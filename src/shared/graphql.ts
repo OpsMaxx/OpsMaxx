@@ -1,10 +1,8 @@
 /**
  * GraphQL over HTTP, in the only two places it differs from a POST.
  *
- * The API client this app embeds has no GraphQL support at all — not a gap in
- * how it is wired up, there is nothing in the package. What GraphQL actually
- * needs beyond "POST some JSON" is small, and both halves are here because
- * both are easy to get subtly wrong:
+ * What GraphQL actually needs beyond "POST some JSON" is small, and both
+ * halves are here because both are easy to get subtly wrong:
  *
  *   - The request body has a fixed shape, and `variables` is typed by the
  *     server. Sending `"{}"` as a string where an object is expected is the
@@ -189,4 +187,49 @@ export function usefulTypes(types: readonly SchemaType[]): SchemaType[] {
   return types
     .filter((t) => t.name && !t.name.startsWith('__') && !builtin.has(t.name))
     .sort((a, b) => (a.name ?? '').localeCompare(b.name ?? ''))
+}
+
+const typeRef = (depth: number): string =>
+  depth === 0 ? 'kind name' : `kind name ofType { ${typeRef(depth - 1)} }`
+
+/**
+ * The introspection query the redesigned client sends: everything
+ * `buildClientSchema` needs, with `ofType` four deep. Four covers
+ * `[[Thing]!]!`; a type nested deeper than that (`[[Float!]!]!`) fails the
+ * rebuild, and the caller asks again with `depth` raised rather than making
+ * every schema pay for the rare one.
+ *
+ * `lean` is the retry after a server refuses the first for depth or
+ * complexity: no descriptions and no deprecated fields, which is where most
+ * of the weight is.
+ */
+export function introspectionQuery({ lean = false, depth = 4 }: { lean?: boolean; depth?: number } = {}): string {
+  const description = lean ? '' : ' description'
+  const deprecated = lean ? 'false' : 'true'
+  const deprecation = lean ? '' : ' isDeprecated deprecationReason'
+  return `query OpsMaxxIntrospection {
+  __schema {
+    queryType { name }
+    mutationType { name }
+    subscriptionType { name }
+    types {
+      kind name${description}
+      fields(includeDeprecated: ${deprecated}) { name${description} args { ...InputValue } type { ...TypeRef }${deprecation} }
+      inputFields { ...InputValue }
+      interfaces { ...TypeRef }
+      enumValues(includeDeprecated: ${deprecated}) { name${description}${deprecation} }
+      possibleTypes { ...TypeRef }
+    }
+    directives { name${description} locations args { ...InputValue } }
+  }
+}
+
+fragment InputValue on __InputValue { name${description} type { ...TypeRef } defaultValue }
+
+fragment TypeRef on __Type { ${typeRef(depth)} }`
+}
+
+/** A server refusing an introspection for its size rather than its content. */
+export function isDepthOrComplexityError(errors: readonly GraphQlError[] | undefined): boolean {
+  return (errors ?? []).some((e) => /depth|complex|too (large|big|many)|cost/i.test(e.message ?? ''))
 }

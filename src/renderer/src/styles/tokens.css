@@ -106,6 +106,16 @@
   --host-rust: #cd7d54;
   --host-olive: #96962b;
 
+  /* HTTP method badges. Their own hues rather than the state ramp, so a DELETE
+     never reads as an error and a GET never as success. Each clears 4.5:1 on
+     --bg-sidebar and --bg-panel; the method text is always shown with it. */
+  --method-get: #3fb950;
+  --method-post: #d9a441;
+  --method-put: #5c96d0;
+  --method-patch: #b877d8;
+  --method-delete: #f0706a;
+  --method-other: #98a2b3;
+
   /* Workspace accent colors */
   --ws-green: #3fb950;
   --ws-purple: #a371f7;
@@ -330,6 +340,14 @@
   --host-jade: #1e7659;
   --host-rust: #a35129;
   --host-olive: #6b6b1b;
+
+  /* Same roles, darkened for a light ground. */
+  --method-get: #1a7431;
+  --method-post: #8a5a00;
+  --method-put: #2b6bab;
+  --method-patch: #8a3bbd;
+  --method-delete: #c0262d;
+  --method-other: #566070;
 
   --shadow-sm: 0 1px 2px rgba(30, 41, 59, 0.1);
   --shadow-md: 0 8px 24px rgba(30, 41, 59, 0.12);

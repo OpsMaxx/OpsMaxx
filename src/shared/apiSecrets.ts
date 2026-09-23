@@ -84,11 +84,13 @@ export interface SecretLookup {
 /**
  * Replace every `vault:` reference in a set of header values.
  *
- * **Headers and query only, never bodies.** A credential travels in a header
- * or a query parameter; a body does not carry one in any auth scheme worth
- * supporting. Substituting into bodies would mean scanning user content for a
- * pattern and rewriting it — and a response that echoed a request body would
- * then round-trip a real token back into the document.
+ * **Where references resolve.** Headers, URLs, auth fields and STRUCTURED body
+ * rows (urlencoded and multipart text values), each of which is a slot the
+ * user filled deliberately. Never free-text bodies (JSON, XML, text, GraphQL
+ * variables): substituting into those would mean scanning user content for a
+ * pattern and rewriting it, and a response that echoed the body would then
+ * round-trip a real token back into view. `shared/apiRequestBuild.ts` applies
+ * this rule; this module only substitutes what it is handed.
  *
  * Throws rather than substituting an empty string. A request that silently
  * sends `Authorization: Bearer ` gets a 401 that looks like a wrong password,

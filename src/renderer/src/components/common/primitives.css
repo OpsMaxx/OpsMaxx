@@ -1,0 +1,436 @@
+/* Shared primitives for the HTTP client (stream B). Every class is hc-*. */
+
+.hc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.hc-mono {
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+}
+.hc-input {
+  height: 28px;
+  padding: 0 var(--sp-2);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  font-size: var(--fs-body);
+  min-width: 0;
+}
+.hc-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+}
+.hc-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+/* ---- ContextMenu extensions ---- */
+.hc-menu-check {
+  width: 12px;
+  flex: none;
+  text-align: center;
+  color: var(--accent);
+}
+.hc-menu-shortcut {
+  margin-left: auto;
+  padding-left: var(--sp-4);
+  color: var(--text-faint);
+  font-size: var(--fs-caption);
+}
+
+/* ---- Popover ---- */
+.hc-popover {
+  position: fixed;
+  z-index: var(--z-popover);
+  max-width: min(420px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: var(--sp-2);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md);
+}
+
+/* ---- SplitPane ---- */
+.hc-split {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.hc-split--h {
+  flex-direction: row;
+}
+.hc-split--v {
+  flex-direction: column;
+}
+.hc-split-pane {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.hc-split-pane[hidden] {
+  display: none;
+}
+.hc-split-bar {
+  flex: 0 0 32px;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  background: var(--bg-sidebar);
+}
+.hc-split-sep {
+  position: relative;
+  flex: 0 0 4px;
+  background: var(--border-subtle);
+  z-index: var(--z-resizer);
+  touch-action: none;
+}
+.hc-split--h > .hc-split-sep {
+  cursor: col-resize;
+}
+.hc-split--v > .hc-split-sep {
+  cursor: row-resize;
+}
+/* An 8px hit area around the 4px rule. */
+.hc-split-sep::before {
+  content: '';
+  position: absolute;
+  inset: -2px 0;
+}
+.hc-split--h > .hc-split-sep::before {
+  inset: 0 -2px;
+}
+.hc-split-sep:hover,
+.hc-split-sep:focus-visible {
+  background: var(--accent);
+}
+
+/* ---- Tabs ---- */
+.hc-tabs {
+  display: flex;
+  align-items: stretch;
+  height: 32px;
+  min-width: 0;
+  border-bottom: 1px solid var(--border-subtle);
+}
+.hc-tabs-list {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.hc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-3);
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  border-bottom: 2px solid transparent;
+}
+.hc-tab:hover {
+  color: var(--text);
+}
+.hc-tab.is-active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+.hc-tab:focus-visible {
+  outline-offset: -2px;
+}
+.hc-tab-count {
+  color: var(--text-faint);
+  font-size: var(--fs-caption);
+}
+.hc-tab-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--accent);
+}
+.hc-tab-dot--problem {
+  background: var(--danger);
+}
+.hc-tabs-trailing {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2);
+}
+
+/* ---- SplitButton ---- */
+.hc-splitbtn {
+  display: inline-flex;
+  align-items: stretch;
+}
+.hc-splitbtn-main {
+  gap: var(--sp-1);
+}
+.hc-splitbtn > .hc-splitbtn-main:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.hc-splitbtn-more {
+  padding: 0 var(--sp-1);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left: 1px solid var(--border-subtle);
+}
+
+/* ---- CodeEditor and VariableInput ---- */
+.hc-code {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.hc-code > .cm-editor {
+  flex: 1;
+  min-height: 0;
+}
+.hc-code:focus-within {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.hc-code--single .cm-scroller {
+  overflow: hidden;
+}
+.hc-code--single .cm-content {
+  padding: 5px 0;
+}
+.hc-var-input {
+  display: flex;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+.hc-var-input.is-invalid {
+  border-color: var(--danger);
+}
+.hc-var {
+  border-radius: var(--r-sm);
+  padding: 0 1px;
+}
+.hc-var--global {
+  color: var(--host-olive);
+}
+.hc-var--collection {
+  color: var(--host-blue);
+}
+.hc-var--environment {
+  color: var(--host-jade);
+}
+.hc-var--unresolved {
+  color: var(--danger);
+  text-decoration: underline wavy var(--danger);
+  text-underline-offset: 3px;
+}
+.hc-var-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-width: 360px;
+  padding: var(--sp-2) var(--sp-3);
+  font-family: var(--font-ui);
+  font-size: var(--fs-body);
+}
+.hc-var-card-name,
+.hc-var-card-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  overflow-wrap: anywhere;
+}
+.hc-var-card-scope,
+.hc-var-card-missing {
+  color: var(--text-muted);
+}
+.hc-var-card-missing {
+  color: var(--danger);
+}
+
+/* ---- KeyValueTable ---- */
+.hc-kv {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.hc-kv-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  padding: 0 var(--sp-2);
+}
+.hc-kv-head > .ui-label {
+  flex: 1;
+}
+.hc-kv-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+.hc-kv-table th {
+  height: 28px;
+  padding: 0 var(--sp-2);
+  text-align: left;
+  font-weight: inherit;
+}
+.hc-kv-table td {
+  height: 28px;
+  padding: 0;
+  border-top: 1px solid var(--border-subtle);
+}
+.hc-kv-check {
+  width: 32px;
+  text-align: center;
+}
+.hc-kv-more {
+  width: 32px;
+  text-align: center;
+}
+.hc-kv-row .hc-kv-more .hc-icon-btn {
+  visibility: hidden;
+}
+.hc-kv-row:hover .hc-kv-more .hc-icon-btn,
+.hc-kv-row:focus-within .hc-kv-more .hc-icon-btn {
+  visibility: visible;
+}
+.hc-kv-row.is-disabled .hc-kv-input {
+  color: var(--text-faint);
+}
+.hc-kv-value {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.hc-kv-input {
+  width: 100%;
+  height: 27px;
+  padding: 0 var(--sp-2);
+  background: transparent;
+  border: none;
+  color: var(--text);
+  min-width: 0;
+}
+.hc-kv-input:focus-visible {
+  outline-offset: -2px;
+  background: var(--bg-input);
+}
+.hc-kv-value > :not(.hc-kv-warn) {
+  flex: 1;
+  min-width: 0;
+}
+/* A caller's editor in a value cell fills it and sits flush, like the plain input. */
+.hc-kv-value .hc-var-input {
+  border-color: transparent;
+  border-radius: 0;
+}
+.hc-kv-value {
+  --hc-editor-bg: transparent;
+}
+.hc-kv-value .hc-var-input.is-invalid {
+  border-color: var(--danger);
+}
+.hc-kv-warn {
+  display: inline-flex;
+  padding: 0 var(--sp-1);
+  color: var(--warn);
+}
+.hc-kv-bulk {
+  min-height: 160px;
+  padding: var(--sp-2);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  resize: vertical;
+}
+
+/* ---- Vault value ---- */
+.hc-vault-value {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.hc-vault-value > .hc-input {
+  flex: 1;
+}
+.hc-vault-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-vault-name.is-missing {
+  color: var(--danger);
+}
+.hc-vault-name.is-empty,
+.hc-vault-note {
+  color: var(--text-muted);
+}
+.hc-vault-picker {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  width: 280px;
+}
+.hc-vault-field {
+  display: flex;
+  gap: var(--sp-3);
+}
+.hc-vault-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 240px;
+  overflow: auto;
+}
+.hc-vault-entry {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--text);
+  text-align: left;
+}
+.hc-vault-entry:hover {
+  background: var(--bg-hover);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hc-popover,
+  .hc-split-sep {
+    transition: none;
+    animation: none;
+  }
+}

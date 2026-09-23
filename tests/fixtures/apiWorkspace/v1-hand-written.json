@@ -1,0 +1,126 @@
+{
+  "apiCollections": [
+    {
+      "name": "Local API",
+      "specUrl": null,
+      "specPath": null,
+      "baseUrl": "http://127.0.0.1:18080/api",
+      "viaServerId": null,
+      "insecureTls": false,
+      "id": "api-mudwj912-0",
+      "workspaceId": "ws-default"
+    }
+  ],
+  "apiWorkspace": {
+    "version": 1,
+    "meta": {
+      "x-scalar-active-proxy": null,
+      "x-scalar-active-document": "api-mudwj912-0"
+    },
+    "documents": {
+      "api-mudwj912-0": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "Local API",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://127.0.0.1:18080"
+          }
+        ],
+        "paths": {
+          "/api": {
+            "post": {
+              "operationId": "get-api",
+              "summary": "GET /api",
+              "responses": {
+                "200": {
+                  "description": "OK"
+                }
+              },
+              "parameters": [
+                {
+                  "name": "X-Trace",
+                  "in": "header",
+                  "required": false,
+                  "examples": {
+                    "default": {
+                      "value": "abc",
+                      "x-disabled": false
+                    }
+                  }
+                },
+                {
+                  "name": "debug",
+                  "in": "query",
+                  "required": false,
+                  "examples": {
+                    "default": {
+                      "value": "1",
+                      "x-disabled": true
+                    }
+                  }
+                }
+              ],
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "examples": {
+                      "default": {
+                        "value": "{\"a\":1}"
+                      }
+                    }
+                  }
+                },
+                "x-scalar-selected-content-type": {
+                  "default": "application/json"
+                }
+              }
+            }
+          }
+        },
+        "x-original-oas-version": "3.1.1",
+        "x-scalar-original-document-hash": "38d46989e5c0313b",
+        "x-ext-urls": {},
+        "x-scalar-order": [
+          "api-mudwj912-0/description/introduction",
+          "api-mudwj912-0/POST/api"
+        ],
+        "x-scalar-navigation": {
+          "id": "api-mudwj912-0",
+          "type": "document",
+          "title": "Local API",
+          "name": "api-mudwj912-0",
+          "children": [
+            {
+              "id": "api-mudwj912-0/description/introduction",
+              "title": "Introduction",
+              "type": "text"
+            },
+            {
+              "id": "api-mudwj912-0/GET/api",
+              "title": "GET /api",
+              "path": "/api",
+              "method": "get",
+              "ref": "#/paths/~1api/get",
+              "type": "operation",
+              "isDeprecated": false
+            }
+          ]
+        },
+        "x-scalar-is-dirty": true
+      }
+    },
+    "sourceKeys": {
+      "api-mudwj912-0": "{\"specUrl\":null,\"specPath\":null,\"baseUrl\":\"http://127.0.0.1:18080/api\",\"endpoints\":[]}"
+    }
+  },
+  "workspaces": [
+    {
+      "id": "ws-default",
+      "name": "Personal"
+    }
+  ],
+  "activeWorkspaceId": "ws-default"
+}

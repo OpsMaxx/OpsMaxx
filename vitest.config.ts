@@ -24,7 +24,7 @@ export default defineConfig({
     // Deliberately one file, and deliberately cheap in the node environment —
     // see the comment at the top of tests/setup/global.ts.
     setupFiles: ['./tests/setup/global.ts'],
-    testTimeout: 15000
+    testTimeout: 15000,
   },
   // The root tsconfig.json is a project-references stub with no
   // compilerOptions, so esbuild finds no `jsx` setting to inherit and would
@@ -35,7 +35,13 @@ export default defineConfig({
   esbuild: { jsx: 'automatic' },
   resolve: {
     alias: {
-      electron: resolve(__dirname, 'tests/mocks/electron.ts')
+      electron: resolve(__dirname, 'tests/mocks/electron.ts'),
+      // graphql-language-service has no `exports` field, so tests resolve it
+      // through `main` to its CJS build, which require()s graphql's CJS entry
+      // while our code imports the ESM one: two graphqls whose types refuse
+      // each other ("from another realm"). Its ESM build imports the same
+      // graphql we do. The app bundle already picks ESM on its own.
+      'graphql-language-service': 'graphql-language-service/esm/index.js'
     }
   }
 })

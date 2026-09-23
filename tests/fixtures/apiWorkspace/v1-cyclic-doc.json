@@ -1,0 +1,31 @@
+{
+  "apiCollections": [
+    { "id": "cyc-1", "workspaceId": "ws-default", "name": "Cyclic", "specUrl": "http://127.0.0.1:18081/cyclic.json", "specPath": null, "baseUrl": "http://127.0.0.1:18081", "viaServerId": null, "insecureTls": false }
+  ],
+  "apiWorkspace": {
+    "version": 1,
+    "meta": {},
+    "documents": {
+      "cyc-1": {
+        "openapi": "3.0.3",
+        "servers": [{ "url": "http://127.0.0.1:18081" }],
+        "paths": {
+          "/loop": { "$ref": "#/paths/~1loop" },
+          "/node": {
+            "post": {
+              "parameters": [{ "$ref": "#/components/parameters/Self" }],
+              "requestBody": { "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Node" } } } }
+            }
+          }
+        },
+        "components": {
+          "parameters": { "Self": { "$ref": "#/components/parameters/Self" } },
+          "schemas": {
+            "Node": { "type": "object", "properties": { "child": { "$ref": "#/components/schemas/Node" }, "list": { "type": "array", "items": { "$ref": "#/components/schemas/Node" } } } }
+          }
+        }
+      }
+    },
+    "sourceKeys": {}
+  }
+}

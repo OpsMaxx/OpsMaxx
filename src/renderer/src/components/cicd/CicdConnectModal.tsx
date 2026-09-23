@@ -13,8 +13,8 @@ import type { CicdBridge, CicdConnection, CicdProvider, CicdRoute } from '../../
  * file's: this is ONE form with three provider variants, and the provider choice
  * changes exactly three things — the URL placeholder, the token help block, and
  * what Verify probes. Split into steps it would be three screens of the same
- * fields. The shape follows `AddApiModal`: a `.segment` picker, a hint line that
- * changes with the choice, then `Field`s.
+ * fields. The shape: a `.segment` picker, a hint line that changes with the
+ * choice, then `Field`s.
  *
  * (It used to cite the first-run card as precedent. That card is now six screens,
  * for reasons that are about four unrelated questions rather than one form — so

@@ -21,14 +21,7 @@ export default defineConfig({
       alias: { '@': resolve('src/renderer/src') },
       // Ensure a single React instance so hooks resolve (avoids the
       // "Cannot read properties of null (reading 'useRef')" dedupe error).
-      //
-      // Vue is here for the same reason and a second one. The API client is a
-      // Vue app mounted inside this React one, and two copies of Vue mean two
-      // reactivity systems: a store created by one and read by the other
-      // updates nothing, which renders as a client whose inputs do not respond.
-      // It is also a direct dependency now rather than one reached through
-      // npm's hoisting of Scalar's own — see package.json.
-      dedupe: ['react', 'react-dom', 'vue']
+      dedupe: ['react', 'react-dom']
     },
     optimizeDeps: {
       include: ['react', 'react-dom', 'react-dom/client', 'zustand', 'lucide-react', '@xterm/xterm']

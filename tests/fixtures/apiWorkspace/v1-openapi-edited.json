@@ -1,0 +1,363 @@
+{
+  "apiCollections": [
+    {
+      "name": "Petstore",
+      "specUrl": "http://127.0.0.1:18081/openapi.json",
+      "specPath": null,
+      "baseUrl": "http://127.0.0.1:18081",
+      "viaServerId": null,
+      "insecureTls": false,
+      "id": "api-mudwmacq-0",
+      "workspaceId": "ws-default"
+    }
+  ],
+  "apiWorkspace": {
+    "version": 1,
+    "meta": {
+      "x-scalar-active-proxy": null,
+      "x-scalar-active-document": "api-mudwmacq-0"
+    },
+    "documents": {
+      "api-mudwmacq-0": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "Petstore Fixture",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://127.0.0.1:18081/v1",
+            "description": "Primary"
+          },
+          {
+            "url": "http://127.0.0.1:18081/v2",
+            "description": "Secondary"
+          }
+        ],
+        "tags": [
+          {
+            "name": "pets",
+            "description": "Pets",
+            "x-scalar-order": [
+              "api-mudwmacq-0/tag/pets/GET/pets",
+              "api-mudwmacq-0/tag/pets/POST/pets",
+              "api-mudwmacq-0/tag/pets/GET/pets/{petId}"
+            ]
+          },
+          {
+            "name": "store",
+            "description": "Store",
+            "x-scalar-order": [
+              "api-mudwmacq-0/tag/store/POST/store/order"
+            ]
+          }
+        ],
+        "paths": {
+          "/pets": {
+            "get": {
+              "tags": [
+                "pets"
+              ],
+              "summary": "List pets",
+              "operationId": "listPets",
+              "parameters": [
+                {
+                  "name": "limit",
+                  "in": "query",
+                  "schema": {
+                    "type": "integer"
+                  },
+                  "examples": {
+                    "default": {
+                      "value": "25",
+                      "x-disabled": false
+                    }
+                  }
+                },
+                {
+                  "name": "status",
+                  "in": "query",
+                  "schema": {
+                    "type": "string"
+                  },
+                  "examples": {
+                    "default": {
+                      "value": "available",
+                      "x-disabled": true
+                    }
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "OK"
+                }
+              }
+            },
+            "post": {
+              "tags": [
+                "pets"
+              ],
+              "summary": "Create pet",
+              "operationId": "createPet",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string"
+                        },
+                        "tag": {
+                          "type": "string"
+                        }
+                      }
+                    },
+                    "examples": {
+                      "default": {
+                        "value": {
+                          "name": "Rex",
+                          "tag": "dog"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "201": {
+                  "description": "Created"
+                }
+              }
+            }
+          },
+          "/pets/{petId}": {
+            "get": {
+              "tags": [
+                "pets"
+              ],
+              "summary": "Get pet",
+              "operationId": "getPet",
+              "parameters": [
+                {
+                  "name": "petId",
+                  "in": "path",
+                  "required": true,
+                  "schema": {
+                    "type": "string"
+                  },
+                  "examples": {
+                    "default": {
+                      "value": "42"
+                    }
+                  }
+                }
+              ],
+              "responses": {
+                "200": {
+                  "description": "OK"
+                }
+              }
+            }
+          },
+          "/store/order": {
+            "post": {
+              "tags": [
+                "store"
+              ],
+              "summary": "Place order",
+              "operationId": "placeOrder",
+              "requestBody": {
+                "content": {
+                  "application/json": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "petId": {
+                          "type": "integer"
+                        },
+                        "quantity": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "examples": {
+                      "default": {
+                        "value": {
+                          "petId": 42,
+                          "quantity": 1
+                        }
+                      }
+                    }
+                  },
+                  "application/x-www-form-urlencoded": {
+                    "schema": {
+                      "type": "object",
+                      "properties": {
+                        "petId": {
+                          "type": "integer"
+                        },
+                        "quantity": {
+                          "type": "integer"
+                        }
+                      }
+                    },
+                    "examples": {
+                      "default": {
+                        "value": {
+                          "petId": 42,
+                          "quantity": 1
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              "responses": {
+                "200": {
+                  "description": "OK"
+                }
+              }
+            }
+          }
+        },
+        "x-original-oas-version": "3.0.3",
+        "x-scalar-original-document-hash": "7e637e6abee65816",
+        "x-scalar-original-source-url": "http://127.0.0.1:18081/openapi.json",
+        "x-ext-urls": {},
+        "x-scalar-order": [
+          "api-mudwmacq-0/description/introduction",
+          "api-mudwmacq-0/tag/pets",
+          "api-mudwmacq-0/tag/store"
+        ],
+        "x-scalar-navigation": {
+          "id": "api-mudwmacq-0",
+          "type": "document",
+          "title": "Petstore Fixture",
+          "name": "api-mudwmacq-0",
+          "children": [
+            {
+              "id": "api-mudwmacq-0/description/introduction",
+              "title": "Introduction",
+              "type": "text"
+            },
+            {
+              "id": "api-mudwmacq-0/tag/pets",
+              "title": "pets",
+              "name": "pets",
+              "description": "Pets",
+              "children": [
+                {
+                  "id": "api-mudwmacq-0/tag/pets/GET/pets",
+                  "title": "List pets",
+                  "path": "/pets",
+                  "method": "get",
+                  "ref": "#/paths/~1pets/get",
+                  "type": "operation",
+                  "isDeprecated": false,
+                  "children": [
+                    {
+                      "type": "example",
+                      "id": "api-mudwmacq-0/tag/pets/GET/pets/example/default",
+                      "title": "default",
+                      "name": "default"
+                    }
+                  ]
+                },
+                {
+                  "id": "api-mudwmacq-0/tag/pets/POST/pets",
+                  "title": "Create pet",
+                  "path": "/pets",
+                  "method": "post",
+                  "ref": "#/paths/~1pets/post",
+                  "type": "operation",
+                  "isDeprecated": false,
+                  "children": [
+                    {
+                      "type": "example",
+                      "id": "api-mudwmacq-0/tag/pets/POST/pets/example/default",
+                      "title": "default",
+                      "name": "default"
+                    }
+                  ]
+                },
+                {
+                  "id": "api-mudwmacq-0/tag/pets/GET/pets/{petId}",
+                  "title": "Get pet",
+                  "path": "/pets/{petId}",
+                  "method": "get",
+                  "ref": "#/paths/~1pets~1{petId}/get",
+                  "type": "operation",
+                  "isDeprecated": false,
+                  "children": [
+                    {
+                      "type": "example",
+                      "id": "api-mudwmacq-0/tag/pets/GET/pets/{petId}/example/default",
+                      "title": "default",
+                      "name": "default"
+                    }
+                  ]
+                }
+              ],
+              "isGroup": false,
+              "isWebhooks": false,
+              "type": "tag",
+              "xKeys": {
+                "x-scalar-order": [
+                  "api-mudwmacq-0/tag/pets/GET/pets",
+                  "api-mudwmacq-0/tag/pets/POST/pets",
+                  "api-mudwmacq-0/tag/pets/GET/pets/{petId}"
+                ]
+              }
+            },
+            {
+              "id": "api-mudwmacq-0/tag/store",
+              "title": "store",
+              "name": "store",
+              "description": "Store",
+              "children": [
+                {
+                  "id": "api-mudwmacq-0/tag/store/POST/store/order",
+                  "title": "Place order",
+                  "path": "/store/order",
+                  "method": "post",
+                  "ref": "#/paths/~1store~1order/post",
+                  "type": "operation",
+                  "isDeprecated": false,
+                  "children": [
+                    {
+                      "type": "example",
+                      "id": "api-mudwmacq-0/tag/store/POST/store/order/example/default",
+                      "title": "default",
+                      "name": "default"
+                    }
+                  ]
+                }
+              ],
+              "isGroup": false,
+              "isWebhooks": false,
+              "type": "tag",
+              "xKeys": {
+                "x-scalar-order": [
+                  "api-mudwmacq-0/tag/store/POST/store/order"
+                ]
+              }
+            }
+          ]
+        },
+        "x-scalar-is-dirty": true
+      }
+    },
+    "sourceKeys": {
+      "api-mudwmacq-0": "{\"specUrl\":\"http://127.0.0.1:18081/openapi.json\",\"specPath\":null,\"baseUrl\":\"http://127.0.0.1:18081\",\"endpoints\":[]}"
+    }
+  },
+  "workspaces": [
+    {
+      "id": "ws-default",
+      "name": "Personal"
+    }
+  ],
+  "activeWorkspaceId": "ws-default"
+}

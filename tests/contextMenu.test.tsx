@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { useState } from 'react'
 import { act, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { ContextMenu } from '../src/renderer/src/components/connections/ContextMenu'
+import { ContextMenu, placeMenu } from '../src/renderer/src/components/connections/ContextMenu'
 
 /**
  * The shared context menu, from the keyboard.
@@ -97,5 +97,57 @@ describe('ContextMenu keyboard', () => {
     })
     expect(screen.queryByRole('menu')).toBeNull()
     expect(document.activeElement).toBe(screen.getByLabelText('elsewhere'))
+  })
+})
+
+describe('ContextMenu extensions (HTTP client, §3.8)', () => {
+  const open = (entries: Parameters<typeof ContextMenu>[0]['entries'], anchor?: DOMRect): void => {
+    render(<ContextMenu x={40} y={40} entries={entries} anchor={anchor} onClose={() => {}} />)
+  }
+
+  it('shows shortcut text without making it part of the name', () => {
+    open([{ label: 'Duplicate', shortcut: '⌘D' }])
+    expect(item('Duplicate').textContent).toContain('⌘D')
+  })
+
+  it('renders radio and checkbox items with aria-checked', () => {
+    open([
+      { label: 'Auto', radio: 'orientation', checked: false },
+      { label: 'Stacked', radio: 'orientation', checked: true },
+      { label: 'Sidebar', checked: true },
+      { label: 'Response', checked: false },
+      { label: 'Plain' }
+    ])
+    expect(screen.getByRole('menuitemradio', { name: 'Stacked' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('menuitemradio', { name: 'Auto' }).getAttribute('aria-checked')).toBe('false')
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Sidebar' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('menuitemcheckbox', { name: 'Response' }).getAttribute('aria-checked')).toBe('false')
+    expect(item('Plain').getAttribute('aria-checked')).toBeNull()
+  })
+
+  it('shows a section header as presentation, not an item', async () => {
+    open([{ label: 'A' }, { label: 'Description column', section: 'This tab', checked: true }])
+    const header = screen.getByText('This tab')
+    expect(header.getAttribute('role')).toBe('presentation')
+    await userEvent.keyboard('{End}')
+    expect(document.activeElement).toBe(screen.getByRole('menuitemcheckbox', { name: 'Description column' }))
+  })
+
+  it('clamps against the measured size of the menu, not an estimate', () => {
+    const spy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 400))
+    Object.assign(window, { innerWidth: 1024, innerHeight: 768 })
+    render(<ContextMenu x={1000} y={700} entries={[{ label: 'A' }]} onClose={() => {}} />)
+    const menu = screen.getByRole('menu')
+    expect(spy).toHaveBeenCalled()
+    expect(menu.style.left).toBe(`${1024 - 300 - 8}px`)
+    expect(menu.style.top).toBe(`${768 - 400 - 8}px`)
+    spy.mockRestore()
+  })
+
+  it('opens under an anchor, and above it when there is no room below', () => {
+    const anchor = new DOMRect(100, 700, 80, 28)
+    expect(placeMenu({ x: 0, y: 0, anchor: new DOMRect(100, 50, 80, 28) }, 200, 100, 1024, 768)).toEqual([100, 78])
+    expect(placeMenu({ x: 0, y: 0, anchor }, 200, 100, 1024, 768)).toEqual([100, 600])
+    expect(placeMenu({ x: 2000, y: -5 }, 200, 100, 1024, 768)).toEqual([816, 8])
   })
 })

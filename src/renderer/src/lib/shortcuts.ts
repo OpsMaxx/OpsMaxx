@@ -5,7 +5,7 @@
 // call it, so what the user presses while recording is exactly what matches
 // later. Nothing else parses key events.
 
-export type Scope = 'global' | 'app' | 'terminal'
+export type Scope = 'global' | 'app' | 'terminal' | 'http'
 
 export interface Command {
   id: string
@@ -17,6 +17,9 @@ export interface Command {
   //   global   – everywhere, terminals included. Reserve for combos no shell
   //              owns, which in practice means Shift-qualified ones.
   //   terminal – only inside a terminal (clipboard, find).
+  //   http     – only in the HTTP client, checked before app bindings, which
+  //              it shadows there. On macOS a Ctrl binding needs Cmd, so a
+  //              physical Ctrl+E in a text field keeps its emacs meaning.
   scope: Scope
   keys: string
   /**
@@ -138,7 +141,7 @@ export const COMMANDS: Command[] = [
     scope: 'global',
     keys: 'Ctrl+1…9',
     fixed: true,
-    hint: 'Numbering follows the sidebar order.'
+    hint: 'Numbering follows the sidebar order. In the HTTP client these keys go to request tabs.'
   },
   {
     id: 'lock-workspace',
@@ -163,6 +166,111 @@ export const COMMANDS: Command[] = [
   },
   { id: 'zoom-out', name: 'Zoom Out', group: 'Views', scope: 'global', keys: 'Ctrl+-' },
   { id: 'zoom-reset', name: 'Reset Zoom', group: 'Views', scope: 'global', keys: 'Ctrl+0' },
+
+  /**
+   * The HTTP client (§2.7). Tabs there are request tabs: the Tabs commands
+   * above are dispatched to its strip while it is showing, and off macOS these
+   * plain-Ctrl aliases give Postman's keys in a view that has no terminal to
+   * protect. `keys: ''` leaves an alias unbound on macOS, where Cmd already
+   * does the job.
+   */
+  { id: 'http-new-tab', name: 'New Request Tab', group: 'HTTP client', scope: 'http', keys: '', winKeys: 'Ctrl+T' },
+  { id: 'http-close-tab', name: 'Close Request Tab', group: 'HTTP client', scope: 'http', keys: '', winKeys: 'Ctrl+W' },
+  ...[1, 2, 3, 4, 5, 6, 7, 8].map(
+    (n): Command => ({
+      id: `http-select-tab-${n}`,
+      name: `Go to Request Tab ${n}`,
+      group: 'HTTP client',
+      scope: 'http',
+      keys: '',
+      winKeys: `Ctrl+${n}`
+    })
+  ),
+  {
+    id: 'http-select-tab-last',
+    name: 'Go to Last Request Tab',
+    group: 'HTTP client',
+    scope: 'http',
+    keys: '',
+    winKeys: 'Ctrl+9',
+    hint: 'In the HTTP client Ctrl+1…9 are request tabs, not workspaces.'
+  },
+  {
+    id: 'http-send',
+    name: 'Send / Connect / Run',
+    group: 'HTTP client',
+    scope: 'http',
+    keys: 'Ctrl+Enter',
+    hint: 'On a connected WebSocket it sends the message; it never disconnects.'
+  },
+  { id: 'http-save', name: 'Save Request', group: 'HTTP client', scope: 'http', keys: 'Ctrl+S' },
+  { id: 'http-save-as', name: 'Save Request As…', group: 'HTTP client', scope: 'http', keys: 'Ctrl+Shift+S' },
+  {
+    id: 'http-focus-region',
+    name: 'Next Region',
+    group: 'HTTP client',
+    scope: 'http',
+    keys: 'F6',
+    hint: 'Tree, URL, request tabs, response. Needs fn on a Mac laptop.'
+  },
+  { id: 'http-focus-region-back', name: 'Previous Region', group: 'HTTP client', scope: 'http', keys: 'Shift+F6' },
+  {
+    id: 'http-focus-url',
+    name: 'Focus URL',
+    group: 'HTTP client',
+    scope: 'http',
+    // ⌘L is Lock Workspace on macOS and stays so; F6 reaches the URL there.
+    keys: '',
+    winKeys: 'Ctrl+L'
+  },
+  { id: 'http-env', name: 'Environment Picker', group: 'HTTP client', scope: 'http', keys: 'Ctrl+E' },
+  { id: 'http-toggle-response', name: 'Toggle Response', group: 'HTTP client', scope: 'http', keys: 'Ctrl+J' },
+  { id: 'http-toggle-request', name: 'Toggle Request', group: 'HTTP client', scope: 'http', keys: 'Ctrl+Shift+J' },
+  {
+    id: 'http-toggle-layout',
+    name: 'Side by Side / Stacked',
+    group: 'HTTP client',
+    scope: 'http',
+    keys: 'Ctrl+Alt+J'
+  },
+  { id: 'http-beautify', name: 'Beautify', group: 'HTTP client', scope: 'http', keys: 'Ctrl+Alt+B' },
+  {
+    id: 'http-copy-curl',
+    name: 'Copy as cURL',
+    group: 'HTTP client',
+    scope: 'http',
+    keys: 'Ctrl+Shift+C',
+    hint: 'Secrets are masked.'
+  },
+  /*
+   * Fixed, not rebindable: the editors (CodeMirror's Mod-F) and the collection
+   * tree (Mod-D) own these keys where they apply, so a rebinding here would
+   * change what Settings shows and nothing else.
+   */
+  { id: 'http-find', name: 'Find', group: 'HTTP client', scope: 'http', keys: 'Ctrl+F', fixed: true },
+  { id: 'http-duplicate', name: 'Duplicate', group: 'HTTP client', scope: 'http', keys: 'Ctrl+D', fixed: true },
+  { id: 'http-import', name: 'Import…', group: 'HTTP client', scope: 'http', keys: 'Ctrl+O' },
+  {
+    id: 'http-variable-card',
+    name: 'Show Variable',
+    group: 'HTTP client',
+    scope: 'http',
+    keys: 'Ctrl+I',
+    fixed: true,
+    hint: 'In a URL or value field, at the caret.'
+  },
+  { id: 'http-cancel', name: 'Cancel Request', group: 'HTTP client', scope: 'http', keys: 'Escape', fixed: true },
+  { id: 'http-rename', name: 'Rename', group: 'HTTP client', scope: 'http', keys: 'F2', fixed: true },
+  {
+    id: 'http-delete',
+    name: 'Delete Tree Row',
+    group: 'HTTP client',
+    scope: 'http',
+    keys: isMac() ? 'Ctrl+Backspace' : 'Delete',
+    fixed: true,
+    hint: 'Plain Backspace never deletes.'
+  },
+  { id: 'http-tree-undo', name: 'Undo Tree Delete', group: 'HTTP client', scope: 'http', keys: 'Ctrl+Z', fixed: true },
 
   { id: 'term-copy', name: 'Copy', group: 'Terminal', scope: 'terminal', keys: 'Ctrl+Shift+C' },
   {
@@ -303,7 +411,9 @@ export function resolveBindings(overrides: Record<string, string>): Map<string, 
 }
 
 // Two commands clash only where their scopes overlap — 'global' overlaps
-// everything, 'app' and 'terminal' never see each other's key events.
+// everything, 'app' and 'terminal' never see each other's key events. 'http'
+// against 'app' is not a clash: the http binding wins in the HTTP client and
+// the app one everywhere else, which `findShadowed` reports as a note.
 export function scopesOverlap(a: Scope, b: Scope): boolean {
   return a === 'global' || b === 'global' || a === b
 }
@@ -328,4 +438,18 @@ export function findConflicts(bindings: Map<string, string>): Map<string, string
     if (clashing.length > 1) conflicts.set(combo, clashing)
   }
   return conflicts
+}
+
+/**
+ * http id -> the app commands it shadows in the HTTP client. Not an error: the
+ * app binding still works everywhere else, so Settings shows it as a note.
+ */
+export function findShadowed(bindings: Map<string, string>): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  for (const [id, keys] of bindings) {
+    if (COMMANDS_BY_ID.get(id)?.scope !== 'http') continue
+    const shadowed = [...bindings].filter(([other, k]) => k === keys && COMMANDS_BY_ID.get(other)?.scope === 'app')
+    if (shadowed.length) out.set(id, shadowed.map(([other]) => other))
+  }
+  return out
 }

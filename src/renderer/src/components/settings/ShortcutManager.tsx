@@ -9,6 +9,7 @@ import {
   defaultKeys,
   displayCombo,
   findConflicts,
+  findShadowed,
   resolveBindings
 } from '../../lib/shortcuts'
 import { approvalShowing } from '../../hooks/useClickOutside'
@@ -16,7 +17,8 @@ import { approvalShowing } from '../../hooks/useClickOutside'
 const SCOPE_LABEL: Record<string, string> = {
   app: 'Outside terminals',
   global: 'Everywhere',
-  terminal: 'In terminals'
+  terminal: 'In terminals',
+  http: 'HTTP client'
 }
 
 export function ShortcutManager(): React.JSX.Element {
@@ -30,6 +32,8 @@ export function ShortcutManager(): React.JSX.Element {
 
   const bindings = useMemo(() => resolveBindings(overrides), [overrides])
   const conflicts = useMemo(() => findConflicts(bindings), [bindings])
+  // Not a conflict: an HTTP-client binding wins there and the app one everywhere else.
+  const shadowed = useMemo(() => findShadowed(bindings), [bindings])
 
   // While recording, every key press belongs to the recorder — captured on the
   // way down so the app's own shortcuts cannot swallow the combo being bound.
@@ -143,6 +147,13 @@ export function ShortcutManager(): React.JSX.Element {
             const other = clash ? (conflicts.get(keys) ?? []).find((x) => x !== id) : undefined
             const otherName = other ? COMMANDS_BY_ID.get(other)?.name : undefined
             const overridden = !cmd.fixed && overrides[id] !== undefined
+            const shadows = shadowed.get(id)?.map((x) => COMMANDS_BY_ID.get(x)?.name).filter(Boolean)
+            const shadowedBy = [...shadowed].find(([, apps]) => apps.includes(id))?.[0]
+            const shadowNote = shadows?.length
+              ? `In the HTTP client this replaces ${shadows.join(', ')}`
+              : shadowedBy
+                ? `Shadowed in the HTTP client by ${COMMANDS_BY_ID.get(shadowedBy)?.name}`
+                : null
             return (
               <div
                 className="sc-row"
@@ -155,6 +166,7 @@ export function ShortcutManager(): React.JSX.Element {
                   <span className="faint" style={{ marginLeft: 8, fontSize: 11 }}>
                     {SCOPE_LABEL[cmd.scope]}
                     {cmd.hint ? ` · ${cmd.hint}` : ''}
+                    {shadowNote ? ` · ${shadowNote}` : ''}
                   </span>
                 </span>
                 {clash &&

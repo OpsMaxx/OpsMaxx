@@ -1,0 +1,17 @@
+{
+  "apiCollections": [
+    { "id": "api-c-1", "workspaceId": "ws-default", "name": "Cookies", "specUrl": null, "specPath": null, "baseUrl": "http://127.0.0.1:18080", "viaServerId": null, "insecureTls": false }
+  ],
+  "apiWorkspace": {
+    "version": 1,
+    "meta": {
+      "x-scalar-active-proxy": "https://proxy.example.test",
+      "x-scalar-cookies": [{ "name": "session", "value": "cookie-secret", "domain": "127.0.0.1" }],
+      "x-scalar-tabs": [{ "path": "/" }]
+    },
+    "documents": {
+      "api-c-1": { "openapi": "3.1.1", "servers": [{ "url": "http://127.0.0.1:18080" }], "paths": { "/": { "get": { "summary": "root" } } }, "x-scalar-cookies": [{ "name": "doc", "value": "doc-cookie-secret" }] }
+    },
+    "sourceKeys": { "api-c-1": "{}" }
+  }
+}

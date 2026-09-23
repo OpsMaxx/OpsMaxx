@@ -101,6 +101,11 @@ export interface HttpRequestSpec {
    */
   maxRedirects?: number
   timeoutMs?: number
+  /**
+   * Names this request so `http:cancel` can abort it. At most 64 characters,
+   * unique among this window's in-flight requests.
+   */
+  requestId?: string
 }
 
 export interface HttpResponseOk {
@@ -145,6 +150,22 @@ export interface HttpResponseOk {
    * appearing to contradict the header.
    */
   decodedFrom?: string
+  /**
+   * The URL of the hop that produced this response: `spec.url`, or where the
+   * last redirect led. `setCookie` belongs to this URL's host, never to the
+   * one requested when they differ. Absent only from callers that build a
+   * response themselves.
+   */
+  finalUrl?: string
+  /**
+   * True when a redirect crossed to another origin and so left the route, the
+   * private CA or the certificate exemption behind: that last hop went
+   * direct, with normal verification. Its cookies belong to the direct jar,
+   * not to the route the request was sent on.
+   */
+  routeDropped?: true
+  /** Phase timings in ms. SHOULD: absent until main measures them. */
+  timings?: { dns?: number; connect?: number; tls?: number; ttfb: number; download: number }
 }
 
 export interface HttpResponseErr {
@@ -419,4 +440,77 @@ export function stripCredentialHeaders(headers: Record<string, string>): {
     else dropped.push(name)
   }
   return { headers: out, dropped }
+}
+
+// ------------------------------------------------------------ custom CAs
+
+/** A CA file larger than this is not a CA bundle. */
+export const MAX_CA_BYTES = 1024 * 1024
+
+/** The largest OpenAPI description `http:chooseSpecFile` reads. */
+export const MAX_SPEC_FILE_BYTES = 32 * 1024 * 1024
+
+/** The largest request body file `http:chooseBodyFile` reads. Same as the response cap. */
+export const MAX_BODY_FILE_BYTES = 32 * 1024 * 1024
+
+const CERT_BLOCK = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g
+const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/
+
+/**
+ * Only the `-----BEGIN CERTIFICATE-----` blocks of `text`, or why not.
+ *
+ * A file picked as "the server's certificate" is very often the cert and its
+ * private key in one `.pem`. `caPem` lives on a synced, backed-up collection
+ * record, so keeping the key would copy it to every device and every backup —
+ * refused outright rather than quietly dropped, so the user learns what that
+ * file holds (review SEC-M4). Used by `http:chooseCaFile` in main and by the
+ * collection's PEM textarea in the renderer.
+ */
+export function certificateBlocks(text: string): { pem: string } | { error: string } {
+  if (PRIVATE_KEY.test(text)) {
+    return {
+      error:
+        'That file contains a private key. Only the CA certificate is needed; choose a file with just the certificate.'
+    }
+  }
+  const blocks = text.match(CERT_BLOCK)
+  if (!blocks) return { error: 'No PEM certificate (-----BEGIN CERTIFICATE-----) was found in that file.' }
+  return { pem: `${blocks.join('\n')}\n` }
+}
+
+// -------------------------------------------------------------- userinfo
+
+/**
+ * Where a URL's userinfo is, as `[start, end)` offsets into `url`, or null
+ * when there is none. Template-safe: works on text that `new URL` would
+ * reject (`{{baseUrl}}`) or re-encode.
+ *
+ * Three shapes an anchored `[^/?#@]*@` misses, each of which leaked a
+ * credential somewhere (finalsec L4):
+ *   - leading whitespace before the scheme, as pasted;
+ *   - an `@` inside the password (`u:p@ss@host`): the userinfo runs to the
+ *     LAST `@` before the authority ends, as RFC 3986 parsers read it;
+ *   - a token as the username with no password (`ghp_…@github.com`), which
+ *     is why callers mask the whole userinfo rather than only a password.
+ * The `#` inside a `vault:<id>#field` reference does not end the authority.
+ */
+export function userinfoSpan(url: string): { start: number; end: number } | null {
+  const lead = url.length - url.trimStart().length
+  const scheme = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.exec(url.slice(lead))
+  if (!scheme) return null
+  const start = lead + scheme[0].length
+  let end = url.length
+  for (let i = start; i < url.length; i++) {
+    const ch = url[i]
+    if (ch === '/' || ch === '?') {
+      end = i
+      break
+    }
+    if (ch === '#' && !/vault:[A-Za-z0-9_-]{1,64}$/.test(url.slice(start, i))) {
+      end = i
+      break
+    }
+  }
+  const at = url.lastIndexOf('@', end - 1)
+  return at >= start ? { start, end: at } : null
 }

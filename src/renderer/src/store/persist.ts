@@ -2,6 +2,7 @@ import { useApp } from './app'
 import { backfillModules, type ModuleState } from '../../../shared/modules'
 import type { Server, MonitorGroup } from '../types'
 import { hasBackupContent } from '../../../shared/backupContent'
+import { apiSaveFields, applyExternalApi, hydrateApi, subscribeApiPersistence } from './persistHttp'
 
 // Bump when the seed/shape changes in a way that should discard older on-disk
 // data (e.g. removing the original sample/dummy dataset).
@@ -35,12 +36,16 @@ interface Persisted {
   vpns: unknown
   tunnels: unknown
   databases: unknown
-  // Absent in saves written before the HTTP client existed.
+  // The HTTP client, owned by store/api and store/http and read and written
+  // only through persistHttp. v1 records (the old client's) are migrated on
+  // load; the key names are pinned by sync (shared/addy.ts), so they stay.
   apiCollections?: unknown
-  // The API client's own workspace — environments, cookies, tabs and the
-  // documents as edited. Absent in saves written before the client had one,
-  // which is not an error: it is rebuilt from `apiCollections`.
   apiWorkspace?: unknown
+  // The pre-upgrade v1 blob, scrubbed, for "Recover old data…". Not synced.
+  apiWorkspaceLegacy?: unknown
+  // Open request tabs, drafts and layout. Per device: not synced, and not
+  // backup-relevant data either (see subscribeApiPersistence).
+  httpSession?: unknown
   // Absent in saves written before external service checks existed.
   httpChecks?: unknown
   // Absent in saves written before the CI/CD module existed. The records carry
@@ -57,6 +62,20 @@ interface Persisted {
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
+// The HTTP session's own, slower debounce (§3.2): typing into a request draft
+// saves every two seconds at most, not on every keystroke.
+let sessionTimer: ReturnType<typeof setTimeout> | null = null
+
+const saveSoon = (): void => {
+  if (timer) clearTimeout(timer)
+  timer = setTimeout(save, 400)
+}
+const saveSoonSession = (): void => {
+  // A data save already on its way writes the session too.
+  if (timer) return
+  if (sessionTimer) clearTimeout(sessionTimer)
+  sessionTimer = setTimeout(save, 2000)
+}
 
 // Connecting to a server flips Server.status (online/offline/connecting)
 // dozens of times a session, and collapsing a Fleet Monitor group flips
@@ -113,6 +132,8 @@ async function hydrate(): Promise<void> {
     // looks like. A fresh install gets the defaults instead, from
     // defaultModuleState() in DEFAULT_SETTINGS.
     useApp.getState().setSettings({ modules: backfillModules(savedModules, false) })
+    // After replaceAll, so migration sees the restored workspaces and active workspace.
+    hydrateApi(saved)
   } else {
     // No data, or data written by an older (dummy-seeded) version — start clean
     // and overwrite it with the current empty seed.
@@ -192,8 +213,6 @@ async function hydrate(): Promise<void> {
       state.vpns !== prev.vpns ||
       state.tunnels !== prev.tunnels ||
       state.databases !== prev.databases ||
-      state.apiCollections !== prev.apiCollections ||
-      state.apiWorkspace !== prev.apiWorkspace ||
       state.httpChecks !== prev.httpChecks ||
       state.cicdConnections !== prev.cicdConnections
 
@@ -213,12 +232,8 @@ async function hydrate(): Promise<void> {
       state.vpns !== prev.vpns ||
       state.tunnels !== prev.tunnels ||
       state.databases !== prev.databases ||
-      state.apiCollections !== prev.apiCollections ||
-      // The requests themselves, not just the list of APIs. A saved request
-      // body or an environment that writes to disk but does NOT mark the
-      // backup stale is the silent data-loss path described below, pointed at
-      // the half of the HTTP client people actually type into.
-      state.apiWorkspace !== prev.apiWorkspace ||
+      // The HTTP client's collections and environments are not in this store:
+      // subscribeApiPersistence below marks the backup stale for them.
       // Checks are stored data a backup carries, so adding one has to mark the
       // last backup stale like adding a server does.
       state.httpChecks !== prev.httpChecks ||
@@ -271,10 +286,14 @@ async function hydrate(): Promise<void> {
       themeChanged ||
       state.settings !== prev.settings
     ) {
-      if (timer) clearTimeout(timer)
-      timer = setTimeout(save, 400)
+      saveSoon()
     }
   })
+
+  // Collections and environments save on the 400 ms timer and mark the backup
+  // stale; the session saves on its own 2 s timer and does not. Closing the
+  // window flushes whatever is pending.
+  subscribeApiPersistence(saveSoon, saveSoonSession, () => void save())
 
   /**
    * Somebody else changed the file. Take the named collections back in.
@@ -307,17 +326,22 @@ const STORE_KEYS = new Set([
   'vpns',
   'tunnels',
   'databases',
-  'apiCollections',
-  'apiWorkspace',
   'httpChecks',
   'cicdConnections'
 ])
 
+/** Collections persistHttp takes in: migrated or merged, stripped, and TLS changes flagged for review. */
+const API_KEYS = ['apiCollections', 'apiWorkspace'] as const
+
 async function applyExternal(collections: string[]): Promise<void> {
   const wanted = collections.filter((c) => STORE_KEYS.has(c))
-  if (wanted.length === 0) return
+  const api = API_KEYS.filter((k) => collections.includes(k))
+  if (wanted.length === 0 && api.length === 0) return
   const saved = await window.opsmaxx?.data.load<Record<string, unknown>>()
   if (!saved) return
+  // Present-checked like the rest: a key the file does not carry is left alone.
+  const apiPatch = Object.fromEntries(api.filter((k) => k in saved).map((k) => [k, saved[k]]))
+  if (Object.keys(apiPatch).length > 0) applyExternalApi(apiPatch)
   const patch: Record<string, unknown> = {}
   for (const key of wanted) {
     // Present-check rather than `?? []`: a key the file does not carry is one
@@ -328,7 +352,15 @@ async function applyExternal(collections: string[]): Promise<void> {
   if (Object.keys(patch).length > 0) useApp.setState(patch as never)
 }
 
+/** Writes everything now, pending timers included. For a relaunch that must not lose the last edits. */
+export function flushSave(): Promise<void> {
+  return save()
+}
+
 function save(): Promise<void> {
+  if (timer) clearTimeout(timer)
+  if (sessionTimer) clearTimeout(sessionTimer)
+  timer = sessionTimer = null
   const s = useApp.getState()
   return (
     window.opsmaxx?.data.save({
@@ -342,8 +374,8 @@ function save(): Promise<void> {
       vpns: s.vpns,
       tunnels: s.tunnels,
       databases: s.databases,
-      apiCollections: s.apiCollections,
-      apiWorkspace: s.apiWorkspace,
+      // Stripped of literal credentials and capped at the one choke point.
+      ...apiSaveFields(),
       httpChecks: s.httpChecks,
       cicdConnections: s.cicdConnections,
       settings: s.settings,

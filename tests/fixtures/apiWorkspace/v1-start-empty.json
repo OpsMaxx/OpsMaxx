@@ -1,0 +1,22 @@
+{
+  "apiCollections": [
+    {
+      "name": "Local API",
+      "specUrl": null,
+      "specPath": null,
+      "baseUrl": "http://127.0.0.1:18080/api",
+      "viaServerId": null,
+      "insecureTls": false,
+      "id": "api-mudwj912-0",
+      "workspaceId": "ws-default"
+    }
+  ],
+  "apiWorkspace": null,
+  "workspaces": [
+    {
+      "id": "ws-default",
+      "name": "Personal"
+    }
+  ],
+  "activeWorkspaceId": "ws-default"
+}

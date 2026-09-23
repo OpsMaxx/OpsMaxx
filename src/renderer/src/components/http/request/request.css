@@ -1,0 +1,248 @@
+/* The request half of a REST tab, and the Auth and Headers editors GraphQL
+   and WebSocket reuse. Every class is hc- (conventions §0.2). */
+
+.hc-auth {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  max-width: 560px;
+}
+.hc-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.hc-select {
+  height: 28px;
+  max-width: 280px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+.hc-note {
+  margin: 0;
+  color: var(--text-muted);
+}
+.hc-note.hc-warn {
+  color: var(--warn);
+}
+.hc-secret {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.hc-secret-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.hc-headers {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.hc-auto {
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.hc-auto-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+}
+.hc-auto-table th,
+.hc-auto-table td {
+  text-align: left;
+  padding: 2px var(--sp-2);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.hc-auto-table th {
+  font-weight: 500;
+  width: 28%;
+}
+.hc-auto-table .hc-replaced th,
+.hc-auto-table .hc-replaced td:not(.hc-auto-why) {
+  text-decoration: line-through;
+}
+.hc-auto-why {
+  font-family: var(--font-ui);
+}
+
+/* ---- URL row contents; the 44px row and its PROD rule are ProtocolLayout's ---- */
+.hc-urlbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  min-width: 0;
+}
+.hc-method {
+  flex: none;
+  width: 76px;
+  height: 28px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  font-weight: 600;
+}
+.hc-urlbar[data-step='4'] .hc-method,
+.hc-urlbar[data-step='5'] .hc-method {
+  width: 60px;
+}
+.hc-method option {
+  color: var(--text);
+}
+.hc-url {
+  flex: 1;
+  min-width: 120px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+}
+.hc-send {
+  flex: none;
+  min-width: 104px;
+}
+.hc-urlbar[data-step='2'] .hc-send,
+.hc-urlbar[data-step='3'] .hc-send,
+.hc-urlbar[data-step='4'] .hc-send,
+.hc-urlbar[data-step='5'] .hc-send {
+  min-width: 0;
+}
+
+/* ---- request panel ---- */
+/* A flex column, so ProtocolLayout's flex: 1 fills it; as a block, the layout
+   shrank to its content and the stacked response half got 0px (QA 3, 10). */
+.hc-rest {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+}
+.hc-request-panel {
+  height: 100%;
+  min-height: 0;
+  overflow: auto;
+}
+.hc-reqbar {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.hc-reqsum {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.hc-section {
+  margin: var(--sp-2) var(--sp-2) var(--sp-1);
+}
+.hc-pad {
+  padding: var(--sp-3);
+}
+.hc-note.hc-danger {
+  color: var(--danger);
+}
+.hc-path-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.hc-path-table th {
+  width: 28%;
+  padding: 0 var(--sp-2);
+  height: 28px;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.hc-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  max-width: 560px;
+}
+.hc-num {
+  width: 96px;
+}
+.hc-check {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+.hc-bodyed {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.hc-bodyed-code {
+  flex: 1;
+  min-height: 120px;
+}
+.hc-bodyed > .hc-note {
+  padding: var(--sp-1) var(--sp-2);
+}
+.hc-mp-cell {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+}
+.hc-mp-kind {
+  flex: none;
+  width: 72px;
+  height: 24px;
+}
+.hc-file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+.hc-file-name {
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-file-name.hc-missing {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.hc-ro-value {
+  display: block;
+  min-height: 24px;
+  padding: 2px var(--sp-2);
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.hc-reqtools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  min-width: 0;
+}
+.hc-code-drawer {
+  border-top: 1px solid var(--border);
+  max-height: 50%;
+  overflow: auto;
+}

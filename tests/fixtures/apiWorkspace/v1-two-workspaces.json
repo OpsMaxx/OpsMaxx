@@ -1,0 +1,183 @@
+{
+  "apiCollections": [
+    {
+      "name": "Personal API",
+      "specUrl": null,
+      "specPath": null,
+      "baseUrl": "http://127.0.0.1:18080/api",
+      "viaServerId": null,
+      "insecureTls": false,
+      "id": "api-mudwtftq-0",
+      "workspaceId": "ws-default"
+    },
+    {
+      "name": "Work API",
+      "specUrl": null,
+      "specPath": null,
+      "baseUrl": "http://127.0.0.1:18082/v2",
+      "viaServerId": null,
+      "insecureTls": false,
+      "id": "api-mudwv1ep-2",
+      "workspaceId": "ws-mudwtzz2-1"
+    }
+  ],
+  "apiWorkspace": {
+    "version": 1,
+    "meta": {
+      "x-scalar-active-proxy": null,
+      "x-scalar-active-document": "api-mudwv1ep-2"
+    },
+    "documents": {
+      "api-mudwtftq-0": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "Personal API",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://127.0.0.1:18080"
+          }
+        ],
+        "paths": {
+          "/api": {
+            "get": {
+              "operationId": "get-api",
+              "summary": "GET /api",
+              "responses": {
+                "200": {
+                  "description": "OK"
+                }
+              },
+              "parameters": [
+                {
+                  "name": "X-Workspace",
+                  "in": "header",
+                  "required": false,
+                  "examples": {
+                    "default": {
+                      "value": "personal",
+                      "x-disabled": false
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "x-original-oas-version": "3.1.1",
+        "x-scalar-original-document-hash": "65a89cf2aa7f37e4",
+        "x-ext-urls": {},
+        "x-scalar-order": [
+          "api-mudwtftq-0/description/introduction",
+          "api-mudwtftq-0/GET/api"
+        ],
+        "x-scalar-navigation": {
+          "id": "api-mudwtftq-0",
+          "type": "document",
+          "title": "Personal API",
+          "name": "api-mudwtftq-0",
+          "children": [
+            {
+              "id": "api-mudwtftq-0/description/introduction",
+              "title": "Introduction",
+              "type": "text"
+            },
+            {
+              "id": "api-mudwtftq-0/GET/api",
+              "title": "GET /api",
+              "path": "/api",
+              "method": "get",
+              "ref": "#/paths/~1api/get",
+              "type": "operation",
+              "isDeprecated": false
+            }
+          ]
+        },
+        "x-scalar-is-dirty": true
+      },
+      "api-mudwv1ep-2": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "Work API",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://127.0.0.1:18082"
+          }
+        ],
+        "paths": {
+          "/v2": {
+            "get": {
+              "operationId": "get-v2",
+              "summary": "GET /v2",
+              "responses": {
+                "200": {
+                  "description": "OK"
+                }
+              },
+              "parameters": [
+                {
+                  "name": "X-Workspace",
+                  "in": "header",
+                  "required": false,
+                  "examples": {
+                    "default": {
+                      "value": "work",
+                      "x-disabled": false
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "x-original-oas-version": "3.1.1",
+        "x-scalar-original-document-hash": "8afcdf1e9acd1ef9",
+        "x-ext-urls": {},
+        "x-scalar-order": [
+          "api-mudwv1ep-2/description/introduction",
+          "api-mudwv1ep-2/GET/v2"
+        ],
+        "x-scalar-navigation": {
+          "id": "api-mudwv1ep-2",
+          "type": "document",
+          "title": "Work API",
+          "name": "api-mudwv1ep-2",
+          "children": [
+            {
+              "id": "api-mudwv1ep-2/description/introduction",
+              "title": "Introduction",
+              "type": "text"
+            },
+            {
+              "id": "api-mudwv1ep-2/GET/v2",
+              "title": "GET /v2",
+              "path": "/v2",
+              "method": "get",
+              "ref": "#/paths/~1v2/get",
+              "type": "operation",
+              "isDeprecated": false
+            }
+          ]
+        },
+        "x-scalar-is-dirty": true
+      }
+    },
+    "sourceKeys": {
+      "api-mudwv1ep-2": "{\"specUrl\":null,\"specPath\":null,\"baseUrl\":\"http://127.0.0.1:18082/v2\",\"endpoints\":[]}"
+    }
+  },
+  "workspaces": [
+    {
+      "id": "ws-default",
+      "name": "Personal"
+    },
+    {
+      "id": "ws-mudwtzz2-1",
+      "name": "Work"
+    }
+  ],
+  "activeWorkspaceId": "ws-mudwtzz2-1"
+}

@@ -284,7 +284,24 @@ import {
   type CloudFault,
   type CloudProvider
 } from '../shared/cloud'
-import { httpRequest } from './services/httpClient'
+import {
+  cancelHttpRequest,
+  chooseBodyFile,
+  chooseCaFile,
+  chooseSpecFile,
+  guardNavigation,
+  httpRequest,
+  saveResponse,
+  trackedHttpRequest
+} from './services/httpClient'
+import {
+  appendHistory,
+  clearHistory,
+  historySealed,
+  listHistory,
+  pruneHistory,
+  removeHistory
+} from './services/httpHistory'
 import { wsClose, wsCloseForOwner, wsOpen, wsSend } from './services/wsClient'
 import { ServiceCheckRunner } from './services/serviceChecks'
 import * as cicd from './services/cicd/wiring'
@@ -728,6 +745,9 @@ function createWindow(): void {
     if (mayOpenExternally(details.url)) void shell.openExternal(details.url)
     return { action: 'deny' }
   })
+
+  // And the window itself never leaves the app. See guardNavigation.
+  guardNavigation(mainWindow.webContents)
 
   // Emit maximize state so the renderer titlebar can update its control.
   const emitMax = () => mainWindow?.webContents.send('window:maximized', mainWindow.isMaximized())
@@ -1294,9 +1314,32 @@ ipcMain.on('local:close', (e, id: unknown) => {
 //
 // The renderer names the server the same credential-free way the terminal
 // does; secrets are merged here, through the same pipeline as ssh:connect.
-ipcMain.handle('http:request', (_e, spec: HttpRequestSpec) =>
-  httpRequest(spec, { prepare: (target) => preparedSshTarget(target) })
+//
+// A request that carries a `requestId` can be cancelled, by the window that
+// sent it and by no other: the in-flight map is keyed by sender.
+ipcMain.handle('http:request', (e, spec: HttpRequestSpec) =>
+  trackedHttpRequest(e.sender.id, spec, { prepare: (target) => preparedSshTarget(target) })
 )
+ipcMain.handle('http:cancel', (e, requestId: unknown) => cancelHttpRequest(e.sender.id, requestId))
+
+// The renderer never names a path here, in either direction: main shows the
+// dialog, a save writes where the user pointed it, and a pick returns a
+// basename and bytes. See services/httpClient.ts.
+ipcMain.handle('http:saveResponse', (e, suggestedName: unknown, bytes: unknown) =>
+  saveResponse(BrowserWindow.fromWebContents(e.sender), suggestedName, bytes)
+)
+ipcMain.handle('http:chooseBodyFile', (e) => chooseBodyFile(BrowserWindow.fromWebContents(e.sender)))
+ipcMain.handle('http:chooseCaFile', (e) => chooseCaFile(BrowserWindow.fromWebContents(e.sender)))
+
+// Request history: sealed with the keyring, or memory-only without one. Main
+// rebuilds and re-redacts every entry it is handed; see services/httpHistory.ts.
+ipcMain.handle('httpHistory:list', (_e, opts: unknown) => listHistory(opts))
+ipcMain.handle('httpHistory:append', (_e, entry: unknown) => {
+  appendHistory(entry)
+})
+ipcMain.handle('httpHistory:remove', (_e, id: unknown) => removeHistory(id))
+ipcMain.handle('httpHistory:clear', () => clearHistory())
+ipcMain.handle('httpHistory:sealed', () => historySealed())
 
 /**
  * One monitor check: the same transport, a compact answer.
@@ -1341,20 +1384,21 @@ ipcMain.handle('ws:open', (e, spec: WsOpenSpec): Promise<WsOpenResult> =>
   })
 )
 
-ipcMain.handle('ws:send', (_e, id: unknown, data: unknown): WsSendResult => {
+ipcMain.handle('ws:send', (e, id: unknown, data: unknown): WsSendResult => {
   if (typeof id !== 'string') return { ok: false, error: 'That socket is not open.' }
   if (typeof data !== 'string' && !(data instanceof ArrayBuffer)) {
     return { ok: false, error: 'A frame is either text or bytes.' }
   }
-  return wsSend(id, data)
+  return wsSend(id, data, e.sender.id)
 })
 
-ipcMain.handle('ws:close', (_e, id: unknown, code?: unknown, reason?: unknown) => {
+ipcMain.handle('ws:close', (e, id: unknown, code?: unknown, reason?: unknown) => {
   if (typeof id !== 'string') return
   wsClose(
     id,
     typeof code === 'number' ? code : undefined,
-    typeof reason === 'string' ? reason : undefined
+    typeof reason === 'string' ? reason : undefined,
+    e.sender.id
   )
 })
 
@@ -1795,6 +1839,13 @@ function startHistory(): void {
         // does not come through here is reported as entries missing from the
         // start, which is exactly what this one is — only legitimate.
         if (dropped !== null && f === AUDIT_LOG_PATH) refreshAuditFloor()
+      }
+      // The HTTP client's history has its own horizon (30 days, 2,000 entries)
+      // and its own pruner, because it is sealed and retainedLines is not.
+      try {
+        pruneHistory()
+      } catch (err) {
+        console.error('[httpHistory] retention pass failed:', err)
       }
     }
     pass()
@@ -5237,47 +5288,10 @@ ipcMain.handle('backup:dumpDatabase', async (_e, destinationId: string, database
   return dumpToDestination(dest, resolved.target, resolved.password)
 })
 /**
- * Pick an OpenAPI document from disk and return its path and contents.
- *
- * Both, because the two callers want different halves: the collection stores
- * the path so it can be re-read after a restart and so the user can see which
- * file they chose, and the client is handed the text so it never has to reach
- * the filesystem itself.
- *
- * The read is capped. A description is a document, and a multi-hundred-megabyte
- * file chosen here — by accident or otherwise — must not be pulled into the
- * renderer's heap before anything looks at it.
+ * Pick an OpenAPI description. Main shows the dialog and reads the file
+ * (capped); the renderer gets the basename and the text, never the path.
  */
-const OPENAPI_MAX_BYTES = 32 * 1024 * 1024
-ipcMain.handle('http:chooseSpecFile', async () => {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
-  const chosen = await dialog.showOpenDialog(win, {
-    title: 'Choose an OpenAPI description',
-    properties: ['openFile'],
-    filters: [
-      { name: 'OpenAPI', extensions: ['json', 'yaml', 'yml'] },
-      { name: 'All files', extensions: ['*'] }
-    ]
-  })
-  const path = chosen.canceled ? null : (chosen.filePaths[0] ?? null)
-  if (!path) return null
-  const { stat, readFile } = await import('node:fs/promises')
-  const info = await stat(path)
-  if (info.size > OPENAPI_MAX_BYTES) {
-    throw new Error(
-      `That file is ${Math.round(info.size / (1024 * 1024))} MB. An OpenAPI description this large is almost certainly not one.`
-    )
-  }
-  return { path, text: await readFile(path, 'utf8') }
-})
-
-/** Re-read a description the collection already points at. */
-ipcMain.handle('http:readSpecFile', async (_e, path: string) => {
-  const { stat, readFile } = await import('node:fs/promises')
-  const info = await stat(path)
-  if (info.size > OPENAPI_MAX_BYTES) throw new Error('That description is too large to open.')
-  return readFile(path, 'utf8')
-})
+ipcMain.handle('http:chooseSpecFile', (e) => chooseSpecFile(BrowserWindow.fromWebContents(e.sender)))
 
 ipcMain.handle('backup:chooseDirectory', async () => {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]

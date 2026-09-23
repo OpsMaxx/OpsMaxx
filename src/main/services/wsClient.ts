@@ -8,6 +8,7 @@ import {
   MAX_FRAME_BYTES,
   MAX_SOCKETS,
   NORMAL_CLOSURE,
+  WS_ID,
   type WsEvent,
   type WsFrame,
   type WsOpenResult,
@@ -15,7 +16,14 @@ import {
   type WsSendResult
 } from '../../shared/httpSocket'
 import { isLinkLocalHost, sanitizeHeaders } from '../../shared/httpClient'
-import { closeDial, dial, type DialResult, type HttpSshTargetLike } from './netTransport'
+import {
+  asSocket,
+  closeDial,
+  dial,
+  startTls,
+  type DialResult,
+  type HttpSshTargetLike
+} from './netTransport'
 
 /**
  * WebSocket sessions, over the same three transports as an HTTP request.
@@ -29,12 +37,13 @@ import { closeDial, dial, type DialResult, type HttpSshTargetLike } from './netT
  * That is the whole mechanism: a WebSocket to a service bound to a server's
  * loopback, which nothing running in a browser can reach.
  *
- * TLS is handled by the agent rather than by wrapping the socket first, which
- * is the opposite of what `httpClient.ts` does and deliberately so. `ws`
- * computes `Sec-WebSocket-Key`, SNI and the `Host` header from the URL it was
- * given; handing it a pre-encrypted socket under a `ws://` URL would get the
- * first of those right and the other two wrong. An `https.Agent` carrying
- * `rejectUnauthorized` and `ca` reaches the same place with the URL intact.
+ * TLS is done here, with `startTls`, exactly as `httpClient.ts` does it, and
+ * the encrypted socket is what the agent hands over. It cannot be left to the
+ * agent: `https.Agent.createConnection` IS where Node calls `tls.connect`, so
+ * overriding it to return the raw transport sent every wss:// handshake to
+ * port 443 in plaintext. The URL stays `wss://`, so `ws` still builds `Host`
+ * and the request the same way; SNI comes from the target hostname, never the
+ * loopback a VPN forward or SSH channel happens to land on.
  *
  * ── Lifetime ───────────────────────────────────────────────────────────────
  *
@@ -57,6 +66,13 @@ interface Session {
 }
 
 const sessions = new Map<string, Session>()
+/**
+ * Every id in use: open sessions AND handshakes still in flight. An id may be
+ * chosen by the preload (see `socketBridge`), so a second open naming one that
+ * is taken is refused rather than allowed to share its event channel. It is
+ * also what `MAX_SOCKETS` counts, so concurrent opens cannot overshoot it.
+ */
+const reserved = new Set<string>()
 
 /** What this service needs from main: credentials, and somewhere to send events. */
 export interface WsContext {
@@ -130,7 +146,7 @@ export async function wsOpen(
   ownerId: number,
   ctx: WsContext
 ): Promise<WsOpenResult> {
-  if (sessions.size >= MAX_SOCKETS) {
+  if (reserved.size >= MAX_SOCKETS) {
     return {
       ok: false,
       error: `That is ${MAX_SOCKETS} open sockets, which is as many as OpsMaxx will hold. Close one first.`
@@ -139,6 +155,11 @@ export async function wsOpen(
 
   const target = parseWsTarget(spec.url)
   if ('error' in target) return { ok: false, error: target.error }
+
+  const id = spec.id ?? randomUUID()
+  if (typeof id !== 'string' || !WS_ID.test(id)) return { ok: false, error: 'That socket id is not valid.' }
+  if (reserved.has(id)) return { ok: false, error: 'That socket id is already in use.' }
+  reserved.add(id)
 
   // The same rules a request's headers go through: a name that is not a token,
   // a value carrying CR or LF, or one of the fields the transport itself sets
@@ -152,18 +173,22 @@ export async function wsOpen(
     )
     const transport = dialled
 
-    // `createConnection` is used INSTEAD of an agent when no agent is given
-    // (see Node's `_http_client`), which is what lets the handshake travel
-    // over an SSH channel. TLS stays with the agent so `ws` keeps computing
-    // SNI and Host from the real URL.
-    const agent = target.tls
-      ? new https.Agent({
-          rejectUnauthorized: spec.insecureTls !== true,
-          ...(spec.caPem ? { ca: spec.caPem } : {})
-        })
-      : new http.Agent()
-    ;(agent as unknown as { createConnection: () => unknown }).createConnection = () =>
-      transport.transport
+    const wire = target.tls
+      ? await startTls(
+          transport.transport,
+          target.hostname,
+          spec.insecureTls === true,
+          HANDSHAKE_TIMEOUT_MS,
+          spec.caPem
+        )
+      : asSocket(transport.transport)
+
+    // The agent's `createConnection` is what Node calls for a socket, so this
+    // is how the handshake travels over an SSH channel or VPN forward. The
+    // socket is already encrypted for wss; the agent is `https` only because
+    // `https.request` refuses an agent of the other protocol.
+    const agent = target.tls ? new https.Agent() : new http.Agent()
+    ;(agent as unknown as { createConnection: () => unknown }).createConnection = () => wire
 
     const socket = new WebSocket(spec.url, spec.protocols ?? [], {
       agent,
@@ -172,7 +197,6 @@ export async function wsOpen(
       maxPayload: MAX_FRAME_BYTES
     })
 
-    const id = randomUUID()
     const emit = (event: WsEvent): void => ctx.emit(ownerId, id, event)
 
     let torn = false
@@ -180,6 +204,7 @@ export async function wsOpen(
       if (torn) return
       torn = true
       sessions.delete(id)
+      reserved.delete(id)
       try {
         // `terminate`, not `close`: teardown runs on paths where the far end
         // is already gone, and a graceful close would wait for a reply that
@@ -203,8 +228,11 @@ export async function wsOpen(
 
       socket.on('open', () => {
         sessions.set(id, session)
-        emit({ type: 'open', protocol: socket.protocol ?? '' })
-        settle({ ok: true, id })
+        const protocol = socket.protocol ?? ''
+        emit({ type: 'open', protocol })
+        // In the result as well: the event can reach a renderer before it is
+        // listening (see socketBridge), and the result cannot.
+        settle({ ok: true, id, protocol })
       })
 
       socket.on('message', (data: WebSocket.RawData, isBinary: boolean) => {
@@ -245,6 +273,7 @@ export async function wsOpen(
       })
     })
   } catch (err) {
+    reserved.delete(id)
     if (dialled) closeDial(dialled)
     const message = err instanceof Error ? err.message : String(err)
     const code = (err as NodeJS.ErrnoException | undefined)?.code
@@ -255,9 +284,13 @@ export async function wsOpen(
 /** Long enough for an SSH channel plus a TLS handshake, short enough to notice. */
 const HANDSHAKE_TIMEOUT_MS = 30_000
 
-export function wsSend(id: string, data: string | ArrayBuffer): WsSendResult {
+/**
+ * `ownerId`, when given, must be the window that opened the socket: an id can
+ * be chosen by a renderer, so it is not by itself proof of ownership.
+ */
+export function wsSend(id: string, data: string | ArrayBuffer, ownerId?: number): WsSendResult {
   const session = sessions.get(id)
-  if (!session) return { ok: false, error: 'That socket is not open.', reason: 'unknown-session' }
+  if (!session || (ownerId !== undefined && session.ownerId !== ownerId)) return { ok: false, error: 'That socket is not open.', reason: 'unknown-session' }
   if (session.socket.readyState !== WebSocket.OPEN) {
     return { ok: false, error: 'That socket is not open.', reason: 'closed' }
   }
@@ -279,9 +312,9 @@ export function wsSend(id: string, data: string | ArrayBuffer): WsSendResult {
   return { ok: true }
 }
 
-export function wsClose(id: string, code = NORMAL_CLOSURE, reason = ''): void {
+export function wsClose(id: string, code = NORMAL_CLOSURE, reason = '', ownerId?: number): void {
   const session = sessions.get(id)
-  if (!session) return
+  if (!session || (ownerId !== undefined && session.ownerId !== ownerId)) return
   try {
     // Graceful here, unlike teardown: this is a deliberate close and the far
     // end deserves the handshake. `close` fires the listener that tears down.

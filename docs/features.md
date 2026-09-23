@@ -27,6 +27,7 @@ Everything OpsMaxx does, what it replaces, and the shapes of work it was built f
 | **frp** | Publish a local port through an frp server, with a per-proxy confirmation naming exactly what becomes reachable |
 | **Traffic inspector** | Read the HTTP and HTTPS a machine is actually making — a Burp- or Fiddler-style proxy with one-click certificate install, terminals and SSH sessions routed automatically, and a host that pins its certificate named rather than silently missing |
 | **SSH & databases over VPN** | Point a server or a database at a VPN profile and it is brought up, waited for, and torn down with the session |
+| **HTTP client** | REST, WebSocket and GraphQL requests sent from this machine, through a server's SSH connection or over a VPN — a service bound to a server's loopback is one request away. Collections, environments with a production confirm, cURL and OpenAPI import, and Copy as cURL with credentials masked. [How to use it](08-user/guides/http-client.md) |
 | **Databases** | PostgreSQL, MySQL, SQL Server, MongoDB and Redis — with an interactive shell per engine |
 | **Databases over SSH** | Reach a database that is only routable from a bastion |
 | **Vault** | AES-256-GCM encrypted store for URLs, logins, API keys and free-form key/value pairs |

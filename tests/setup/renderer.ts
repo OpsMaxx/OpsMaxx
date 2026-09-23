@@ -57,6 +57,26 @@ export function stubBridge(stub: BridgeStub = {}): void {
 install({})
 
 // ---------------------------------------------------------------------------
+// Layout APIs jsdom does not implement
+// ---------------------------------------------------------------------------
+//
+// CodeMirror measures on mount: it observes its own size and asks text ranges
+// for their rectangles. jsdom has neither, so an editor would throw before a
+// test could type into it. These answer "no size", which is the truth in a DOM
+// with no layout; geometry is asserted over CDP, never here.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  globalThis.ResizeObserver = class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  }
+}
+const emptyRects = (): DOMRectList =>
+  Object.assign([], { item: () => null }) as unknown as DOMRectList
+Range.prototype.getClientRects ??= emptyRects
+Range.prototype.getBoundingClientRect ??= () => new DOMRect(0, 0, 0, 0)
+
+// ---------------------------------------------------------------------------
 // Store snapshots
 // ---------------------------------------------------------------------------
 

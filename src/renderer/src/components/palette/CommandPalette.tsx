@@ -33,6 +33,7 @@ import { MODULES, isOperateModule, moduleEnabled } from '../../../../shared/modu
 import { reportBug } from '../../lib/reportBug'
 import { fuzzyScore } from '../../lib/fuzzy'
 import { templateTerminalText, type JobTemplate } from '../../../../shared/jobCompose'
+import { httpPaletteCommands } from '../http/paletteCommands'
 
 interface Cmd {
   id: string
@@ -289,7 +290,7 @@ export function CommandPalette(): React.JSX.Element {
       run: () => openSettings(id)
     }))
 
-    return [...actions, ...destinations, ...modules, ...aiPages, ...settingsPages, ...list]
+    return [...actions, ...destinations, ...modules, ...aiPages, ...settingsPages, ...list, ...httpPaletteCommands(store)]
   }, [store, templates])
 
   const filtered = useMemo(() => {

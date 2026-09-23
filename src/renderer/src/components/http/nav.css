@@ -1,0 +1,475 @@
+/* HTTP client navigation (stream B): sidebar, tree, history, environments,
+   collection settings, dialogs. Every class is hc-*. */
+
+/* ---- Sidebar ---- */
+.hc-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-width: 0;
+  background: var(--bg-sidebar);
+}
+.hc-sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  container-type: inline-size;
+}
+.hc-sidebar-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-body);
+  font-weight: 500;
+}
+.hc-sidebar-actions {
+  display: flex;
+  gap: var(--sp-1);
+}
+/* The Import label goes below 240px of sidebar (UX-m22); the icon and its
+   aria-label stay. */
+@container (max-width: 239px) {
+  .hc-import-text {
+    display: none;
+  }
+}
+.hc-sidebar-filter {
+  margin: var(--sp-2) var(--sp-3);
+}
+.hc-sidebar-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.hc-empty-actions {
+  display: flex;
+  gap: var(--sp-2);
+}
+
+/* ---- Tree ---- */
+.hc-tree {
+  padding-bottom: var(--sp-2);
+}
+.hc-tree-empty {
+  padding: var(--sp-3);
+  color: var(--text-muted);
+}
+.hc-tree-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 28px;
+  padding-right: var(--sp-1);
+  cursor: default;
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+.hc-tree-row:hover {
+  background: var(--bg-hover);
+}
+.hc-tree-row.is-selected {
+  background: var(--bg-active);
+}
+.hc-tree-row:focus-visible {
+  outline-offset: -2px;
+}
+.hc-tree-chevron {
+  display: inline-flex;
+  width: 14px;
+  flex: none;
+  color: var(--text-faint);
+}
+.hc-tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-tree-rename {
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding: 0 var(--sp-1);
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  color: var(--text);
+}
+.hc-tree-more {
+  visibility: hidden;
+}
+.hc-tree-row:hover .hc-tree-more,
+.hc-tree-row:focus-within .hc-tree-more,
+.hc-history-row:hover .hc-tree-more,
+.hc-history-row:focus-within .hc-tree-more {
+  visibility: visible;
+}
+
+/* ---- Method and status ---- */
+.hc-mbadge {
+  flex: none;
+  /* A fixed column, so names line up whatever the method. Plain tinted text:
+     C's .hc-method is the URL row's boxed picker, not this. */
+  width: 42px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+}
+.hc-mbadge--get {
+  color: var(--method-get);
+}
+.hc-mbadge--post {
+  color: var(--method-post);
+}
+.hc-mbadge--put {
+  color: var(--method-put);
+}
+.hc-mbadge--patch {
+  color: var(--method-patch);
+}
+.hc-mbadge--delete {
+  color: var(--method-delete);
+}
+.hc-mbadge--other,
+.hc-mbadge--ws,
+.hc-mbadge--graphql {
+  color: var(--method-other);
+}
+.hc-status {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--fs-caption);
+  color: var(--text-muted);
+}
+.hc-status--2xx {
+  color: var(--ok);
+}
+.hc-status--3xx {
+  color: var(--info);
+}
+.hc-status--4xx {
+  color: var(--warn);
+}
+.hc-status--5xx,
+.hc-status--error {
+  color: var(--danger);
+}
+
+/* ---- History ---- */
+.hc-history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 var(--sp-3);
+  height: 28px;
+}
+.hc-history-day {
+  margin: var(--sp-2) var(--sp-3) var(--sp-1);
+}
+.hc-history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.hc-history-row {
+  display: flex;
+  align-items: center;
+  padding-right: var(--sp-1);
+}
+.hc-history-row:hover {
+  background: var(--bg-hover);
+}
+.hc-history-open {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 var(--sp-3);
+  color: var(--text);
+  text-align: left;
+}
+.hc-history-open:focus-visible {
+  outline-offset: -2px;
+}
+.hc-history-url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-history-time {
+  flex: none;
+  color: var(--text-faint);
+  font-size: var(--fs-caption);
+}
+.hc-history-note {
+  padding: var(--sp-3);
+  color: var(--text-muted);
+}
+.hc-history-more {
+  margin: var(--sp-2) var(--sp-3);
+}
+.hc-history-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+.hc-history-skeleton > div {
+  height: 16px;
+  border-radius: var(--r-sm);
+  background: var(--bg-hover);
+}
+
+/* ---- Shared form bits ---- */
+.hc-form-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 28px;
+  margin-bottom: var(--sp-2);
+}
+.hc-form-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+.hc-textarea {
+  height: auto;
+  min-height: 72px;
+  padding: var(--sp-2);
+  resize: vertical;
+}
+.hc-num {
+  width: 88px;
+}
+.hc-note-line,
+.hc-effective {
+  color: var(--text-muted);
+}
+.hc-warn-line {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--danger);
+}
+.hc-error-line {
+  color: var(--danger);
+}
+.hc-banner {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  background: var(--warn-soft);
+  color: var(--text);
+}
+.hc-banner > span {
+  flex: 1;
+}
+.hc-dest-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-height: 280px;
+  overflow: auto;
+}
+.hc-dest {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* ---- Environments ---- */
+.hc-swatch {
+  display: inline-block;
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border-strong);
+}
+.hc-swatch--blue {
+  background: var(--host-blue);
+}
+.hc-swatch--violet {
+  background: var(--host-violet);
+}
+.hc-swatch--pink {
+  background: var(--host-pink);
+}
+.hc-swatch--jade {
+  background: var(--host-jade);
+}
+.hc-swatch--rust {
+  background: var(--host-rust);
+}
+.hc-swatch--olive {
+  background: var(--host-olive);
+}
+.hc-swatch-pick {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.hc-prod {
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-sm);
+  color: var(--danger);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+}
+.hc-env-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 28px;
+  max-width: 200px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-sm);
+  color: var(--text);
+}
+.hc-env-picker:hover {
+  background: var(--bg-hover);
+}
+.hc-env-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-envs {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+.hc-envs-list {
+  flex: 0 0 220px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border-subtle);
+  background: var(--bg-sidebar);
+}
+.hc-envs-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2);
+}
+.hc-envs-options {
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+}
+.hc-envs-option {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  padding: 0 var(--sp-3);
+  color: var(--text);
+  text-align: left;
+}
+.hc-envs-option:hover {
+  background: var(--bg-hover);
+}
+.hc-envs-option[aria-selected='true'] {
+  background: var(--bg-active);
+}
+.hc-envs-active {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: var(--fs-caption);
+}
+.hc-envs-detail {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: var(--sp-3);
+}
+.hc-vars-pop {
+  width: 380px;
+}
+.hc-vars-pop ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.hc-vars-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 28px;
+}
+.hc-vars-name {
+  flex: 0 0 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hc-vars-value {
+  flex: 1;
+  min-width: 0;
+}
+.hc-vars-scope {
+  color: var(--text-faint);
+  font-size: var(--fs-caption);
+}
+.hc-vars-add {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.hc-vars-missing {
+  color: var(--danger);
+}
+
+/* ---- Collection settings ---- */
+.hc-coltab {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+.hc-coltab-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-3);
+}
+.hc-overridden {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+.hc-overridden input {
+  text-decoration: line-through;
+  color: var(--text-faint);
+}
+/* A synced change held for review: text, not only colour. */
+.hc-review {
+  padding: 0 var(--sp-1);
+  border: 1px solid var(--warn);
+  border-radius: var(--r-sm);
+  /* --warn text is under 4.5:1 on the light sidebar; the border carries the hue. */
+  color: var(--text);
+  font-size: var(--fs-caption);
+  font-weight: 600;
+}
+.hc-review-keys {
+  color: var(--text-muted);
+}

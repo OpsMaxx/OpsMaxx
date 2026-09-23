@@ -1,0 +1,9 @@
+{
+  "apiCollections": [
+    { "id": "api-spec-1", "workspaceId": "ws-default", "name": "Spec", "specUrl": "http://127.0.0.1:18081/openapi.json", "specPath": null, "baseUrl": "http://127.0.0.1:18081", "viaServerId": null, "insecureTls": false },
+    { "id": "api-file-1", "workspaceId": "ws-default", "name": "File spec", "specUrl": null, "specPath": "/home/someone/specs/petstore.yaml", "baseUrl": "https://u:secret@api.example.test", "viaServerId": "srv-1", "insecureTls": true },
+    { "id": "api-hand-1", "workspaceId": "ws-default", "name": "Hand", "specUrl": null, "specPath": null, "baseUrl": "http://127.0.0.1:18080/api", "viaServerId": null, "insecureTls": false,
+      "endpoints": [{ "id": "e1", "method": "GET", "path": "/users" }, { "id": "e2", "method": "DELETE", "path": "users/{id}", "summary": "Remove a user" }] }
+  ],
+  "apiWorkspace": { "version": 1, "meta": { "x-scalar-environments": { "dev": { "variables": [] } } }, "documents": "not a map" }
+}

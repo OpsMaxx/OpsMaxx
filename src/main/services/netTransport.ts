@@ -82,6 +82,10 @@ export function startTls(
       // SNI. Omitted for an IP literal, which is not a valid SNI value and
       // makes some servers abort the handshake outright.
       ...(net.isIP(servername) ? {} : { servername }),
+      // What the certificate is checked against. Without it an IP literal,
+      // which gets no SNI above, is checked as `localhost` — so a cert issued
+      // for 10.0.0.5 failed against https://10.0.0.5 even with its CA supplied.
+      host: servername,
       // A private CA for this request only. Node replaces the root store when
       // `ca` is set, so the system roots go back in alongside it — a company CA
       // for the internal Jenkins must not stop the same session reaching

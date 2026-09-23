@@ -25,8 +25,8 @@ import { approvalShowing } from '../../hooks/useClickOutside'
  * other and not so anybody reads them.
  */
 const COLLECTION_NAMES: Record<string, string> = {
-  apiCollections: 'your saved APIs',
-  apiWorkspace: 'the API client workspace',
+  apiCollections: 'your HTTP collections',
+  apiWorkspace: 'your HTTP environments and variables',
   cicdConnections: 'your CI/CD connections',
   databases: 'your saved databases',
   deviceNames: 'what you call your devices',

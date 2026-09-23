@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-22",
+  "generated": "2026-09-23",
   "nodes": [
     {
       "id": "claude",
@@ -50,8 +50,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 163,
-      "hash": "7ff42ef1a90e7e50",
+      "lines": 164,
+      "hash": "51eaceb52358be32",
       "generated": false
     },
     {
@@ -63,8 +63,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 443,
-      "hash": "29d0a87993b6a959",
+      "lines": 444,
+      "hash": "5138cef8a65a73b4",
       "generated": false
     },
     {
@@ -76,8 +76,21 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 528,
-      "hash": "a5f095428a0ff585",
+      "lines": 600,
+      "hash": "2e4816dd9cedc292",
+      "generated": false
+    },
+    {
+      "id": "http-client",
+      "path": "docs/08-user/guides/http-client.md",
+      "type": "user.guide",
+      "authority": "audience",
+      "visibility": "public",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 228,
+      "hash": "64a9b159828bab8e",
       "generated": false
     },
     {
@@ -102,8 +115,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 620,
-      "hash": "55a6b831ead205fb",
+      "lines": 752,
+      "hash": "6c435919d28f2ae9",
       "generated": false
     },
     {
@@ -115,8 +128,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 406,
-      "hash": "a4184b776aaf8d63",
+      "lines": 511,
+      "hash": "6635b9fbca3becd3",
       "generated": false
     },
     {
@@ -128,8 +141,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 1969,
-      "hash": "2ffd4ef877033caa",
+      "lines": 1981,
+      "hash": "c242cfc6531aab10",
       "generated": false
     },
     {
@@ -155,7 +168,7 @@
       "status": "active",
       "kind": "document",
       "lines": 211,
-      "hash": "3d72e36a1e411c6f",
+      "hash": "3146efa7d99397a7",
       "generated": false
     },
     {
@@ -219,8 +232,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 118,
-      "hash": "8dc74f2ae50adc6f",
+      "lines": 119,
+      "hash": "ba3e187669164532",
       "generated": false
     },
     {
@@ -232,8 +245,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 265,
-      "hash": "893799379301bf91",
+      "lines": 288,
+      "hash": "233f3eab3cf31631",
       "generated": false
     },
     {
@@ -246,7 +259,7 @@
       "status": "active",
       "kind": "document",
       "lines": 65,
-      "hash": "ef971d3ca4ca3aec",
+      "hash": "ccdc6a7be0acdffa",
       "generated": false
     },
     {
@@ -388,8 +401,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 363,
-      "hash": "2da024e7eab43755",
+      "lines": 418,
+      "hash": "446a6f18b41e54ca",
       "generated": false
     },
     {
@@ -415,7 +428,7 @@
       "status": "active",
       "kind": "document",
       "lines": 103,
-      "hash": "4fb73a44fb0c196d",
+      "hash": "cee0ad665fef8423",
       "generated": false
     },
     {
@@ -741,6 +754,42 @@
       "inferred": true
     },
     {
+      "from": "http-client",
+      "to": "docs-vault",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "http-client",
+      "to": "docs-vault",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "http-client",
+      "to": "docs-tunnels",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "http-client",
+      "to": "docs-vpn",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "http-client",
+      "to": "docs-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "http-client",
+      "to": "docs-features",
+      "rel": "references",
+      "inferred": true
+    },
+    {
       "from": "competitive-ux-review",
       "to": "docs-plans-sync-security-protocol",
       "rel": "references",
@@ -910,6 +959,12 @@
     },
     {
       "from": "docs-features",
+      "to": "http-client",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-features",
       "to": "readme",
       "rel": "references",
       "inferred": true
@@ -1037,6 +1092,12 @@
     {
       "from": "docs-vault",
       "to": "security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-vault",
+      "to": "docs-terminal",
       "rel": "references",
       "inferred": true
     },

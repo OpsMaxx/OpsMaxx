@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest'
+import { buildClientSchema, graphqlSync, buildSchema, parse, validate, getIntrospectionQuery } from 'graphql'
 import {
   INTROSPECTION_QUERY,
+  introspectionQuery,
+  isDepthOrComplexityError,
   buildGraphQlBody,
   parseVariables,
   readGraphQlResponse,
@@ -161,5 +164,53 @@ describe('the introspection query', () => {
     // nested as a real field type gets.
     const depth = (INTROSPECTION_QUERY.match(/ofType/g) ?? []).length
     expect(depth).toBeLessThanOrEqual(6)
+  })
+})
+
+describe('the redesigned client’s introspection query', () => {
+  const sdl = buildSchema(`
+    type Query { country(code: ID!): Country, grid: [[Cell]!]! }
+    """A country"""
+    type Country { name: String @deprecated(reason: "use label"), label: String }
+    type Cell { v: Int }
+  `)
+
+  it('is valid against the introspection schema, in both forms', () => {
+    for (const lean of [false, true]) expect(validate(sdl, parse(introspectionQuery({ lean })))).toEqual([])
+  })
+
+  it('goes four ofType deep, which is enough to rebuild [[Thing]!]!', () => {
+    const q = introspectionQuery()
+    expect(q.split('fragment TypeRef')[1].match(/ofType/g)).toHaveLength(4)
+    const result = graphqlSync({ schema: sdl, source: q })
+    expect(result.errors).toBeUndefined()
+    const rebuilt = buildClientSchema(result.data as never)
+    expect(String(rebuilt.getQueryType()!.getFields().grid.type)).toBe('[[Cell]!]!')
+  })
+
+  it('can be asked deeper, for the schema that needs it', () => {
+    expect(introspectionQuery({ depth: 8 }).split('fragment TypeRef')[1].match(/ofType/g)).toHaveLength(8)
+  })
+
+  it('drops descriptions and deprecated fields when lean', () => {
+    const full = introspectionQuery()
+    const lean = introspectionQuery({ lean: true })
+    expect(full).toContain('description')
+    expect(lean).not.toContain('description')
+    expect(lean).toContain('includeDeprecated: false')
+    const rebuilt = buildClientSchema(graphqlSync({ schema: sdl, source: lean }).data as never)
+    expect(rebuilt.getType('Country')!.description).toBeFalsy()
+    expect(Object.keys((rebuilt.getType('Country') as never as { getFields(): object }).getFields())).toEqual(['label'])
+  })
+
+  it('is no heavier than graphql’s own default query', () => {
+    expect(introspectionQuery().length).toBeLessThan(getIntrospectionQuery().length * 1.5)
+  })
+
+  it('recognises a refusal for size, and only that', () => {
+    expect(isDepthOrComplexityError([{ message: 'Query depth 12 exceeds maximum 10' }])).toBe(true)
+    expect(isDepthOrComplexityError([{ message: 'Query is too complex: 1200 > 1000' }])).toBe(true)
+    expect(isDepthOrComplexityError([{ message: 'Cannot query field "x" on type "Query".' }])).toBe(false)
+    expect(isDepthOrComplexityError(undefined)).toBe(false)
   })
 })

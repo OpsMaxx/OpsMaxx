@@ -171,6 +171,15 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
     'device-local: live agent sessions, bound to this install bridge and meaningless on another machine',
   inspectCapture:
     'device-local: plaintext request and response bodies spilled by the traffic inspector. Swept on every inspector start, and the last thing that should acquire a second copy on another machine',
+  specFiles:
+    'device-local: a list of local OpenAPI file paths, and its marker, left behind by older versions. Nothing writes or reads them now; "delete all data" removes them, and a path to this machine\'s files means nothing on another',
+  httpSession:
+    'per-device open tabs and unsaved drafts; drafts can hold values the user has not decided to share',
+  apiWorkspaceLegacy:
+    'a one-time pre-upgrade copy kept for local recovery; syncing it would resurrect v1 data on upgraded devices',
+  httpHistory: 'device-local request history; sealed with this machine\'s keyring and never backed up',
+  apiLocal:
+    'device-local HTTP state: the upgrade report until its banner is dismissed, and which collections\' certificate settings this device has not reviewed',
 }
 
 /**

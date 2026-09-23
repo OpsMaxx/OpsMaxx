@@ -1,0 +1,363 @@
+/* WebSocket tab (§2.12). Tokens only; every class starts hc-ws-. */
+
+/* Fills the layout's URL row, which already pads it: the bar is what useWidth
+   measures, and a bar that shrank to its content would measure small and
+   degrade itself further. */
+.hc-ws-bar {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 44px;
+  min-width: 0;
+}
+.hc-ws-badge {
+  flex: none;
+  width: 76px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  font-weight: 600;
+  color: var(--method-other);
+}
+.hc-ws-url {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+.hc-ws-url-locked {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-identifier);
+  color: var(--text-muted);
+  padding: 0 var(--sp-2);
+}
+.hc-ws-connect {
+  flex: none;
+  min-width: 104px;
+}
+.hc-ws-spin {
+  animation: hc-ws-spin 1s linear infinite;
+}
+@keyframes hc-ws-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.hc-ws-toolbar,
+.hc-ws-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  min-width: 0;
+}
+.hc-ws-tools .input,
+.hc-ws-toolbar .input {
+  height: 24px;
+  font-size: var(--fs-sm);
+}
+.hc-ws-search {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--text-faint);
+}
+.hc-ws-search .input {
+  width: 140px;
+  font-size: var(--fs-identifier);
+}
+.hc-ws-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.hc-ws-locked-note,
+.hc-ws-hint,
+.hc-ws-note {
+  margin: 0;
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.hc-ws-spacer {
+  flex: 1 1 auto;
+}
+.hc-ws-tools .is-on,
+.hc-ws-seg .is-on {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+/* A tabpanel wrapper that the content still fills. */
+.hc-ws-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+}
+
+/* A credential in a field that is saved, or a value the last save did not keep. */
+.hc-ws-warn {
+  margin: var(--sp-2) 0 0;
+  max-width: 480px;
+  font-size: var(--fs-sm);
+  color: var(--state-watch);
+}
+
+/* Composer */
+.hc-ws-composer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.hc-ws-composer-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-input);
+}
+.hc-ws-composer-foot {
+  display: flex;
+  justify-content: flex-end;
+  padding: var(--sp-1) var(--sp-2);
+}
+.hc-ws-composer-foot {
+  align-items: center;
+  gap: var(--sp-2);
+}
+.hc-ws-composer-note {
+  margin: 0 auto 0 0;
+  font-size: var(--fs-sm);
+  color: var(--state-watch);
+}
+.hc-ws-kbd {
+  font-family: var(--font-mono);
+  font-size: var(--fs-xs);
+  opacity: 0.8;
+}
+
+.hc-ws-settings {
+  padding: var(--sp-3);
+}
+.hc-ws-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-width: 480px;
+}
+
+/* Response half */
+.hc-ws-response {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+.hc-ws-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 var(--sp-2);
+  background: var(--bg-sidebar);
+  font-size: var(--fs-body);
+  min-width: 0;
+}
+.hc-ws-status-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-ws-status-text.is-failure {
+  color: var(--state-alarm);
+}
+.hc-ws-collapse {
+  display: inline-flex;
+}
+.hc-ws-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  white-space: nowrap;
+}
+.hc-ws-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.hc-ws-messages {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+.hc-ws-messages.is-right {
+  flex-direction: row;
+}
+.hc-ws-logpane {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 84px;
+}
+.hc-ws-list {
+  position: relative;
+  flex: 1 1 auto;
+  overflow: auto;
+}
+.hc-ws-list:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.hc-ws-spacer-rows {
+  position: relative;
+}
+.hc-ws-row {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: grid;
+  grid-template-columns: 96px 96px 64px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  padding: 0 var(--sp-2);
+  font-size: var(--fs-sm);
+  cursor: default;
+}
+.hc-ws-row:hover {
+  background: var(--bg-hover);
+}
+.hc-ws-row.is-selected {
+  background: var(--bg-active);
+}
+.hc-ws-dropped {
+  position: static;
+  display: flex;
+  gap: var(--sp-1);
+  color: var(--text-muted);
+}
+.hc-ws-dir {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--text-muted);
+}
+.hc-ws-row.is-out .hc-ws-dir {
+  color: var(--info);
+}
+.hc-ws-row.is-in .hc-ws-dir {
+  color: var(--ok);
+}
+.hc-ws-row.is-error .hc-ws-dir,
+.hc-ws-row.is-error .hc-ws-preview {
+  color: var(--danger);
+}
+.hc-ws-time,
+.hc-ws-size,
+.hc-ws-preview {
+  font-size: var(--fs-identifier);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hc-ws-time,
+.hc-ws-size {
+  color: var(--text-faint);
+}
+.hc-ws-empty {
+  margin: 0;
+  padding: var(--sp-4) var(--sp-3);
+  color: var(--text-muted);
+  font-size: var(--fs-body);
+}
+.hc-ws-pill {
+  position: absolute;
+  bottom: var(--sp-2);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: var(--z-pane-control);
+  box-shadow: var(--shadow-md);
+}
+
+.hc-ws-detail {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.hc-ws-detail.is-below {
+  flex: 0 0 40%;
+}
+.hc-ws-detail.is-right {
+  flex: 0 0 45%;
+  border-top: none;
+  border-left: 1px solid var(--border);
+}
+.hc-ws-detail-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 28px;
+  padding: 0 var(--sp-2);
+  background: var(--bg-sidebar);
+}
+.hc-ws-detail-title {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hc-ws-seg {
+  display: inline-flex;
+}
+.hc-ws-detail-body {
+  flex: 1 1 auto;
+  margin: 0;
+  padding: var(--sp-2);
+  overflow: auto;
+  font-size: var(--fs-identifier);
+  white-space: pre;
+}
+.hc-ws-detail-body.is-wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.hc-ws-handshake {
+  padding: var(--sp-2) var(--sp-3);
+  overflow: auto;
+}
+.hc-ws-headers {
+  border-collapse: collapse;
+  font-size: var(--fs-identifier);
+}
+.hc-ws-headers th {
+  text-align: left;
+  font-weight: 500;
+  padding: var(--sp-1) var(--sp-3) var(--sp-1) 0;
+  color: var(--text-muted);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hc-ws-spin {
+    animation: none;
+  }
+}

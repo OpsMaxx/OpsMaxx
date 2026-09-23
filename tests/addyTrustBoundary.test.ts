@@ -213,6 +213,8 @@ function collectionNameFor(file: string): string {
     data: 'servers',
     credproxy: 'credproxyRules',
     inspect: 'inspectCA',
+    // The spec-file allowlist's marker, left by older versions beside its list.
+    'specFiles.seeded': 'specFiles',
   }
   return aliases[base] ?? base
 }

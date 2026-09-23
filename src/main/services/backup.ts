@@ -1,5 +1,5 @@
 import { app, dialog, BrowserWindow } from 'electron'
-import { join } from 'node:path'
+import path, { join } from 'node:path'
 import {
   existsSync,
   mkdtempSync,
@@ -21,6 +21,7 @@ import {
   MACHINE_ONLY_SECRET_PREFIX
 } from './secrets'
 import { removeHistoryFiles } from './history'
+import { clearHistory as clearHttpHistory } from './httpHistory'
 import { CRED_PROXY_AUDIT_FILE } from './credProxy'
 import { RULES_FILE } from '../../shared/rules'
 import { openTarget, sha256, type BackupTarget, type TargetDeps } from './backupTargets'
@@ -393,9 +394,9 @@ export const TARGETS_FILE = 'opsmaxx-backup-targets.json'
 // from this list. Each of the eleven carries its own comment where it sits, so
 // the count can be rechecked by reading down rather than taken on faith.
 //
-// Three files the app writes are deliberately NOT in it, because they are
-// SETTINGS rather than data and deleting them changes behaviour without
-// deleting anything about anybody:
+// Three files the app writes are deliberately NOT in it. They are SETTINGS
+// rather than data, and deleting them changes behaviour without deleting
+// anything about anybody:
 //
 //   * `update-prefs.json` — updater channel, interval, auto-install. Naming no
 //     host and no credential, and a wipe that silently moved a beta user back
@@ -442,11 +443,19 @@ export const ALL_DATA_FILES = [
   'opsmaxx-secret-grants.json',
   'opsmaxx-vault.json',
   'opsmaxx-wslocks.json',
+  // Nothing writes these two any more; older versions left them behind. The
+  // list holds local paths, a record of what this person works on.
+  'opsmaxx-spec-files.json',
+  'opsmaxx-spec-files.seeded',
   'opsmaxx-known-hosts.json',
   'opsmaxx-mcp-config.json',
   'opsmaxx-mcp-sessions.json',
   'opsmaxx-ai-policy.json',
   'opsmaxx-ai-audit.jsonl',
+  // The HTTP client's request history (services/httpHistory.ts): URLs, header
+  // names and route ids, keyring-sealed and redacted, and still a record of
+  // what this person called.
+  'opsmaxx-http-history.jsonl',
   // FOUND BY DERIVING THE LIST RATHER THAN READING IT. Both of these were
   // written to userData and in neither list, so "delete everything" left them
   // on disk — the same failure the eleven named below were found in, and found
@@ -628,6 +637,10 @@ export function deleteAllData(closeHistory?: () => void): BackupResult {
   // because it is sensitive; a "delete all data" that leaves it behind and
   // then goes on appending to it is that same judgement made backwards.
   step('the history database', () => removeHistoryFiles(app.getPath('userData')))
+  // The HTTP client's history also lives in memory, and a later remove or the
+  // 50th append's prune would write it straight back before the relaunch (or
+  // after one that failed). This empties both, and every file beside it.
+  step('the HTTP request history', () => clearHttpHistory())
 
   if (failed.length > 0) {
     return { ok: false, error: `Some of it could not be deleted: ${failed.join('; ')}` }
@@ -1074,11 +1087,34 @@ export async function inspectRemoteBackup(
   }
 }
 
+/**
+ * Whether `target` names a file `stagingPath` could have produced: directly in
+ * userData, named `staged-*`.
+ *
+ * Resolved first, then compared by parts. The renderer supplies this path, and
+ * a prefix check on the raw string passed `<userData>\staged-\..\anything`
+ * — which Windows resolves lexically, so it deleted any file the user could
+ * write, including the marker that keeps the spec-file seed from re-running.
+ * `paths` is a parameter so both platforms' rules are testable on either.
+ */
+export function isStagedPath(
+  target: string,
+  userData: string,
+  paths: typeof path.posix = path
+): boolean {
+  const full = paths.resolve(target)
+  return (
+    paths.dirname(full) === paths.resolve(userData) && paths.basename(full).startsWith('staged-')
+  )
+}
+
 /** Delete a staged download. Called when the user cancels rather than
  *  restores, so a copy of the vault is not left lying in userData. */
-export function discardStagedBackup(path: string): void {
+export function discardStagedBackup(target: string): void {
   try {
-    if (path.startsWith(join(app.getPath('userData'), 'staged-')) && existsSync(path)) unlinkSync(path)
+    if (!isStagedPath(target, app.getPath('userData'))) return
+    const full = path.resolve(target)
+    if (existsSync(full)) unlinkSync(full)
   } catch {
     /* a file we could not remove is reported nowhere useful; it is inert */
   }

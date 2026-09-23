@@ -1,0 +1,29 @@
+{
+  "apiCollections": [
+    { "id": "__proto__", "workspaceId": "ws-default", "name": "proto", "specUrl": null, "specPath": null, "baseUrl": "http://127.0.0.1:1", "viaServerId": null, "insecureTls": false },
+    { "id": "constructor", "workspaceId": "ws-default", "name": "ctor", "specUrl": null, "specPath": null, "baseUrl": "http://127.0.0.1:1", "viaServerId": null, "insecureTls": false },
+    { "id": "ok-1", "workspaceId": "prototype", "name": "bad ws", "specUrl": null, "specPath": null, "baseUrl": "http://127.0.0.1:1", "viaServerId": null, "insecureTls": false },
+    { "id": "has space", "workspaceId": "ws-default", "name": "bad id", "baseUrl": "" },
+    "not an object",
+    null,
+    { "id": "ok-2", "workspaceId": "ws-default", "name": "Survivor", "specUrl": null, "specPath": null, "baseUrl": "http://127.0.0.1:18080/api", "viaServerId": "__proto__", "insecureTls": "yes",
+      "endpoints": [{ "method": "GET", "path": "/__proto__" }, { "method": "__proto__", "path": "/x" }, { "method": "POST", "path": "items" }] },
+    { "id": "ok-2", "workspaceId": "ws-default", "name": "Duplicate", "baseUrl": "" }
+  ],
+  "apiWorkspace": {
+    "version": 1,
+    "meta": {
+      "x-scalar-environments": {
+        "__proto__": { "color": "#000000", "variables": [{ "name": "polluted", "value": "yes" }] },
+        "constructor": { "variables": [] },
+        "prod": { "color": "not a colour", "variables": [{ "name": "__proto__", "value": { "polluted": true } }, { "name": "baseUrl", "value": { "default": "https://api.example.test" } }, "junk"] }
+      },
+      "x-scalar-active-environment": "__proto__"
+    },
+    "documents": {
+      "__proto__": { "polluted": true, "openapi": "3.1.1", "paths": { "/p": { "get": {} } } },
+      "ok-2": { "openapi": "3.1.1", "servers": [{ "url": "http://127.0.0.1:18080" }], "paths": { "__proto__": { "get": { "summary": "proto path", "parameters": [{ "name": "__proto__", "in": "query", "examples": { "default": { "value": "x", "x-disabled": false } } }] } }, "/constructor": { "post": { "requestBody": { "content": { "application/json": { "examples": { "default": { "value": "{}" } } } }, "x-scalar-selected-content-type": { "__proto__": "application/json" } } } } }, "x-scalar-order": ["ok-2/GET/__proto__", 42, null] }
+    },
+    "sourceKeys": {}
+  }
+}

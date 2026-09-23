@@ -1,6 +1,7 @@
-import { ReactNode, useEffect, useRef } from 'react'
+import { Fragment, ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useClickOutside } from '../../hooks/useClickOutside'
+import '../common/primitives.css'
 
 export interface MenuEntry {
   label: string
@@ -9,6 +10,14 @@ export interface MenuEntry {
   danger?: boolean
   separator?: boolean
   disabled?: boolean
+  /** Shortcut text shown at the right, e.g. "⌘D". */
+  shortcut?: string
+  /** A checkbox item, or the selected item of a `radio` group. */
+  checked?: boolean
+  /** Radio group name; the item renders as `menuitemradio`. */
+  radio?: string
+  /** A non-interactive section header shown above this entry. */
+  section?: string
 }
 
 interface ContextMenuProps {
@@ -16,12 +25,24 @@ interface ContextMenuProps {
   y: number
   entries: MenuEntry[]
   onClose: () => void
+  /** Open against this element's rect rather than at x/y. */
+  anchor?: DOMRect
 }
 
-export function ContextMenu({ x, y, entries, onClose }: ContextMenuProps): React.JSX.Element {
+export function ContextMenu({ x, y, entries, onClose, anchor }: ContextMenuProps): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   useClickOutside(ref, onClose)
-  const [px, py] = clamp(x, y)
+  // First paint at the requested point, then corrected against the menu's
+  // real size before the browser shows it. A fixed 230×320 estimate put a
+  // long menu off the bottom of the window and a short one needlessly high.
+  const [[px, py], setPos] = useState<[number, number]>(() =>
+    anchor ? [anchor.left, anchor.bottom] : [x, y]
+  )
+  useLayoutEffect(() => {
+    const r = ref.current!.getBoundingClientRect()
+    setPos(placeMenu({ x, y, anchor }, r.width, r.height, window.innerWidth, window.innerHeight))
+  }, [x, y, anchor])
+  const checkable = entries.some((e) => e.checked !== undefined || e.radio !== undefined)
   useEffect(() => {
     const onScroll = (): void => onClose()
     window.addEventListener('resize', onScroll)
@@ -71,34 +92,63 @@ export function ContextMenu({ x, y, entries, onClose }: ContextMenuProps): React
         target?.focus()
       }}
     >
-      {entries.map((e, i) =>
-        e.separator ? (
-          <div className="menu-sep" role="separator" key={i} />
-        ) : (
-          <button
-            key={i}
-            role="menuitem"
-            className={`menu-item${e.danger ? ' danger' : ''}`}
-            disabled={e.disabled}
-            onClick={() => {
-              e.onClick?.()
-              onClose()
-            }}
-          >
-            {e.icon}
-            <span>{e.label}</span>
-          </button>
-        )
-      )}
+      {entries.map((e, i) => (
+        <Fragment key={i}>
+          {e.section && (
+            <div className="menu-label" role="presentation">
+              {e.section}
+            </div>
+          )}
+          {e.separator ? (
+            <div className="menu-sep" role="separator" />
+          ) : (
+            <button
+              role={e.radio !== undefined ? 'menuitemradio' : e.checked !== undefined ? 'menuitemcheckbox' : 'menuitem'}
+              aria-checked={e.radio !== undefined || e.checked !== undefined ? !!e.checked : undefined}
+              className={`menu-item${e.danger ? ' danger' : ''}`}
+              disabled={e.disabled}
+              onClick={() => {
+                e.onClick?.()
+                onClose()
+              }}
+            >
+              {checkable && (
+                <span className="hc-menu-check" aria-hidden="true">
+                  {e.checked ? (e.radio !== undefined ? '●' : '✓') : ''}
+                </span>
+              )}
+              {e.icon}
+              <span>{e.label}</span>
+              {e.shortcut && (
+                <span className="hc-menu-shortcut" aria-hidden="true">
+                  {e.shortcut}
+                </span>
+              )}
+            </button>
+          )}
+        </Fragment>
+      ))}
     </div>,
     document.body
   )
 }
 
-function clamp(x: number, y: number): [number, number] {
-  const menuW = 230
-  const menuH = 320
-  const px = Math.min(x, window.innerWidth - menuW - 8)
-  const py = Math.min(y, window.innerHeight - menuH - 8)
-  return [Math.max(8, px), Math.max(8, py)]
+/**
+ * Where a menu of this size goes: at the point, or under the anchor (above it
+ * when it does not fit below), then kept 8px inside the window.
+ */
+export function placeMenu(
+  at: { x: number; y: number; anchor?: DOMRect },
+  w: number,
+  h: number,
+  vw: number,
+  vh: number
+): [number, number] {
+  const M = 8
+  let { x, y } = at
+  if (at.anchor) {
+    x = at.anchor.left
+    y = at.anchor.bottom + h + M > vh && at.anchor.top - h >= M ? at.anchor.top - h : at.anchor.bottom
+  }
+  return [Math.max(M, Math.min(x, vw - w - M)), Math.max(M, Math.min(y, vh - h - M))]
 }

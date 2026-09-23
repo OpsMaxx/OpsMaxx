@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeAll, beforeEach, afterAll, afterEach } from 'vitest'
-import { mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, readdirSync, readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs'
 import { readFile, writeFile, readdir, stat, unlink, rename } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import { app } from 'electron'
 import {
   backupImport,
@@ -10,6 +10,7 @@ import {
   buildBundle,
   discardStagedBackup,
   dumpToDestination,
+  isStagedPath,
   inspectRemoteBackup,
   listRemoteBackups,
   readTargets,
@@ -874,6 +875,41 @@ describe('staged downloads', () => {
     discardStagedBackup(outsider)
     expect(existsSync(outsider)).toBe(true)
     unlinkSync(outsider)
+  })
+
+  it('removes a file it did stage', () => {
+    const staged = join(USER_DATA, 'staged-latest.spbackup')
+    writeFileSync(staged, 'a staged copy')
+    discardStagedBackup(staged)
+    expect(existsSync(staged)).toBe(false)
+  })
+
+  /**
+   * The path comes from the renderer. A prefix check on the raw string let
+   * `staged-\..\` through, which Windows resolves lexically — so it deleted any
+   * file the user could write. Checked under both platforms' rules.
+   */
+  it('refuses a path that climbs out of the staged name', () => {
+    const ud = 'C:\\Users\\u\\AppData\\Roaming\\OpsMaxx'
+    expect(isStagedPath(`${ud}\\staged-abc`, ud, win32)).toBe(true)
+    expect(isStagedPath(`${ud}\\staged-\\..\\opsmaxx-spec-files.seeded`, ud, win32)).toBe(false)
+    expect(isStagedPath(`${ud}\\staged-/../x`, ud, win32)).toBe(false)
+    expect(isStagedPath(`${ud}\\staged-\\..\\..\\..\\Documents\\x`, ud, win32)).toBe(false)
+
+    const pd = '/home/u/.config/OpsMaxx'
+    expect(isStagedPath(`${pd}/staged-abc`, pd, posix)).toBe(true)
+    expect(isStagedPath(`${pd}/staged-/../opsmaxx-spec-files.seeded`, pd, posix)).toBe(false)
+    expect(isStagedPath(`${pd}/sub/staged-abc`, pd, posix)).toBe(false)
+  })
+
+  it('leaves a real file alone when reached through a staged- prefix', () => {
+    const victim = join(USER_DATA, 'opsmaxx-spec-files.seeded')
+    writeFileSync(victim, '')
+    mkdirSync(join(USER_DATA, 'staged-'), { recursive: true })
+    discardStagedBackup(`${join(USER_DATA, 'staged-')}/../opsmaxx-spec-files.seeded`)
+    expect(existsSync(victim)).toBe(true)
+    rmSync(join(USER_DATA, 'staged-'), { recursive: true, force: true })
+    unlinkSync(victim)
   })
 })
 

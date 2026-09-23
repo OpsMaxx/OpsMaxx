@@ -1,13 +1,19 @@
-import { app } from 'electron'
+import { app, dialog, type BrowserWindow } from 'electron'
+import { createReadStream, writeFileSync } from 'node:fs'
+import { basename, join } from 'node:path'
 import { remoteText } from '../../shared/remoteText'
 import http from 'node:http'
 import zlib from 'node:zlib'
 import type { Transform } from 'node:stream'
 import {
   DECODABLE_ENCODINGS,
+  MAX_BODY_FILE_BYTES,
+  MAX_CA_BYTES,
+  MAX_SPEC_FILE_BYTES,
   MAX_REDIRECT_HOPS,
   MAX_RESPONSE_BYTES,
   REDIRECT_STATUSES,
+  certificateBlocks,
   clampTimeout,
   contentEncodings,
   isPinnedOrigin,
@@ -210,12 +216,9 @@ function explainDroppedRoute(
 
 function messageOf(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err)
-  // Node's self-signed message is accurate but tells the user nothing about
-  // what to do, and this is by far the most common failure against internal
-  // services. Name the toggle that fixes it.
-  if (/self[- ]signed certificate/i.test(raw)) {
-    return `${raw} — turn on "Skip certificate check" for this request if that is expected.`
-  }
+  // A self-signed certificate is reported as Node states it, with no advice
+  // to switch verification off: the HTTP client never offers that from an
+  // error (its fix is adding the CA), and a suggestion here would read as one.
   if (codeOf(err) === 'ECONNREFUSED') {
     return `${raw} — nothing is listening there. If the service is bound to the server's loopback, send the request through that server.`
   }
@@ -233,6 +236,8 @@ export interface HttpRequestContext {
   prepare: (target: HttpSshTarget) => HttpSshTarget
 }
 
+const ABORTED: HttpResult = { ok: false, error: 'The request was cancelled.', code: 'ABORTED' }
+
 /** One request over one transport. `httpRequest` calls it once per redirect hop. */
 interface Hop {
   url: string
@@ -246,7 +251,8 @@ interface Hop {
 async function sendOnce(
   hop: Hop,
   spec: HttpRequestSpec,
-  ctx: HttpRequestContext
+  ctx: HttpRequestContext,
+  signal: AbortSignal | undefined
 ): Promise<HttpResult> {
   const target = parseTarget(hop.url)
   if ('error' in target) return { ok: false, error: target.error }
@@ -255,9 +261,32 @@ async function sendOnce(
   const { method, headers } = hop
 
   let dialled: DialResult | null = null
+  let dialling: Promise<DialResult> | null = null
+  if (signal?.aborted) return ABORTED
+  // Set once the request exists, so an abort mid-body can end it. Before that,
+  // an abort destroys what the dial opened, and the TLS await below throws.
+  let abortRequest: (() => void) | null = null
+  const onAbort = (): void => {
+    if (abortRequest) abortRequest()
+    // Only the stream: `finally` releases the rest, and releasing a pooled
+    // connection twice would hand back a reference this request never took.
+    else dialled?.transport.destroy()
+  }
+  signal?.addEventListener('abort', onAbort, { once: true })
 
   try {
-    dialled = await dial(spec.via, target.hostname, target.port, timeoutMs, (t) => ctx.prepare(t))
+    dialling = dial(spec.via, target.hostname, target.port, timeoutMs, (t) => ctx.prepare(t))
+    // A dial through a slow SSH handshake is the longest wait there is, so an
+    // abort must not sit behind it. The dial is left to finish and closed then.
+    dialled = await (signal
+      ? Promise.race([
+          dialling,
+          new Promise<never>((_, reject) => {
+            if (signal.aborted) reject(new Error('aborted'))
+            signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+          })
+        ])
+      : dialling)
 
     const socket = target.tls
       ? await startTls(
@@ -284,6 +313,11 @@ async function sendOnce(
         socket.destroy()
         finish({ ok: false, error: `Timed out after ${timeoutMs}ms`, code: 'ETIMEDOUT' })
       }, timeoutMs)
+      abortRequest = () => {
+        request.destroy()
+        socket.destroy()
+        finish(ABORTED)
+      }
 
       // `createConnection` is an AGENT option, not a request option: with
       // `agent: false` Node builds its own agent and ignores it, opening a
@@ -416,8 +450,14 @@ async function sendOnce(
       request.end()
     })
   } catch (err) {
+    if (signal?.aborted) {
+      // The dial lost the race: close it whenever it does arrive.
+      if (!dialled) void dialling?.then(closeDial, () => undefined)
+      return ABORTED
+    }
     return { ok: false, error: messageOf(err), code: codeOf(err) }
   } finally {
+    signal?.removeEventListener('abort', onAbort)
     // The channel belongs to this request; the pooled SSH connection does not,
     // and a VPN forward opened for this request — including the one that
     // failed — is a listener per attempt if nobody closes it.
@@ -431,9 +471,14 @@ function locationOf(res: HttpResponseOk): string | null {
   return raw && raw.trim() !== '' ? raw.trim() : null
 }
 
+/**
+ * `signal` aborts the request: the socket, the SSH channel or VPN forward, and
+ * any redirect not yet followed. The result is then `{ ok: false, code: 'ABORTED' }`.
+ */
 export async function httpRequest(
   spec: HttpRequestSpec,
-  ctx: HttpRequestContext
+  ctx: HttpRequestContext,
+  signal?: AbortSignal
 ): Promise<HttpResult> {
   const maxHops = Math.min(Math.max(Math.floor(spec.maxRedirects ?? 0), 0), MAX_REDIRECT_HOPS)
   const { headers } = sanitizeHeaders(spec.headers ?? {})
@@ -467,14 +512,20 @@ export async function httpRequest(
   let hopSpec = spec
 
   for (let hops = 0; ; hops++) {
-    const res = await sendOnce(hop, hopSpec, ctx)
+    const res = await sendOnce(hop, hopSpec, ctx, signal)
     // A caller that did not ask to follow gets the 3xx itself, which is what
     // every caller before `maxRedirects` existed relied on.
     if (!res.ok && dropped) return { ...res, error: explainDroppedRoute(res.error, dropped) }
-    if (!res.ok || maxHops === 0) return res
+    if (!res.ok) return res
+    // `finalUrl` names the hop that produced this response, and so the host
+    // its Set-Cookie belongs to. Intermediate hops' cookies are never returned:
+    // a cookie from wherever a redirect pointed must not be filed under the
+    // host the user typed, or it is sent there next time.
+    const answer: HttpResponseOk = { ...res, finalUrl: hop.url, ...(dropped ? { routeDropped: true } : {}) }
+    if (maxHops === 0) return answer
 
     const location = locationOf(res)
-    if (location === null) return res
+    if (location === null) return answer
     if (hops >= maxHops) {
       return {
         ok: false,
@@ -536,6 +587,27 @@ export async function httpRequest(
       hopSpec = { ...hopSpec, via: { kind: 'direct' }, insecureTls: false, caPem: undefined }
     }
 
+    // 307/308 keep the method AND the body. To the same origin that is what
+    // was asked for; to another origin it would re-send the body, often a
+    // login form or a token exchange, to a host the far end chose, direct.
+    // Refused with a reason rather than silently followed or silently emptied.
+    if (
+      crossOrigin &&
+      (res.status === 307 || res.status === 308) &&
+      hop.body &&
+      hop.body.byteLength > 0 &&
+      methodAllowsBody(hop.method)
+    ) {
+      return {
+        ok: false,
+        error:
+          `${remoteText(hop.url, 120)} answered ${res.status} with ${remoteText(next, 120)}, on another origin, ` +
+          'and asked for the request body to be sent there. OpsMaxx does not send a body across origins on a redirect; ' +
+          'send the request to that URL yourself if that is what you mean.',
+        code: 'ECROSSORIGINBODY'
+      }
+    }
+
     // 303 always, and 301/302 by universal practice, turn a non-idempotent
     // request into a GET. 307/308 exist precisely to keep method and body.
     const downgrade = res.status !== 307 && res.status !== 308 && hop.method !== 'HEAD'
@@ -545,5 +617,214 @@ export async function httpRequest(
       headers: nextHeaders,
       body: downgrade ? undefined : hop.body
     }
+  }
+}
+
+// ------------------------------------------------------------ cancellation
+
+/**
+ * In-flight requests that named themselves, keyed `${senderId}:${requestId}`.
+ *
+ * Keyed by the sender so one window can only ever cancel its own requests:
+ * the ids are chosen by the renderer, and another webContents naming the same
+ * string reaches a different key (review SEC-L2).
+ */
+const inFlight = new Map<string, AbortController>()
+
+/** The number of requests that can currently be cancelled. For tests. */
+export function inFlightCount(): number {
+  return inFlight.size
+}
+
+/**
+ * `httpRequest`, cancellable through `cancelHttpRequest` when the spec carries
+ * a `requestId`. A malformed id or one already in flight is refused rather
+ * than overwritten: overwriting would orphan the first request's controller,
+ * and that request could then never be cancelled.
+ */
+export async function trackedHttpRequest(
+  senderId: number,
+  spec: HttpRequestSpec,
+  ctx: HttpRequestContext
+): Promise<HttpResult> {
+  const id: unknown = spec?.requestId
+  if (id === undefined) return httpRequest(spec, ctx)
+  if (typeof id !== 'string' || id.length === 0 || id.length > 64) {
+    return { ok: false, error: 'A request id is a string of 1 to 64 characters.' }
+  }
+  const key = `${senderId}:${id}`
+  if (inFlight.has(key)) {
+    return { ok: false, error: 'A request with this id is already in flight.' }
+  }
+  const controller = new AbortController()
+  inFlight.set(key, controller)
+  try {
+    return await httpRequest(spec, ctx, controller.signal)
+  } finally {
+    inFlight.delete(key)
+  }
+}
+
+/** Abort this sender's request `requestId`. Anything else is a no-op. */
+export function cancelHttpRequest(senderId: number, requestId: unknown): void {
+  if (typeof requestId !== 'string') return
+  inFlight.get(`${senderId}:${requestId}`)?.abort()
+}
+
+// ------------------------------------------------------------------ files
+//
+// The renderer never names a path in either direction. A save goes where the
+// user points the dialog main shows; a pick comes back as a basename and
+// bytes. A path the renderer could supply is a path a compromised renderer
+// could aim — `http:readSpecFile` was that bug.
+
+// C0, DEL, C1 and the bidi controls: U+202E turns `a‮fdp.exe` into what
+// reads as `aexe.pdf` in the dialog the user is trusting.
+// eslint-disable-next-line no-control-regex -- matching them is the point
+const UNSAFE_NAME = /[\u0000-\u001f\u007f-\u009f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g
+
+/** A server-suggested file name, reduced to something safe to offer. */
+export function safeFileName(suggested: unknown): string {
+  const raw = typeof suggested === 'string' ? suggested : ''
+  // Both separators: a name from a Windows server arrives with backslashes.
+  const base = (raw.split(/[\\/]/).pop() ?? '').replace(UNSAFE_NAME, '').trim().slice(0, 200)
+  return base === '' || base === '.' || base === '..' ? 'response' : base
+}
+
+/**
+ * Save response bytes where the user picks. The dialog starts in Downloads
+ * with a sanitised name; the bytes are written unmodified. Resolves to the
+ * path, or null when dismissed (review SEC-L1).
+ */
+export async function saveResponse(
+  win: BrowserWindow | null,
+  suggestedName: unknown,
+  bytes: unknown
+): Promise<string | null> {
+  if (!(bytes instanceof ArrayBuffer)) throw new Error('A response to save is bytes.')
+  const defaultPath = join(app.getPath('downloads'), safeFileName(suggestedName))
+  const options = { title: 'Save response', defaultPath }
+  const chosen = await (win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options))
+  if (chosen.canceled || !chosen.filePath) return null
+  writeFileSync(chosen.filePath, Buffer.from(bytes))
+  return chosen.filePath
+}
+
+async function pickFile(
+  win: BrowserWindow | null,
+  title: string,
+  filters?: Electron.FileFilter[]
+): Promise<string | null> {
+  const options: Electron.OpenDialogOptions = { title, properties: ['openFile'], ...(filters ? { filters } : {}) }
+  const chosen = await (win ? dialog.showOpenDialog(win, options) : dialog.showOpenDialog(options))
+  return chosen.canceled ? null : (chosen.filePaths[0] ?? null)
+}
+
+/**
+ * Up to `cap` bytes of `path`, or null when it is longer. One bounded stream
+ * rather than `stat` then `readFile`: a file that grows between the two would
+ * be read past the cap (review SEC-L5).
+ */
+function readCapped(path: string, cap: number): Promise<Buffer | null> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let size = 0
+    // `end` is inclusive, so this reads at most cap + 1 bytes: one more than
+    // allowed is how "too large" is told apart from "exactly the cap".
+    const stream = createReadStream(path, { start: 0, end: cap })
+    stream.on('data', (chunk: string | Buffer) => {
+      const b = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      chunks.push(b)
+      size += b.length
+    })
+    stream.on('error', reject)
+    stream.on('end', () => resolve(size > cap ? null : Buffer.concat(chunks)))
+  })
+}
+
+const mib = (n: number): number => Math.round(n / (1024 * 1024))
+
+/** A request body from disk: the basename and the bytes, never the path. */
+export async function chooseBodyFile(
+  win: BrowserWindow | null
+): Promise<{ name: string; bytes: ArrayBuffer } | { error: string } | null> {
+  const path = await pickFile(win, 'Choose a file to send')
+  if (!path) return null
+  const data = await readCapped(path, MAX_BODY_FILE_BYTES)
+  if (!data) return { error: `That file is larger than ${mib(MAX_BODY_FILE_BYTES)} MiB, the most a request body can be.` }
+  return {
+    name: basename(path),
+    bytes: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
+  }
+}
+
+/**
+ * An OpenAPI description from disk: its basename and its text, never the path.
+ * Nothing re-reads the file later, and `importedFrom` keeps only the name, so
+ * the renderer has no use for where it lives.
+ */
+export async function chooseSpecFile(
+  win: BrowserWindow | null
+): Promise<{ name: string; text: string } | { error: string } | null> {
+  const path = await pickFile(win, 'Choose an OpenAPI description', [
+    { name: 'OpenAPI', extensions: ['json', 'yaml', 'yml'] },
+    { name: 'All files', extensions: ['*'] }
+  ])
+  if (!path) return null
+  const data = await readCapped(path, MAX_SPEC_FILE_BYTES)
+  if (!data) {
+    return { error: `That file is larger than ${mib(MAX_SPEC_FILE_BYTES)} MiB. An OpenAPI description this large is almost certainly not one.` }
+  }
+  return { name: basename(path), text: data.toString('utf8') }
+}
+
+/** A CA from disk: its certificate blocks only, refused if it holds a private key. */
+export async function chooseCaFile(
+  win: BrowserWindow | null
+): Promise<{ pem: string } | { error: string } | null> {
+  const path = await pickFile(win, 'Choose a CA certificate', [
+    { name: 'Certificates', extensions: ['pem', 'crt', 'cer'] },
+    { name: 'All files', extensions: ['*'] }
+  ])
+  if (!path) return null
+  const data = await readCapped(path, MAX_CA_BYTES)
+  if (!data) return { error: `That file is larger than ${mib(MAX_CA_BYTES)} MiB, which no CA bundle is.` }
+  return certificateBlocks(data.toString('utf8'))
+}
+
+// -------------------------------------------------------------- navigation
+
+/**
+ * Keep the main window on the app.
+ *
+ * The HTTP client renders text the far end wrote — response headers, OpenAPI
+ * descriptions, GraphQL docs — always as React text nodes. The day something
+ * renders one as HTML instead, an injected `<form action=https://evil>` would
+ * navigate the main window to a remote origin that still has the preload
+ * bridge (`sandbox: false`, `window.opsmaxx.*`); the prod CSP has no
+ * `form-action`, and that directive does not fall back to `default-src`.
+ * Refusing every navigation away from the app's own URL closes it whatever
+ * renders what (review SEC-M9). A reload of the app itself is still allowed.
+ */
+export function guardNavigation(contents: {
+  getURL(): string
+  on(event: 'will-navigate', listener: (e: { url: string; preventDefault(): void }) => void): unknown
+}): void {
+  // The URL the window is showing, read at the moment of the attempt rather than
+  // rebuilt from a path: `loadFile`'s encoding of a path with spaces or non-ASCII
+  // in it is Chromium's, and a hand-built file URL that differed by one escape
+  // would refuse the app's own reload.
+  contents.on('will-navigate', (e) => {
+    if (withoutHash(e.url) !== withoutHash(contents.getURL())) e.preventDefault()
+  })
+}
+
+function withoutHash(url: string): string {
+  try {
+    const u = new URL(url)
+    u.hash = ''
+    return u.href
+  } catch {
+    return url
   }
 }

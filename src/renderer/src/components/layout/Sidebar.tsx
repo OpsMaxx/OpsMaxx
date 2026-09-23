@@ -7,7 +7,7 @@ import { TunnelSidebar } from '../tunnels/TunnelSidebar'
 import { VpnSidebar } from '../vpn/VpnSidebar'
 import { MonitorSidebar } from '../monitor/MonitorSidebar'
 import { DatabaseSidebar } from '../databases/DatabaseSidebar'
-import { ApiSidebar } from '../http/ApiSidebar'
+import { HttpSidebar } from '../http/HttpSidebar'
 import { VaultSidebar } from '../vault/VaultSidebar'
 import { useVault } from '../../store/vault'
 import { openTunnels, useNav } from '../../store/nav'
@@ -113,11 +113,6 @@ export function Sidebar(): React.JSX.Element | null {
               <Network size={15} />
             </button>
           )}
-          {activity === 'http' && (
-            <button className="icon-btn" title="Add an API" onClick={() => setModal('add-api')}>
-              <Plus size={16} />
-            </button>
-          )}
           {/* Monitoring only. A monitor group is a Monitoring layout, and the
               two rails share one ActivityView — so gating on `activity` alone
               put "New monitor group" in the header of the Operations pane,
@@ -142,7 +137,7 @@ export function Sidebar(): React.JSX.Element | null {
       <div className="sidebar-scroll">
         {activity === 'connections' && <ConnectionTree />}
         {activity === 'databases' && <DatabaseSidebar />}
-        {activity === 'http' && <ApiSidebar />}
+        {activity === 'http' && <HttpSidebar />}
         {activity === 'tunnels' && (
           <>
             <TunnelSidebar />

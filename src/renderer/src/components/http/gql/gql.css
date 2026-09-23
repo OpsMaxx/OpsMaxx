@@ -1,0 +1,256 @@
+/* GraphQL tab (§2.13). Tokens only; every class starts hc-gql-. */
+
+/* Fills the layout's URL row, which already pads it: the bar is what useWidth
+   measures, and a bar that shrank to its content would measure small and
+   degrade itself further. */
+.hc-gql-bar {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 44px;
+  min-width: 0;
+}
+.hc-gql-badge {
+  flex: none;
+  width: 76px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  font-weight: 600;
+  color: var(--method-other);
+}
+.hc-gql-url {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+.hc-gql-run {
+  flex: none;
+  min-width: 104px;
+}
+.hc-gql-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  min-width: 0;
+}
+.hc-gql-toolbar .is-on,
+.hc-gql-explorer-head .is-on {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+.hc-gql-meta {
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.hc-gql-spacer {
+  flex: 1 1 auto;
+}
+
+.hc-gql-request {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+}
+.hc-gql-query {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-width: 320px;
+  min-height: 0;
+}
+.hc-gql-editor {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: var(--bg-input);
+}
+.hc-gql-vars {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+}
+.hc-gql-vars-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 28px;
+  padding: 0 var(--sp-2);
+  background: var(--bg-sidebar);
+  border: none;
+  color: var(--text-muted);
+  text-align: left;
+}
+.hc-gql-vars-editor {
+  height: 120px;
+  overflow: auto;
+  background: var(--bg-input);
+}
+.hc-gql-settings {
+  padding: var(--sp-3);
+}
+.hc-gql-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  max-width: 240px;
+}
+
+.hc-gql-response {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.hc-gql-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hc-gql-explorer {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-panel);
+}
+.hc-gql-explorer.is-dock {
+  flex: 0 0 280px;
+  border-left: 1px solid var(--border);
+}
+.hc-gql-explorer.is-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: var(--z-pane-overlay);
+  box-shadow: var(--shadow-md);
+}
+.hc-gql-explorer-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 32px;
+  padding: 0 var(--sp-2);
+  background: var(--bg-sidebar);
+}
+.hc-gql-explorer-title {
+  font-size: var(--fs-body);
+  font-weight: 500;
+}
+.hc-gql-note,
+.hc-gql-desc {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+}
+.hc-gql-note.is-error {
+  color: var(--state-alarm);
+}
+.hc-gql-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  color: var(--text-muted);
+}
+.hc-gql-empty p {
+  margin: 0;
+}
+.hc-gql-tree-wrap {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.hc-gql-filter {
+  margin: var(--sp-2);
+  font-size: var(--fs-identifier);
+}
+.hc-gql-tree,
+.hc-gql-tree ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hc-gql-tree {
+  overflow: auto;
+  flex: 1 1 auto;
+}
+.hc-gql-root {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  width: 100%;
+  height: 28px;
+  padding: 0 var(--sp-2);
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: var(--fs-body);
+  font-weight: 500;
+  text-align: left;
+}
+.hc-gql-field {
+  display: flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 0 var(--sp-2) 0 var(--sp-6);
+  font-size: var(--fs-identifier);
+}
+.hc-gql-field:hover,
+.hc-gql-field:focus-within {
+  background: var(--bg-hover);
+}
+.hc-gql-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-gql-type {
+  border: none;
+  background: none;
+  padding: 0;
+  color: var(--accent-ink);
+  font-size: var(--fs-identifier);
+  cursor: pointer;
+}
+.hc-gql-more {
+  margin-left: auto;
+  opacity: 0;
+}
+.hc-gql-field:hover .hc-gql-more,
+.hc-gql-field:focus-within .hc-gql-more {
+  opacity: 1;
+}
+.hc-gql-kind {
+  color: var(--text-faint);
+  font-size: var(--fs-xs);
+}
+.hc-gql-focus {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.hc-gql-type-head {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-identifier);
+}
+
+/* A literal credential in the variables, which are saved and synced. */
+.hc-gql-warn {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-sm);
+  color: var(--state-watch);
+}

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useApp } from '../store/app'
 import { COMMANDS_BY_ID, comboFrom, isMac, resolveBindings, type Scope } from '../lib/shortcuts'
 import { openMonitor } from '../store/nav'
+import { httpHotkey } from '../store/http'
 import { approvalShowing } from './useClickOutside'
 import type { Workspace } from '../types'
 
@@ -183,18 +184,67 @@ export function runShortcut(
   // is for reading the dialog.
   const blind = approvalShowing()
 
-  for (const [id, keys] of bindings) {
+  const inHttp = where === 'app' && s.activity === 'http'
+  // In the HTTP client its own bindings are checked first, so they shadow app
+  // ones there and nowhere else.
+  const ordered = inHttp
+    ? [...bindings].sort(([a], [b]) => httpRank(b) - httpRank(a))
+    : [...bindings]
+
+  for (const [id, keys] of ordered) {
     if (keys !== combo) continue
     if (blind && !id.startsWith('zoom-')) continue
     const cmd = COMMANDS_BY_ID.get(id)
-    if (!cmd || !scopeApplies(cmd.scope, where, usedAppModifier(e))) continue
+    if (!cmd) continue
+    if (cmd.scope === 'http') {
+      if (inHttp && httpKeyAllowed(e, keys) && httpHotkey(id)?.(e)) return true
+      continue
+    }
+    if (!scopeApplies(cmd.scope, where, usedAppModifier(e))) continue
+    // The tab commands act on the request-tab strip while the HTTP client shows.
+    if (inHttp && HTTP_DISPATCHED.has(id)) {
+      if (httpHotkey(id)?.(e)) return true
+      continue
+    }
     if (RUNNERS[id]?.(s, term)) return true
   }
 
   // Ctrl/Cmd+1…9 jumps to the Nth visible workspace. Checked after the user's
   // bindings so rebinding a digit still wins, and matched on e.code so it
-  // lands on the right digit under non-US keyboard layouts.
-  return !blind && switchWorkspaceByDigit(e, s)
+  // lands on the right digit under non-US keyboard layouts. Not in the HTTP
+  // client, where those digits are request tabs on every platform.
+  return !blind && !inHttp && switchWorkspaceByDigit(e, s)
+}
+
+/** Tab commands the HTTP client takes over while it is showing (§2.7.1 b). */
+const HTTP_DISPATCHED = new Set([
+  'new-terminal',
+  'close-tab',
+  'duplicate-tab',
+  'reopen-tab',
+  'next-tab',
+  'prev-tab',
+  'select-tab-1',
+  'select-tab-2',
+  'select-tab-3',
+  'select-tab-4',
+  'select-tab-5',
+  'select-tab-6',
+  'select-tab-7',
+  'select-tab-8',
+  'select-tab-last'
+])
+
+const httpRank = (id: string): number => (COMMANDS_BY_ID.get(id)?.scope === 'http' ? 1 : 0)
+
+/**
+ * An http binding never matches AltGr, which is how Ctrl+Alt arrives on
+ * layouts that type characters with it. On macOS a Ctrl binding needs Cmd:
+ * a physical Ctrl+E or Ctrl+D in a plain text field keeps its emacs meaning.
+ */
+function httpKeyAllowed(e: KeyboardEvent, keys: string): boolean {
+  if (e.getModifierState?.('AltGraph')) return false
+  return !isMac() || !keys.startsWith('Ctrl+') || e.metaKey
 }
 
 function switchWorkspaceByDigit(e: KeyboardEvent, s: Store): boolean {
@@ -238,6 +288,10 @@ export function useHotkeys(): void {
   useEffect(() => {
     const handler = (e: KeyboardEvent): void => {
       if (ownsTheKeyboard(e.target)) return
+      // A CodeMirror editor that handled the key (Mod-Enter, Mod-F, Mod-D…)
+      // wins over any app binding. Scoped to editors: elsewhere a prevented
+      // default still reaches the app, as it always has.
+      if (e.defaultPrevented && (e.target as HTMLElement | null)?.closest?.('.cm-editor')) return
       if (runShortcut(e, 'app')) e.preventDefault()
     }
     window.addEventListener('keydown', handler)

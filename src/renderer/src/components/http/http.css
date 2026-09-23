@@ -1,0 +1,366 @@
+/* The HTTP client's shell: workbench, tab strip, protocol grid, chips (§2.1–§2.4, §2.19).
+   Every class is hc-, every size and colour a token, every z-index var(--z-*). */
+
+.hc-workbench {
+  display: flex;
+  flex-direction: column;
+  /* It fills the main area, which is a flex row. */
+  flex: 1;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: var(--fs-body);
+  /* Below 440px the workbench scrolls rather than clip a control (§2.1). */
+  min-width: 440px;
+  overflow-x: auto;
+}
+.hc-surface {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- Tab strip (36) ---- */
+.hc-tabstrip {
+  display: flex;
+  align-items: stretch;
+  height: 36px;
+  flex: none;
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+}
+.hc-tabs {
+  display: flex;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.hc-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 96px;
+  max-width: 220px;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  border: none;
+  border-right: 1px solid var(--border-subtle);
+  border-top: 2px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+}
+.hc-tab:hover {
+  background: var(--bg-hover);
+}
+.hc-tab[aria-selected='true'] {
+  background: var(--bg-app);
+  color: var(--text);
+  border-top-color: var(--accent);
+}
+.hc-tab.hc-preview .hc-tab-title {
+  font-style: italic;
+}
+.hc-tab.hc-drop-before {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.hc-tab-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-tab-glyph {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.hc-tab-glyph .hc-dirty {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+.hc-tab:hover .hc-tab-glyph .hc-dirty,
+.hc-tab:focus-visible .hc-tab-glyph .hc-dirty {
+  display: none;
+}
+.hc-tab-glyph .hc-close {
+  display: none;
+}
+.hc-tab:hover .hc-tab-glyph .hc-close,
+.hc-tab:focus-visible .hc-tab-glyph .hc-close,
+.hc-tab[aria-selected='true'] .hc-tab-glyph .hc-close.hc-clean {
+  display: inline-flex;
+}
+.hc-live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.hc-tablist {
+  display: flex;
+  align-items: stretch;
+}
+.hc-tab-rename {
+  height: 24px;
+  min-width: 0;
+  flex: 1;
+  font-size: var(--fs-body);
+}
+.hc-strip-tools {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: 0 var(--sp-2);
+  flex: none;
+}
+.hc-strip-spacer {
+  flex: 1;
+}
+
+/* ---- Protocol badges and methods ---- */
+.hc-badge {
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  font-weight: 600;
+  flex: none;
+}
+.hc-badge.hc-m-get { color: var(--method-get); }
+.hc-badge.hc-m-post { color: var(--method-post); }
+.hc-badge.hc-m-put { color: var(--method-put); }
+.hc-badge.hc-m-patch { color: var(--method-patch); }
+.hc-badge.hc-m-delete { color: var(--method-delete); }
+.hc-badge.hc-m-other { color: var(--method-other); }
+
+/* ---- Protocol grid (§2.2) ---- */
+.hc-protocol {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.hc-urlrow {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 44px;
+  flex: none;
+  padding: 0 var(--sp-2);
+  border-bottom: 1px solid var(--border);
+  border-top: 2px solid transparent;
+  background: var(--bg-panel);
+}
+.hc-urlrow.hc-prod {
+  border-top-color: var(--danger);
+}
+.hc-request,
+.hc-response {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+.hc-tabrow {
+  display: flex;
+  align-items: center;
+  height: 32px;
+  flex: none;
+  padding: 0 var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.hc-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  flex: none;
+  padding: 0 var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.hc-pane-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* The 32px bar a collapsed half becomes (§2.4). */
+.hc-collapsed-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 32px;
+  padding: 0 var(--sp-2);
+  background: var(--bg-sidebar);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+}
+.hc-collapsed-title {
+  font-weight: 500;
+}
+.hc-collapsed-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+}
+.hc-split-toggles {
+  display: inline-flex;
+  gap: 2px;
+}
+
+/* ---- Chips in the URL row ---- */
+.hc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 28px;
+  max-width: 200px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  flex: none;
+}
+.hc-chip:hover {
+  background: var(--bg-hover);
+}
+.hc-chip.hc-chip-icon {
+  width: 28px;
+  padding: 0;
+  justify-content: center;
+}
+.hc-chip-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hc-chip.hc-chip-danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+.hc-chip.hc-chip-info {
+  color: var(--info);
+  background: var(--info-soft);
+  border-color: transparent;
+}
+.hc-prod-badge {
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: var(--r-sm);
+  padding: 0 var(--sp-1);
+}
+
+/* ---- Empty workbench (§2.3, §2.10) ---- */
+.hc-empty {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.hc-empty-body {
+  padding: var(--sp-6) var(--sp-6);
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  color: var(--text-muted);
+}
+.hc-empty-title {
+  font-size: var(--fs-title);
+  font-weight: var(--fw-title);
+  color: var(--text);
+}
+.hc-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  align-items: center;
+}
+
+/* ---- Upgrade banner (§2.10) ---- */
+.hc-banner {
+  display: flex;
+  gap: var(--sp-3);
+  align-items: flex-start;
+  padding: var(--sp-3) var(--sp-4);
+  background: var(--info-soft);
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.hc-banner-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.hc-banner-list {
+  margin: 0;
+  padding-left: var(--sp-4);
+}
+.hc-banner-actions {
+  display: flex;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+/* ---- Cookies popover (§2.17) ---- */
+.hc-cookies {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+.hc-cookie-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+}
+.hc-cookie-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+}
+.hc-cookie-row .hc-cookie-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.hc-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hc-workbench * {
+    transition: none !important;
+    animation: none !important;
+  }
+}

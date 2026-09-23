@@ -1,0 +1,294 @@
+/* The response half of a protocol tab: status row, tab row, body. Every class
+   is hc- (conventions §0.2); heights follow §2.19. */
+
+.hc-resp {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg-panel);
+  font-size: var(--fs-body);
+}
+
+.hc-response-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: 32px;
+  flex: none;
+  padding: 0 var(--sp-2);
+  background: var(--bg-sidebar);
+  border-bottom: 1px solid var(--border);
+}
+
+.hc-grow {
+  flex: 1;
+}
+
+/* ---- one-line summary (also the collapsed bar) ---- */
+.hc-rs {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.hc-rs-idle {
+  color: var(--text-muted);
+}
+.hc-rs-error {
+  color: var(--danger);
+}
+.hc-rs-code {
+  display: inline-flex;
+  align-items: center;
+  font-weight: 500;
+}
+.hc-rs-is-ok {
+  color: var(--state-ok);
+}
+.hc-rs-is-unknown {
+  color: var(--info);
+}
+.hc-rs-is-unknown .state-dot {
+  color: var(--info);
+}
+.hc-rs-is-watch {
+  color: var(--state-watch);
+}
+.hc-rs-is-alarm {
+  color: var(--state-alarm);
+}
+.hc-rs-metric {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+}
+.hc-rs-lock {
+  display: inline-flex;
+  color: var(--text-muted);
+}
+.hc-rs-lock.hc-danger {
+  color: var(--danger);
+}
+
+/* ---- empty, waiting, error ---- */
+.hc-response-state {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--sp-6) var(--sp-4);
+}
+.hc-state-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  color: var(--text-muted);
+  margin: var(--sp-6) 0 0;
+}
+.hc-error {
+  max-width: 640px;
+}
+.hc-error-title {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-2);
+  color: var(--danger);
+  font-weight: 500;
+}
+.hc-error-detail {
+  margin: 0 0 var(--sp-3);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  overflow-wrap: anywhere;
+}
+.hc-error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+
+/* ---- done ---- */
+.hc-response-done {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.hc-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.hc-response-panel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.hc-strip {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--info-soft);
+  border-bottom: 1px solid var(--border);
+}
+.hc-strip.hc-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.hc-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.hc-body-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: 28px;
+  flex: none;
+  padding: 0 var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+}
+.hc-seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.hc-seg-btn {
+  padding: 0 var(--sp-2);
+  height: 22px;
+  background: transparent;
+  color: var(--text-muted);
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.hc-seg-btn + .hc-seg-btn {
+  border-left: 1px solid var(--border);
+}
+.hc-seg-btn.hc-on {
+  background: var(--bg-active);
+  color: var(--text);
+}
+.hc-seg-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.hc-body-lang {
+  height: 22px;
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+}
+.hc-body-content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.hc-body-note {
+  padding: var(--sp-4);
+  color: var(--text-muted);
+}
+
+.hc-body-preview {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.hc-preview-note {
+  margin: 0;
+  padding: var(--sp-1) var(--sp-2);
+  color: var(--text-muted);
+  font-size: var(--fs-caption);
+}
+.hc-preview-frame {
+  flex: 1;
+  width: 100%;
+  border: 0;
+}
+.hc-preview-img {
+  max-width: 100%;
+  margin: var(--sp-4);
+  align-self: flex-start;
+}
+
+/* ---- headers, cookies, timeline ---- */
+.hc-rv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+}
+.hc-rv-table th,
+.hc-rv-table td {
+  text-align: left;
+  vertical-align: top;
+  padding: var(--sp-1) var(--sp-2);
+  border-bottom: 1px solid var(--border-subtle);
+  overflow-wrap: anywhere;
+}
+.hc-rv-table th {
+  color: var(--text-muted);
+  font-weight: 500;
+  width: 30%;
+}
+.hc-rv-cookies,
+.hc-rv-timeline {
+  padding: var(--sp-2);
+}
+.hc-rv-cookies h4,
+.hc-rv-timeline h4 {
+  margin: var(--sp-3) 0 var(--sp-1);
+}
+.hc-rv-empty,
+.hc-rv-note {
+  margin: var(--sp-1) 0 var(--sp-2);
+  color: var(--text-muted);
+}
+.hc-rv-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: var(--sp-1) var(--sp-4);
+  margin: 0;
+}
+.hc-rv-facts > div {
+  display: contents;
+}
+.hc-rv-facts dt {
+  color: var(--text-muted);
+}
+.hc-rv-facts dd {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--fs-identifier);
+  overflow-wrap: anywhere;
+}
+
+/* Read by screen readers, never seen. */
+.hc-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .hc-resp .spin {
+    animation: none;
+  }
+}

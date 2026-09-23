@@ -1,0 +1,33 @@
+{
+  "apiCollections": [
+    {
+      "name": "Big API",
+      "specUrl": "http://127.0.0.1:18081/big.json",
+      "specPath": null,
+      "baseUrl": "http://127.0.0.1:18081",
+      "viaServerId": null,
+      "insecureTls": false,
+      "id": "api-mudww56q-0",
+      "workspaceId": "ws-default"
+    }
+  ],
+  "apiWorkspace": {
+    "version": 1,
+    "meta": {
+      "x-scalar-active-proxy": null,
+      "x-scalar-active-document": "api-mudww56q-0"
+    },
+    "documents": {},
+    "sourceKeys": {},
+    "shed": [
+      "api-mudww56q-0"
+    ]
+  },
+  "workspaces": [
+    {
+      "id": "ws-default",
+      "name": "Personal"
+    }
+  ],
+  "activeWorkspaceId": "ws-default"
+}

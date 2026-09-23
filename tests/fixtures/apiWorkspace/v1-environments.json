@@ -1,0 +1,116 @@
+{
+  "apiCollections": [
+    {
+      "name": "Local API",
+      "specUrl": null,
+      "specPath": null,
+      "baseUrl": "http://127.0.0.1:18080/api",
+      "viaServerId": null,
+      "insecureTls": false,
+      "id": "api-mudws9xd-0",
+      "workspaceId": "ws-default"
+    }
+  ],
+  "apiWorkspace": {
+    "version": 1,
+    "meta": {
+      "x-scalar-active-proxy": null,
+      "x-scalar-active-document": "api-mudws9xd-0",
+      "x-scalar-environments": {
+        "dev": {
+          "color": "#8ab4f8",
+          "variables": [
+            {
+              "name": "baseUrl",
+              "value": "http://127.0.0.1:18080/api"
+            },
+            {
+              "name": "token",
+              "value": "dev-token-placeholder"
+            }
+          ]
+        },
+        "prod": {
+          "color": "#8ab4f8",
+          "variables": [
+            {
+              "name": "baseUrl",
+              "value": "https://api.example.test"
+            },
+            {
+              "name": "token",
+              "value": "vault:v-mudwrxlw-0#password"
+            }
+          ]
+        }
+      },
+      "x-scalar-active-environment": "prod"
+    },
+    "documents": {
+      "api-mudws9xd-0": {
+        "openapi": "3.1.1",
+        "info": {
+          "title": "Local API",
+          "version": "1.0.0"
+        },
+        "servers": [
+          {
+            "url": "http://127.0.0.1:18080"
+          }
+        ],
+        "paths": {
+          "/api": {
+            "get": {
+              "operationId": "get-api",
+              "summary": "GET /api",
+              "responses": {
+                "200": {
+                  "description": "OK"
+                }
+              }
+            }
+          }
+        },
+        "x-original-oas-version": "3.1.1",
+        "x-scalar-original-document-hash": "38d46989e5c0313b",
+        "x-ext-urls": {},
+        "x-scalar-order": [
+          "api-mudws9xd-0/description/introduction",
+          "api-mudws9xd-0/GET/api"
+        ],
+        "x-scalar-navigation": {
+          "id": "api-mudws9xd-0",
+          "type": "document",
+          "title": "Local API",
+          "name": "api-mudws9xd-0",
+          "children": [
+            {
+              "id": "api-mudws9xd-0/description/introduction",
+              "title": "Introduction",
+              "type": "text"
+            },
+            {
+              "id": "api-mudws9xd-0/GET/api",
+              "title": "GET /api",
+              "path": "/api",
+              "method": "get",
+              "ref": "#/paths/~1api/get",
+              "type": "operation",
+              "isDeprecated": false
+            }
+          ]
+        }
+      }
+    },
+    "sourceKeys": {
+      "api-mudws9xd-0": "{\"specUrl\":null,\"specPath\":null,\"baseUrl\":\"http://127.0.0.1:18080/api\",\"endpoints\":[]}"
+    }
+  },
+  "workspaces": [
+    {
+      "id": "ws-default",
+      "name": "Personal"
+    }
+  ],
+  "activeWorkspaceId": "ws-default"
+}

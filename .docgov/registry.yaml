@@ -39,7 +39,7 @@ documents:
     authority: historical
     visibility: internal
     title: AI agent access
-    hash: 3d72e36a1e411c6f
+    hash: 3146efa7d99397a7
     lines: 211
   docs-ai-mcp:
     path: docs/AI-MCP.md
@@ -47,16 +47,16 @@ documents:
     authority: historical
     visibility: internal
     title: "AI & MCP — technical guide"
-    hash: 55a6b831ead205fb
-    lines: 620
+    hash: 6c435919d28f2ae9
+    lines: 752
   docs-ai-security:
     path: docs/AI-SECURITY.md
     type: unknown
     authority: historical
     visibility: internal
     title: "AI & MCP — threat model and security boundaries"
-    hash: a4184b776aaf8d63
-    lines: 406
+    hash: 6635b9fbca3becd3
+    lines: 511
   docs-cloud:
     path: docs/cloud.md
     type: unknown
@@ -95,23 +95,23 @@ documents:
     authority: historical
     visibility: internal
     title: Features
-    hash: 8dc74f2ae50adc6f
-    lines: 118
+    hash: ba3e187669164532
+    lines: 119
   docs-install:
     path: docs/install.md
     type: unknown
     authority: historical
     visibility: internal
     title: Install
-    hash: 893799379301bf91
-    lines: 265
+    hash: 233f3eab3cf31631
+    lines: 288
   docs-monitoring:
     path: docs/monitoring.md
     type: unknown
     authority: historical
     visibility: internal
     title: Monitoring and fleet operations
-    hash: ef971d3ca4ca3aec
+    hash: ccdc6a7be0acdffa
     lines: 65
   docs-plans-addy:
     path: docs/plans/addy.md
@@ -191,8 +191,8 @@ documents:
     authority: historical
     visibility: internal
     title: OpsMaxx roadmap
-    hash: 2ffd4ef877033caa
-    lines: 1969
+    hash: c242cfc6531aab10
+    lines: 1981
   docs-security:
     path: docs/security.md
     type: unknown
@@ -207,8 +207,8 @@ documents:
     authority: historical
     visibility: internal
     title: Terminal
-    hash: 2da024e7eab43755
-    lines: 363
+    hash: 446a6f18b41e54ca
+    lines: 418
   docs-tunnels:
     path: docs/tunnels.md
     type: unknown
@@ -223,7 +223,7 @@ documents:
     authority: historical
     visibility: internal
     title: "Vault, backup and settings"
-    hash: 4fb73a44fb0c196d
+    hash: cee0ad665fef8423
     lines: 103
   docs-vpn:
     path: docs/VPN.md
@@ -241,6 +241,14 @@ documents:
     title: Workspaces
     hash: 9bcb1a93fdf61068
     lines: 73
+  http-client:
+    path: docs/08-user/guides/http-client.md
+    type: user.guide
+    authority: audience
+    visibility: public
+    title: HTTP client
+    hash: 64a9b159828bab8e
+    lines: 228
   packaging-winget-readme:
     path: packaging/winget/README.md
     type: unknown
@@ -255,16 +263,16 @@ documents:
     authority: historical
     visibility: internal
     title: OpsMaxx
-    hash: 7ff42ef1a90e7e50
-    lines: 163
+    hash: 51eaceb52358be32
+    lines: 164
   security:
     path: SECURITY.md
     type: unknown
     authority: historical
     visibility: internal
     title: Security Policy
-    hash: 29d0a87993b6a959
-    lines: 443
+    hash: 5138cef8a65a73b4
+    lines: 444
   sidecar-addyd-pair-vendored:
     path: sidecar/addyd/pair/VENDORED.md
     type: unknown
@@ -319,5 +327,5 @@ documents:
     authority: historical
     visibility: internal
     title: Third-Party Notices
-    hash: a5f095428a0ff585
-    lines: 528
+    hash: 2e4816dd9cedc292
+    lines: 600

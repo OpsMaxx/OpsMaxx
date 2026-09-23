@@ -30,7 +30,6 @@ import type {
   VpnSpec,
   VpnStatus,
   Tunnel,
-  ApiCollection,
   DatabaseConn
 } from '../types'
 import type { LocalShell } from '../../../shared/local'
@@ -38,6 +37,8 @@ import type { HttpCheck } from '../../../shared/httpMonitor'
 import type { CicdConnection } from '../../../shared/cicd'
 import type { TerminalScheme } from '../../../shared/terminalTheme'
 import { bridgeHas } from '../lib/bridge'
+import { useApi } from './api'
+import { useHttp } from './http'
 import { DEFAULT_SSH_AGENT_SETTINGS, type SshAgentSettings } from '../../../shared/sshAgentHost'
 
 // Clean default: a single empty workspace. No sample servers/VPNs/tunnels.
@@ -439,7 +440,6 @@ export type ModalKind =
   | 'workspaces'
   | 'route-editor'
   | 'add-database'
-  | 'add-api'
   | 'import-ssh'
   | 'report-bug'
   | null
@@ -487,22 +487,6 @@ interface AppState {
   vpnStatuses: Record<string, VpnStatus>
   tunnels: Tunnel[]
   databases: DatabaseConn[]
-  apiCollections: ApiCollection[]
-  /**
-   * The API client's own workspace: environments, cookies, tabs, and the
-   * documents as the user has edited them.
-   *
-   * Owned by the embedded client rather than by OpsMaxx, which is why it is
-   * held opaquely — the shape belongs to the library, and re-declaring it here
-   * would be a copy that drifts. `shared/apiWorkspaceSnapshot.ts` is the only
-   * thing that looks inside, and its job is to keep response bodies and typed
-   * credentials OUT of it before it ever reaches disk.
-   *
-   * `apiCollections` remains the identity list — which APIs exist, what they
-   * are called and how their requests are routed. This is what the user has
-   * done inside them.
-   */
-  apiWorkspace: unknown | null
   /** External service checks. See shared/httpMonitor.ts. */
   httpChecks: HttpCheck[]
   /**
@@ -522,8 +506,6 @@ interface AppState {
   // `activity` itself and for the same reason: persist.ts saves the data a
   // backup needs, and where someone happened to be looking is not that.
   tunnelsTab: TunnelsTab
-  // Which API the HTTP client is showing. Session-only, like `activity`.
-  activeApiCollectionId: string | null
   sidebarWidth: number
   sidebarCollapsed: boolean
 
@@ -557,14 +539,6 @@ interface AppState {
    * dormant session is never offered as a target.
    */
   pasteTargets: Record<string, true>
-  /**
-   * A request to focus the endpoint editor for one API.
-   *
-   * A nonce for the reason findRequest carries one: pressing the toolbar's
-   * plus twice has to be two events, and a boolean already true gives a
-   * component nothing to react to.
-   */
-  apiEndpointFocus: { collectionId: string; nonce: number } | null
   /**
    * Recently closed tabs, oldest first, for reopening.
    *
@@ -612,8 +586,6 @@ interface AppState {
   routeEditorServerId: string | null
   // Server being edited in the add/edit modal; null means "adding new".
   editServerId: string | null
-  /** Which saved API the add/edit modal is editing, or null when it is adding. */
-  editApiCollectionId: string | null
   paletteOpen: boolean
   theme: ThemeMode
   settings: AppSettings
@@ -637,7 +609,6 @@ interface AppState {
   workspaceFolders: (kind?: FolderKind) => Folder[]
   workspaceVpns: () => VpnProfile[]
   workspaceTunnels: () => Tunnel[]
-  workspaceApiCollections: () => ApiCollection[]
   // Non-system groups in display order, then the Ungrouped bucket last.
   workspaceMonitorGroups: () => MonitorGroup[]
   activeTab: () => Tab | null
@@ -709,8 +680,6 @@ interface AppState {
   /** Ask one terminal pane to show `text` in the paste confirmation. Writes
    *  nothing, and does nothing for a pane that is not a live paste target. */
   requestTerminalPaste: (paneId: string, text: string) => void
-  /** Put the cursor in the endpoint editor for one API. The toolbar's plus. */
-  requestApiEndpointFocus: (collectionId: string) => void
   cycleTab: (dir: 1 | -1) => void
   /** Drag-to-reorder. `toIndex` is a position among the VISIBLE tabs. */
   moveTab: (id: string, toIndex: number) => void
@@ -740,7 +709,6 @@ interface AppState {
   // no new concepts. See the implementation for the full truth table.
   toggleSplit: (tabId: string, dir: SplitDirection) => void
   setModal: (m: ModalKind) => void
-  openApiEditor: (id: string) => void
   openRouteEditor: (serverId: string) => void
   openServerEditor: (serverId: string) => void
   togglePalette: (open?: boolean) => void
@@ -787,11 +755,6 @@ interface AppState {
   syncMonitorLayout: () => void
   addTunnel: (input: Omit<Tunnel, 'id' | 'workspaceId' | 'status'>) => string
   deleteTunnel: (id: string) => void
-  addApiCollection: (input: Omit<ApiCollection, 'id' | 'workspaceId'>) => string
-  updateApiCollection: (id: string, patch: Partial<Omit<ApiCollection, 'id' | 'workspaceId'>>) => void
-  deleteApiCollection: (id: string) => void
-  setActiveApiCollection: (id: string | null) => void
-  setApiWorkspace: (snapshot: unknown) => void
   setTunnelStatus: (id: string, status: Tunnel['status']) => void
   setVpnProfiles: (profiles: VpnProfile[]) => void
   upsertVpnProfile: (profile: VpnProfile) => void
@@ -821,8 +784,6 @@ interface AppState {
         | 'vpns'
         | 'tunnels'
         | 'databases'
-        | 'apiCollections'
-        | 'apiWorkspace'
         | 'httpChecks'
         | 'cicdConnections'
         | 'settings'
@@ -1263,8 +1224,6 @@ export const useApp = create<AppState>((set, get) => ({
   vpnStatuses: {},
   tunnels: [],
   databases: [],
-  apiCollections: [],
-  apiWorkspace: null,
   httpChecks: [],
   cicdConnections: [],
 
@@ -1273,7 +1232,6 @@ export const useApp = create<AppState>((set, get) => ({
   activeWorkspaceId: DEFAULT_WORKSPACE.id,
   activity: 'connections',
   tunnelsTab: 'tunnels',
-  activeApiCollectionId: null,
   sidebarWidth: 280,
   sidebarCollapsed: false,
 
@@ -1282,7 +1240,6 @@ export const useApp = create<AppState>((set, get) => ({
   findRequest: null,
   pasteRequest: null,
   pasteTargets: {},
-  apiEndpointFocus: null,
   closedTabs: [],
   recentServerIds: [],
   tabSession: {},
@@ -1293,7 +1250,6 @@ export const useApp = create<AppState>((set, get) => ({
   modal: null,
   routeEditorServerId: null,
   editServerId: null,
-  editApiCollectionId: null,
   paletteOpen: false,
   theme: 'dark',
   settings: DEFAULT_SETTINGS,
@@ -1320,8 +1276,6 @@ export const useApp = create<AppState>((set, get) => ({
     get().folders.filter((f) => f.workspaceId === get().activeId() && (f.kind ?? 'server') === kind),
   workspaceVpns: () => get().vpns.filter((v) => v.workspaceId === get().activeId()),
   workspaceTunnels: () => get().tunnels.filter((t) => t.workspaceId === get().activeId()),
-  workspaceApiCollections: () =>
-    get().apiCollections.filter((c) => c.workspaceId === get().activeId()),
   workspaceMonitorGroups: () => {
     const mine = get().monitorGroups.filter((g) => g.workspaceId === get().activeId())
     // Ungrouped is where unplaced cards land, so it belongs at the bottom of
@@ -1745,11 +1699,6 @@ export const useApp = create<AppState>((set, get) => ({
       return { tabs }
     }),
 
-  requestApiEndpointFocus: (collectionId) =>
-    set((s) => ({
-      apiEndpointFocus: { collectionId, nonce: (s.apiEndpointFocus?.nonce ?? 0) + 1 }
-    })),
-
   requestTerminalFind: (paneId) =>
     set((s) => ({
       findRequest: { paneId, nonce: (s.findRequest?.nonce ?? 0) + 1 }
@@ -1980,16 +1929,8 @@ export const useApp = create<AppState>((set, get) => ({
     })
   },
 
-  setModal: (m) => set({ modal: m, editServerId: null, editApiCollectionId: null }),
-  // Clears the API id for the reason setModal clears both: these two editors
-  // share one modal slot, and an id left behind is a stale record the next
-  // opener could bind to.
-  openServerEditor: (serverId) =>
-    set({ editServerId: serverId, editApiCollectionId: null, modal: 'add-server' }),
-  // The same shape as openServerEditor, and for the same reason: the modal
-  // that adds a thing is the modal that knows every field of it, so editing
-  // is that modal with an id rather than a second one to keep in step.
-  openApiEditor: (id) => set({ editApiCollectionId: id, modal: 'add-api' }),
+  setModal: (m) => set({ modal: m, editServerId: null }),
+  openServerEditor: (serverId) => set({ editServerId: serverId, modal: 'add-server' }),
 
   openRouteEditor: (serverId) => set({ modal: 'route-editor', routeEditorServerId: serverId }),
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),
@@ -2055,6 +1996,10 @@ export const useApp = create<AppState>((set, get) => ({
       // passes deleteCicdConnection, so without this line every token in the
       // workspace is orphaned in the vault with nothing left pointing at it.
       releaseCicdSecrets(s.cicdConnections.filter((c) => c.workspaceId === id))
+      // The HTTP client's collections, environments, globals and open tabs live
+      // in their own stores and go with the workspace the same way.
+      useApi.getState().onWorkspaceDeleted(id)
+      useHttp.getState().onWorkspaceDeleted(id)
       // Tabs go with their workspace whatever backs them — a local tab has no
       // server to cascade from, so filtering on doomedServers alone would leave
       // it stranded in a workspace that no longer exists, unreachable from the
@@ -2072,7 +2017,6 @@ export const useApp = create<AppState>((set, get) => ({
         databases: detachVpn(s.databases.filter((d) => d.workspaceId !== id), doomedVpns),
         vpns: s.vpns.filter((v) => v.workspaceId !== id),
         tunnels: s.tunnels.filter((t) => t.workspaceId !== id),
-        apiCollections: s.apiCollections.filter((c) => c.workspaceId !== id),
       httpChecks: s.httpChecks.filter((c) => c.workspaceId !== id),
         cicdConnections: s.cicdConnections.filter((c) => c.workspaceId !== id),
         tabs: keptTabs,
@@ -2280,32 +2224,6 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   deleteTunnel: (id) => set((s) => ({ tunnels: s.tunnels.filter((t) => t.id !== id) })),
-
-  addApiCollection: (input) => {
-    const id = uid('api')
-    set((s) => ({
-      apiCollections: [...s.apiCollections, { ...input, id, workspaceId: s.activeWorkspaceId }],
-      activeApiCollectionId: id
-    }))
-    return id
-  },
-
-  updateApiCollection: (id, patch) =>
-    set((s) => ({
-      apiCollections: s.apiCollections.map((c) => (c.id === id ? { ...c, ...patch } : c))
-    })),
-
-  // Clearing the selection when the open collection is the one deleted
-  // avoids the view holding an id nothing answers to.
-  deleteApiCollection: (id) =>
-    set((s) => ({
-      apiCollections: s.apiCollections.filter((c) => c.id !== id),
-      activeApiCollectionId: s.activeApiCollectionId === id ? null : s.activeApiCollectionId
-    })),
-
-  setActiveApiCollection: (id) => set({ activeApiCollectionId: id }),
-
-  setApiWorkspace: (snapshot) => set({ apiWorkspace: snapshot }),
 
   // A live tunnel re-emits its status on every connection open and close, so
   // this is called constantly with a status that has not moved. Writing it
@@ -2648,21 +2566,6 @@ export const useApp = create<AppState>((set, get) => ({
         // absent means an ordinary server.
         sftpOnly: sv.sftpOnly === true
       })),
-      // Saves written before the HTTP client have no key at all; normalising
-      // here keeps "null means direct" and "false means verify" the only
-      // representations the view ever reads.
-      apiCollections: (data.apiCollections ?? s.apiCollections ?? []).map((c) => ({
-        ...c,
-        specUrl: c.specUrl ?? null,
-        viaServerId: c.viaServerId ?? null,
-        insecureTls: c.insecureTls === true
-      })),
-      // Absent in every save written before the client had a workspace of its
-      // own, and absent is not an error: the client rebuilds one from the
-      // collections above, which is exactly what an upgrade should do. Kept
-      // opaque — `shared/apiWorkspaceSnapshot.ts` is the only thing that
-      // validates or reads it.
-      apiWorkspace: data.apiWorkspace ?? s.apiWorkspace ?? null,
       // Saves written before this module have no key at all, which is not the
       // same as an empty list — `?? s.cicdConnections` keeps the distinction the
       // way the keys above it do. See normalizeCicd for what an older save, or
@@ -2737,8 +2640,6 @@ export const useWorkspaceFolders = (kind: FolderKind = 'server') =>
 export const useWorkspaceVpns = () => useApp(useShallow((s) => s.workspaceVpns()))
 export const useWorkspaceTunnels = () => useApp(useShallow((s) => s.workspaceTunnels()))
 export const useWorkspaceDatabases = () => useApp(useShallow((s) => s.workspaceDatabases()))
-export const useWorkspaceApiCollections = () =>
-  useApp(useShallow((s) => s.workspaceApiCollections()))
 export const useWorkspaceTabs = () => useApp(useShallow((s) => s.workspaceTabs()))
 export const useWorkspaceMonitorGroups = () =>
   useApp(useShallow((s) => s.workspaceMonitorGroups()))

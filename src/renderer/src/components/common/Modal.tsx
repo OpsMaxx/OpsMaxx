@@ -1,6 +1,6 @@
-import { ReactNode, useEffect, useRef, useState } from 'react'
+import { ReactNode, RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
-import { useClickOutside } from '../../hooks/useClickOutside'
+import { approvalShowing, useClickOutside } from '../../hooks/useClickOutside'
 import { clsx } from '../../lib/format'
 
 /**
@@ -160,6 +160,82 @@ function useModalLayer(priority: number): { layer: number; top: boolean } {
   return { layer: pos < 0 ? order.length : pos, top: pos < 0 || pos === order.length - 1 }
 }
 
+// ---------------------------------------------------------------- focus
+//
+// A dialog that focus never entered was answered by whatever still had it:
+// the production confirm opened from ⌘↵ in an editor, and the next ⌘↵ sent
+// again instead of answering it. So focus goes in when the dialog opens,
+// Tab stays inside it while it is in front, and focus goes back to whatever
+// opened it when it closes -- unless something else has already taken it,
+// such as the tab a Save just created.
+
+const FOCUSABLE =
+  'button:not(:disabled), [href], input:not(:disabled):not([type="hidden"]), select:not(:disabled), ' +
+  'textarea:not(:disabled), [tabindex]:not([tabindex="-1"]), [contenteditable="true"]'
+
+const focusables = (root: HTMLElement): HTMLElement[] =>
+  [...root.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((el) => !el.closest('[hidden]'))
+
+/**
+ * Where focus lands when a dialog opens: wherever an autoFocus already put it,
+ * else the confirm button -- or Cancel, when the confirm is destructive, so
+ * that a reflexive Enter cannot delete or send to production -- else the
+ * dialog itself.
+ */
+function initialFocus(dialog: HTMLElement): HTMLElement {
+  const footer = dialog.querySelector('.modal-footer')
+  const confirm = footer?.querySelector<HTMLButtonElement>('button.primary:not(:disabled), button.danger:not(:disabled)')
+  const cancel = footer?.querySelector<HTMLButtonElement>('button.secondary:not(:disabled)')
+  if (confirm?.classList.contains('danger')) return cancel ?? confirm
+  return confirm ?? dialog
+}
+
+function useDialogFocus(ref: RefObject<HTMLDivElement | null>, top: boolean): void {
+  // Read during the first render, before any autoFocus inside the dialog runs.
+  const [opener] = useState(() => document.activeElement as HTMLElement | null)
+  const topRef = useRef(top)
+  topRef.current = top
+
+  useLayoutEffect(() => {
+    const dialog = ref.current
+    if (!dialog) return
+    if (!dialog.contains(document.activeElement)) initialFocus(dialog).focus()
+    return () => {
+      const now = document.activeElement
+      if (opener?.isConnected && opener !== document.body && (now === document.body || now === null || dialog.contains(now))) {
+        opener.focus()
+      }
+    }
+    // Mount and unmount only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      const dialog = ref.current
+      if (e.key !== 'Tab' || !dialog || !topRef.current || approvalShowing()) return
+      const items = focusables(dialog)
+      if (items.length === 0) {
+        e.preventDefault()
+        dialog.focus()
+        return
+      }
+      const first = items[0]
+      const last = items[items.length - 1]
+      const at = document.activeElement as HTMLElement | null
+      // A menu, popover or toast painted over the dialog handles its own Tab.
+      if (at?.closest('[role="menu"], .hc-popover, .toasts')) return
+      const inside = !!at && dialog.contains(at)
+      if (!inside || (e.shiftKey && at === first) || (!e.shiftKey && at === last)) {
+        e.preventDefault()
+        ;(e.shiftKey ? last : first).focus()
+      }
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [ref])
+}
+
 export function Modal({
   title,
   subtitle,
@@ -179,10 +255,11 @@ export function Modal({
   // the guard one Escape closes every open dialog at once -- including ones
   // the user cannot see, whose close is not always harmless.
   useClickOutside(ref, onClose, dismissible && top)
+  useDialogFocus(ref, top)
   const hasFooter = confirm !== undefined || footer !== undefined || footerNote !== undefined
   return (
     <div className="scrim" style={{ '--modal-layer': layer } as React.CSSProperties}>
-      <div className={clsx('modal', size === 'lg' && 'lg')} ref={ref} role="dialog" aria-modal>
+      <div className={clsx('modal', size === 'lg' && 'lg')} ref={ref} role="dialog" aria-modal tabIndex={-1}>
         <div className="modal-header">
           <div>
             <h2>{title}</h2>

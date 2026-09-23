@@ -275,7 +275,7 @@ describe('httpRequest, direct', () => {
 })
 
 describe('httpRequest, TLS', () => {
-  it('refuses a self-signed certificate by default, and says how to proceed', async () => {
+  it('refuses a self-signed certificate by default, and does not suggest turning checks off', async () => {
     const result = await httpRequest(
       { url: `${tlsUrl}/echo`, method: 'GET', headers: {}, via: { kind: 'direct' } },
       ctx
@@ -283,7 +283,8 @@ describe('httpRequest, TLS', () => {
     expect(result.ok).toBe(false)
     if (result.ok) return
     expect(result.code).toMatch(/SELF_SIGNED|DEPTH_ZERO/)
-    expect(result.error).toMatch(/Skip certificate check/)
+    expect(result.error).toMatch(/self[- ]signed/i)
+    expect(result.error).not.toMatch(/Skip certificate|turn on/i)
   })
 
   it('accepts it only when the request explicitly opts out', async () => {

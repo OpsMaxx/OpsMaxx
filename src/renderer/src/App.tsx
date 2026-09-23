@@ -16,7 +16,6 @@ import { Sidebar } from './components/layout/Sidebar'
 import { StatusBar } from './components/layout/StatusBar'
 import { WorkspacePanel } from './components/panel/WorkspacePanel'
 import { AddDatabaseModal } from './components/databases/AddDatabaseModal'
-import { AddApiModal } from './components/http/AddApiModal'
 import { ApprovalWatcher } from './components/ai/ApprovalWatcher'
 import { AgentConfigWatcher } from './components/ai/AgentConfigWatcher'
 import { FleetWatcher } from './components/monitor/FleetWatcher'
@@ -46,7 +45,9 @@ const databasesView = deferredView(() =>
 const tunnelsView = deferredView(() =>
   import('./components/tunnels/TunnelsView').then((m) => m.TunnelsView)
 )
-const httpView = deferredView(() => import('./components/http/HttpView').then((m) => m.HttpView))
+const httpView = deferredView(() =>
+  import('./components/http/HttpWorkbench').then((m) => m.HttpWorkbench)
+)
 const vaultView = deferredView(() =>
   import('./components/vault/VaultView').then((m) => m.VaultView)
 )
@@ -57,7 +58,7 @@ const settingsView = deferredView(() =>
 const FleetMonitor = monitorView.View
 const DatabaseWorkspace = databasesView.View
 const TunnelsView = tunnelsView.View
-const HttpView = httpView.View
+const HttpWorkbench = httpView.View
 const VaultView = vaultView.View
 const AiPanel = aiView.View
 const Settings = settingsView.View
@@ -68,17 +69,17 @@ const DEFERRED_VIEWS = [monitorView, databasesView, tunnelsView, httpView, vault
 // would drop running processes. Other views are cheap and mount on demand.
 //
 // The HTTP client is the second exception, for the same reason wearing a
-// different hat. It holds an embedded API client with every collection loaded
-// and whatever the user has typed into a request — headers, a body, a URL
-// half-edited — none of which is saved anywhere until it is sent. Unmounting
-// on the way to Terminals and back threw all of it away, which is a large part
-// of why the client read as unusable.
+// different hat. Drafts survive in store/http, but an open WebSocket, a request
+// in flight, the editors' undo history and caret, and a scrolled response do
+// not: they belong to the mounted workbench, and unmounting on the way to
+// Terminals and back would throw them away.
 function MainArea(): React.JSX.Element {
   const activity = useApp((s) => s.activity)
   const onConnections = activity === 'connections'
   const onHttp = activity === 'http'
-  // Not mounted until first visited: the API client is the largest thing in
-  // the renderer, and someone who never opens it should not pay to build it.
+  // Not mounted until first visited: the HTTP client is one of the largest
+  // things in the renderer, and someone who never opens it should not pay to
+  // build it.
   const httpVisited = useRef(false)
   if (onHttp) httpVisited.current = true
   // The monitor tree is the third exception, and it earns it the most.
@@ -119,7 +120,7 @@ function MainArea(): React.JSX.Element {
       {activity === 'tunnels' && <TunnelsView />}
       {httpVisited.current && (
         <div className={clsx('main-host', !onHttp && 'hidden')} aria-hidden={!onHttp}>
-          <HttpView />
+          <HttpWorkbench />
         </div>
       )}
       {activity === 'vault' && <VaultView />}
@@ -245,7 +246,6 @@ export default function App(): React.JSX.Element {
       {modal === 'route-editor' && <RouteEditor />}
       {modal === 'workspaces' && <WorkspaceManager />}
       {modal === 'add-database' && <AddDatabaseModal />}
-      {modal === 'add-api' && <AddApiModal />}
       {modal === 'import-ssh' && <SshConfigImport />}
       {modal === 'report-bug' && <ReportBugModal />}
       {/* Not a `modal` kind: the unlock prompt can appear over any view. */}

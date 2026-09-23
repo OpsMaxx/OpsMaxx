@@ -6,13 +6,8 @@ import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
 import type { MachineGrant } from '../shared/machineGrants'
 import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
-import type {
-  HttpSocketBridge,
-  WsEvent,
-  WsOpenResult,
-  WsOpenSpec,
-  WsSendResult
-} from '../shared/httpSocket'
+import type { HistoryEntry } from '../shared/httpHistory'
+import { socketBridge, type SocketIpc } from '../shared/httpSocket'
 import type { CheckResult, HttpCheck } from '../shared/httpMonitor'
 import type {
   AgentRunReport,
@@ -819,13 +814,44 @@ const api = {
       spec: HttpRequestSpec
     ): Promise<{ ok: true; status: number; durationMs: number } | { ok: false; error: string }> =>
       ipcRenderer.invoke('http:check', spec),
-    /** Pick an OpenAPI description from disk. Returns its path and its
-     *  contents, or null if the picker was dismissed. Both halves, because the
-     *  collection stores the path and the client is handed the text. */
-    chooseSpecFile: (): Promise<{ path: string; text: string } | null> =>
+    /**
+     * Pick an OpenAPI description from disk: its basename and its text, never
+     * the path. `{ error }` when it is over the cap; null if dismissed.
+     */
+    chooseSpecFile: (): Promise<{ name: string; text: string } | { error: string } | null> =>
       ipcRenderer.invoke('http:chooseSpecFile'),
-    /** Re-read a description a collection already points at. */
-    readSpecFile: (path: string): Promise<string> => ipcRenderer.invoke('http:readSpecFile', path)
+    /** Abort this window's in-flight request named by `spec.requestId`. */
+    cancel: (requestId: string): Promise<void> => ipcRenderer.invoke('http:cancel', requestId),
+    /** Save response bytes, unmodified, where the user picks. Resolves to the path, or null if dismissed. */
+    saveResponse: (suggestedName: string, bytes: ArrayBuffer): Promise<string | null> =>
+      ipcRenderer.invoke('http:saveResponse', suggestedName, bytes),
+    /**
+     * Pick a request body file. The name is a basename; the path never crosses
+     * the bridge. `{ error }` when the file is over the 32 MiB cap.
+     */
+    chooseBodyFile: (): Promise<{ name: string; bytes: ArrayBuffer } | { error: string } | null> =>
+      ipcRenderer.invoke('http:chooseBodyFile'),
+    /** Pick a CA file. Only its certificate blocks come back; a private key refuses it. */
+    chooseCaFile: (): Promise<{ pem: string } | { error: string } | null> =>
+      ipcRenderer.invoke('http:chooseCaFile')
+  },
+  /**
+   * The HTTP client's request history, kept in main: sealed with the keyring,
+   * or held in memory only when there is no real keyring. Main re-applies the
+   * redaction to every entry it is handed.
+   */
+  httpHistory: {
+    /** `workspaceId` keeps a page to that workspace's entries (see historyInWorkspace). */
+    list: (opts: { limit: number; before?: number; query?: string; workspaceId?: string }): Promise<HistoryEntry[]> =>
+      ipcRenderer.invoke('httpHistory:list', opts),
+    append: (entry: HistoryEntry): Promise<void> => ipcRenderer.invoke('httpHistory:append', entry),
+    remove: (id: string): Promise<void> => ipcRenderer.invoke('httpHistory:remove', id),
+    clear: (): Promise<void> => ipcRenderer.invoke('httpHistory:clear'),
+    /**
+     * Whether history is written to disk (sealed with the OS keyring). False
+     * means this session only: the History pane says so.
+     */
+    sealed: (): Promise<boolean> => ipcRenderer.invoke('httpHistory:sealed')
   },
   /**
    * WebSocket sessions, opened in main over the same three routes a request
@@ -833,19 +859,12 @@ const api = {
    * browser cannot set handshake headers, cannot be handed a private CA, and
    * cannot reach a service bound to a server's loopback.
    */
-  httpSocket: {
-    open: (spec: WsOpenSpec): Promise<WsOpenResult> => ipcRenderer.invoke('ws:open', spec),
-    send: (id: string, data: string | ArrayBuffer): Promise<WsSendResult> =>
-      ipcRenderer.invoke('ws:send', id, data),
-    close: (id: string, code?: number, reason?: string): Promise<void> =>
-      ipcRenderer.invoke('ws:close', id, code, reason),
-    onEvent: (id: string, cb: (event: WsEvent) => void): (() => void) => {
-      const ch = `ws:event:${id}`
-      const h = (_e: IpcRendererEvent, event: WsEvent): void => cb(event)
-      ipcRenderer.on(ch, h)
-      return () => ipcRenderer.removeListener(ch, h)
-    }
-  } satisfies HttpSocketBridge,
+  // The id is chosen here and listened on before the handshake, so the `open`
+  // event (with the negotiated subprotocol) and a greeting frame sent on
+  // connect reach the caller however late it subscribes. See socketBridge.
+  // Spread so the property keeps an object-literal type, as the other bridges
+  // have: callers probe it with `bridgeHas`, which takes a record.
+  httpSocket: { ...socketBridge(ipcRenderer as unknown as SocketIpc, () => crypto.randomUUID()) },
   /**
    * Service checks, which run in main whether or not anything is displaying
    * them. The renderer owns the LIST (it is user configuration, persisted with

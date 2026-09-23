@@ -27,8 +27,8 @@ the only one, it is Windows-only, and it is described in full below rather than
 left to a table — OpsMaxx is presented as open-source software and that
 claim should not have an unmentioned exception behind it.
 
-This list was generated from the actual installed dependency tree
-(`npm ls --all`), not by inspection of `package.json` alone, so it also
+This list was generated from the resolved dependency tree recorded in
+`package-lock.json`, not by inspection of `package.json` alone, so it also
 covers indirect (transitive) dependencies pulled in by the packages below.
 
 ## Bundled binaries
@@ -173,7 +173,15 @@ what ships in the packaged app and are attributed here for that reason.
 | @xterm/addon-fit, addon-search, addon-web-links, addon-webgl | 0.10.0 / 0.15.0 / 0.11.0 / 0.18.0 | MIT | xterm.js addons |
 | @lydell/node-pty | 1.2.0-beta.15 | MIT | Pseudo-terminal for local shells — pinned to an exact version, and it ships native binaries (see below) |
 | ssh2 | 1.17.0 | MIT | SSH/SFTP client |
-| ws | 8.21.3 | MIT | WebSocket server for the loopback RDP relay |
+| ws | 8.21.3 | MIT | WebSocket server for the loopback RDP relay, and the HTTP client's WebSocket connections |
+| @codemirror/autocomplete, commands, language, lint, search, state, view | 6.20.3 / 6.11.0 / 6.12.4 / 6.9.7 / 6.7.2 / 6.7.4 / 6.43.11 | MIT | The HTTP client's code editor (bundled into the renderer) |
+| @codemirror/lang-json, lang-xml, lang-html, lang-yaml | 6.0.2 / 6.1.0 / 6.4.12 / 6.1.3 | MIT | Editor languages for request and response bodies (bundled into the renderer) |
+| @lezer/highlight | 1.2.3 | MIT | Syntax highlighting for the editor (bundled into the renderer) |
+| graphql | 16.14.2 | MIT | GraphQL parsing and schema introspection in the HTTP client (bundled into the renderer) |
+| cm6-graphql | 0.2.2 | MIT | GraphQL autocomplete and linting in the editor (bundled into the renderer) |
+| yaml | 2.9.0 | ISC | Reading OpenAPI descriptions written in YAML |
+| @scalar/openapi-upgrader | 0.2.15 | MIT | Upgrading Swagger 2 descriptions to OpenAPI 3 on import |
+| @scalar/snippetz | 0.9.30 | MIT | Python, Go and HTTPie code generation in the HTTP client (bundled into the renderer) |
 | @devolutions/iron-remote-desktop | 0.11.0 | MIT OR Apache-2.0 | Remote-desktop web component (bundled into the renderer) |
 | @devolutions/iron-remote-desktop-rdp | 0.7.0 | MIT OR Apache-2.0 | IronRDP client compiled to WebAssembly — the RDP protocol implementation (bundled into the renderer) |
 | mongodb | 7.5.0 | Apache-2.0 | MongoDB driver |
@@ -234,9 +242,9 @@ Build-only tooling (TypeScript, Vite, Vitest, esbuild, electron-builder,
 `@types/*`, etc.) is excluded, since it never ships. License data comes
 from each package's own `package.json`.
 
-License summary: **202 MIT · 12 ISC · 7 BSD-3-Clause · 7 Apache-2.0 · 2
-BlueOak-1.0.0 · 2 BSD-2-Clause · 2 MIT OR Apache-2.0 · 1 Python-2.0 · 1 0BSD ·
-1 Unlicense** — 237 packages total. No GPL, AGPL, LGPL, SSPL, or
+License summary: **254 MIT · 14 ISC · 8 Apache-2.0 · 8 BSD-3-Clause · 3
+BSD-2-Clause · 2 MIT OR Apache-2.0 · 2 MIT OR CC0-1.0 · 1 BlueOak-1.0.0 ·
+1 Python-2.0 · 1 0BSD · 1 Unlicense** — 295 packages total. No GPL, AGPL, LGPL, SSPL, or
 proprietary-licensed dependencies were found anywhere in the tree.
 
 The two `MIT OR Apache-2.0` entries are the IronRDP packages, which offer the
@@ -279,18 +287,45 @@ the licence position.
 | @azure/msal-browser | 5.19.0 | MIT |
 | @azure/msal-common | 16.13.0 | MIT |
 | @azure/msal-node | 5.6.0 | MIT |
+| @codemirror/autocomplete | 6.20.3 | MIT |
+| @codemirror/commands | 6.11.0 | MIT |
+| @codemirror/lang-css | 6.3.1 | MIT |
+| @codemirror/lang-html | 6.4.12 | MIT |
+| @codemirror/lang-javascript | 6.2.5 | MIT |
+| @codemirror/lang-json | 6.0.2 | MIT |
+| @codemirror/lang-xml | 6.1.0 | MIT |
+| @codemirror/lang-yaml | 6.1.3 | MIT |
+| @codemirror/language | 6.12.4 | MIT |
+| @codemirror/lint | 6.9.7 | MIT |
+| @codemirror/search | 6.7.2 | MIT |
+| @codemirror/state | 6.7.4 | MIT |
+| @codemirror/view | 6.43.11 | MIT |
+| @devolutions/iron-remote-desktop | 0.11.0 | MIT OR Apache-2.0 |
+| @devolutions/iron-remote-desktop-rdp | 0.7.0 | MIT OR Apache-2.0 |
 | @hono/node-server | 2.1.1 | MIT |
 | @ioredis/commands | 2.0.0 | MIT |
 | @js-joda/core | 6.1.0 | BSD-3-Clause |
-| @devolutions/iron-remote-desktop | 0.11.0 | MIT OR Apache-2.0 |
-| @devolutions/iron-remote-desktop-rdp | 0.7.0 | MIT OR Apache-2.0 |
+| @lezer/common | 1.5.2 | MIT |
+| @lezer/css | 1.3.6 | MIT |
+| @lezer/highlight | 1.2.3 | MIT |
+| @lezer/html | 1.3.13 | MIT |
+| @lezer/javascript | 1.5.4 | MIT |
+| @lezer/json | 1.0.3 | MIT |
+| @lezer/lr | 1.4.10 | MIT |
+| @lezer/xml | 1.0.6 | MIT |
+| @lezer/yaml | 1.0.4 | MIT |
 | @lydell/node-pty | 1.2.0-beta.15 | MIT |
 | @lydell/node-pty-`<platform>`-`<arch>` | 1.2.0-beta.15 | MIT |
+| @marijn/find-cluster-break | 1.0.4 | MIT |
 | @modelcontextprotocol/sdk | 1.30.0 | MIT |
 | @mongodb-js/saslprep | 1.5.0 | MIT |
+| @scalar/helpers | 0.11.3 | MIT |
+| @scalar/openapi-types | 0.9.5 | MIT |
+| @scalar/openapi-upgrader | 0.2.15 | MIT |
+| @scalar/snippetz | 0.9.30 | MIT |
+| @scalar/types | 0.19.0 | MIT |
 | @tediousjs/connection-string | 1.1.0 | MIT |
 | @types/node | 22.20.1 | MIT |
-| @types/react | 19.2.18 | MIT |
 | @types/readable-stream | 4.0.24 | MIT |
 | @types/webidl-conversions | 7.0.3 | MIT |
 | @types/whatwg-url | 13.0.0 | MIT |
@@ -323,16 +358,19 @@ the licence position.
 | call-bound | 1.0.4 | MIT |
 | clsx | 2.1.1 | MIT |
 | cluster-key-slot | 1.1.1 | Apache-2.0 |
+| cm6-graphql | 0.2.2 | MIT |
 | commander | 11.1.0 | MIT |
 | content-disposition | 1.1.0 | MIT |
 | content-type | 1.0.5 | MIT |
 | content-type | 2.1.0 | MIT |
+| convert-hrtime | 5.0.0 | MIT |
 | cookie | 0.7.2 | MIT |
 | cookie-signature | 1.2.2 | MIT |
 | cors | 2.8.6 | MIT |
 | cpu-features | 0.0.10 | MIT |
+| crelt | 1.0.7 | MIT |
 | cross-spawn | 7.0.6 | MIT |
-| csstype | 3.2.3 | MIT |
+| debounce-promise | 3.1.2 | MIT |
 | debug | 4.4.3 | MIT |
 | default-browser | 5.5.1 | MIT |
 | default-browser-id | 5.0.1 | MIT |
@@ -356,38 +394,47 @@ the licence position.
 | express | 5.2.1 | MIT |
 | express-rate-limit | 8.6.2 | MIT |
 | fast-deep-equal | 3.1.3 | MIT |
-| fast-uri | 3.1.5 | BSD-3-Clause |
+| fast-uri | 3.1.7 | BSD-3-Clause |
 | finalhandler | 2.1.1 | MIT |
 | forwarded | 0.2.0 | MIT |
 | fresh | 2.0.0 | MIT |
 | fs-extra | 10.1.0 | MIT |
 | function-bind | 1.1.2 | MIT |
+| function-timeout | 1.0.2 | MIT |
 | generate-function | 2.3.1 | MIT |
 | get-intrinsic | 1.3.0 | MIT |
+| get-own-enumerable-keys | 1.0.0 | MIT |
 | get-proto | 1.0.1 | MIT |
 | gopd | 1.2.0 | MIT |
 | graceful-fs | 4.2.11 | ISC |
+| graphql | 16.14.2 | MIT |
+| graphql-language-service | 5.7.0 | MIT |
 | has-symbols | 1.1.0 | MIT |
 | hasown | 2.0.4 | MIT |
-| hono | 4.13.4 | MIT |
+| hono | 4.13.7 | MIT |
 | http-errors | 2.0.1 | MIT |
 | http-proxy-agent | 7.0.2 | MIT |
 | https-proxy-agent | 7.0.6 | MIT |
 | iconv-lite | 0.7.3 | MIT |
+| identifier-regex | 1.1.0 | MIT |
 | ieee754 | 1.2.1 | BSD-3-Clause |
 | inherits | 2.0.4 | ISC |
 | ioredis | 6.0.0 | MIT |
 | ip-address | 10.5.0 | MIT |
 | ipaddr.js | 1.9.1 | MIT |
 | is-docker | 3.0.0 | MIT |
+| is-identifier | 1.1.0 | MIT |
 | is-inside-container | 1.0.0 | MIT |
+| is-obj | 3.0.0 | MIT |
 | is-promise | 4.0.0 | MIT |
 | is-property | 1.0.2 | MIT |
+| is-regexp | 3.1.0 | MIT |
 | is-wsl | 3.1.1 | MIT |
-| isexe | 2.0.0 | BlueOak-1.0.0 |
+| isexe | 2.0.0 | ISC |
 | jose | 6.2.10 | MIT |
+| js-base64 | 3.9.3 | BSD-3-Clause |
 | js-md4 | 0.3.2 | MIT |
-| js-yaml | 4.3.1 | MIT |
+| js-yaml | 4.3.2 | MIT |
 | json-schema-traverse | 1.0.0 | MIT |
 | json-schema-typed | 8.0.2 | BSD-2-Clause |
 | jsonfile | 6.2.1 | MIT |
@@ -407,6 +454,7 @@ the licence position.
 | long | 5.3.2 | Apache-2.0 |
 | lru.min | 1.1.4 | MIT |
 | lucide-react | 0.469.0 | ISC |
+| make-asynchronous | 1.1.0 | MIT |
 | math-intrinsics | 1.1.0 | MIT |
 | media-typer | 1.1.1 | MIT |
 | memory-pager | 1.5.0 | MIT |
@@ -420,13 +468,17 @@ the licence position.
 | mysql2 | 3.23.4 | MIT |
 | named-placeholders | 1.1.6 | MIT |
 | nan | 2.28.0 | MIT |
+| nanoid | 5.1.16 | MIT |
 | native-duplexpair | 1.0.0 | MIT |
 | negotiator | 1.1.0 | MIT |
+| nullthrows | 1.1.1 | MIT |
 | object-assign | 4.1.1 | MIT |
 | object-inspect | 1.13.4 | MIT |
 | on-finished | 2.4.1 | MIT |
 | once | 1.4.0 | ISC |
 | open | 10.2.0 | MIT |
+| p-event | 6.0.1 | MIT |
+| p-timeout | 6.1.4 | MIT |
 | parseurl | 1.3.3 | MIT |
 | path-key | 3.1.1 | MIT |
 | path-to-regexp | 8.4.2 | MIT |
@@ -446,13 +498,14 @@ the licence position.
 | process | 0.11.10 | MIT |
 | proxy-addr | 2.0.7 | MIT |
 | punycode | 2.3.1 | MIT |
-| qs | 6.15.3 | BSD-3-Clause |
+| qs | 6.16.0 | BSD-3-Clause |
 | range-parser | 1.3.0 | MIT |
 | raw-body | 3.0.2 | MIT |
 | react | 19.2.8 | MIT |
 | readable-stream | 4.7.0 | MIT |
 | redis-errors | 1.2.0 | MIT |
 | require-from-string | 2.0.2 | MIT |
+| reserved-identifiers | 1.2.0 | MIT |
 | router | 2.2.0 | MIT |
 | run-applescript | 7.1.0 | MIT |
 | safe-buffer | 5.2.1 | MIT |
@@ -474,28 +527,39 @@ the licence position.
 | sprintf-js | 1.1.3 | BSD-3-Clause |
 | sql-escaper | 1.5.1 | MIT |
 | ssh2 | 1.17.0 | MIT |
-| ws | 8.21.3 | MIT |
 | standard-as-callback | 2.1.0 | MIT |
 | statuses | 2.0.2 | MIT |
 | string_decoder | 1.3.0 | MIT |
+| stringify-object | 6.0.0 | BSD-2-Clause |
+| style-mod | 4.1.3 | MIT |
+| super-regex | 1.1.0 | MIT |
+| tagged-tag | 1.0.0 | MIT |
 | tarn | 3.1.2 | MIT |
 | tedious | 20.0.0 | MIT |
+| time-span | 5.1.0 | MIT |
 | tiny-typed-emitter | 2.1.0 | MIT |
 | toidentifier | 1.0.1 | MIT |
 | tr46 | 5.1.1 | MIT |
 | tslib | 2.8.1 | 0BSD |
 | tweetnacl | 0.14.5 | Unlicense |
+| type-fest | 4.41.0 | (MIT OR CC0-1.0) |
+| type-fest | 5.9.0 | (MIT OR CC0-1.0) |
 | type-is | 2.1.0 | MIT |
 | undici-types | 6.21.0 | MIT |
 | universalify | 2.0.1 | MIT |
 | unpipe | 1.0.0 | MIT |
 | vary | 1.1.2 | MIT |
+| vscode-languageserver-types | 3.18.3 | MIT |
+| w3c-keyname | 2.2.8 | MIT |
+| web-worker | 1.5.0 | Apache-2.0 |
 | webidl-conversions | 7.0.0 | BSD-2-Clause |
 | whatwg-url | 14.2.0 | MIT |
 | which | 2.0.2 | ISC |
 | wrappy | 1.0.2 | ISC |
+| ws | 8.21.3 | MIT |
 | wsl-utils | 0.1.0 | MIT |
 | xtend | 4.0.2 | MIT |
+| yaml | 2.9.0 | ISC |
 | zod | 4.4.3 | MIT |
 | zod-to-json-schema | 3.25.2 | ISC |
 | zustand | 5.0.15 | MIT |
@@ -506,9 +570,12 @@ the licence position.
 
 ## Notes and flagged items
 
-- **BlueOak-1.0.0** (`isexe`, `sax`): a modern, OSI-approved permissive
+- **BlueOak-1.0.0** (`sax`): a modern, OSI-approved permissive
   license, comparable to MIT/ISC in what it allows. Not copyleft, not a
   compliance concern — flagged only because it is less common than MIT/ISC.
+- **MIT OR CC0-1.0** (`type-fest`, two versions): the recipient may take
+  either licence. Both are permissive; it is listed as its own category for
+  the same reason as the IronRDP packages above.
 - **No GPL, LGPL, AGPL, or SSPL dependencies** were found in the production
   dependency tree. The bundled `openvpn` binary is GPL-2.0 and is not an npm
   dependency; see **Bundled binaries** for how that obligation is met.
@@ -517,11 +584,16 @@ the licence position.
   likewise, is not an npm dependency; see **Bundled binaries**.
 - **No dependency had an unverifiable or missing license field** in the
   production tree audited above.
-- This file was generated by walking the installed `node_modules` tree with
-  `npm ls --all --omit=dev` and reading each package's own `license` field —
-  it was not hand-typed or guessed. If a dependency's declared `license`
+- This file was generated from `package-lock.json`: every package entry not
+  marked `dev` or `devOptional`, with the licence the lockfile records, checked
+  against each installed package's own `package.json` (which supplied the
+  field for `ssh2`, `cpu-features` and `buildcheck`, whose lockfile entries
+  omit it). The six `@lydell/node-pty` platform siblings are one row, as
+  explained above, and `react-dom` and `scheduler` are added by hand because
+  they are bundled from `devDependencies`. It was not hand-typed or guessed. If a dependency's declared `license`
   field is later found to be inaccurate upstream, that inaccuracy would need
   correcting at the source package, not here.
 - Regenerate this file after upgrading or adding a production dependency,
-  since the list above is a snapshot of the tree as installed at the time
-  of the Apache-2.0 migration.
+  since the list above is a snapshot of the tree as resolved when the HTTP
+  client's Scalar-based implementation was replaced (the `@scalar/api-client`,
+  `@scalar/workspace-store` and `vue` packages are no longer in it).

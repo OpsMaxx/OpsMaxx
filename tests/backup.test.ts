@@ -62,6 +62,7 @@ const WRITES_TO_USERDATA = [
   // second copy of the estate, so it is data, not a setting.
   'opsmaxx-data.json.bak',
   'opsmaxx-env-secrets.json',
+  'opsmaxx-http-history.jsonl',
   'opsmaxx-job-approvals.jsonl',
   'opsmaxx-job-templates-aside.json',
   'opsmaxx-job-templates.json',
@@ -76,6 +77,10 @@ const WRITES_TO_USERDATA = [
   'opsmaxx-runbooks.json',
   'opsmaxx-secret-grants.json',
   'opsmaxx-secrets.json',
+  // Written by older versions only: the HTTP client's spec-file allowlist and
+  // its seed marker. Still deleted, so a wipe leaves nothing an upgrade left.
+  'opsmaxx-spec-files.json',
+  'opsmaxx-spec-files.seeded',
   'opsmaxx-startup.json',
   'opsmaxx-vault-bio.json',
   'opsmaxx-vault.json',
@@ -88,7 +93,11 @@ const WRITES_TO_USERDATA = [
 // itself; it lives there because that is where the next person adding a file
 // looks. Naming them HERE as well is what makes the assertion below a decision
 // instead of a subtraction — a file must be in one list or the other.
-const KEPT_ON_PURPOSE = ['instance-id', 'opsmaxx-startup.json', 'update-prefs.json']
+const KEPT_ON_PURPOSE = [
+  'instance-id',
+  'opsmaxx-startup.json',
+  'update-prefs.json'
+]
 
 const EXPECTED_DATA_FILES = WRITES_TO_USERDATA.filter((f) => !KEPT_ON_PURPOSE.includes(f))
 
