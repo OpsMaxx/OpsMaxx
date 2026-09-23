@@ -46,8 +46,8 @@ describe('what happens when one is seen', () => {
     // the retry is not a retry at all.
     const exec = SSH.slice(SSH.indexOf('const first = await execOn'))
     const body = exec.slice(0, exec.indexOf('const second = await execOn'))
-    expect(body.indexOf('invalidate(conn)')).toBeGreaterThan(-1)
-    expect(body.indexOf('invalidate(conn)')).toBeLessThan(body.indexOf('acquire(cfg'))
+    expect(body.indexOf('invalidate(stale)')).toBeGreaterThan(-1)
+    expect(body.indexOf('invalidate(stale)')).toBeLessThan(body.indexOf('acquire(cfg'))
   })
 
   it('retries exactly once', () => {

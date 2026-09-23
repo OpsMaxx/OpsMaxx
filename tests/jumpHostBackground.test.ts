@@ -1,13 +1,22 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { generateKeyPairSync } from 'node:crypto'
-import { writeFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { connect as tcpConnect } from 'node:net'
 import { app } from 'electron'
 import { Client, Server, utils } from 'ssh2'
 import type { SshHop } from '../src/shared/ssh'
 import { fingerprint } from '../src/main/services/knownhosts'
-import { openChain, poolDisposeAll, poolList, sshExec, sshOpenFresh } from '../src/main/services/ssh'
+import {
+  acquire,
+  openChain,
+  poolDisposeAll,
+  poolList,
+  release,
+  setPoolIdle,
+  sshExec,
+  sshOpenFresh
+} from '../src/main/services/ssh'
 import { metricsDisposeAll, metricsSample } from '../src/main/services/metrics'
 import type { SshConnectConfig } from '../src/shared/ssh'
 
@@ -452,5 +461,59 @@ describe('a connection that authenticates after its deadline', () => {
     expect(target.logins).toHaveLength(1)
     expect(bastion.live()).toBe(0)
     expect(target.live()).toBe(0)
+  })
+})
+
+describe('a retried exec whose second connection fails', () => {
+  // sshExec retries once on a refused channel. When the retry's acquire threw,
+  // its finally released the FIRST connection a second time: refs went
+  // negative, the destroy ran twice, and the shared bastion lost a reference
+  // it was still owed -- then was destroyed under a sibling server using it.
+  it('does not take a reference off the bastion a sibling still holds', async () => {
+    const allowed = utils.parseKey(clientKey)
+    if (allowed instanceof Error) throw allowed
+    let logins = 0
+    // Accepts one login, refuses every channel on it, then refuses to log in
+    // again: a server out of MaxSessions that is also going away.
+    const flaky = new Server({ hostKeys: [hostKey] }, (conn) => {
+      conn.on('error', () => undefined)
+      conn.on('authentication', (ctx) => {
+        if (logins > 0 || ctx.method !== 'publickey') return ctx.reject(['publickey'])
+        if (ctx.signature && !allowed.verify(ctx.blob as Buffer, ctx.signature, ctx.hashAlgo)) {
+          return ctx.reject(['publickey'])
+        }
+        if (ctx.signature) logins++
+        ctx.accept()
+      })
+      conn.on('ready', () => conn.on('session', (_accept, reject) => reject()))
+    })
+    await new Promise<void>((r) => flaky.listen(0, HOST, r))
+    const flakyPort = (flaky.address() as { port: number }).port
+    const hostsPath = join(app.getPath('userData'), 'opsmaxx-known-hosts.json')
+    const hosts = JSON.parse(readFileSync(hostsPath, 'utf8'))
+    const trusted = hosts[`${HOST}:${bastion.port}`]
+    hosts[`${HOST}:${flakyPort}`] = { ...trusted, id: `${HOST}:${flakyPort}` }
+    writeFileSync(hostsPath, JSON.stringify(hosts))
+
+    setPoolIdle(0)
+    const held = await acquire(behindBastion(), undefined, false)
+    try {
+      const r = await sshExec(
+        { ...behindBastion(), serverId: 'srv-flaky', port: flakyPort },
+        'uptime',
+        10_000,
+        false
+      )
+      expect(r.error).toBeDefined()
+      expect(logins).toBe(1)
+      await new Promise((res) => setTimeout(res, 200))
+      expect(bastion.live()).toBe(1)
+      const bastionEntry = poolList().find((p) => p.key === 'srv:srv-bastion')
+      expect(bastionEntry?.sessions).toBe(1)
+    } finally {
+      release(held)
+      setPoolIdle(15)
+      await new Promise<void>((r) => flaky.close(() => r()))
+    }
   })
 })

@@ -310,8 +310,13 @@ async function connectClient(
   // A `sock` handed in is a channel forwarded for this connection alone, so
   // it is ours to close as well: on a pooled bastion nothing else would until
   // the bastion itself went away.
-  const discard = (t: NodeJS.ReadableStream | undefined): void =>
-    (t as { destroy?: () => void } | undefined)?.destroy?.()
+  const discard = (t: NodeJS.ReadableStream | undefined): void => {
+    try {
+      ;(t as { destroy?: () => void } | undefined)?.destroy?.()
+    } catch {
+      /* the parent is already gone, and its channel with it */
+    }
+  }
   let auth: ReturnType<typeof authFor>
   try {
     auth = authFor(hop)
@@ -1726,8 +1731,14 @@ export async function sshExec(
      * The bad connection leaves the pool first, so the fresh `acquire` cannot
      * be handed it back.
      */
-    invalidate(conn)
-    release(conn)
+    // Cleared before the second acquire: if that one fails, the finally below
+    // must not release this connection a second time. A double release drove
+    // refs negative and took one more reference off a shared bastion, which
+    // could then be destroyed under a sibling server still using it.
+    const stale = conn
+    conn = null
+    invalidate(stale)
+    release(stale)
     conn = await withDeadline(
       acquire(cfg, undefined, allowPrompt),
       timeoutMs,
