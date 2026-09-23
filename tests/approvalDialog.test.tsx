@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { configure, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { ApprovalWatcher } from '../src/renderer/src/components/ai/ApprovalWatcher'
+import { ARM_MS } from '../src/renderer/src/hooks/useArming'
 import { useApprovalQueue } from '../src/renderer/src/store/approvalQueue'
 import { NO_CONSEQUENCE_TEXT, PREVIEW_MAX_CHARS, contentPreview } from '../src/shared/approvalRisk'
 import { redactOutput } from '../src/main/services/secretRedaction'
@@ -15,6 +16,16 @@ import type { ApprovalRequest, McpAgentSession } from '../src/shared/mcp'
 // was not incorrect — it was four true labels and no meaning. A modal that
 // prints "Risk HIGH" in the same grey as "Workspace" has told the truth and
 // communicated nothing, and no assertion about the data would have caught it.
+
+// The default 1s for findBy/waitFor passed alone and failed five tests at
+// ~1006 ms under the full suite's load. Nothing here is slow; the machine is.
+configure({ asyncUtilTimeout: 5000 })
+
+/** A yes button once its click-arming delay has passed. */
+async function armed(button: HTMLElement): Promise<HTMLElement> {
+  await waitFor(() => expect(button.getAttribute('aria-disabled')).toBe('false'))
+  return button
+}
 
 const T0 = Date.parse('2026-09-07T10:00:00.000Z')
 
@@ -380,17 +391,22 @@ describe('once, or for the session', () => {
   it('sends "once" for Approve once', async () => {
     const h = harness({ approvals: [request({ sessionGrant: 'capability' })] })
     render(<ApprovalWatcher />)
-    await userEvent.click(await screen.findByRole('button', { name: 'Approve once' }))
+    await userEvent.click(await armed(await screen.findByRole('button', { name: 'Approve once' })))
     expect(h.respondApproval).toHaveBeenCalledWith('appr-1', 'approved', 'once')
   })
 
-  it('names the permission, the server and the duration on the session button', async () => {
+  // The visible text is the accessible name (WCAG 2.5.3) and names the unit a
+  // yes covers; the server is in the Where row, and the whole sentence is the
+  // tooltip.
+  it('names the permission and the duration on the session button, the server in its tooltip', async () => {
     const h = harness({ approvals: [request({ sessionGrant: 'capability' })] })
     render(<ApprovalWatcher />)
     const grant = await screen.findByRole('button', {
-      name: 'Allow “Sudo / privilege escalation” on k3s-node-01 for this session'
+      name: 'Allow “Sudo / privilege escalation” this session'
     })
-    await userEvent.click(grant)
+    expect(grant.getAttribute('aria-label')).toBeNull()
+    expect(grant.getAttribute('title')).toBe('Allow “Sudo / privilege escalation” on k3s-node-01 for this session')
+    await userEvent.click(await armed(grant))
     expect(h.respondApproval).toHaveBeenCalledWith('appr-1', 'approved', 'session')
   })
 
@@ -399,9 +415,8 @@ describe('once, or for the session', () => {
       approvals: [request({ sessionGrant: 'tool', toolName: 'update_server', capability: 'manageServers' })]
     })
     render(<ApprovalWatcher />)
-    expect(
-      await screen.findByRole('button', { name: 'Allow update_server on k3s-node-01 for this session' })
-    ).toBeTruthy()
+    const grant = await screen.findByRole('button', { name: 'Allow update_server this session' })
+    expect(grant.getAttribute('title')).toBe('Allow update_server on k3s-node-01 for this session')
   })
 
   it('offers only Approve once for a per-call tool', async () => {
@@ -410,7 +425,7 @@ describe('once, or for the session', () => {
     harness({ approvals: [request({ toolName: 'remove_server', capability: 'manageServers' })] })
     render(<ApprovalWatcher />)
     await screen.findByRole('button', { name: 'Approve once' })
-    expect(screen.queryByRole('button', { name: /for this session/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: /this session/ })).toBeNull()
   })
 
   it('keeps the weight and the focus on Deny with both yeses on screen', async () => {
@@ -418,7 +433,7 @@ describe('once, or for the session', () => {
     render(<ApprovalWatcher />)
     const deny = await screen.findByRole('button', { name: 'Deny' })
     expect(document.activeElement).toBe(deny)
-    expect(screen.getByRole('button', { name: /for this session/ }).className).not.toContain('primary')
+    expect(screen.getByRole('button', { name: /this session/ }).className).not.toContain('primary')
   })
 
   it('shows which permission is being granted', async () => {
@@ -475,7 +490,7 @@ describe('what write_file will write', () => {
   it('says, above the session button, that later writes will not be shown', async () => {
     harness({ approvals: [{ ...writeRequest('x=1'), sessionGrant: 'capability' }] })
     render(<ApprovalWatcher />)
-    const grant = await screen.findByRole('button', { name: /Allow “Write files” on k3s-node-01 for this session/ })
+    const grant = await screen.findByRole('button', { name: 'Allow “Write files” this session' })
     const note = screen.getByText('Later writes in this session won’t be shown to you.')
     // On its own line, not squeezed into the button row: in the row it had to
     // share the width with three buttons and wrapped to one word a line.
@@ -497,5 +512,62 @@ describe('what write_file will write', () => {
     render(<ApprovalWatcher />)
     await screen.findByText(/Restarts cron/)
     expect(screen.queryByLabelText(/File content written by/)).toBeNull()
+  })
+})
+
+// An agent can withdraw its request and ask something else at once, so what is
+// under the pointer can change mid-click. The yeses are inert for ARM_MS after
+// a request appears; the noes never are.
+describe('click-arming', () => {
+  it('ignores Approve once pressed before it arms, and honours it after', async () => {
+    const h = harness({ approvals: [request({ sessionGrant: 'capability' })] })
+    render(<ApprovalWatcher />)
+    const once = await screen.findByRole('button', { name: 'Approve once' })
+    const grant = screen.getByRole('button', { name: /this session/ })
+
+    expect(once.getAttribute('aria-disabled')).toBe('true')
+    expect(grant.getAttribute('aria-disabled')).toBe('true')
+    await userEvent.click(once)
+    await userEvent.click(grant)
+    expect(h.respondApproval).not.toHaveBeenCalled()
+
+    await userEvent.click(await armed(once))
+    expect(h.respondApproval).toHaveBeenCalledWith('appr-1', 'approved', 'once')
+  })
+
+  it('lets Deny through at once', async () => {
+    const h = harness()
+    render(<ApprovalWatcher />)
+    const deny = await screen.findByRole('button', { name: 'Deny' })
+    expect(deny.getAttribute('aria-disabled')).toBeNull()
+    await userEvent.click(deny)
+    expect(h.respondApproval).toHaveBeenCalledWith('appr-1', 'denied')
+  })
+
+  it('ignores a key press that began before it armed and landed after', async () => {
+    const h = harness()
+    render(<ApprovalWatcher />)
+    const once = await screen.findByRole('button', { name: 'Approve once' })
+    fireEvent.keyDown(once, { key: ' ' })
+    await armed(once)
+    // Space fires its click on keyup; `detail` 0 is how a keyboard click reads.
+    fireEvent.click(once, { detail: 0 })
+    expect(h.respondApproval).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(once, { key: ' ' })
+    fireEvent.click(once, { detail: 0 })
+    expect(h.respondApproval).toHaveBeenCalledWith('appr-1', 'approved', 'once')
+  })
+
+  it('re-arms for the next request, which is a new dialog', async () => {
+    const h = harness({ approvals: [request(), request({ id: 'appr-2', action: 'sudo reboot' })] })
+    render(<ApprovalWatcher />)
+    await userEvent.click(await screen.findByRole('button', { name: 'Deny' }))
+    h.fire({ type: 'resolved', request: { ...request(), status: 'denied' } })
+
+    await screen.findByText('sudo reboot')
+    const once = screen.getByRole('button', { name: 'Approve once' })
+    expect(once.getAttribute('aria-disabled')).toBe('true')
+    expect(ARM_MS).toBeGreaterThanOrEqual(500)
   })
 })

@@ -162,6 +162,24 @@ function CreateSessionForm({
     }
   }
 
+  // Does what it says: turns the bridge on, then says whether it is listening.
+  // It used to open the Security page and leave the switch to be found there.
+  const turnOn = async (): Promise<void> => {
+    const result = await window.opsmaxx?.aiMcp.setConfig({ enabled: true })
+    const status = await window.opsmaxx?.aiMcp.status()
+    if (status?.running && status.port) {
+      const port = status.port
+      setIssued((i) => (i ? { ...i, port } : i))
+      toast(`AI & MCP access is on, listening on 127.0.0.1:${port}. The snippet below now has the port.`, 'ok')
+      return
+    }
+    toast(
+      `AI & MCP access did not start${result?.error ? `: ${result.error}` : ''}. Another program may be using the port.`,
+      'error',
+      { label: 'Open AI security', run: () => openAi('security') }
+    )
+  }
+
   if (issued) {
     const url = `http://127.0.0.1:${issued.port}/mcp`
     const jsonConfig = JSON.stringify(
@@ -185,7 +203,7 @@ function CreateSessionForm({
                 listening for any agent.
               </div>
             </div>
-            <button className="btn sm primary" onClick={() => openAi('security')}>
+            <button className="btn sm primary" onClick={() => void turnOn()}>
               Turn on AI access
             </button>
           </div>

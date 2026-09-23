@@ -15,7 +15,10 @@
   /* A column, so the toast slot stacks above the prompt. See .toasts.in-slot. */
   flex-direction: column;
   align-items: center;
-  justify-content: center;
+  /* `safe`, and the prompt scrolls inside itself: with toasts above it, a tall
+     prompt must shrink rather than push its buttons off the bottom. */
+  justify-content: safe center;
+  overflow: hidden;
   padding: 24px;
   background: var(--bg-scrim);
 }
@@ -25,6 +28,9 @@
 }
 
 .agent-approval {
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
   width: 100%;
   max-width: 480px;
   background: var(--bg-card);

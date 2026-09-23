@@ -385,3 +385,112 @@ describe('the write_file preview', () => {
     expect(listRecentApprovals()[0].contentPreview).toBeUndefined()
   })
 })
+
+// Found by killing an MCP client mid-request: the question stayed on screen
+// until the fuse ran out, and was then announced and audited as "told no by the
+// clock" about an agent that had long gone. gate() hands the MCP request's
+// abort signal through; the request now ends when it fires.
+describe('an agent that disconnects while waiting', () => {
+  beforeEach(() => {
+    resetApprovalVolumeForTests()
+    resetMcpAuthForTests()
+    setMcpConfig({ approvalTimeoutSeconds: 60 })
+  })
+
+  it('ends the request as disconnected, not as a timeout', async () => {
+    const events: ApprovalEvent[] = []
+    const off = onApprovalEvent((e) => events.push(e))
+    const abort = new AbortController()
+    const pending = req({ signal: abort.signal })
+    expect(listPendingApprovals()).toHaveLength(1)
+
+    abort.abort()
+
+    expect(await pending).toBe('disconnected')
+    expect(listPendingApprovals()).toHaveLength(0)
+    const resolved = events.find((e) => e.type === 'resolved')
+    expect(resolved?.request.status).toBe('disconnected')
+    off()
+  })
+
+  it('does not put the signal on the request the renderer is sent', () => {
+    void req({ signal: new AbortController().signal })
+    expect(listPendingApprovals()[0]).not.toHaveProperty('signal')
+    denyAllPending()
+  })
+
+  it('starts no deny cooldown, since nobody decided anything', async () => {
+    const abort = new AbortController()
+    const first = req({ signal: abort.signal })
+    abort.abort()
+    expect(await first).toBe('disconnected')
+
+    const again = req()
+    expect(listPendingApprovals()).toHaveLength(1)
+    respondToApproval(listPendingApprovals()[0].id, 'denied')
+    expect(await again).toBe('denied')
+  })
+})
+
+// A disconnect frees the prompt and starts no cooldown, so without a bound an
+// agent could cycle benign -> abort -> dangerous as fast as it likes. Past three
+// withdrawals a minute, the session is not asked again until they age out.
+describe('withdrawing requests too often', () => {
+  beforeEach(() => {
+    resetApprovalVolumeForTests()
+    resetMcpAuthForTests()
+    setMcpConfig({ approvalTimeoutSeconds: 60 })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    denyAllPending()
+    resetApprovalVolumeForTests()
+  })
+
+  async function withdraw(action: string, sessionId = 'sess-1'): Promise<void> {
+    const abort = new AbortController()
+    const p = req({ action, sessionId, signal: abort.signal })
+    abort.abort()
+    expect(await p).toBe('disconnected')
+  }
+
+  it('refuses the session\'s next request after three in a minute, without asking anyone', async () => {
+    await withdraw('a')
+    await withdraw('b')
+    await withdraw('c')
+
+    expect(await req({ action: 'd' })).toBe('refused-withdrawn')
+    expect(listPendingApprovals()).toHaveLength(0)
+  })
+
+  it('holds it to the session that withdrew', async () => {
+    await withdraw('a')
+    await withdraw('b')
+    await withdraw('c')
+
+    void req({ action: 'd', sessionId: 'sess-2' })
+    expect(listPendingApprovals()).toHaveLength(1)
+  })
+
+  it('still asks a containment request, the emergency brake', async () => {
+    await withdraw('a')
+    await withdraw('b')
+    await withdraw('c')
+
+    void req({ action: 'cancel', containment: true })
+    expect(listPendingApprovals()).toHaveLength(1)
+  })
+
+  it('asks again once the withdrawals are a minute old', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.parse('2026-09-23T10:00:00Z'))
+    await withdraw('a')
+    await withdraw('b')
+    await withdraw('c')
+    expect(await req({ action: 'd' })).toBe('refused-withdrawn')
+
+    vi.setSystemTime(Date.parse('2026-09-23T10:01:01Z'))
+    void req({ action: 'e' })
+    expect(listPendingApprovals()).toHaveLength(1)
+  })
+})

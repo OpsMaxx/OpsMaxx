@@ -175,3 +175,12 @@ describe('a request nobody was asked about', () => {
     expect(o.detail).not.toMatch(/You refused/)
   })
 })
+
+describe('a request whose agent disconnected', () => {
+  it('is neither a denial by you nor a timeout', () => {
+    const o = auditOutcome(e({ approval: 'disconnected', result: 'denied' }))
+    expect(o.label).toBe('Cancelled — agent disconnected')
+    expect(o.decidedBy).toBeNull()
+    expect(o.detail).not.toMatch(/You refused|timeout|clock/)
+  })
+})

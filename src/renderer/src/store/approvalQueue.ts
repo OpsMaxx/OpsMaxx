@@ -63,6 +63,17 @@ function announce(request: ApprovalRequest): void {
     toast(`Approved “${where}”. ${request.agentName} was allowed to run it.${further}`, 'info', audit)
     return
   }
+  if (request.status === 'disconnected') {
+    // Not the clock and not you: the agent went away (killed, or it cancelled
+    // the call) while the question was on screen. Said as that, because "told
+    // no by the clock" about an agent nobody was left to tell was false twice.
+    toast(
+      `The agent disconnected before you answered: “${where}” did not run. Nothing was decided.`,
+      'info',
+      audit
+    )
+    return
+  }
   if (request.status === 'timeout') {
     // Deliberately not the same sentence as a denial, and deliberately the
     // loud kind. Fail-closed on timeout is the right default, but an operator

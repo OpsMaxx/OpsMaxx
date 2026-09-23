@@ -247,7 +247,8 @@ consequences of closing that are deliberate and are not left to the capability's
   `add_server` — which has no server id yet and so shares one elevation key across every add in a
   session — approved the first write and then wrote every one after it silently. `update_server`
   is scoped to itself rather than per-call: its dialog offers a second answer, **Allow
-  update_server on *server* for this session**, after which further changes to that same
+  update_server this session** (in full, with the server, in its tooltip), after which further
+  changes to that same
   connection in that same session do not ask. **Approve once** covers the one change. Either yes
   reaches no other tool, no other server and no later session.
 
@@ -434,8 +435,29 @@ tool call on an in-memory pending request — nothing is written to disk until i
 request only clears when:
 
 - a human answers it in the approval dialog or on the **Approvals** screen (`respondToApproval`),
-- it times out (`approvalTimeoutSeconds` in Security, 1–10 minutes) and is treated as denied, or
-- **Stop all AI access** denies every pending request at once (`denyAllPending`).
+- it times out (`approvalTimeoutSeconds` in Security, 1–10 minutes) and is treated as denied,
+- **Stop all AI access** denies every pending request at once (`denyAllPending`), or
+- the agent's MCP request goes away first — the client was killed, or cancelled the call. `gate()`
+  passes the request's abort signal through, and the request ends at once as `disconnected`:
+  nothing runs, it is announced as "The agent disconnected before you answered", and it is audited
+  as **Cancelled — agent disconnected**, not as a timeout or a denial. It starts no deny cooldown,
+  because nobody decided anything. If the operator's yes and the disconnect land together,
+  `gate()` re-reads the signal after the answer and runs nothing (audited the same way), and a
+  session grant given in that moment is not remembered.
+
+**Withdrawing is bounded, and a yes is armed.** Because an agent can now end its own request, it
+could otherwise ask something benign, withdraw it, and ask something else in its place while the
+operator is mid-click. Two things stop that:
+
+- **Click-arming.** For 750 ms after a new request appears — or, on the Approvals page, after the
+  list of waiting requests changes — **Approve once** and the session grant are dimmed,
+  `aria-disabled` and inert, and an Enter or Space that went down before they armed is ignored
+  when it lands. **Deny**, **Decide later** and the kill switch are never held back. The SSH
+  agent's signing prompt arms its Allow buttons the same way (`hooks/useArming.ts`).
+- **A withdrawal limit.** After three withdrawals from one session inside a minute, that
+  session's further requests are not asked until the oldest ages out. The agent is told why,
+  and the audit log records each one as **Denied — not asked** with that reason — never as a
+  refusal by you. A containment request (the emergency brake) is still asked.
 
 There is no code path from the MCP/HTTP surface into `respondToApproval` — approving a request
 requires the renderer's IPC handler, which only the human-facing UI calls. An agent cannot approve
@@ -444,12 +466,15 @@ its own request by construction, not by convention.
 **Two ways to say yes, and each says how far it reaches.**
 
 - **Approve once** authorises this call and nothing after it. The next call asks again.
-- **Allow "*permission*" on *server* for this session** also remembers the answer, in memory, for
+- **Allow "*permission*" this session** also remembers the answer, in memory, for
   that permission on that server **under the same policy rule** until the agent's session ends or
   AI access is stopped. The remembered key is session + server + permission + the policy engine's
   reason for asking, so a grant given under "Terminal commands require approval" does not answer
   a path rule that asks on its own account. For a tool whose grant `gate()` narrows to itself
-  (`update_server`) the button names the tool instead of the permission. Calls it carries are
+  (`update_server`) the button names the tool instead of the permission. The server is left off
+  the button — the dialog's Where row names it — and the full sentence, *Allow "permission" on
+  server for this session*, is its tooltip. A long permission name wraps inside the button rather
+  than pushing the footer onto a third row. Calls it carries are
   audited as `approved-earlier`, and the call that gave it as `approved-for-session`, so every
   carried row has one to point back to.
 
@@ -508,7 +533,8 @@ refusal by the policy itself is shown as **Blocked by policy** with the rule tha
 as allowed — including an `ask` on a call that names no single server (the fleet-wide reads), which
 has nobody to put the question to and is refused. A request OpsMaxx declined to put to anyone,
 because the session already had too many open or the same action was just denied, is shown as
-**Denied — not asked**, never as a refusal by you. Rows are written one per line, **append-only** (a crash
+**Denied — not asked**, never as a refusal by you, and one whose agent disconnected while it waited
+as **Cancelled — agent disconnected**. Rows are written one per line, **append-only** (a crash
 mid-write can corrupt at most the last line). Every free-text field (`action`, `error`) is passed
 through the same redaction (`secretRedaction.ts`) used for tool output before it's written, so the
 audit trail itself never becomes a place secrets end up.

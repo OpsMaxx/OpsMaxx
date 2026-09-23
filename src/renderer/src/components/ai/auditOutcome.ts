@@ -40,6 +40,18 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
         'Nobody answered before the approval timeout, so OpsMaxx denied it. That is the fail-closed default, not a decision somebody made.'
     }
   }
+  if (e.approval === 'disconnected') {
+    return {
+      label: 'Cancelled — agent disconnected',
+      decidedBy: null,
+      tone: 'muted',
+      // The error says which: gone before anyone answered, or approved and
+      // gone before it could run. Either way nothing ran.
+      detail: e.error
+        ? `${e.error}.`
+        : 'The agent disconnected before anyone answered, so this did not run. Nobody decided it.'
+    }
+  }
   if (e.approval === 'denied') {
     return { label: 'Denied', decidedBy: 'you', tone: 'danger', detail: 'You refused this request.' }
   }

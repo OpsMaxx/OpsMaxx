@@ -5,6 +5,7 @@ import type { ApprovalRequest, AuditEntry, ContentPreview, McpAgentSession } fro
 import { describeConsequence, describeDenial, explainRisk } from '../../../../shared/approvalRisk'
 import { duration } from '../../lib/format'
 import { ToastSlot } from '../common/Toasts'
+import { useArming } from '../../hooks/useArming'
 import {
   KILL_SWITCH_FAILED,
   canExtendFuse,
@@ -167,6 +168,22 @@ export function sessionGrantLabel(request: ApprovalRequest): string | null {
 }
 
 /**
+ * The same grant as the button's visible text: the unit a yes covers — one
+ * tool, or a whole permission — without the server, which the Where row names.
+ *
+ * Not a generic "Allow for this session": that hid from a sighted operator
+ * whether the yes reached one tool or every call under the permission, and
+ * the rows above say neither. It is also the button's accessible name, so what
+ * is read aloud is what is on screen (WCAG 2.5.3); the full sentence, server
+ * included, is its tooltip.
+ */
+export function sessionGrantShortLabel(request: ApprovalRequest): string | null {
+  if (request.sessionGrant === 'tool' && request.toolName) return `Allow ${request.toolName} this session`
+  if (request.sessionGrant) return `Allow “${capabilityLabel(request.capability)}” this session`
+  return null
+}
+
+/**
  * Said next to a session grant on a write. The preview is the reason to
  * approve a write at all, and a remembered yes skips the dialog -- and with it
  * the preview -- for every later write it covers.
@@ -254,6 +271,8 @@ export function ApprovalDialog({
   const extendable = canExtendFuse()
   const grantLabel = sessionGrantLabel(request)
   const [stopFailed, setStopFailed] = useState(false)
+  // The dialog is keyed on the request, so this re-arms for every new one.
+  const { armed, allow, noteKey } = useArming(request.id)
 
   const toneText =
     risk.tone === 'danger' ? 'var(--danger)' : risk.tone === 'warn' ? 'var(--warn)' : 'var(--text-muted)'
@@ -489,18 +508,13 @@ export function ApprovalDialog({
         {grantLabel && request.contentPreview && (
           <div
             data-testid="later-writes-note"
-            style={{
-              padding: '0 var(--sp-5)',
-              color: 'var(--warn)',
-              fontSize: 'var(--fs-caption)',
-              textAlign: 'right'
-            }}
+            className="approval-note approval-later-writes"
           >
             {LATER_WRITES_UNSEEN}
           </div>
         )}
         {stopFailed && (
-          <div className="approval-stop-failed state-alarm" role="alert">
+          <div className="approval-note approval-stop-failed state-alarm" role="alert">
             <span className="state-dot is-alarm" aria-hidden="true" />
             {KILL_SWITCH_FAILED}. This request is still waiting on you.
           </div>
@@ -513,7 +527,7 @@ export function ApprovalDialog({
               three screens away in AI & MCP > Security; this calls the same IPC
               rather than reimplementing any of it. */}
           <button
-            className="btn sm"
+            className="btn sm approval-kill"
             style={{ color: 'var(--danger)', borderColor: 'transparent', background: 'transparent' }}
             onClick={() => void denyAndStopAllAi().then((ok) => setStopFailed(!ok))}
           >
@@ -536,15 +550,35 @@ export function ApprovalDialog({
             </button>
             {/* Two yeses, and they say different things. "Approve once" is this
                 call; the second button remembers the answer for the rest of the
-                session, and its label is the grant's full extent. Absent for a
+                session, and its name is the grant's full extent. Absent for a
                 per-call tool, where main would not honour it. Neither carries
                 any weight: Deny keeps the fill and the focus. */}
+            {/* Named by its unit, without the server (the Where row has it);
+                the full sentence is the tooltip. It is the one answer that
+                shrinks, wrapping inside itself, so a long permission name makes
+                the button taller rather than pushing the footer to a third row
+                — which, with toasts, put Deny off the window. */}
             {grantLabel && (
-              <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'session')}>
-                {grantLabel}
+              <button
+                className="btn approval-grant"
+                title={grantLabel}
+                aria-disabled={!armed}
+                onKeyDown={noteKey}
+                onClick={(e) => {
+                if (allow(e)) void respondToApproval(request.id, 'approved', 'session')
+              }}
+              >
+                {sessionGrantShortLabel(request)}
               </button>
             )}
-            <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'once')}>
+            <button
+              className="btn"
+              aria-disabled={!armed}
+              onKeyDown={noteKey}
+              onClick={(e) => {
+                if (allow(e)) void respondToApproval(request.id, 'approved', 'once')
+              }}
+            >
               Approve once
             </button>
             <button

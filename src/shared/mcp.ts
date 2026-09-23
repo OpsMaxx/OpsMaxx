@@ -426,7 +426,11 @@ export interface ApprovalRequest {
   action: string
   risk: 'low' | 'medium' | 'high'
   createdAt: string
-  status: 'pending' | 'approved' | 'denied' | 'timeout'
+  /**
+   * `disconnected`: the agent's connection closed while it waited, so there was
+   * no one left to answer. Neither a denial nor the clock — see approvals.ts.
+   */
+  status: 'pending' | 'approved' | 'denied' | 'timeout' | 'disconnected'
   resolvedAt?: string
 
   /**
@@ -562,6 +566,8 @@ export type AuditApproval =
   | 'approved-earlier'
   | 'denied'
   | 'timeout'
+  /** The agent's connection closed before anyone answered. Nothing ran. */
+  | 'disconnected'
   /**
    * OpsMaxx declined to put the question to anyone: the session already had
    * too many approval requests open, or the same action was denied moments
