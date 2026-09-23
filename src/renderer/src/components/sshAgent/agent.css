@@ -12,10 +12,16 @@
      after ApprovalWatcher, so this one is in front. */
   z-index: var(--z-approval);
   display: flex;
+  /* A column, so the toast slot stacks above the prompt. See .toasts.in-slot. */
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 24px;
   background: var(--bg-scrim);
+}
+
+.agent-approval-scrim .toasts.in-slot {
+  width: min(480px, 100%);
 }
 
 .agent-approval {

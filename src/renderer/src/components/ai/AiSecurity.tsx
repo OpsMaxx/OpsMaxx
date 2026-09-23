@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Copy, Octagon, Plus } from 'lucide-react'
-import { toast } from '../../store/toast'
+import { clsx } from '../../lib/format'
+import { dismissToast, toast } from '../../store/toast'
 import { openAi } from '../../store/nav'
 import type { McpGlobalConfig } from '../../../../shared/mcp'
 import { Switch } from '../common/Switch'
@@ -41,6 +42,9 @@ async function buildsClause(): Promise<string> {
   }
 }
 
+/** The one "could not listen" toast; see `update`. */
+const BIND_FAILED = 'mcp-bind-failed'
+
 function copy(text: string): void {
   navigator.clipboard.writeText(text)
   toast('Copied')
@@ -56,7 +60,13 @@ export function AiSecurity(): React.JSX.Element {
 
   const load = (): void => {
     void window.opsmaxx?.aiMcp.getConfig().then((c) => c && setConfig(c))
-    void window.opsmaxx?.aiMcp.status().then((s) => s && setStatus(s))
+    void window.opsmaxx?.aiMcp.status().then((s) => {
+      if (!s) return
+      setStatus(s)
+      // However it came to be listening — this page, Connect an agent, or a
+      // restart — a failure to listen is no longer true once it is.
+      if (s.running) dismissToast(BIND_FAILED)
+    })
     // Read, not assumed. `null` stays null when either call fails, and the
     // confirmation then says it could not tell rather than printing a zero
     // nobody measured — a "0 sessions" on an emergency stop is the one number
@@ -84,6 +94,9 @@ export function AiSecurity(): React.JSX.Element {
     if (!result) return
     setConfig(result.config)
     if (result.error) {
+      // Keyed, so a second failed attempt (every keystroke in the port field
+      // retries while the bridge is meant to be on) replaces this rather than
+      // stacking a copy per port number.
       toast(
         `OpsMaxx could not listen on port ${result.config.port}: ${result.error}. Another program is probably using it.`,
         'error',
@@ -93,8 +106,13 @@ export function AiSecurity(): React.JSX.Element {
             portRef.current?.focus()
             portRef.current?.select()
           }
-        }
+        },
+        { key: BIND_FAILED }
       )
+    } else {
+      // Listening now, or deliberately off: either way the failure it reported
+      // is no longer true, and a sticky error left up says it still is.
+      dismissToast(BIND_FAILED)
     }
     load()
   }
@@ -159,17 +177,23 @@ export function AiSecurity(): React.JSX.Element {
       <h2>Security</h2>
       <div className="sub">Global configuration for the OpsMaxx MCP bridge itself.</div>
 
+      {/* The switch shows whether the bridge is LISTENING, not whether it is
+          meant to be. With the port taken it was drawn on beside text saying
+          Off, and pressing it then turned the setting off rather than trying
+          again. Now a press from off always asks main to start it. */}
       <div className="setting-row">
         <div className="s-info">
           <div className="s-title">Enable AI & MCP access</div>
-          <div className="s-desc">
+          <div className={clsx('s-desc', config.enabled && !status.running && 'state-alarm')}>
             {status.running
               ? `Listening on 127.0.0.1:${port} — never reachable from outside this machine.`
-              : 'Off. No AI agent can reach OpsMaxx while disabled.'}
+              : config.enabled
+                ? `Not listening: OpsMaxx could not open 127.0.0.1:${config.port}. No AI agent can reach it until it does — pick another port, or turn this on again once the port is free.`
+                : 'Off. No AI agent can reach OpsMaxx while disabled.'}
           </div>
         </div>
         <Switch
-          checked={config.enabled}
+          checked={status.running}
           label="Enable AI & MCP access"
           onChange={(v) => update({ enabled: v })}
         />

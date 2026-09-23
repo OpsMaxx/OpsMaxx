@@ -93,9 +93,16 @@ describe('layer tokens', () => {
   it('keeps the order the rules had before they were tokens', () => {
     expect(zOf('.scrim')).toBeLessThan(zOf('.menu'))
     expect(zOf('.menu')).toBeLessThan(zOf('.palette-scrim'))
-    expect(zOf('.palette-scrim')).toBeLessThan(zOf('.tip-card'))
-    expect(zOf('.tip-card')).toBeLessThan(zOf('.tour-card'))
+    expect(zOf('.palette-scrim')).toBeLessThan(zOf('.tour-card'))
     expect(zOf('.tab-overflow-scrim')).toBeLessThan(zOf('.tab-overflow-menu'))
+  })
+
+  // The one layer moved DOWN. A feature tip is a note beside a view; at 880 it
+  // drew over the command palette's scrim and over every dialog.
+  it('keeps a feature tip under the palette and every dialog', () => {
+    expect(zOf('.tip-card')).toBeLessThan(zOf('.scrim'))
+    expect(zOf('.tip-card')).toBeLessThan(zOf('.palette-scrim'))
+    expect(zOf('.tip-card')).toBeGreaterThan(zOf('.panel-info-pop'))
   })
 
   // A CSS declaration, a style object, an assignment, or `setProperty`.

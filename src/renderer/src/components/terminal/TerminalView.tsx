@@ -17,6 +17,7 @@ import { adviseOnError, classifyConnectionError } from '../../lib/connectionErro
 import { clsx } from '../../lib/format'
 import type { TerminalTransport } from '../../lib/transport'
 import type { Server } from '../../types'
+import { resolveScheme } from '../../../../shared/terminalTheme'
 
 // ---- Simulated demo shell --------------------------------------------------
 const MOCK: Record<string, string> = {
@@ -101,11 +102,25 @@ function useDemoSession(server: Server, hostRef: React.RefObject<HTMLDivElement 
   }, [server.id])
 }
 
+/**
+ * The chosen scheme's own background, for the padding around the grid.
+ *
+ * xterm paints only its own canvas, so `.terminal-wrap`'s padding showed the
+ * app's `--bg-terminal` in a frame around, say, Dracula. Undefined for the app
+ * palette and for an ANSI-only scheme, which keep the app's background anyway.
+ */
+function useSchemeBackground(): string | undefined {
+  const id = useApp((s) => s.settings.terminalScheme)
+  const custom = useApp((s) => s.settings.terminalCustomSchemes)
+  return resolveScheme(id, custom)?.background
+}
+
 function DemoTerminal({ server }: { server: Server }): React.JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   useDemoSession(server, hostRef)
+  const background = useSchemeBackground()
   return (
-    <div className="terminal-wrap">
+    <div className="terminal-wrap" style={{ background }}>
       <div className="xterm-host" ref={hostRef} />
     </div>
   )
@@ -492,6 +507,7 @@ function RealTerminal({
    * scrollback to survive the shell.
    */
   const closeOnExit = useApp((s) => s.settings.closeTabOnShellExit !== false)
+  const background = useSchemeBackground()
   useEffect(() => {
     if (!dead || !onClose || !closeOnExit) return
     if (classifyConnectionError(dead) !== 'exited') return
@@ -522,6 +538,7 @@ function RealTerminal({
   return (
     <div
       className="terminal-wrap"
+      style={{ background }}
       // Ctrl+wheel zooms, matching every other terminal emulator.
       onWheel={(e) => {
         if (!e.ctrlKey && !e.metaKey) return
