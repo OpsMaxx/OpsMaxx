@@ -20,5 +20,7 @@ export function ApprovalWatcher(): React.JSX.Element | null {
   const current = nextUndeferred(pending, deferred)
   if (!current) return null
 
-  return <ApprovalDialog request={current} waiting={pending.length} />
+  // Keyed on the request, so what one dialog learned (a kill switch that
+  // failed) is not shown on the next queued request as though it were news.
+  return <ApprovalDialog key={current.id} request={current} waiting={pending.length} />
 }

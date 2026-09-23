@@ -2,11 +2,12 @@
 import { describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { act, render, screen } from '@testing-library/react'
+import { act, render, screen, waitFor } from '@testing-library/react'
+import { useState } from 'react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { ApprovalWatcher } from '../src/renderer/src/components/ai/ApprovalWatcher'
-import { Toasts } from '../src/renderer/src/components/common/Toasts'
+import { ToastSlot, Toasts } from '../src/renderer/src/components/common/Toasts'
 import { KILL_SWITCH_FAILED, useApprovalQueue } from '../src/renderer/src/store/approvalQueue'
 import { toast } from '../src/renderer/src/store/toast'
 import type { ApprovalRequest } from '../src/shared/mcp'
@@ -101,6 +102,43 @@ describe('toasts while an approval is up', () => {
   })
 })
 
+describe('two approvals up at once', () => {
+  // The AI dialog re-renders every second for its countdown. With an inline
+  // ref it re-registered its slot each time and, chosen as last-registered,
+  // pulled the stack under the SSH agent prompt in front of it, re-mounting
+  // every role="alert" toast so a screen reader announced it again.
+  it('keeps toasts in the front slot, and does not re-mount them', () => {
+    let tick: () => void = () => undefined
+    function Ticking(): React.JSX.Element {
+      const [, set] = useState(0)
+      tick = () => set((n) => n + 1)
+      return (
+        <div data-testid="behind">
+          <ToastSlot />
+        </div>
+      )
+    }
+    stubBridge({})
+    render(
+      <>
+        <Ticking />
+        <div data-testid="front">
+          <ToastSlot />
+        </div>
+        <Toasts />
+      </>
+    )
+    act(() => toast('Something failed', 'error'))
+    const node = screen.getByRole('alert')
+    expect(screen.getByTestId('front').contains(node)).toBe(true)
+
+    for (let i = 0; i < 5; i++) act(() => tick())
+
+    expect(screen.getByRole('alert')).toBe(node)
+    expect(screen.getByTestId('front').contains(node)).toBe(true)
+  })
+})
+
 describe('the kill switch failing', () => {
   it('says so in the dialog, not only in a toast', async () => {
     withApproval(vi.fn(async () => undefined as never))
@@ -111,6 +149,20 @@ describe('the kill switch failing', () => {
     const alert = await screen.findByRole('alert')
     expect(alert.textContent).toContain(KILL_SWITCH_FAILED)
     expect(alert.closest('[role="dialog"]')).not.toBeNull()
+  })
+})
+
+describe('the next queued request', () => {
+  it('does not inherit the previous one\'s kill switch failure', async () => {
+    withApproval(vi.fn(async () => undefined as never))
+    render(<ApprovalWatcher />)
+    await userEvent.click(await screen.findByRole('button', { name: /Deny and stop all AI access/ }))
+    await screen.findByRole('alert')
+
+    act(() => useApprovalQueue.setState({ pending: [{ ...approval, id: 'appr-2' }] }))
+
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull())
+    expect(screen.getByRole('dialog', { name: 'AI action requires approval' })).toBeTruthy()
   })
 })
 
