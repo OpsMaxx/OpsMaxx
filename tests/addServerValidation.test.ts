@@ -220,13 +220,17 @@ describe('a profile can be checked before it is saved', () => {
     expect(body).not.toContain('acquire(')
   })
 
-  // A chain that failed on hop three still opened hops one and two, and leaking
-  // those is how a form with a typo in it holds connections open on a bastion.
+  // A chain that failed part-way is closed by openChainDirect itself (tested
+  // against real servers in tests/jumpHostBackground.test.ts); a chain that
+  // opened is closed here, every client of it, not only the last.
   it('closes every client it opened, in a finally', () => {
     const i = ssh.indexOf('export async function sshTest')
     const body = ssh.slice(i, i + 1600)
     expect(body).toContain('} finally {')
-    expect(body).toMatch(/for \(const c of chain\?\.clients \?\? \[\]\) c\.end\(\)/)
+    expect(body).toContain('if (chain) closeChain(chain)')
+    const j = ssh.indexOf('function closeChain(')
+    expect(j).toBeGreaterThan(-1)
+    expect(ssh.slice(j, j + 400)).toContain('for (const c of chain.clients)')
   })
 
   /**
