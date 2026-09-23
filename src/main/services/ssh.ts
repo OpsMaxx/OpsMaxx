@@ -8,7 +8,7 @@ import type { SshCloseInfo, SshConnectConfig, SshHop, SshStatus, SshStatusPhase 
 import type { CloudTarget } from '../../shared/cloud'
 import { agentForHop } from '../../shared/sshAgent'
 import { debugRecord } from './debugLog'
-import { verifyHostKey } from './knownhosts'
+import { hostKeyUnaskable, verifyHostKey } from './knownhosts'
 // Names only, and only for an error message: a hop is addressed by the
 // friendly name of a saved server, so that is what a failure has to say.
 import { getCachedServer } from './mcpDataCache'
@@ -482,13 +482,17 @@ async function connectClient(
       // forever. Saying which of the two it is turns "unreachable" into
       // something the user can finish in one action.
       if (refusedHostKey) {
+        const keyId = hop.hostKeyId ?? `${hop.host}:${hop.port || 22}`
         reject(
           new Error(
-            allowPrompt
-              ? `The host key for ${hop.hostKeyId ?? `${hop.host}:${hop.port || 22}`} was not accepted.`
-              : `OpsMaxx has no trusted host key for ${hop.hostKeyId ?? `${hop.host}:${hop.port || 22}`}, ` +
-                'and a background check is not allowed to ask for one. Open a terminal to this server ' +
-                'once and confirm its fingerprint; checks will run on their own after that.'
+            hostKeyUnaskable(keyId)
+              ? `OpsMaxx has no trusted host key for ${keyId} and no open window to ask in. ` +
+                'Open OpsMaxx and connect to this server once to confirm its fingerprint.'
+              : allowPrompt
+                ? `The host key for ${hop.hostKeyId ?? `${hop.host}:${hop.port || 22}`} was not accepted.`
+                : `OpsMaxx has no trusted host key for ${hop.hostKeyId ?? `${hop.host}:${hop.port || 22}`}, ` +
+                  'and a background check is not allowed to ask for one. Open a terminal to this server ' +
+                  'once and confirm its fingerprint; checks will run on their own after that.'
           )
         )
         return

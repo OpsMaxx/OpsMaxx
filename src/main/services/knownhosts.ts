@@ -1,4 +1,5 @@
-import { app, dialog } from 'electron'
+import { app } from 'electron'
+import { askInWindow } from './promptWindow'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -48,6 +49,17 @@ export function knownHostForget(id: string): void {
   write(map)
 }
 
+/**
+ * Hosts whose first-contact prompt could not be shown because OpsMaxx had no
+ * window open, so the connection error can say that instead of "not
+ * accepted" — which reads as though somebody pressed Cancel. Read once.
+ */
+const unaskable = new Set<string>()
+
+export function hostKeyUnaskable(id: string): boolean {
+  return unaskable.delete(id)
+}
+
 // Collapses concurrent prompts for the same host into one dialog — metrics,
 // SFTP and a terminal can all connect at once on first use.
 const pending = new Map<string, Promise<boolean>>()
@@ -76,8 +88,7 @@ export function verifyHostKey(
     if (known.fingerprint === fp) return Promise.resolve(true)
     // A changed key is either a rebuilt server or an interception. Never decide
     // this silently — refuse and make the user act.
-    return dialog
-      .showMessageBox({
+    return askInWindow({
         type: 'error',
         title: 'Host key changed',
         message: `The host key for ${id} does not match the one previously trusted.`,
@@ -117,8 +128,7 @@ export function verifyHostKey(
   const openssh = lookupInKnownHosts(readOpenSshKnownHosts(), host, port, fingerprint, fp)
 
   if (openssh.revoked) {
-    return dialog
-      .showMessageBox({
+    return askInWindow({
         type: 'error',
         title: 'Host key revoked',
         message: `The host key for ${id} is marked @revoked in your ~/.ssh/known_hosts.`,
@@ -130,8 +140,7 @@ export function verifyHostKey(
   }
 
   const recognised = openssh.trusted
-  const prompt = dialog
-    .showMessageBox({
+  const prompt = askInWindow({
       type: recognised ? 'question' : 'warning',
       title: recognised ? 'Confirm server' : 'Unknown server',
       message: recognised
@@ -152,7 +161,9 @@ export function verifyHostKey(
       cancelId: 1
     })
     .then((r) => {
-      if (r.response !== 0) return false
+      // No window to ask in is a refusal, as Cancel is: see askInWindow.
+      if (!r) unaskable.add(id)
+      if (r?.response !== 0) return false
       const current = read()
       current[id] = { id, fingerprint: fp, addedAt: new Date().toISOString() }
       write(current)
