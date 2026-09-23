@@ -180,6 +180,17 @@ function seal(data: unknown): string {
 }
 
 export function loadData(): unknown | null {
+  // Before `ready` a sealed file cannot be opened — safeStorage throws "cannot
+  // be used before app is ready" — and inside the try below that throw reads
+  // exactly like a corrupt primary: it went to the backup, failed there too,
+  // and answered null, which every caller takes to mean "this machine has
+  // nothing". Anything that saved on that answer would write an empty estate
+  // over a perfectly good one. So an early read is refused outright, here,
+  // before the fallback can misfile it. `?.` because test doubles of
+  // `electron` may not carry isReady; they stand for a ready app.
+  if (app.isReady?.() === false) {
+    throw new Error('loadData() called before app is ready; the data file cannot be unsealed yet')
+  }
   try {
     if (existsSync(FILE)) {
       const { value, sealed } = readOne(FILE)
