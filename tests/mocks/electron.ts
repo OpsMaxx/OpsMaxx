@@ -62,10 +62,23 @@ export const ipcMain = {
   }
 }
 
-// backup.ts references this at module scope (only called from
-// export/inspect, neither of which the backup tests exercise), so it just
-// needs to exist, not do anything.
+// One open, focused window, as the running app has. Main-process prompts
+// (promptWindow.ts) are raised as a sheet on it, and with no window they are
+// not raised at all — so a test that answers a host-key dialog needs one to
+// exist. Tests of the no-window path spy getFocusedWindow/getAllWindows.
+export const mainWindowStub = {
+  // A prompt listens for the window closing (promptWindow.ts).
+  once: (): void => undefined,
+  removeListener: (): void => undefined,
+  isDestroyed: (): boolean => false,
+  isMinimized: (): boolean => false,
+  isVisible: (): boolean => true,
+  restore: (): void => undefined,
+  show: (): void => undefined,
+  focus: (): void => undefined,
+  webContents: { send: (): void => undefined }
+}
 export const BrowserWindow = {
-  getFocusedWindow: () => null,
-  getAllWindows: () => []
+  getFocusedWindow: (): typeof mainWindowStub | null => mainWindowStub,
+  getAllWindows: (): (typeof mainWindowStub)[] => [mainWindowStub]
 }

@@ -4,6 +4,7 @@ import { clsx } from '../../lib/format'
 import { dismissToast, toast } from '../../store/toast'
 import { openAi } from '../../store/nav'
 import type { McpGlobalConfig } from '../../../../shared/mcp'
+import { Switch } from '../common/Switch'
 
 
 /**
@@ -191,12 +192,10 @@ export function AiSecurity(): React.JSX.Element {
                 : 'Off. No AI agent can reach OpsMaxx while disabled.'}
           </div>
         </div>
-        <span
-          className={clsx('switch', status.running && 'on')}
-          role="switch"
-          aria-checked={status.running}
-          aria-label="Enable AI & MCP access"
-          onClick={() => update({ enabled: !status.running })}
+        <Switch
+          checked={status.running}
+          label="Enable AI & MCP access"
+          onChange={(v) => update({ enabled: v })}
         />
       </div>
 

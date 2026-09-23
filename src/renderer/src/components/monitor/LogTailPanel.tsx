@@ -18,6 +18,7 @@ import {
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
+import { Switch } from '../common/Switch'
 
 // "A unit failed" is the question the monitor now answers. This is "why".
 //
@@ -652,11 +653,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
               {paused && ' — paused, the server is still being followed'}
             </span>
             <label className="row" style={{ gap: 6 }}>
-              <span
-                className={clsx('switch', follow && 'on')}
-                onClick={() => setFollow((v) => !v)}
-                style={{ transform: 'scale(0.8)' }}
-              />
+              <Switch checked={follow} onChange={setFollow} style={{ transform: 'scale(0.8)' }} />
               Follow
             </label>
           </div>

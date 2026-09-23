@@ -24,9 +24,15 @@ const BAK = `${DATA}.bak`
 // `throws: true` is safeStorage raising instead of answering, which it can do
 // before app.ready and while a Linux backend is still being resolved.
 const keychain = { available: true, throws: false }
+// Electron's `app.isReady()`. Before it, safeStorage refuses to decrypt.
+const app = { ready: true }
 
 vi.mock('electron', () => ({
-  app: { getPath: (): string => userData, getVersion: (): string => '0.0.0-test' },
+  app: {
+    getPath: (): string => userData,
+    getVersion: (): string => '0.0.0-test',
+    isReady: (): boolean => app.ready
+  },
   safeStorage: {
     isEncryptionAvailable: (): boolean => {
       if (keychain.throws) throw new Error('keychain is not ready')
@@ -36,6 +42,7 @@ vi.mock('electron', () => ({
     // estate goes through the sealing path at all, and comes back.
     encryptString: (v: string): Buffer => Buffer.from(`SEALED:${v}`, 'utf8'),
     decryptString: (b: Buffer): string => {
+      if (!app.ready) throw new Error('safeStorage cannot be used before app is ready')
       const s = b.toString('utf8')
       if (!s.startsWith('SEALED:')) throw new Error('not sealed by this machine')
       return s.slice('SEALED:'.length)
@@ -53,7 +60,35 @@ beforeEach(() => {
   rmSync(BAK, { force: true })
   keychain.available = true
   keychain.throws = false
+  app.ready = true
   resetStoreMigrationForTests()
+})
+
+describe('a read before the app is ready', () => {
+  // Found on every launch with an existing profile: main read the data file at
+  // module scope, before `ready`. safeStorage threw, the store filed that as a
+  // corrupt primary, went to the backup, failed there too, and answered null —
+  // "this machine has nothing". Four modules came up off, and anything that
+  // saved on that answer would have written an empty estate over a real one.
+  it('is refused, without calling the primary unreadable or touching the backup', () => {
+    saveData(ESTATE)
+    saveData(ESTATE) // a second save, so the backup exists too
+    const primary = readFileSync(DATA, 'utf8')
+    const backup = readFileSync(BAK, 'utf8')
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      app.ready = false
+      expect(() => loadData()).toThrow(/before app is ready/)
+      expect(error).not.toHaveBeenCalled()
+      expect(readFileSync(DATA, 'utf8')).toBe(primary)
+      expect(readFileSync(BAK, 'utf8')).toBe(backup)
+    } finally {
+      error.mockRestore()
+    }
+    // And the same file opens normally once the app is up.
+    app.ready = true
+    expect(loadData()).toEqual(ESTATE)
+  })
 })
 
 describe('the estate on disk', () => {

@@ -79,6 +79,7 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
   activeTabId: 'per-device window state; syncing it would fight the user on two screens',
   activeWorkspaceId: 'per-device window state; syncing it would fight the user on two screens',
   tabCwd: 'per-device window state; syncing it would fight the user on two screens',
+  recentServerIds: 'per-device window state; syncing it would fight the user on two screens',
   settings: 'the cosmetic subset is the T2 public profile; the rest is per-device',
   theme: 'carried in the T2 public profile so a new device looks right before pairing',
   version: 'a local on-disk seed marker, not user data',

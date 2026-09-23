@@ -52,6 +52,8 @@ interface Persisted {
   activeTabId?: unknown
   panes?: unknown
   tabCwd?: unknown
+  // Absent in saves written before Recent listed servers actually opened.
+  recentServerIds?: unknown
 }
 
 let timer: ReturnType<typeof setTimeout> | null = null
@@ -250,7 +252,8 @@ async function hydrate(): Promise<void> {
       state.tabs !== prev.tabs ||
       state.activeTabId !== prev.activeTabId ||
       state.panes !== prev.panes ||
-      state.tabCwd !== prev.tabCwd
+      state.tabCwd !== prev.tabCwd ||
+      state.recentServerIds !== prev.recentServerIds
 
     // Grouped with the window layout rather than with the data, and that
     // placement is the whole decision: a theme change has to trigger a SAVE, or
@@ -360,7 +363,8 @@ function save(): Promise<void> {
       tabs: s.tabs,
       activeTabId: s.activeTabId,
       panes: s.panes,
-      tabCwd: s.tabCwd
+      tabCwd: s.tabCwd,
+      recentServerIds: s.recentServerIds
     }) ?? Promise.resolve()
   )
 }

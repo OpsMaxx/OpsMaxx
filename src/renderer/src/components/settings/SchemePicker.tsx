@@ -84,6 +84,10 @@ export function SchemePicker({
               refs.current[i] = el
             }}
             role="radio"
+            // Named outright rather than from the card's contents: the preview
+            // is aria-hidden, but a tool that reads text still ran it into the
+            // name as "$ lsDracula".
+            aria-label={o.name}
             aria-checked={selected}
             tabIndex={selected ? 0 : -1}
             className={clsx('scheme-card', selected && 'selected')}

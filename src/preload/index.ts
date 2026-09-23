@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer, clipboard, webUtils } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AddyLink } from '../shared/addyLink'
 import type { IpcRendererEvent } from 'electron'
 import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
@@ -622,9 +622,13 @@ const api = {
     ): Promise<{ ok: boolean; stdout: string; stderr: string; error?: string }> =>
       ipcRenderer.invoke('net-tools:run', cfg, command, timeoutMs)
   },
+  // Through main, not Electron's renderer `clipboard` module, which is
+  // deprecated here and warned on every paste. `read` is async as a result;
+  // `write` stays fire-and-forget, and IPC keeps it ordered before any read
+  // that follows it.
   clipboard: {
-    read: (): string => clipboard.readText(),
-    write: (text: string): void => clipboard.writeText(text)
+    read: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
+    write: (text: string): void => ipcRenderer.send('clipboard:write', text)
   },
   /**
    * The text for a bug report: versions, counts and booleans about THIS

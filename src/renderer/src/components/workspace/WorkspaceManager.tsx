@@ -8,8 +8,8 @@ import { rdpSecretId } from '../../../../shared/rdp'
 import { WS_MIN_PASSWORD } from '../../../../shared/workspace'
 import { toast } from '../../store/toast'
 import { colorVar } from '../layout/WorkspaceSwitcher'
-import { clsx } from '../../lib/format'
 import type { WorkspaceColor } from '../../types'
+import { Switch } from '../common/Switch'
 
 const COLORS: WorkspaceColor[] = ['green', 'purple', 'blue', 'orange', 'red', 'cyan', 'pink']
 
@@ -262,7 +262,7 @@ export function WorkspaceManager(): React.JSX.Element {
           <span className="spacer" />
           <label className="row" style={{ gap: 8 }}>
             <span className="muted">Password protect</span>
-            <span className={clsx('switch', withPassword && 'on')} onClick={() => setWithPassword((v) => !v)} />
+            <Switch checked={withPassword} onChange={setWithPassword} />
           </label>
         </div>
         {withPassword && (

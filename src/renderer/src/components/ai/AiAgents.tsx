@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { Plus, Copy, Eye, EyeOff, Ban, Octagon, Trash2, TriangleAlert } from 'lucide-react'
 import { toast } from '../../store/toast'
-import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
 import { openAi } from '../../store/nav'
 import { SessionAccess } from './SessionAccess'
 import type { McpAgentSession, AccessGroup } from '../../../../shared/mcp'
 import { resolveDefaultSessionGroup } from '../../../../shared/mcp'
 import { maskToken } from '../../../../shared/tokenDisplay'
+import { Switch } from '../common/Switch'
 
 interface WorkspaceOpt {
   id: string
@@ -197,7 +197,7 @@ function CreateSessionForm({
           Streamable HTTP (e.g. Gemini CLI). <b>Claude Desktop cannot use it</b> — it ignores{' '}
           <code className="mono">url</code> and <code className="mono">headers</code> and only
           launches stdio servers; use <b>Overview → Connect Claude Desktop</b>, which writes the
-          bridge entry it does understand. For Claude Code, <b>Overview → Connect Claude Code</b>
+          bridge entry it does understand. For Claude Code, <b>Overview → Connect Claude Code</b>{' '}
           gives you a one-line command; Codex has{' '}
           <code className="mono">opsmaxx codex</code>.
         </div>
@@ -274,10 +274,7 @@ function CreateSessionForm({
           {workspaces.map((w) => (
             <label key={w.id} style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
               {w.name}
-              <span
-                className={clsx('switch', workspaceIds.includes(w.id) && 'on')}
-                onClick={() => toggleWorkspace(w.id)}
-              />
+              <Switch checked={workspaceIds.includes(w.id)} onChange={() => toggleWorkspace(w.id)} />
             </label>
           ))}
         </div>

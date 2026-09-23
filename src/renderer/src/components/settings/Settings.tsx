@@ -91,6 +91,7 @@ import { parseTerminalScheme } from '../../../../shared/terminalTheme'
 import { SchemePicker } from './SchemePicker'
 import { useFleetStatus } from '../../store/fleetStatus'
 import { toast } from '../../store/toast'
+import { Switch } from '../common/Switch'
 
 // Keyed by the nav store's union rather than by a list that describes itself,
 // so a page added here without being added there — and therefore unreachable
@@ -387,7 +388,7 @@ function SettingSwitch({
         <div className="s-title">{label}</div>
         <div className="s-desc">{desc}</div>
       </div>
-      <span className={clsx('switch', checked && 'on')} onClick={() => onChange(!checked)} />
+      <Switch checked={checked} label={label} onChange={onChange} />
     </div>
   )
 }
@@ -1207,15 +1208,11 @@ export function Settings(): React.JSX.Element {
                           <div className="s-title">{m.label}</div>
                           <div className="s-desc">{m.detail}</div>
                         </div>
-                        <span
-                          className={clsx('switch', moduleEnabled(settings.modules, m.id) && 'on')}
-                          onClick={() =>
-                            setSettings({
-                              modules: {
-                                ...settings.modules,
-                                [m.id]: !moduleEnabled(settings.modules, m.id)
-                              }
-                            })
+                        <Switch
+                          checked={moduleEnabled(settings.modules, m.id)}
+                          label={m.label}
+                          onChange={(v) =>
+                            setSettings({ modules: { ...settings.modules, [m.id]: v } })
                           }
                         />
                       </div>
@@ -1295,9 +1292,10 @@ export function Settings(): React.JSX.Element {
                   </div>
                   <FleetSamplerLine />
                 </div>
-                <span
-                  className={clsx('switch', settings.fleetSamplingEnabled && 'on')}
-                  onClick={() => setSettings({ fleetSamplingEnabled: !settings.fleetSamplingEnabled })}
+                <Switch
+                  checked={settings.fleetSamplingEnabled}
+                  label="Check servers in the background"
+                  onChange={(v) => setSettings({ fleetSamplingEnabled: v })}
                 />
               </div>
               <div className="setting-row">

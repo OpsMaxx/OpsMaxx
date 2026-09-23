@@ -1378,6 +1378,12 @@ button {
 .switch.on::after {
   transform: translateX(16px);
 }
+/* Drawn on a <button role="switch"> now (components/common/Switch.tsx). The
+   global button reset already clears border and background; the padding is
+   the one thing a button brings that the span it replaced did not. */
+button.switch {
+  padding: 0;
+}
 
 /* ============================= Modal ============================= */
 .scrim {

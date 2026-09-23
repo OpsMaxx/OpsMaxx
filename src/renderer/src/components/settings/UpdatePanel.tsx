@@ -10,13 +10,13 @@ import {
 } from 'lucide-react'
 import { useUpdater } from '../../store/updater'
 import { Modal } from '../common/Modal'
-import { clsx } from '../../lib/format'
 import {
   channelOfVersion,
   type CheckIntervalHours,
   type UpdateChannel,
   type UpdaterCapabilities
 } from '../../../../shared/updater'
+import { Switch } from '../common/Switch'
 
 // Marks an offered build as a prerelease. Being on the beta channel does not
 // answer "what am I about to install": beta cascades, so the newest thing on
@@ -49,9 +49,11 @@ function SettingSwitch({
         <div className="s-title">{label}</div>
         <div className="s-desc">{desc}</div>
       </div>
-      <span
-        className={clsx('switch', checked && !disabled && 'on', disabled && 'disabled')}
-        onClick={() => !disabled && onChange(!checked)}
+      <Switch
+        checked={checked && !disabled}
+        disabled={disabled}
+        label={label}
+        onChange={onChange}
       />
     </div>
   )

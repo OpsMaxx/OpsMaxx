@@ -19,6 +19,7 @@ import type {
 } from '../../../../shared/credproxy'
 import type { VaultEntry } from '../../../../shared/vault'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
+import { Switch } from '../common/Switch'
 
 // The API credential proxy — roadmap item 7, settings half.
 //
@@ -253,12 +254,10 @@ export function CredProxyPanel(): React.JSX.Element {
             us, which is why an unconfigured tool is unaffected.
           </div>
         </div>
-        <span
-          className={clsx('switch', status?.listening && 'on')}
-          role="switch"
-          aria-checked={status?.listening ? 'true' : 'false'}
-          aria-label="Run the API credential proxy"
-          onClick={() => void toggle(!status?.listening)}
+        <Switch
+          checked={!!status?.listening}
+          label="Run the API credential proxy"
+          onChange={(v) => void toggle(v)}
         />
       </div>
 

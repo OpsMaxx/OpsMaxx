@@ -2,7 +2,7 @@
 // service module resolves its file paths.
 import './portable'
 import { parseAddyLink, ADDY_LINK_SCHEME, type AddyLink } from '../shared/addyLink'
-import { app, shell, BrowserWindow, globalShortcut, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
+import { app, shell, BrowserWindow, clipboard, globalShortcut, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
 import { join, resolve} from 'node:path'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -1216,6 +1216,15 @@ ipcMain.handle('ssh:pool-evict', (_e, serverId: string) =>
   typeof serverId === 'string' && serverId !== '' ? poolEvictServer(serverId) : 0
 )
 ipcMain.handle('ssh:pool-idle', (_e, minutes: number) => setPoolIdle(minutes))
+// The clipboard, for the renderer. Electron deprecated the `clipboard` module
+// in renderer processes -- the preload counts as one -- and logged a warning on
+// every paste. Main's clipboard is the same system clipboard, so behaviour is
+// unchanged and no permission prompt is involved, which navigator.clipboard
+// would have needed. Text only, the same two calls the preload made.
+ipcMain.handle('clipboard:read', () => clipboard.readText())
+ipcMain.on('clipboard:write', (_e, text: unknown) => {
+  if (typeof text === 'string') clipboard.writeText(text)
+})
 ipcMain.on('ssh:write', (_e, id: string, data: string) => sshWrite(id, data))
 ipcMain.on('ssh:resize', (_e, id: string, cols: number, rows: number) => sshResize(id, cols, rows))
 ipcMain.on('ssh:close', (_e, id: string) => sshClose(id))
@@ -2059,15 +2068,12 @@ function syncAccessModule(data: unknown): void {
   changeLogModuleOn = modules?.changeLog === true
   driftModuleOn = modules?.drift === true
 }
-try {
-  syncAccessModule(loadData())
-} catch {
-  // A blob that will not parse is not consent. Off.
-  accessModuleOn = false
-  postureModuleOn = false
-  changeLogModuleOn = false
-  driftModuleOn = false
-}
+// Read at boot from inside whenReady, with the rest of the launch consumers —
+// NOT here at module scope. This ran before `ready`, when a sealed data file
+// cannot be unsealed, so on every launch with an existing profile the store
+// logged the primary and the backup as unreadable and all four modules came up
+// OFF until the next save. Until whenReady they stay at their declared OFF,
+// which is also what an absent setting means; nothing reads them before then.
 
 // Fleet key and access, on the same slow clock — roadmap item 23. One reader
 // for the whole process, for the reason HostFactsReader is one: it holds no
@@ -6217,6 +6223,11 @@ app.whenReady().then(() => {
   // loadData() itself: six reads of the file and six decryptions of the whole
   // estate on the launch path, all returning the same bytes.
   const boot = loadData()
+  // The four module gates. Here rather than at module scope — see
+  // syncAccessModule — and before anything can ask: every reader of them is an
+  // IPC handler or a sampler the renderer configures, and this runs in the
+  // same synchronous block as createWindow, so nothing has been able to ask.
+  syncAccessModule(boot)
   // Primed once at launch so the MCP bridge can resolve server/workspace
   // names even before the renderer's first data:save call.
   refreshMcpDataCache(boot)
