@@ -217,7 +217,13 @@ export function setupTerminalUX(
     }
     term.paste(t)
   }
-  const paste = (): void => guardedPaste(window.opsmaxx?.clipboard.read() ?? '')
+  // Asynchronous: the clipboard is read through main (see the preload). The
+  // text still arrives here and nowhere else.
+  const paste = (): void => {
+    void Promise.resolve(window.opsmaxx?.clipboard.read())
+      .then((t) => guardedPaste(t ?? ''))
+      .catch(() => undefined)
+  }
 
   // The paste EVENT, taken before xterm sees it.
   //
@@ -237,7 +243,7 @@ export function setupTerminalUX(
   host.addEventListener('paste', onPasteEvent, true)
 
   // onSelectionChange fires on every mouse move during a drag, and each copy
-  // is a synchronous clipboard write across the context bridge. Coalesce to
+  // is a clipboard write across IPC to main. Coalesce to
   // the end of the gesture.
   let selTimer: ReturnType<typeof setTimeout> | null = null
   const selDisp = term.onSelectionChange(() => {

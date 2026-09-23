@@ -2,7 +2,7 @@
 // service module resolves its file paths.
 import './portable'
 import { parseAddyLink, ADDY_LINK_SCHEME, type AddyLink } from '../shared/addyLink'
-import { app, shell, BrowserWindow, globalShortcut, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
+import { app, shell, BrowserWindow, clipboard, globalShortcut, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
 import { join, resolve} from 'node:path'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -1216,6 +1216,15 @@ ipcMain.handle('ssh:pool-evict', (_e, serverId: string) =>
   typeof serverId === 'string' && serverId !== '' ? poolEvictServer(serverId) : 0
 )
 ipcMain.handle('ssh:pool-idle', (_e, minutes: number) => setPoolIdle(minutes))
+// The clipboard, for the renderer. Electron deprecated the `clipboard` module
+// in renderer processes -- the preload counts as one -- and logged a warning on
+// every paste. Main's clipboard is the same system clipboard, so behaviour is
+// unchanged and no permission prompt is involved, which navigator.clipboard
+// would have needed. Text only, the same two calls the preload made.
+ipcMain.handle('clipboard:read', () => clipboard.readText())
+ipcMain.on('clipboard:write', (_e, text: unknown) => {
+  if (typeof text === 'string') clipboard.writeText(text)
+})
 ipcMain.on('ssh:write', (_e, id: string, data: string) => sshWrite(id, data))
 ipcMain.on('ssh:resize', (_e, id: string, cols: number, rows: number) => sshResize(id, cols, rows))
 ipcMain.on('ssh:close', (_e, id: string) => sshClose(id))

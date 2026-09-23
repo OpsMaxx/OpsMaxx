@@ -9,8 +9,13 @@ import { setupTerminalUX } from '../src/renderer/src/hooks/useTerminalSession'
 // so a LONE \r separates two commands exactly as \n does. It used to go
 // straight through, because only \n was looked for.
 
-function pasteVia(clip: string): { confirm: ReturnType<typeof vi.fn>; written: ReturnType<typeof vi.fn> } {
-  stubBridge({ clipboard: { read: () => clip, write: vi.fn() } })
+/** The clipboard is read through main now, so a paste settles a tick later. */
+const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 0))
+
+async function pasteVia(
+  clip: string
+): Promise<{ confirm: ReturnType<typeof vi.fn>; written: ReturnType<typeof vi.fn> }> {
+  stubBridge({ clipboard: { read: vi.fn(async () => clip), write: vi.fn() } })
   const written = vi.fn()
   const term = {
     getSelection: () => '',
@@ -23,25 +28,26 @@ function pasteVia(clip: string): { confirm: ReturnType<typeof vi.fn>; written: R
   const dispose = setupTerminalUX(term, host, undefined, confirm)
   // Right-click is paste here, PuTTY style.
   host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  await settle()
   dispose()
   return { confirm, written }
 }
 
 describe('what counts as more than one line', () => {
-  it('asks for two commands separated by a lone carriage return, and writes nothing', () => {
-    const { confirm, written } = pasteVia('echo safe\rrm -rf /tmp/x')
+  it('asks for two commands separated by a lone carriage return, and writes nothing', async () => {
+    const { confirm, written } = await pasteVia('echo safe\rrm -rf /tmp/x')
     expect(confirm).toHaveBeenCalledWith('echo safe\rrm -rf /tmp/x', 2)
     expect(written).not.toHaveBeenCalled()
   })
 
-  it('still asks for \\n and \\r\\n', () => {
-    expect(pasteVia('a\nb').confirm).toHaveBeenCalledWith('a\nb', 2)
-    expect(pasteVia('a\r\nb').confirm).toHaveBeenCalledWith('a\r\nb', 2)
+  it('still asks for \\n and \\r\\n', async () => {
+    expect((await pasteVia('a\nb')).confirm).toHaveBeenCalledWith('a\nb', 2)
+    expect((await pasteVia('a\r\nb')).confirm).toHaveBeenCalledWith('a\r\nb', 2)
   })
 
-  it('still lets one command with its trailing newline through, as it always did', () => {
+  it('still lets one command with its trailing newline through, as it always did', async () => {
     for (const clip of ['ls -la\n', 'ls -la\r', 'ls -la\r\n', 'ls -la']) {
-      const { confirm, written } = pasteVia(clip)
+      const { confirm, written } = await pasteVia(clip)
       expect(confirm, JSON.stringify(clip)).not.toHaveBeenCalled()
       expect(written).toHaveBeenCalledWith(clip)
     }
@@ -66,7 +72,7 @@ function mount(clip: string): {
   host: HTMLDivElement
   dispose: () => void
 } {
-  stubBridge({ clipboard: { read: () => clip, write: vi.fn() } })
+  stubBridge({ clipboard: { read: vi.fn(async () => clip), write: vi.fn() } })
   const written = vi.fn()
   let key: (e: KeyboardEvent) => boolean = () => true
   const term = {
@@ -137,15 +143,27 @@ describe('a DOM paste event cannot go around the confirmation', () => {
     t.dispose()
   })
 
-  it('leaves the shortcut and right-click paths working', () => {
+  it('leaves the shortcut and right-click paths working, reading the clipboard through main', async () => {
     const t = mount('a\rb')
+    const read = (window as unknown as { opsmaxx: { clipboard: { read: ReturnType<typeof vi.fn> } } })
+      .opsmaxx.clipboard.read
     const handled = t.key(
       new KeyboardEvent('keydown', { key: 'V', code: 'KeyV', ctrlKey: true, shiftKey: true })
     )
     expect(handled).toBe(false)
+    await settle()
     expect(t.confirm).toHaveBeenCalledTimes(1)
     t.host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await settle()
+    expect(read).toHaveBeenCalledTimes(2)
     expect(t.confirm).toHaveBeenCalledTimes(2)
+    // One line by right-click: read, guarded, written once.
+    const one = mount('uptime')
+    one.host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    await settle()
+    expect(one.written).toHaveBeenCalledTimes(1)
+    expect(one.written).toHaveBeenCalledWith('uptime')
+    one.dispose()
     expect(t.written).not.toHaveBeenCalled()
     t.dispose()
   })
@@ -158,5 +176,20 @@ describe('a DOM paste event cannot go around the confirmation', () => {
     expect(t.confirm).not.toHaveBeenCalled()
     expect(t.xtermSent).toHaveBeenCalledTimes(1)
     t.host.remove()
+  })
+})
+
+// The deprecation this replaced: Electron logs "Accessing 'clipboard.readText'
+// from the renderer process is deprecated" whenever the preload touches its
+// `clipboard` module. The preload must not import it; main answers instead.
+describe('the clipboard is read through main', () => {
+  it('is not taken from Electron in the preload', async () => {
+    const { readFileSync } = await import('node:fs')
+    const { resolve } = await import('node:path')
+    const preload = readFileSync(resolve(__dirname, '../src/preload/index.ts'), 'utf8')
+    const main = readFileSync(resolve(__dirname, '../src/main/index.ts'), 'utf8')
+    expect(preload).not.toMatch(/import\s*\{[^}]*\bclipboard\b[^}]*\}\s*from 'electron'/)
+    expect(preload).toMatch(/ipcRenderer\.invoke\('clipboard:read'\)/)
+    expect(main).toMatch(/ipcMain\.handle\('clipboard:read'/)
   })
 })
