@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import { Copy, Octagon, Plus } from 'lucide-react'
-import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
 import { openAi } from '../../store/nav'
 import type { McpGlobalConfig } from '../../../../shared/mcp'
+import { Switch } from '../common/Switch'
 
 
 /**
@@ -168,9 +168,10 @@ export function AiSecurity(): React.JSX.Element {
               : 'Off. No AI agent can reach OpsMaxx while disabled.'}
           </div>
         </div>
-        <span
-          className={clsx('switch', config.enabled && 'on')}
-          onClick={() => update({ enabled: !config.enabled })}
+        <Switch
+          checked={config.enabled}
+          label="Enable AI & MCP access"
+          onChange={(v) => update({ enabled: v })}
         />
       </div>
 

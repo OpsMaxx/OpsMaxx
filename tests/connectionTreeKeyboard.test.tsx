@@ -34,6 +34,8 @@ function seed(): { openServer: ReturnType<typeof vi.fn> } {
   const openServer = vi.fn()
   useApp.setState({
     openServer,
+    // Recent lists servers actually opened; these three were.
+    recentServerIds: ['srv-a', 'srv-b', 'srv-c'],
     folders: [{ id: 'f-prod', workspaceId: ws, name: 'Production', parentId: null, kind: 'server' }],
     servers: [
       { ...base, id: 'srv-a', workspaceId: ws, folderId: 'f-prod', name: 'api', host: '10.0.0.1', tags: ['prod', 'eu', 'db'], status: 'online' },
@@ -181,7 +183,61 @@ describe('connection tree keyboard', () => {
   })
 })
 
+describe('searching', () => {
+  it('hides folders with nothing matching, and filters Recent too', async () => {
+    seed()
+    const ws = useApp.getState().activeId()
+    useApp.setState((st) => ({
+      folders: [...st.folders, { id: 'f-stage', workspaceId: ws, name: 'Staging', parentId: null, kind: 'server' }]
+    }))
+    render(<ConnectionTree />)
+    // Without a query, an empty folder is still a place to put things.
+    expect(rows().some((r) => r.textContent?.includes('Staging'))).toBe(true)
+
+    await userEvent.type(screen.getByPlaceholderText('Search connections…'), 'redis')
+    expect(rows().some((r) => r.textContent?.includes('Staging'))).toBe(false)
+    expect(rows().some((r) => r.textContent?.includes('Production'))).toBe(false)
+    const recent = within(screen.getByRole('tree', { name: 'Recent' })).getAllByRole('treeitem')
+    expect(recent.map((r) => r.textContent)).toEqual(['cache'])
+  })
+})
+
+describe('Recent', () => {
+  it('lists only servers that were opened, most recent first', async () => {
+    seed()
+    useApp.setState({ recentServerIds: [] })
+    const { rerender } = render(<ConnectionTree />)
+    // Never opened, never listed — it used to show the first three servers.
+    expect(screen.queryByRole('tree', { name: 'Recent' })).toBeNull()
+    // And no header over an empty list.
+    expect(screen.queryByText('Recent')).toBeNull()
+
+    // The real actions, not the stub `seed` installs.
+    useApp.setState({ openServer: useApp.getInitialState().openServer })
+    useApp.getState().openServer('srv-c')
+    useApp.getState().openServer('srv-a')
+    useApp.getState().openServer('srv-c')
+    rerender(<ConnectionTree />)
+    const recent = within(screen.getByRole('tree', { name: 'Recent' })).getAllByRole('treeitem')
+    expect(recent.map((r) => r.textContent)).toEqual(['cache', 'api'])
+  })
+
+  it('survives a save and reload, and ignores junk in the blob', () => {
+    useApp.getState().replaceAll({ recentServerIds: ['srv-a', 7, null, 'srv-b'] as never })
+    expect(useApp.getState().recentServerIds).toEqual(['srv-a', 'srv-b'])
+  })
+})
+
 describe('what a row shows', () => {
+  it('names a row for a screen reader without running the name into its chips', () => {
+    seed()
+    render(<ConnectionTree />)
+    const api = rows().find((r) => r.dataset.key === 'srv:srv-a')!
+    expect(api.getAttribute('aria-label')).toBe('api, Connected, tags: prod, eu, db')
+    expect(screen.getAllByRole('treeitem', { name: /^cache, Idle, tags: redis$/ })).toHaveLength(2)
+    for (const chip of api.querySelectorAll('.chip')) expect(chip.getAttribute('aria-hidden')).toBe('true')
+  })
+
   it('gives each status its own shape class and a label, not only a colour', () => {
     seed()
     render(<ConnectionTree />)

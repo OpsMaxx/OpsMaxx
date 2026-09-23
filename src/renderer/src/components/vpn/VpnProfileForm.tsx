@@ -22,6 +22,7 @@ import type {
 } from '../../types'
 import { BindWarning } from './VpnStatusCard'
 import { FrpProxyEditor } from './FrpProxyEditor'
+import { Switch } from '../common/Switch'
 
 /** A keypair that exists only in this form.
  *
@@ -280,10 +281,7 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
         </label>
 
         <label className="row" style={{ gap: 8 }}>
-          <span
-            className={clsx('switch', draft.autoStart && 'on')}
-            onClick={() => setDraft((d) => ({ ...d, autoStart: !d.autoStart }))}
-          />
+          <Switch checked={draft.autoStart} onChange={(v) => setDraft((d) => ({ ...d, autoStart: v }))} />
           <span className="muted" style={{ fontSize: 12 }}>
             Connect automatically when OpsMaxx starts
           </span>
@@ -1254,10 +1252,10 @@ function OpenVpnFields({ spec, issue, onChange, shown, focus }: OvpnProps): Reac
       )}
 
       <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-        <span
-          className={clsx('switch', spec.redirectGateway && 'on')}
+        <Switch
+          checked={!!spec.redirectGateway}
           style={{ marginTop: 1 }}
-          onClick={() => set({ redirectGateway: !spec.redirectGateway })}
+          onChange={(v) => set({ redirectGateway: v })}
         />
         <span style={{ fontSize: 12, color: spec.redirectGateway ? 'var(--warn)' : 'var(--text-muted)' }}>
           Send all traffic through this VPN. Off by default: a downloaded profile asking for your
@@ -1413,9 +1411,9 @@ function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX
       </div>
 
       <label className="row" style={{ gap: 8 }}>
-        <span
-          className={clsx('switch', spec.transport.tlsEnable && 'on')}
-          onClick={() => set({ transport: { ...spec.transport, tlsEnable: !spec.transport.tlsEnable } })}
+        <Switch
+          checked={spec.transport.tlsEnable}
+          onChange={(v) => set({ transport: { ...spec.transport, tlsEnable: v } })}
         />
         <span className="muted" style={{ fontSize: 12 }}>
           Encrypt the control connection with TLS

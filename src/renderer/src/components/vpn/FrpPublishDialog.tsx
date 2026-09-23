@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Field, Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
-import { clsx } from '../../lib/format'
 import { bridgeHas } from '../../lib/bridge'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import {
@@ -16,6 +15,7 @@ import {
 import { isVpnRunning } from '../../../../shared/vpn'
 import type { FrpSpec } from '../../../../shared/vpn'
 import { headline } from './useVpnProfiles'
+import { Switch } from '../common/Switch'
 
 /**
  * The last thing between a typed port number and a port on the internet.
@@ -153,20 +153,11 @@ export function FrpPublishDialog({
         {/* The engine's gate, asked here rather than deep in the proxy editor,
             because this is where the click that publishes actually is. */}
         <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-          <span
-            className={clsx('switch', acknowledged && 'on')}
+          <Switch
+            checked={acknowledged}
+            label={exposure.sentence}
             style={{ marginTop: 1 }}
-            role="switch"
-            tabIndex={0}
-            aria-checked={acknowledged}
-            aria-label={exposure.sentence}
-            onClick={() => setAcknowledged(!acknowledged)}
-            onKeyDown={(e) => {
-              if (e.key === ' ' || e.key === 'Enter') {
-                e.preventDefault()
-                setAcknowledged(!acknowledged)
-              }
-            }}
+            onChange={setAcknowledged}
           />
           <span style={{ fontSize: 12, color: acknowledged ? 'var(--text-muted)' : 'var(--warn)' }}>
             I want {exposure.local} reachable at {exposure.url}.

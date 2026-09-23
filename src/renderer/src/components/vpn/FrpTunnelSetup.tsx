@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { Field, Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
-import { clsx } from '../../lib/format'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import {
   delegationRecord,
@@ -11,6 +10,7 @@ import {
   publicUrl
 } from '../../../../shared/frpTunnel'
 import type { FrpPublicHost, FrpSpec, FrpTokenResult, VpnProfile } from '../../../../shared/vpn'
+import { Switch } from '../common/Switch'
 
 /**
  * `vpn.frpToken`, read off the bridge rather than called through it.
@@ -319,20 +319,11 @@ export function FrpTunnelSetup({
             tick this app cannot honestly earn is exactly the kind of magic
             this whole flow exists to avoid. */}
         <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
-          <span
-            className={clsx('switch', confirmed && 'on')}
+          <Switch
+            checked={confirmed}
+            label="I have created this record, and my frp server serves HTTP for these names."
             style={{ marginTop: 1 }}
-            role="switch"
-            tabIndex={0}
-            aria-checked={confirmed}
-            aria-label="I have created this record, and my frp server serves HTTP for these names."
-            onClick={() => setConfirmed(!confirmed)}
-            onKeyDown={(e) => {
-              if (e.key === ' ' || e.key === 'Enter') {
-                e.preventDefault()
-                setConfirmed(!confirmed)
-              }
-            }}
+            onChange={setConfirmed}
           />
           <span style={{ fontSize: 12, color: confirmed ? 'var(--text-muted)' : 'var(--warn)' }}>
             I have created this record, and my frp server serves HTTP for these names. OpsMaxx

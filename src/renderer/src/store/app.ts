@@ -574,6 +574,16 @@ interface AppState {
    * and shells may all have changed underneath it.
    */
   closedTabs: ClosedTab<Tab>[]
+  /**
+   * Servers the user actually opened, most recent first — what the sidebar's
+   * Recent list shows. It used to show `servers.slice(0, 3)`: the first three
+   * in the list, opened or not.
+   *
+   * Remembered across launches like the window layout, and like it, not stored
+   * data: it does not mark a backup stale and does not sync. Ids of deleted
+   * servers are simply not drawn.
+   */
+  recentServerIds: string[]
   // Terminal session id + working directory (for SFTP <-> terminal sync),
   // keyed by **pane** id, not tab id. A tab can hold up to MAX_PANES live
   // terminals and each has its own session and its own cwd; keying by tab meant
@@ -818,6 +828,7 @@ interface AppState {
         | 'settings'
         | 'activeWorkspaceId'
         | 'monitorGroups'
+        | 'recentServerIds'
       >
     >
   ) => void
@@ -944,6 +955,11 @@ function sideTabs(all: Tab[], id: string, side: 'left' | 'right'): Set<string> {
 // per-target, and the target is a server for an SSH tab and a shell for a local
 // one — a single `t.serverId === serverId` comparison across both would compare
 // `undefined === null`, never match, and title every local tab identically.
+/** `id` moved to the front of the recently-opened list, which keeps ten. */
+export function rememberRecent(ids: readonly string[], id: string): string[] {
+  return [id, ...ids.filter((x) => x !== id)].slice(0, 10)
+}
+
 /**
  * The title a new session on `match`'s target should carry.
  *
@@ -1268,6 +1284,7 @@ export const useApp = create<AppState>((set, get) => ({
   pasteTargets: {},
   apiEndpointFocus: null,
   closedTabs: [],
+  recentServerIds: [],
   tabSession: {},
   tabCwd: {},
   panes: {},
@@ -1439,6 +1456,7 @@ export const useApp = create<AppState>((set, get) => ({
   openServer: (serverId, view = 'terminal') => {
     const server = get().servers.find((s) => s.id === serverId)
     if (!server) return
+    set((s) => ({ recentServerIds: rememberRecent(s.recentServerIds, serverId) }))
     // A files-only account has no shell to open. Landing on Terminal would
     // start a connection sshd refuses, and the refusal is what marks the whole
     // server offline — so the view follows what the account can actually do,
@@ -1491,6 +1509,7 @@ export const useApp = create<AppState>((set, get) => ({
     // A files-only account has no shell, and an RDP-only machine has no SSH
     // at all, so a second shell is not a thing either of them can open.
     if (!server || server.sftpOnly === true || server.rdpOnly === true) return
+    set((s) => ({ recentServerIds: rememberRecent(s.recentServerIds, serverId) }))
     const tab: Tab = {
       id: uid('tab'),
       kind: 'ssh',
@@ -1514,6 +1533,7 @@ export const useApp = create<AppState>((set, get) => ({
   openRdp: (serverId) => {
     const server = get().servers.find((s) => s.id === serverId)
     if (!server || !server.rdp) return
+    set((s) => ({ recentServerIds: rememberRecent(s.recentServerIds, serverId) }))
     const tab: RdpTab = {
       id: uid('tab'),
       kind: 'rdp',
@@ -2606,6 +2626,11 @@ export const useApp = create<AppState>((set, get) => ({
         data.theme === 'dark' || data.theme === 'light' || data.theme === 'system'
           ? data.theme
           : s.theme,
+      // Narrowed for the same reason: ids only, and never more than the list
+      // keeps.
+      recentServerIds: Array.isArray(data.recentServerIds)
+        ? data.recentServerIds.filter((id): id is string => typeof id === 'string').slice(0, 10)
+        : s.recentServerIds,
       // The saved active workspace is restored here rather than left at the
       // seed default, and pinned to a workspace that actually exists.
       activeWorkspaceId: resolveWorkspaceId(

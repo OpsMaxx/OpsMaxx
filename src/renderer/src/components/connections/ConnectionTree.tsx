@@ -27,7 +27,7 @@ import { cloudTargetSubtitle } from '../../../../shared/cloud'
 import { toast } from '../../store/toast'
 import { ContextMenu, MenuEntry } from './ContextMenu'
 import { Modal } from '../common/Modal'
-import type { Server, ServerStatus } from '../../types'
+import type { Folder as FolderRecord, Server, ServerStatus } from '../../types'
 
 /**
  * What each status dot says, for anyone who cannot tell its colour — the dot's
@@ -294,14 +294,30 @@ export function ConnectionTree(): React.JSX.Element {
     !q || s.name.toLowerCase().includes(q) || s.host.includes(q) || s.tags.some((t) => t.includes(q))
 
   const favorites = servers.filter((s) => s.favorite && match(s))
-  const rootFolders = folders.filter((f) => f.parentId === null)
 
   const serversIn = (folderId: string | null): Server[] =>
     servers.filter((s) => s.folderId === folderId && match(s))
 
+  // While searching, a folder with nothing matching in it is not an answer:
+  // "Production 0" and "Staging 0" were listed under every query. One being
+  // renamed stays, or a new folder would vanish from under its own input.
+  const shows = (folderId: string, count: number): boolean => !q || count > 0 || renaming === folderId
+  const childFoldersOf = (id: string): FolderRecord[] =>
+    folders.filter((cf) => cf.parentId === id && shows(cf.id, serversIn(cf.id).length))
+  const rootFolders = folders.filter(
+    (f) =>
+      f.parentId === null &&
+      shows(f.id, serversIn(f.id).length + childFoldersOf(f.id).length)
+  )
+
   const rootServers = serversIn(null)
 
-  const recent = useMemo(() => servers.slice(0, 3), [servers])
+  // Servers actually opened, most recent first, and searched like the rest.
+  const recentIds = useApp((s) => s.recentServerIds)
+  const recent = recentIds
+    .map((id) => servers.find((s) => s.id === id))
+    .filter((s): s is Server => s !== undefined && match(s))
+    .slice(0, 3)
 
   const entries = (s: Server): MenuEntry[] => [
     { label: 'Connect', icon: <Plug size={14} />, onClick: () => openServer(s.id, 'terminal') },
@@ -353,6 +369,20 @@ export function ConnectionTree(): React.JSX.Element {
     }
   ]
 
+  // What a screen reader calls a server row: the name, the state its dot
+  // shows, the distribution its icon shows, then every tag (the row draws two).
+  const rowName = (s: Server): string => {
+    const distro = distroIcon(fleetFacts[s.id]?.facts?.distroId)
+    return [
+      labels.get(s.id) ?? s.name,
+      STATUS_LABEL[s.status],
+      distro?.label,
+      s.tags.length > 0 ? `tags: ${s.tags.join(', ')}` : undefined
+    ]
+      .filter(Boolean)
+      .join(', ')
+  }
+
   // A render function for the same reason as `folderLabel`: as a component it
   // remounted on every render, which would drop keyboard focus from the row the
   // moment focusing it re-rendered the tree.
@@ -363,6 +393,9 @@ export function ConnectionTree(): React.JSX.Element {
       <div
         key={key}
         role="treeitem"
+        // Said, not assembled from the row's text: that ran the name into its
+        // tag chips — "api-01apiprod".
+        aria-label={rowName(s)}
         aria-level={level}
         aria-selected={active}
         data-key={key}
@@ -407,12 +440,12 @@ export function ConnectionTree(): React.JSX.Element {
         {s.route.length > 0 && <Route size={12} className="faint" />}
         {s.tags.slice(0, ROW_TAGS).map((t, i) => (
           // By position: a tag list saved before normalisation can repeat one.
-          <span key={i} className="chip" title={t}>
+          <span key={i} className="chip" title={t} aria-hidden="true">
             {t}
           </span>
         ))}
         {s.tags.length > ROW_TAGS && (
-          <span className="chip" title={s.tags.slice(ROW_TAGS).join(', ')}>
+          <span className="chip" title={s.tags.slice(ROW_TAGS).join(', ')} aria-hidden="true">
             +{s.tags.length - ROW_TAGS}
           </span>
         )}
@@ -495,7 +528,7 @@ export function ConnectionTree(): React.JSX.Element {
             <div role="tree" aria-label="Connections">
               {rootFolders.map((f) => {
                 const open = !collapsed[f.id]
-                const childFolders = folders.filter((cf) => cf.parentId === f.id)
+                const childFolders = childFoldersOf(f.id)
                 const direct = serversIn(f.id)
                 return (
                   <div key={f.id}>
@@ -605,11 +638,13 @@ export function ConnectionTree(): React.JSX.Element {
           )}
         </div>
 
-        <div className="tree-section">
-          <div className="tree-section-label">
-            <ServerIcon size={11} /> Recent
-          </div>
-          {recent.length > 0 && (
+        {/* No header over nothing: until a server has been opened there is no
+            Recent, rather than a heading with an empty list under it. */}
+        {recent.length > 0 && (
+          <div className="tree-section">
+            <div className="tree-section-label">
+              <ServerIcon size={11} /> Recent
+            </div>
             <div role="tree" aria-label="Recent">
               {recent.map((s) => {
                 const key = `recent:${s.id}`
@@ -617,6 +652,7 @@ export function ConnectionTree(): React.JSX.Element {
                   <div
                     key={key}
                     role="treeitem"
+                    aria-label={rowName(s)}
                     aria-level={1}
                     data-key={key}
                     tabIndex={focusKey === key ? 0 : -1}
@@ -635,8 +671,8 @@ export function ConnectionTree(): React.JSX.Element {
                 )
               })}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {ctx && (
