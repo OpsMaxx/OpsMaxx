@@ -177,6 +177,9 @@ interface ExtraLike {
   // spec says the receiver is not obligated to send any, so everything that
   // reads these has to cope with them being absent.
   _meta?: { progressToken?: string | number }
+  // Aborted when the client's request goes away: the per-request transport is
+  // closed with the response, which aborts every handler still running.
+  signal?: AbortSignal
   sendNotification?: (n: {
     method: 'notifications/progress'
     params: { progressToken: string | number; progress: number; total?: number; message?: string }
@@ -1000,7 +1003,8 @@ async function gate(
       policyReason: check.reason,
       actionsThisSession: countSessionActions(ctx.session.id) ?? undefined,
       sessionGrant,
-      writeContent: subject.writeContent
+      writeContent: subject.writeContent,
+      signal: extra?.signal
     })
     // Only an explicit session answer is remembered. A plain `approved` is the
     // "Approve once" button and covers this call alone.
@@ -1040,9 +1044,11 @@ async function gate(
       return {
         ok: false,
         result: errorText(
-          decision === 'timeout'
-            ? `Denied: nobody answered the approval request for this action within the timeout. It was waiting in the OpsMaxx window. Ask the user to approve it there, or to raise the capability for ${ctx.serverName} from Ask to Allow in AI & MCP > Access, then retry.`
-            : 'Denied: the user rejected this action.'
+          decision === 'disconnected'
+            ? 'Cancelled: the request was withdrawn before the user answered, so nothing ran.'
+            : decision === 'timeout'
+              ? `Denied: nobody answered the approval request for this action within the timeout. It was waiting in the OpsMaxx window. Ask the user to approve it there, or to raise the capability for ${ctx.serverName} from Ask to Allow in AI & MCP > Access, then retry.`
+              : 'Denied: the user rejected this action.'
         )
       }
     }

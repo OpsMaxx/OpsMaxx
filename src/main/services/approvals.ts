@@ -21,7 +21,7 @@ const pending = new Map<
   string,
   {
     request: ApprovalRequest
-    resolve: (v: 'approved' | 'approved-for-session' | 'denied' | 'timeout') => void
+    resolve: (v: 'approved' | 'approved-for-session' | 'denied' | 'timeout' | 'disconnected') => void
     /** null until armApproval() — the fuse does not burn before the question
      *  has been put to somebody. */
     timer: ReturnType<typeof setTimeout> | null
@@ -204,6 +204,13 @@ export interface CreateApprovalInput {
    * has to keep.
    */
   writeContent?: { content: string; knownSecrets: string[] }
+  /**
+   * Aborted when the agent's MCP request goes away — the client was killed, or
+   * cancelled the call. The request then ends as `disconnected` at once rather
+   * than sitting on screen until the fuse runs out and being reported as a
+   * timeout: "told no by the clock" about a question nobody was left to hear.
+   */
+  signal?: AbortSignal
 }
 
 /**
@@ -214,7 +221,7 @@ export interface CreateApprovalInput {
  * nobody was asked, and retrying now will be refused again. It used to be
  * written as `denied`, which the audit view read as the operator's refusal.
  */
-export type ApprovalDecision = 'approved' | 'approved-for-session' | 'denied' | 'timeout' | 'refused'
+export type ApprovalDecision = 'approved' | 'approved-for-session' | 'denied' | 'timeout' | 'disconnected' | 'refused'
 
 // Generous on purpose. The point of passing these through remoteText is the
 // character filtering and the newline flattening, not the truncation: an
@@ -242,7 +249,7 @@ export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDec
   // file, secrets and all, and a request is broadcast to the renderer, listed
   // over IPC and kept in `recent`. Only the preview built from it below may
   // travel.
-  const { containment: asked, writeContent, ...forRequest } = input
+  const { containment: asked, writeContent, signal, ...forRequest } = input
   const containment = asked === true
   let live = 0
   for (const e of pending.values())
@@ -300,6 +307,10 @@ export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDec
       containment
     })
     emitter.emit('event', { type: 'created', request } satisfies ApprovalEvent)
+    // After `created`, so the renderer sees the request arrive and then resolve
+    // rather than a resolution for something it never had.
+    if (signal?.aborted) finish(request.id, 'disconnected')
+    else signal?.addEventListener('abort', () => finish(request.id, 'disconnected'), { once: true })
   })
 }
 
@@ -341,7 +352,11 @@ export function armAllPendingApprovals(): number {
   return armed
 }
 
-function finish(id: string, decision: 'approved' | 'denied' | 'timeout', scope: ApprovalScope = 'once'): void {
+function finish(
+  id: string,
+  decision: 'approved' | 'denied' | 'timeout' | 'disconnected',
+  scope: ApprovalScope = 'once'
+): void {
   const entry = pending.get(id)
   if (!entry) return
   if (entry.timer) clearTimeout(entry.timer)

@@ -150,9 +150,11 @@ export function AiApprovals(): React.JSX.Element {
                   <span style={{ color: a.status === 'approved' ? 'var(--text-muted)' : 'var(--warn)' }}>
                     {a.status === 'timeout'
                       ? 'Nobody answered — denied'
-                      : a.grantedScope === 'session'
-                        ? 'approved for this session'
-                        : a.status}
+                      : a.status === 'disconnected'
+                        ? 'Agent disconnected — not run'
+                        : a.grantedScope === 'session'
+                          ? 'approved for this session'
+                          : a.status}
                   </span>
                 </div>
                 <div className="r-sub">

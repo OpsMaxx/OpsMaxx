@@ -489,6 +489,7 @@ export function ApprovalDialog({
         {grantLabel && request.contentPreview && (
           <div
             data-testid="later-writes-note"
+            className="approval-note"
             style={{
               padding: '0 var(--sp-5)',
               color: 'var(--warn)',
@@ -500,7 +501,7 @@ export function ApprovalDialog({
           </div>
         )}
         {stopFailed && (
-          <div className="approval-stop-failed state-alarm" role="alert">
+          <div className="approval-note approval-stop-failed state-alarm" role="alert">
             <span className="state-dot is-alarm" aria-hidden="true" />
             {KILL_SWITCH_FAILED}. This request is still waiting on you.
           </div>
@@ -513,7 +514,7 @@ export function ApprovalDialog({
               three screens away in AI & MCP > Security; this calls the same IPC
               rather than reimplementing any of it. */}
           <button
-            className="btn sm"
+            className="btn sm approval-kill"
             style={{ color: 'var(--danger)', borderColor: 'transparent', background: 'transparent' }}
             onClick={() => void denyAndStopAllAi().then((ok) => setStopFailed(!ok))}
           >
@@ -536,12 +537,23 @@ export function ApprovalDialog({
             </button>
             {/* Two yeses, and they say different things. "Approve once" is this
                 call; the second button remembers the answer for the rest of the
-                session, and its label is the grant's full extent. Absent for a
+                session, and its name is the grant's full extent. Absent for a
                 per-call tool, where main would not honour it. Neither carries
                 any weight: Deny keeps the fill and the focus. */}
+            {/* The visible label is short so the answers fit one row at the
+                dialog's width; the extent — which permission, on which server —
+                is the button's accessible name and its tooltip, and the Where
+                and Permission rows above say the same. At full length it
+                wrapped the footer to three rows and, with toasts, pushed Deny
+                off the window. */}
             {grantLabel && (
-              <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'session')}>
-                {grantLabel}
+              <button
+                className="btn"
+                aria-label={grantLabel}
+                title={grantLabel}
+                onClick={() => void respondToApproval(request.id, 'approved', 'session')}
+              >
+                Allow for this session
               </button>
             )}
             <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'once')}>

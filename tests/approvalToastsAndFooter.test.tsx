@@ -82,7 +82,7 @@ describe('toasts while an approval is up', () => {
     expect(stack.textContent).toContain('Something failed')
     // In flow, not positioned: this is the rule that makes "cannot cover" true.
     expect(rule('.toasts.in-slot')).toMatch(/position:\s*static/)
-    expect(rule('.scrim.approval-scrim')).toMatch(/align-content:\s*center/)
+    expect(rule('.scrim.approval-scrim')).toMatch(/flex-direction:\s*column/)
   })
 
   it('go back to their corner once it is answered', async () => {
@@ -179,8 +179,13 @@ describe('the approval footer', () => {
     // The kill switch is outside the answers group, on its own side.
     const kill = screen.getByRole('button', { name: /Deny and stop all AI access/ })
     expect(answers.contains(kill)).toBe(false)
-    // The session grant is present, which is the case that overflowed.
-    expect(answers.textContent).toMatch(/for this session/)
+    // The session grant is present, which is the case that overflowed — with a
+    // short visible label, and its full extent as its name and tooltip.
+    const grant = screen.getByRole('button', {
+      name: /Allow “.*” on k3s-node-01.production.example.internal for this session/
+    })
+    expect(grant.textContent).toBe('Allow for this session')
+    expect(grant.getAttribute('title')).toBe(grant.getAttribute('aria-label'))
 
     expect(rule('.approval-footer')).toMatch(/flex-wrap:\s*wrap/)
     expect(rule('.approval-answers')).toMatch(/flex-wrap:\s*wrap/)
@@ -197,9 +202,90 @@ describe('the approval footer', () => {
   })
 })
 
+describe('fitting the window', () => {
+  // jsdom cannot lay out, so these pin the rules that make "fits" true; the
+  // numbers were measured in the real app (see the commit).
+  it('is a column exactly the window high, whose dialog gives way', () => {
+    const scrim = rule('.scrim.approval-scrim')
+    expect(scrim).toMatch(/flex-direction:\s*column/)
+    expect(scrim).toMatch(/justify-content:\s*safe center/)
+    expect(scrim).toMatch(/overflow:\s*hidden/)
+    const modal = rule('.approval-scrim > .modal')
+    expect(modal).toMatch(/min-height:\s*0/)
+    expect(modal).toMatch(/max-height:\s*100%/)
+  })
+
+  it('keeps the header, notes and footer at full height; only the body scrolls', () => {
+    expect(rule('.approval-scrim .modal-header,\n.approval-scrim .modal-footer,\n.approval-scrim .approval-note')).toMatch(
+      /flex:\s*none/
+    )
+    expect(rule('.modal-body')).toMatch(/overflow-y:\s*auto/)
+    expect(rule('.modal-body')).toMatch(/min-height:\s*0/)
+  })
+
+  it('caps the toast stack at a quarter of the height, scrolling inside itself', () => {
+    const slot = rule('.toasts.in-slot')
+    expect(slot).toMatch(/max-height:\s*25vh/)
+    expect(slot).toMatch(/overflow-y:\s*auto/)
+  })
+
+  it('puts the newest toast first while it is capped', async () => {
+    withApproval()
+    render(
+      <>
+        <ApprovalWatcher />
+        <Toasts />
+      </>
+    )
+    await screen.findByRole('dialog', { name: 'AI action requires approval' })
+    act(() => {
+      toast('First')
+      toast('Second')
+    })
+    const texts = [...document.querySelectorAll('.toasts.in-slot .toast')].map((t) => t.textContent)
+    expect(texts[0]).toContain('Second')
+  })
+})
+
 describe('the corner the walkthrough shares', () => {
-  it('moves toasts left of a tour or tip card, so they cannot cover its Next button', () => {
-    expect(rule('body:has(.tour-card, .tip-card) .toasts:not(.in-slot)')).toMatch(/right:\s*min\(calc\(400px/)
+  it('moves toasts left of a tour or tip card, and no further than the activity bar', () => {
+    const r = rule('body:has(.tour-card, .tip-card) .toasts:not(.in-slot)')
+    expect(r).toMatch(/right:\s*calc\(400px \+ var\(--sp-3\)\)/)
+    expect(r).toMatch(/max-width:\s*calc\(100vw - 400px - var\(--sp-3\) - var\(--activitybar-w\)/)
+  })
+
+  it('keeps toasts under the palette scrim while it is open', () => {
+    expect(rule('body:has(.palette-scrim) .toasts:not(.in-slot)')).toMatch(/z-index:\s*calc\(var\(--z-palette\) - 1\)/)
+  })
+})
+
+describe('an agent that disconnected while you were deciding', () => {
+  it('is announced as that, not as the clock', async () => {
+    let fire: (e: unknown) => void = () => undefined
+    stubBridge({
+      aiMcp: {
+        listApprovals: async () => [approval],
+        getConfig: async () => ({ approvalTimeoutSeconds: 120 }),
+        listSessions: async () => [],
+        listAudit: async () => [],
+        onApprovalEvent: (cb: (e: unknown) => void) => {
+          fire = cb
+          return () => undefined
+        }
+      }
+    })
+    render(
+      <>
+        <ApprovalWatcher />
+        <Toasts />
+      </>
+    )
+    await screen.findByRole('dialog', { name: 'AI action requires approval' })
+
+    act(() => fire({ type: 'resolved', request: { ...approval, status: 'disconnected' } }))
+
+    await waitFor(() => expect(document.body.textContent).toContain('The agent disconnected before you answered'))
+    expect(document.body.textContent).not.toContain('by the clock')
   })
 })
 

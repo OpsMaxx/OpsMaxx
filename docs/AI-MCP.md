@@ -246,8 +246,9 @@ consequences of closing that are deliberate and are not left to the capability's
   approval authorises the call in front of the user and never the next one. Without that,
   `add_server` — which has no server id yet and so shares one elevation key across every add in a
   session — approved the first write and then wrote every one after it silently. `update_server`
-  is scoped to itself rather than per-call: its dialog offers a second answer, **Allow
-  update_server on *server* for this session**, after which further changes to that same
+  is scoped to itself rather than per-call: its dialog offers a second answer, **Allow for this
+  session** (named in full, *Allow update_server on server for this session*, in its tooltip
+  and to screen readers), after which further changes to that same
   connection in that same session do not ask. **Approve once** covers the one change. Either yes
   reaches no other tool, no other server and no later session.
 
@@ -434,8 +435,13 @@ tool call on an in-memory pending request — nothing is written to disk until i
 request only clears when:
 
 - a human answers it in the approval dialog or on the **Approvals** screen (`respondToApproval`),
-- it times out (`approvalTimeoutSeconds` in Security, 1–10 minutes) and is treated as denied, or
-- **Stop all AI access** denies every pending request at once (`denyAllPending`).
+- it times out (`approvalTimeoutSeconds` in Security, 1–10 minutes) and is treated as denied,
+- **Stop all AI access** denies every pending request at once (`denyAllPending`), or
+- the agent's MCP request goes away first — the client was killed, or cancelled the call. `gate()`
+  passes the request's abort signal through, and the request ends at once as `disconnected`:
+  nothing runs, it is announced as "The agent disconnected before you answered", and it is audited
+  as **Cancelled — agent disconnected**, not as a timeout or a denial. It starts no deny cooldown,
+  because nobody decided anything.
 
 There is no code path from the MCP/HTTP surface into `respondToApproval` — approving a request
 requires the renderer's IPC handler, which only the human-facing UI calls. An agent cannot approve
@@ -444,12 +450,15 @@ its own request by construction, not by convention.
 **Two ways to say yes, and each says how far it reaches.**
 
 - **Approve once** authorises this call and nothing after it. The next call asks again.
-- **Allow "*permission*" on *server* for this session** also remembers the answer, in memory, for
+- **Allow for this session** also remembers the answer, in memory, for
   that permission on that server **under the same policy rule** until the agent's session ends or
   AI access is stopped. The remembered key is session + server + permission + the policy engine's
   reason for asking, so a grant given under "Terminal commands require approval" does not answer
   a path rule that asks on its own account. For a tool whose grant `gate()` narrows to itself
-  (`update_server`) the button names the tool instead of the permission. Calls it carries are
+  (`update_server`) the button names the tool instead of the permission. The visible label is
+  short so the dialog's answers fit on one row; the button's tooltip and accessible name carry
+  the full extent — *Allow "permission" on server for this session* — and the dialog's Where and
+  Permission rows say the same. Calls it carries are
   audited as `approved-earlier`, and the call that gave it as `approved-for-session`, so every
   carried row has one to point back to.
 
@@ -508,7 +517,8 @@ refusal by the policy itself is shown as **Blocked by policy** with the rule tha
 as allowed — including an `ask` on a call that names no single server (the fleet-wide reads), which
 has nobody to put the question to and is refused. A request OpsMaxx declined to put to anyone,
 because the session already had too many open or the same action was just denied, is shown as
-**Denied — not asked**, never as a refusal by you. Rows are written one per line, **append-only** (a crash
+**Denied — not asked**, never as a refusal by you, and one whose agent disconnected while it waited
+as **Cancelled — agent disconnected**. Rows are written one per line, **append-only** (a crash
 mid-write can corrupt at most the last line). Every free-text field (`action`, `error`) is passed
 through the same redaction (`secretRedaction.ts`) used for tool output before it's written, so the
 audit trail itself never becomes a place secrets end up.

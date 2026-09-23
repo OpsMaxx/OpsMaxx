@@ -1401,18 +1401,46 @@ button.switch {
   animation: fade 0.12s ease;
 }
 /* The AI approval dialog: same scrim, top layer. See `--z-approval`.
-   Rows sized to their content and centred together, so the toast slot sits
-   directly above the dialog instead of taking half the height. */
+
+   A column exactly the window's height (the scrim is inset 0, so its padding
+   is inside it), holding the toast slot and the dialog, and it must ALWAYS fit:
+   measured at 1440x900 with two toasts above it, the dialog ran to y=947 with
+   Deny off the bottom and the top toast at y=-47. So the toast slot is capped
+   and the dialog is the part that gives, by shrinking its body, which scrolls,
+   while its header, notes and footer keep their height. `safe` keeps the top
+   reachable in the one case nothing can shrink any further. */
 .scrim.approval-scrim {
   z-index: var(--z-approval);
-  align-content: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: safe center;
+  overflow: hidden;
+}
+.approval-scrim > .modal {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 100%;
+}
+.approval-scrim .modal-header,
+.approval-scrim .modal-footer,
+.approval-scrim .approval-note {
+  flex: none;
 }
 /* Toasts, while an approval is up: moved into the approval's own layout,
-   above it, by `ToastSlot`. Laid out beside the dialog, not floated over it, so
-   no number of them can cover its buttons — a tall stack scrolls the scrim. */
+   above it, by `ToastSlot`, so they sit beside the dialog rather than over it.
+   Capped at a quarter of the height and scrolling inside their own box, newest
+   first, so a pile of them costs the dialog at most that quarter. */
+.approval-scrim > .toast-slot,
+.agent-approval-scrim > .toast-slot {
+  flex: none;
+  max-width: 100%;
+}
 .toasts.in-slot {
   position: static;
   width: min(620px, 92vw);
+  max-height: 25vh;
+  overflow-y: auto;
   margin-bottom: var(--sp-3);
 }
 .toasts.in-slot:empty {
@@ -1425,6 +1453,12 @@ button.switch {
    inside its own button rather than widening the row. */
 .approval-footer {
   flex-wrap: wrap;
+}
+/* Left, on its own. Dialog footers right-align (dialogs.css), which put the
+   kill switch alone on the first row directly above Deny: the two red buttons
+   one above the other, the drastic one where the eye expects the answer. */
+.approval-kill {
+  margin-right: auto;
 }
 .approval-answers {
   display: flex;
@@ -2504,10 +2538,18 @@ details[open] > .disclosure-head .chev {
   z-index: var(--z-toast);
 }
 /* The walkthrough and feature tip cards share this corner, and a toast above
-   one covered its Next button. While one is up the stack moves to its left:
-   the card's 380px plus its 20px inset, or as far as the window allows. */
+   one covered its Next button. While one is up the stack moves to the card's
+   left — its 380px plus its 20px inset — and is capped so a long message wraps
+   rather than running on over the activity bar at the window's left edge. */
 body:has(.tour-card, .tip-card) .toasts:not(.in-slot) {
-  right: min(calc(400px + var(--sp-3)), calc(100vw - 260px - var(--sp-4)));
+  right: calc(400px + var(--sp-3));
+  max-width: calc(100vw - 400px - var(--sp-3) - var(--activitybar-w) - var(--sp-4));
+}
+/* The command palette is a modal question too: toasts go under its scrim while
+   it is open, the same as everything else behind it. Not inside an approval,
+   where they are part of the dialog's own layout. */
+body:has(.palette-scrim) .toasts:not(.in-slot) {
+  z-index: calc(var(--z-palette) - 1);
 }
 .toast {
   display: flex;

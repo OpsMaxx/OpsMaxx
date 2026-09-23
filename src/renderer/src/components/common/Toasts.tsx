@@ -41,7 +41,10 @@ export function Toasts(): React.JSX.Element {
   const slot = useToastSlot((s) => frontSlot(s.slots))
   const stack = (
     <div className={clsx('toasts', slot && 'in-slot')}>
-      {toasts.map((t) => (
+      {/* Newest first in the slot, which is capped and scrolls: the one that
+          just arrived is the one on screen. In the corner the newest is at the
+          bottom, nearest the edge it slid in from. */}
+      {(slot ? [...toasts].reverse() : toasts).map((t) => (
         <div
           key={t.id}
           className={clsx('toast', t.kind)}
