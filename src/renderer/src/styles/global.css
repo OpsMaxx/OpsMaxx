@@ -348,6 +348,12 @@ button {
      fade's room. */
   scroll-padding-block: var(--sp-5);
   container-type: scroll-state;
+  /* The pinned Report bug / Settings pair is its own section, and has to look
+     it: the fade alone still let a clipped icon read as touching Report bug.
+     On the box, not the content, so the line stays put while the list scrolls;
+     the margin adds to the rail's gap below it. */
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--sp-1);
 }
 .activity-scroll::-webkit-scrollbar {
   display: none;

@@ -266,6 +266,8 @@ describe('the rail buttons', () => {
     expect(CSS).not.toMatch(/animation-timeline:\s*scroll\(self\)/)
     // And keyboard focus stops clear of the fade rather than under it.
     expect(rule('.activity-scroll')).toMatch(/scroll-padding-block:/)
+    // And a divider marks where the pinned Report bug / Settings group begins.
+    expect(rule('.activity-scroll')).toMatch(/border-bottom:\s*1px solid var\(--border-subtle\)/)
   })
 
   it('does not add an ActivityView for any of them', () => {
