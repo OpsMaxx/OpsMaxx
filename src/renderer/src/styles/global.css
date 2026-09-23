@@ -1488,6 +1488,20 @@ button.switch {
   white-space: normal;
   text-align: center;
 }
+/* Its own band between the scrolling body and the footer, on the dialog's own
+   ground. With no spacing and no background it sat against the body's last
+   visible line and, before any scrolling, over the bottom of it (measured at
+   1440x900). */
+.approval-later-writes {
+  position: relative;
+  padding: var(--sp-2) var(--sp-5);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--warn);
+  /* The explanatory role, not the 11px label size: this is a sentence. */
+  font-size: var(--type-note-size);
+  text-align: right;
+}
 .approval-stop-failed {
   display: flex;
   align-items: center;

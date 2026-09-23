@@ -226,6 +226,15 @@ describe('fitting the window', () => {
     expect(rule('.modal-body')).toMatch(/min-height:\s*0/)
   })
 
+  // Measured at 1440x900: with no spacing and no ground of its own, the note
+  // sat over the scrolling body's last visible line.
+  it('gives the later-writes note its own band on the dialog\'s ground', () => {
+    const note = rule('.approval-later-writes')
+    expect(note).toMatch(/padding:\s*var\(--sp-2\)/)
+    expect(note).toMatch(/background:\s*var\(--bg-card\)/)
+    expect(note).toMatch(/border-top:/)
+  })
+
   it('caps the toast stack at a quarter of the height, scrolling inside itself', () => {
     const slot = rule('.toasts.in-slot')
     expect(slot).toMatch(/max-height:\s*25vh/)

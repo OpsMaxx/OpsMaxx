@@ -508,13 +508,7 @@ export function ApprovalDialog({
         {grantLabel && request.contentPreview && (
           <div
             data-testid="later-writes-note"
-            className="approval-note"
-            style={{
-              padding: '0 var(--sp-5)',
-              color: 'var(--warn)',
-              fontSize: 'var(--fs-caption)',
-              textAlign: 'right'
-            }}
+            className="approval-note approval-later-writes"
           >
             {LATER_WRITES_UNSEEN}
           </div>
