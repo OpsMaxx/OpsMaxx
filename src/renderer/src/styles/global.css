@@ -343,9 +343,63 @@ button {
   align-items: center;
   gap: var(--sp-1);
   scrollbar-width: none;
+  /* Focus scrolls a button in flush with the edge, which is where the fade
+     below is, so keyboard focus would land on a half-faded button. Leave the
+     fade's room. */
+  scroll-padding-block: var(--sp-5);
+  container-type: scroll-state;
+  /* The pinned Report bug / Settings pair is its own section, and has to look
+     it: the fade alone still let a clipped icon read as touching Report bug.
+     On the box, not the content, so the line stays put while the list scrolls;
+     the margin adds to the rail's gap below it. */
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: var(--sp-1);
 }
 .activity-scroll::-webkit-scrollbar {
   display: none;
+}
+/* The edge where the list is cut off has to LOOK cut off. With a hard clip and
+   no scrollbar, a half-scrolled button sat directly on the Report bug icon and
+   read as the two overlapping (reported at 1280x680). Each end fades into the
+   rail's background, and only while there is more in that direction -- on a
+   window tall enough for every icon neither shows.
+   Sticky overlays driven by a scroll-state query rather than a mask driven by
+   a scroll timeline: the timeline version was tried and measured, and after a
+   window grew from scrollable to not, Chromium left the last faded state
+   painted over Connections. The query re-evaluates on every layout.
+   The negative margin takes back the overlay's height AND the column's gap, so
+   the buttons sit exactly where they did without it. */
+.activity-scroll::before,
+.activity-scroll::after {
+  content: '';
+  position: sticky;
+  z-index: var(--z-sticky);
+  flex: none;
+  align-self: stretch;
+  height: var(--sp-5);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.12s;
+}
+.activity-scroll::before {
+  top: 0;
+  margin-bottom: calc(-1 * (var(--sp-5) + var(--sp-1)));
+  background: linear-gradient(var(--bg-sidebar), transparent);
+}
+.activity-scroll::after {
+  bottom: 0;
+  margin-top: calc(-1 * (var(--sp-5) + var(--sp-1)));
+  background: linear-gradient(transparent, var(--bg-sidebar));
+}
+@container scroll-state(scrollable: top) {
+  .activity-scroll::before {
+    opacity: 1;
+  }
+}
+@container scroll-state(scrollable: bottom) {
+  .activity-scroll::after {
+    opacity: 1;
+  }
 }
 
 /* ============================= Sidebar ============================= */
