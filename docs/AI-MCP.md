@@ -246,9 +246,9 @@ consequences of closing that are deliberate and are not left to the capability's
   approval authorises the call in front of the user and never the next one. Without that,
   `add_server` — which has no server id yet and so shares one elevation key across every add in a
   session — approved the first write and then wrote every one after it silently. `update_server`
-  is scoped to itself rather than per-call: its dialog offers a second answer, **Allow for this
-  session** (named in full, *Allow update_server on server for this session*, in its tooltip
-  and to screen readers), after which further changes to that same
+  is scoped to itself rather than per-call: its dialog offers a second answer, **Allow
+  update_server this session** (in full, with the server, in its tooltip), after which further
+  changes to that same
   connection in that same session do not ask. **Approve once** covers the one change. Either yes
   reaches no other tool, no other server and no later session.
 
@@ -450,15 +450,15 @@ its own request by construction, not by convention.
 **Two ways to say yes, and each says how far it reaches.**
 
 - **Approve once** authorises this call and nothing after it. The next call asks again.
-- **Allow for this session** also remembers the answer, in memory, for
+- **Allow "*permission*" this session** also remembers the answer, in memory, for
   that permission on that server **under the same policy rule** until the agent's session ends or
   AI access is stopped. The remembered key is session + server + permission + the policy engine's
   reason for asking, so a grant given under "Terminal commands require approval" does not answer
   a path rule that asks on its own account. For a tool whose grant `gate()` narrows to itself
-  (`update_server`) the button names the tool instead of the permission. The visible label is
-  short so the dialog's answers fit on one row; the button's tooltip and accessible name carry
-  the full extent — *Allow "permission" on server for this session* — and the dialog's Where and
-  Permission rows say the same. Calls it carries are
+  (`update_server`) the button names the tool instead of the permission. The server is left off
+  the button — the dialog's Where row names it — and the full sentence, *Allow "permission" on
+  server for this session*, is its tooltip. A long permission name wraps inside the button rather
+  than pushing the footer onto a third row. Calls it carries are
   audited as `approved-earlier`, and the call that gave it as `approved-for-session`, so every
   carried row has one to point back to.
 

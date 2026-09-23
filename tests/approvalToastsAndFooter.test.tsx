@@ -179,19 +179,22 @@ describe('the approval footer', () => {
     // The kill switch is outside the answers group, on its own side.
     const kill = screen.getByRole('button', { name: /Deny and stop all AI access/ })
     expect(answers.contains(kill)).toBe(false)
-    // The session grant is present, which is the case that overflowed — with a
-    // short visible label, and its full extent as its name and tooltip.
-    const grant = screen.getByRole('button', {
-      name: /Allow “.*” on k3s-node-01.production.example.internal for this session/
-    })
-    expect(grant.textContent).toBe('Allow for this session')
-    expect(grant.getAttribute('title')).toBe(grant.getAttribute('aria-label'))
+    // The session grant is present, which is the case that overflowed. Its
+    // visible text names the unit and is its accessible name; the server is in
+    // the tooltip.
+    const grant = screen.getByRole('button', { name: 'Allow “Execute terminal commands” this session' })
+    expect(grant.getAttribute('aria-label')).toBeNull()
+    expect(grant.getAttribute('title')).toMatch(/on k3s-node-01.production.example.internal for this session$/)
 
     expect(rule('.approval-footer')).toMatch(/flex-wrap:\s*wrap/)
-    expect(rule('.approval-answers')).toMatch(/flex-wrap:\s*wrap/)
+    expect(rule('.approval-answers')).not.toMatch(/flex-wrap:\s*wrap/)
     expect(rule('.approval-answers')).toMatch(/margin-left:\s*auto/)
-    // A long grant label wraps inside its button instead of widening the row.
-    expect(rule('.approval-answers .btn')).toMatch(/white-space:\s*normal/)
+    // A long grant label wraps inside its own button, the one answer that
+    // shrinks, instead of wrapping the row to a third line.
+    expect(rule('.approval-answers .btn')).toMatch(/flex:\s*none/)
+    const grantRule = rule('.approval-answers .btn.approval-grant')
+    expect(grantRule).toMatch(/white-space:\s*normal/)
+    expect(grantRule).toMatch(/min-width:\s*0/)
   })
 
   it('still puts the focus on Deny', async () => {

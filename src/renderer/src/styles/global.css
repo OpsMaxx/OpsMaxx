@@ -1462,13 +1462,21 @@ button.switch {
 }
 .approval-answers {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
   gap: var(--sp-2);
   margin-left: auto;
   min-width: 0;
 }
+/* One row, always. The other answers keep their width; the session grant is
+   the one that gives, wrapping its permission name inside itself. Wrapping the
+   ROW instead put a long grant on a row of its own and the footer at three. */
 .approval-answers .btn {
+  flex: none;
+}
+.approval-answers .btn.approval-grant {
+  flex: 0 1 auto;
+  min-width: 0;
   height: auto;
   min-height: 32px;
   white-space: normal;

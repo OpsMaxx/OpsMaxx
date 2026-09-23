@@ -167,6 +167,22 @@ export function sessionGrantLabel(request: ApprovalRequest): string | null {
 }
 
 /**
+ * The same grant as the button's visible text: the unit a yes covers — one
+ * tool, or a whole permission — without the server, which the Where row names.
+ *
+ * Not a generic "Allow for this session": that hid from a sighted operator
+ * whether the yes reached one tool or every call under the permission, and
+ * the rows above say neither. It is also the button's accessible name, so what
+ * is read aloud is what is on screen (WCAG 2.5.3); the full sentence, server
+ * included, is its tooltip.
+ */
+export function sessionGrantShortLabel(request: ApprovalRequest): string | null {
+  if (request.sessionGrant === 'tool' && request.toolName) return `Allow ${request.toolName} this session`
+  if (request.sessionGrant) return `Allow “${capabilityLabel(request.capability)}” this session`
+  return null
+}
+
+/**
  * Said next to a session grant on a write. The preview is the reason to
  * approve a write at all, and a remembered yes skips the dialog -- and with it
  * the preview -- for every later write it covers.
@@ -540,20 +556,18 @@ export function ApprovalDialog({
                 session, and its name is the grant's full extent. Absent for a
                 per-call tool, where main would not honour it. Neither carries
                 any weight: Deny keeps the fill and the focus. */}
-            {/* The visible label is short so the answers fit one row at the
-                dialog's width; the extent — which permission, on which server —
-                is the button's accessible name and its tooltip, and the Where
-                and Permission rows above say the same. At full length it
-                wrapped the footer to three rows and, with toasts, pushed Deny
-                off the window. */}
+            {/* Named by its unit, without the server (the Where row has it);
+                the full sentence is the tooltip. It is the one answer that
+                shrinks, wrapping inside itself, so a long permission name makes
+                the button taller rather than pushing the footer to a third row
+                — which, with toasts, put Deny off the window. */}
             {grantLabel && (
               <button
-                className="btn"
-                aria-label={grantLabel}
+                className="btn approval-grant"
                 title={grantLabel}
                 onClick={() => void respondToApproval(request.id, 'approved', 'session')}
               >
-                Allow for this session
+                {sessionGrantShortLabel(request)}
               </button>
             )}
             <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'once')}>
