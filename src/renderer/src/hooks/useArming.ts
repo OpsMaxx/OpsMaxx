@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 
 /** How long a "yes" stays inert after what it would answer appears or moves. */
 export const ARM_MS = 750
@@ -14,6 +14,12 @@ export const ARM_MS = 750
  * the button armed and fired after. Deny, Decide later and the kill switch are
  * never behind this: a mis-aimed no costs nothing.
  *
+ * THE CLOCK RESTARTS DURING RENDER, not in an effect. An effect runs after
+ * paint, so the render that moved a different request under the pointer was
+ * painted armed, with `allow` still measuring from the previous key: a click in
+ * that frame counted. Captured here, the new key is inert in the very render
+ * that shows it. The timer only exists to re-render once the delay is up.
+ *
  * Wire `allow` into the click handler, `noteKey` into onKeyDown, and render
  * `armed` as `aria-disabled` so the inert state is visible and announced.
  */
@@ -22,16 +28,23 @@ export function useArming(key: string): {
   allow: (e: React.MouseEvent) => boolean
   noteKey: (e: React.KeyboardEvent) => void
 } {
+  const keyRef = useRef(key)
   const since = useRef(performance.now())
-  const keyDownAt = useRef<number | null>(null)
-  const [armed, setArmed] = useState(false)
-
-  useEffect(() => {
+  if (keyRef.current !== key) {
+    keyRef.current = key
     since.current = performance.now()
-    setArmed(false)
-    const t = setTimeout(() => setArmed(true), ARM_MS)
+  }
+  const keyDownAt = useRef<number | null>(null)
+  const [, tick] = useState(0)
+
+  useLayoutEffect(() => {
+    const left = since.current + ARM_MS - performance.now()
+    if (left <= 0) return
+    const t = setTimeout(() => tick((n) => n + 1), left)
     return () => clearTimeout(t)
   }, [key])
+
+  const armed = performance.now() >= since.current + ARM_MS
 
   const allow = useCallback((e: React.MouseEvent): boolean => {
     const armAt = since.current + ARM_MS
