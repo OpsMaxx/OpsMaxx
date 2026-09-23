@@ -123,13 +123,18 @@ const RECENT_MAX = 20
 // capability, same per-call approval, same modal, same audit: only the
 // rationing is separate, and a flood of cancels is still capped, just not by
 // the fuse that trigger_run spends.
+//
+// A workspace-wide request has no server, and is keyed on its workspace under
+// its own tag, so denying a read of the whole workspace cools down that and not
+// the same capability on one of its servers.
 const subjectKey = (i: {
   sessionId: string
   capability: string
-  serverId: string
+  workspaceId: string
+  serverId: string | null
   containment?: boolean
 }): string =>
-  `${i.sessionId}\u0000${i.capability}\u0000${i.serverId}\u0000${i.containment ? 'stop' : 'start'}`
+  `${i.sessionId}\u0000${i.capability}\u0000${i.serverId === null ? `workspace\u0000${i.workspaceId}` : `server\u0000${i.serverId}`}\u0000${i.containment ? 'stop' : 'start'}`
 
 /** Only for tests and for a fresh process: the guard holds no secrets. */
 export function resetApprovalVolumeForTests(): void {
@@ -156,8 +161,9 @@ export interface CreateApprovalInput {
   agentName: string
   workspaceId: string
   workspaceName: string
-  serverId: string
-  serverName: string
+  /** Both null together for a workspace-wide read: the request is about the workspace. */
+  serverId: string | null
+  serverName: string | null
   capability: ApprovalRequest['capability']
   action: string
   risk: ApprovalRequest['risk']
@@ -314,7 +320,7 @@ export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDec
     // interpolating it; this is the floor under that, not a replacement for it.
     action: remoteText(input.action, ACTION_MAX_CHARS),
     riskReason: remoteText(input.riskReason, ACTION_MAX_CHARS),
-    serverName: remoteText(input.serverName, NAME_MAX_CHARS) || '(unnamed)',
+    serverName: input.serverName === null ? null : remoteText(input.serverName, NAME_MAX_CHARS) || '(unnamed)',
     // Redacted over the WHOLE content, then cut: a known secret straddling the
     // cut would otherwise survive as a prefix no pattern recognises.
     contentPreview: writeContent

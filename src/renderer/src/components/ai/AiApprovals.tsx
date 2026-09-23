@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Check, X } from 'lucide-react'
 import type { ApprovalRequest, ApprovalScope } from '../../../../shared/mcp'
-import { describeConsequence, formatRiskLabel, riskTone } from '../../../../shared/approvalRisk'
+import { approvalWhere, describeConsequence, formatRiskLabel, riskTone } from '../../../../shared/approvalRisk'
 import { bridgeOn } from '../../lib/bridge'
 import { LATER_WRITES_UNSEEN, WritePreview, capabilityLabel, sessionGrantLabel } from './ApprovalDialog'
 import { useArming } from '../../hooks/useArming'
@@ -96,7 +96,7 @@ export function AiApprovals(): React.JSX.Element {
           <div>
             <div className="r-title">{a.agentName}</div>
             <div className="r-sub">
-              {a.workspaceName} / {a.serverName} ·{' '}
+              {approvalWhere(a)} ·{' '}
               <span
                 style={{
                   color:
@@ -176,9 +176,7 @@ export function AiApprovals(): React.JSX.Element {
                           : a.status}
                   </span>
                 </div>
-                <div className="r-sub">
-                  {a.workspaceName} / {a.serverName}
-                </div>
+                <div className="r-sub">{approvalWhere(a)}</div>
                 <div className="r-sub mono">{a.action}</div>
                 {a.policyReason && <div className="r-sub">Rule: {a.policyReason}</div>}
               </div>

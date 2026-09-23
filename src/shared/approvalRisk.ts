@@ -62,7 +62,8 @@ export interface ApprovalSubject {
   capability: AiCapability | string
   action: string
   risk: string
-  serverName: string
+  /** Null for a workspace-wide read, which is about the workspace and no server in it. */
+  serverName: string | null
   workspaceName?: string
   /**
    * The rule main applied, when the gate() call site recorded one. Optional
@@ -116,7 +117,23 @@ const PROD_RE = /(^|[\s\-_./:])(prod|production|prd|live)([\s\-_./:]|$)/i
 
 /** The first of the request's own names that reads as production, or null. */
 export function productionHint(s: ApprovalSubject): string | null {
-  return [s.serverName, s.workspaceName ?? ''].find((v) => v && PROD_RE.test(v)) ?? null
+  return [s.serverName ?? '', s.workspaceName ?? ''].find((v) => v && PROD_RE.test(v)) ?? null
+}
+
+/**
+ * What a request is about, as a phrase: the server, or -- for a workspace-wide
+ * read, which names none -- the workspace. Never "null" and never blank: an
+ * operator reading "act on" followed by nothing cannot tell what a yes reaches.
+ */
+export function approvalTarget(r: { serverName: string | null; workspaceName?: string }): string {
+  return r.serverName ?? `the ${r.workspaceName ?? 'unnamed'} workspace`
+}
+
+/** The Where line: "Workspace / Server", or the workspace alone and said to be whole. */
+export function approvalWhere(r: { serverName: string | null; workspaceName: string }): string {
+  return r.serverName === null
+    ? `Workspace: ${r.workspaceName} — the whole workspace, no single server`
+    : `${r.workspaceName} / ${r.serverName}`
 }
 
 /**
@@ -467,6 +484,7 @@ const COMMAND_SHAPES: CommandShape[] = [
  * for. If the shape is not recognised, the answer is that it is not recognised.
  */
 export function describeConsequence(s: ApprovalSubject): Consequence {
+  if (s.serverName === null) return describeWorkspaceConsequence(s)
   const host = s.serverName
   const action = s.action
 
@@ -575,6 +593,45 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
 }
 
 /**
+ * The workspace-wide reads. Each is named by its tool, because one capability
+ * (fleetRead) covers three reads that disclose very different things, and the
+ * sentence is the operator's only way to tell them apart. Every one of them
+ * reads what OpsMaxx already holds and opens no connection.
+ */
+function describeWorkspaceConsequence(s: ApprovalSubject): Consequence {
+  const ws = approvalTarget(s)
+  switch (s.action) {
+    case 'fleet_inventory':
+      return {
+        text: `Returns every server in ${ws} with its OS, pending updates and how many of them are security updates — what each host is unpatched against. It reads what OpsMaxx already collected and connects to nothing.`,
+        known: true
+      }
+    case 'fleet_drift':
+      return {
+        text: `Names every server in ${ws} whose watched configuration has changed since it was last reviewed. Read together, that is a list of the workspace’s weakest hosts. It reads what OpsMaxx already collected and connects to nothing.`,
+        known: true
+      }
+    case 'list_alerts':
+      return {
+        text: `Returns the alerts OpsMaxx has already raised for servers in ${ws}. Nothing changes; it reads history already recorded.`,
+        known: true
+      }
+    case 'backup_status':
+      return {
+        text: `Lists every backup destination configured on this machine and whether each is running on schedule — machine-wide, not only ${ws}. Destinations are named; their credentials are not.`,
+        known: true
+      }
+    case 'list_ci_connections':
+      return {
+        text: `Lists the names and providers of the CI/CD connections in ${ws}. Not their URLs or tokens, and nothing about the pipelines on them.`,
+        known: true
+      }
+    default:
+      return { text: NO_CONSEQUENCE_TEXT, known: false }
+  }
+}
+
+/**
  * What denying costs, said plainly.
  *
  * The operator's unspoken question at a modal like this is "if I say no, do I
@@ -582,7 +639,9 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
  * makes a tired person click the affirmative, so the answer is on the screen.
  */
 export function describeDenial(s: ApprovalSubject): string {
-  return `Denying tells the agent this action was rejected. It stays connected and can do something else — nothing runs on ${s.serverName}.`
+  return s.serverName === null
+    ? `Denying tells the agent this action was rejected. It stays connected and can do something else — nothing is read from ${approvalTarget(s)}.`
+    : `Denying tells the agent this action was rejected. It stays connected and can do something else — nothing runs on ${s.serverName}.`
 }
 
 // ---------------------------------------------------------------------------

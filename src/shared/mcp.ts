@@ -420,8 +420,14 @@ export interface ApprovalRequest {
   agentName: string
   workspaceId: string
   workspaceName: string
-  serverId: string
-  serverName: string
+  /**
+   * Both null for a workspace-wide read (fleet_inventory, list_alerts,
+   * fleet_drift, backup_status, list_ci_connections): the request is about the
+   * workspace, not a server in it, and a session grant on it covers that
+   * workspace and nothing narrower or wider. Render it with approvalTarget().
+   */
+  serverId: string | null
+  serverName: string | null
   capability: AiCapability
   action: string
   risk: 'low' | 'medium' | 'high'

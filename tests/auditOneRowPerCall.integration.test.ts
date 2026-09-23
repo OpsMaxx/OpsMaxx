@@ -193,18 +193,25 @@ describe('a refusal by the policy reads as one', () => {
 })
 
 // An `ask` on a call that names no server -- the fleet-wide reads pass
-// serverId null -- used to be refused with no row at all.
+// serverId null -- used to be refused with no row at all, and then with a
+// "Blocked by policy" row: nobody was asked. It is now put to a human, naming
+// the workspace, and a no is recorded as theirs. The full matrix is in
+// tests/workspaceApproval.integration.test.ts.
 describe('an ask with no server to name', () => {
-  it('is refused with one row that reads as the policy\u2019s answer', async () => {
+  it('is put to a human about the workspace, and a no leaves one row that says so', async () => {
     const restore = withOpen({ fleetRead: 'ask' })
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') respondToApproval(e.request.id, 'denied')
+    })
     const { c, id } = await session()
     try {
-      expect(await call(c, 'fleet_inventory', {})).toMatch(/Denied/)
+      expect(await call(c, 'fleet_inventory', {})).toMatch(/Denied: the user rejected this action/)
       const rows = rowsFor(id)
       expect(rows).toHaveLength(1)
-      expect(rows[0]).toMatchObject({ approval: 'not-required', result: 'denied', serverId: null })
-      expect(auditOutcome(rows[0]).label).toBe('Blocked by policy')
+      expect(rows[0]).toMatchObject({ approval: 'denied', result: 'denied', serverId: null, workspaceName: 'Personal' })
+      expect(auditOutcome(rows[0]).label).toBe('Denied')
     } finally {
+      off()
       restore()
       await c.close()
     }

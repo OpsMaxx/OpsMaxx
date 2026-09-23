@@ -86,7 +86,7 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `list_images` | `containers` | Images present, with dangling layers marked as dangling rather than named `<none>`. What exists, not what it costs — there is no disk-usage tool here at any setting |
 | `get_config_drift` | `fleetRead`, checked per server | Whether **one** named server's watched files still match their baseline. Secret-shaped text is redacted before the comparison, so a changed password is reported as a change without disclosing either value |
 | `fleet_drift` | `fleetRead`, resolved on the **workspace**, graded **high** | The fleet-wide form, and a heavier disclosure: read as an attacker would, "which hosts have fallen behind" is a ranked list of the weakest machines. An unsampled host is reported as unknown, never as clean |
-| `list_ci_connections` | `ciRead` | Connection names and providers — **never a base URL or API token** |
+| `list_ci_connections` | `ciRead`, resolved on the **workspace** | Connection names and providers — **never a base URL or API token** |
 | `list_pipelines` | `ciRead` | Pipelines on one connection, with their opaque `ref` and whether each can be started. Capped |
 | `list_runs` | `ciRead` | Recent runs of one pipeline, newest first, capped. Fenced as untrusted |
 | `get_run` | `ciRead` | One run: status, timing, per-step outcomes. Fenced as untrusted |
@@ -478,6 +478,21 @@ its own request by construction, not by convention.
   audited as `approved-earlier`, and the call that gave it as `approved-for-session`, so every
   carried row has one to point back to.
 
+**A workspace-wide read asks about the workspace.** `fleet_inventory`, `list_alerts`,
+`fleet_drift`, `backup_status` and `list_ci_connections` name no server, so an Ask on
+`fleetRead`, `backupRead` or `ciRead` is put to you naming the **workspace** instead: the dialog
+says the agent is asking to act on *the Alpha workspace*, and its Where row reads *Workspace:
+Alpha — the whole workspace, no single server*. A session that holds several workspaces is asked
+once per workspace that says Ask, in turn (`gateWorkspaces`, `mcpServer.ts`); workspaces that
+allow outright are not asked about, and a no to any one of them refuses the whole call.
+`backup_status` answers for the whole machine, so every workspace the session holds must permit
+it. The session grant for one of these is keyed session + **workspace** + permission + rule,
+tagged as a workspace key, so it never answers a question about one of that workspace's servers
+(`get_config_drift` is `fleetRead` too, and still asks), a per-server grant never answers for the
+workspace, and a grant on workspace A never answers for workspace B
+(`tests/workspaceApproval.integration.test.ts`). Before this, gate() refused every Ask that named
+no server, so Ask on these three permissions behaved exactly like Deny and nobody was asked.
+
 The second button is only offered where `gate()` would honour it. These are per-call — every
 call asks, they show **Approve once** alone, and they never read a remembered grant:
 
@@ -530,8 +545,7 @@ Every gated action — allowed outright, approved, denied, or failed — is appe
 `opsmaxx-ai-audit.jsonl` (`auditLog.ts`) as exactly one JSON object per call, including a call
 whose connection fails after it was allowed (`tests/auditOneRowPerCall.integration.test.ts`). A
 refusal by the policy itself is shown as **Blocked by policy** with the rule that refused it, never
-as allowed — including an `ask` on a call that names no single server (the fleet-wide reads), which
-has nobody to put the question to and is refused. A request OpsMaxx declined to put to anyone,
+as allowed. A request OpsMaxx declined to put to anyone,
 because the session already had too many open or the same action was just denied, is shown as
 **Denied — not asked**, never as a refusal by you, and one whose agent disconnected while it waited
 as **Cancelled — agent disconnected**. Rows are written one per line, **append-only** (a crash
