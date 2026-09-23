@@ -41,7 +41,10 @@ const WRAPPERS: Record<string, (s: string) => string> = {
   "script -qc '…'": (s) => `script -qc ${sq(s)} /dev/null`,
   // find hands -exec an argv, not a command line; joining it back with spaces
   // took `bash -lc "…"` apart, and every depth-three allow went through here.
-  "find -exec sh -c '…' \\;": (s) => `find . -maxdepth 0 -exec sh -c ${sq(s)} \\;`
+  // A harmless first group comes before the payload: only the first group
+  // used to be walked when it ended in `\;`.
+  "find -exec true \\; -exec sh -c '…' \\;": (s) =>
+    `find . -maxdepth 0 -exec true \\; -exec sh -c ${sq(s)} \\;`
 }
 
 /** Every nest of 1..maxDepth wrappers around `inner`, with its depth and a readable label. */
@@ -74,6 +77,11 @@ function group(caps: Partial<AccessGroup['capabilities']>): AccessGroup {
   }
 }
 
+// Each depth-four pass evaluates some 38,000 commands, several of them long
+// after four rounds of quoting: seconds on an idle machine, and well past the
+// suite's 15-second default when the full suite runs alongside it.
+const DEPTH_FOUR_MS = 120_000
+
 const noSudo = group({ terminal: 'allow', sudo: 'deny' })
 const shadowDenied: AccessGroup = {
   ...group({ terminal: 'allow', sudo: 'allow' }),
@@ -103,7 +111,7 @@ describe('every quoted nest around `sudo reboot`, sudo=deny + terminal=allow', (
       .filter((n) => evaluateCommand(noSudo, n.command).decision === 'allow')
       .map((n) => `${n.label}: ${n.command}`)
     expect(allowed).toEqual([])
-  })
+  }, DEPTH_FOUR_MS)
 })
 
 describe('the same matrix around a harmless `ls /tmp`', () => {
@@ -112,7 +120,7 @@ describe('the same matrix around a harmless `ls /tmp`', () => {
       .filter((n) => evaluateCommand(noSudo, n.command).decision === 'deny')
       .map((n) => `${n.label}: ${n.command}`)
     expect(denied).toEqual([])
-  })
+  }, DEPTH_FOUR_MS)
 })
 
 describe('every quoted nest around `cat /etc/shadow`, with a deny rule on it', () => {
@@ -132,5 +140,5 @@ describe('every quoted nest around `cat /etc/shadow`, with a deny rule on it', (
       .filter((n) => evaluateCommand(shadowDenied, n.command).decision === 'allow')
       .map((n) => `${n.label}: ${n.command}`)
     expect(allowed).toEqual([])
-  })
+  }, DEPTH_FOUR_MS)
 })

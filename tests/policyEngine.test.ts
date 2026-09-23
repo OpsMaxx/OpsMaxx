@@ -945,3 +945,32 @@ describe('find -exec, and tools that change privilege', () => {
     expect(evaluateCommand(noSudo, cmd).decision).toBe('allow')
   })
 })
+
+// Security pass #8: every find action group is walked, including after a `;`
+// the shell split on, and unshare -r gets a reason of its own.
+describe('every find action group', () => {
+  const noSudo = group({ terminal: 'allow', sudo: 'deny' })
+  const shadowDenied = group({ terminal: 'allow', sudo: 'allow', readFiles: 'allow', writeFiles: 'allow' }, [
+    { id: 'shadow', pattern: '/etc/shadow', read: 'deny', write: 'deny' }
+  ])
+
+  it('applies the /etc/shadow rule to a later group after an unescaped ;', () => {
+    expect(evaluateCommand(shadowDenied, 'find . -exec echo {} ; -exec cat /etc/shadow ;').decision).toBe('deny')
+  })
+
+  it.each([
+    'find . -exec echo {} ; -exec sh -c "sudo reboot" ;',
+    'find . -exec ls ; -execdir bash -lc "sudo reboot" ;',
+    'find . -exec echo {} \\; -exec sh -c "sudo reboot" \\;',
+    'find . -exec echo {} + -ok sudo reboot \\;'
+  ])('denies %s under sudo=deny', (cmd) => {
+    expect(evaluateCommand(noSudo, cmd).decision).toBe('deny')
+  })
+
+  it('asks about unshare -r for what it is, not as an unreadable command', () => {
+    const d = evaluateCommand(noSudo, 'unshare --map-root-user id')
+    expect(d.decision).toBe('ask')
+    expect(d.reason).toMatch(/root inside a new user namespace/)
+    expect(d.reason).not.toMatch(/computed/)
+  })
+})

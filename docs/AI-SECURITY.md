@@ -73,8 +73,9 @@ Regardless of which access group a session holds:
   - the insides of `$(...)`, `<(...)`, `>(...)`, backticks, a shell's command string (`-c`
     anywhere in an option cluster: `bash -lc`, `sh -ec`, `zsh -ic`, `bash -lic`, with the string
     as the first operand after the options), `script -c` (`-qc` included), `su -c`, `sg`, `env -S`,
-    `flock -c`, `find -exec`/`-execdir`/`-ok`/`-okdir` (its target walked as the argv find passes,
-    not a re-joined line), a `parallel` template (or, with none, each of its
+    `flock -c`, every `find -exec`/`-execdir`/`-ok`/`-okdir` group (each target walked as the argv
+    find passes, not a re-joined line, and a group left behind by an unescaped `;` the shell split
+    on walked too), a `parallel` template (or, with none, each of its
     arguments), `watch`, `eval`, and on Windows `cmd /c`, `/r` or
     `/k` (glued on or not, `cmd.exe/c` included), PowerShell's `-Command` (or `-c`, or the implicit
     command a bare `powershell Start-Process …` takes), `iex`/`Invoke-Expression`, the scriptblock
@@ -94,7 +95,8 @@ Regardless of which access group a session holds:
   options), `gsudo`, `sudo.exe` or `Start-Process … -Verb RunAs` — the command is governed by the
   **Sudo** capability, and what it runs is judged too — `sudo env bash` and `gsudo cmd` are
   elevated shells. `unshare -r` / `--map-root-user` is root only inside a new user namespace and
-  is everyday rootless tooling, so it asks rather than counting as sudo. A privileged tool asked
+  is everyday rootless tooling, so it asks, with that as the reason, rather than counting as sudo,
+  and a remembered approval never covers it. A privileged tool asked
   only `--help` or `--version` is describing itself and is not an escalation. So
   `/usr/bin/sudo reboot`, `env sudo reboot`, `if true; then sudo reboot; fi`,
   `\sudo reboot`, `eval sudo reboot` and `su -c "rm -rf /x"` are all sudo, and a group that denies
@@ -123,8 +125,8 @@ Regardless of which access group a session holds:
   The quoting is tested with a generated matrix rather than hand-picked cases
   (`tests/escalationQuotingMatrix.test.ts`): every nest of `eval '…'`, `sh -c '…'`, `sh -c "…"`,
   `env -S "…"`, `$(…)`, a `$(case … esac)` with parens of its own, `cat <(…)`, a backquote,
-  `bash -lc`, `sh -ec`, `zsh -ic`, `bash -lic`, `script -qc` and `find -exec sh -c` — 41,370
-  nests up to four deep,
+  `bash -lc`, `sh -ec`, `zsh -ic`, `bash -lic`, `script -qc` and `find -exec true \; -exec sh -c`
+  (a harmless first group before the payload) — 41,370 nests up to four deep,
   each quoted the way a careful tool quotes. Around `sudo reboot` under a group that denies sudo,
   and around `cat /etc/shadow` under a path rule that denies it, every nest to depth three must be
   denied and none at depth four allowed; the same nests around `ls /tmp` must never be denied.

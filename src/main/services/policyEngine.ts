@@ -90,6 +90,11 @@ export interface CommandClassification {
   isSudo: boolean
   isUnrestrictedShell: boolean
   /**
+   * Some segment runs under `unshare -r` / `--map-root-user`: root inside a
+   * new user namespace only. evaluateCommand asks about it, with that reason.
+   */
+  namespaceRoot?: boolean
+  /**
    * Some segment's command word is computed when it runs -- `$(which sudo)`,
    * `${SUDO:-sudo}`, a backtick -- so nothing here can say what it is.
    * evaluateCommand turns an `allow` into an `ask` for it.
@@ -246,9 +251,6 @@ const SETPRIV_VALUE_OPTIONS = new Set([
   '--pdeathsig', '--selinux-label', '--apparmor-profile', '--landlock-access', '--landlock-rule'
 ])
 const UNSHARE_VALUE_OPTIONS = new Set(['-S', '-G', '--setuid', '--setgid', '--map-user', '--map-group'])
-
-/** One word, quoted so tokenize reads it back as exactly that word. */
-const shellQuote = (w: string): string => (/^[\w@%+=:,./{}-]+$/.test(w) ? w : `'${w.replace(/'/g, `'\\''`)}'`)
 
 /** Everything after a command's own options. */
 function afterOptions(argv: string[], valueOptions: Set<string>): string[] {
@@ -562,6 +564,8 @@ interface SegmentFacts {
   shell: boolean
   /** The working command's own word is computed when it runs. */
   computed: boolean
+  /** Some `unshare -r` stood in front of it: root, but only in a new user namespace. */
+  nsRoot?: boolean
   /** The command that does the work: past runners AND escalators. Empty if none. */
   argv: string[]
 }
@@ -569,7 +573,17 @@ interface SegmentFacts {
 /** parallel options that take a value. */
 const PARALLEL_VALUE_OPTIONS = new Set(['-j', '-S', '-a', '-I', '-n', '-N', '-P', '--jobs', '--sshlogin', '--arg-file'])
 
-function unwrapSegment(tokens: string[], nested: string[], stdinFed = false): Omit<SegmentFacts, 'segment'> {
+/**
+ * `siblings` receives further argvs this segment runs in its own right, each to
+ * be walked exactly as the segment itself is -- every find -exec target, not
+ * the first one only.
+ */
+function unwrapSegment(
+  tokens: string[],
+  nested: string[],
+  stdinFed = false,
+  siblings: string[][] = []
+): Omit<SegmentFacts, 'segment'> {
   const head = stripRunners(tokens, nested) ?? []
   let t = head
   let escalated = false
@@ -577,6 +591,7 @@ function unwrapSegment(tokens: string[], nested: string[], stdinFed = false): Om
   // Set when the command hands over something this walk cannot read at all,
   // such as a base64 PowerShell command.
   let unreadable = false
+  let nsRoot = false
   const done = (argv: string[]): Omit<SegmentFacts, 'segment'> => ({
     head,
     escalated,
@@ -586,6 +601,7 @@ function unwrapSegment(tokens: string[], nested: string[], stdinFed = false): Om
     // `f(){sudo` -- is one this code cannot name, so it is reported for
     // evaluateCommand to ask about rather than guessed at.
     computed: unreadable || (argv.length > 0 && argv[0] !== '[' && UNREADABLE_WORD.test(argv[0])),
+    nsRoot,
     argv
   })
   // Bounded: every pass consumes at least the command word.
@@ -651,7 +667,7 @@ function unwrapSegment(tokens: string[], nested: string[], stdinFed = false): Om
     // namespace, and it is everyday rootless tooling -- so it asks rather than
     // being refused as sudo.
     if (name === 'unshare') {
-      if (argv.some((a) => a === '--map-root-user' || /^-[A-Za-z]*r[A-Za-z]*$/.test(a))) unreadable = true
+      if (argv.some((a) => a === '--map-root-user' || /^-[A-Za-z]*r[A-Za-z]*$/.test(a))) nsRoot = true
       const target = afterOptions(argv, UNSHARE_VALUE_OPTIONS)
       if (!target.length) return done([])
       t = target
@@ -685,16 +701,23 @@ function unwrapSegment(tokens: string[], nested: string[], stdinFed = false): Om
       }
     }
     // More commands that run a command of their own.
-    if (name === 'find') {
-      // `-exec CMD … ;` / `+`, `-execdir`, `-ok`, `-okdir`: CMD runs per file,
-      // as an argv, not a command line. The first one is walked in place, like
-      // chroot's command; any later one is handed on re-quoted, so its words
-      // are the words find will pass. Joining them with spaces took
-      // `bash -lc "cat /etc/shadow"` apart into `bash -lc cat` and a stray
-      // operand.
+    //
+    // find: `-exec CMD … ;` / `+`, `-execdir`, `-ok`, `-okdir` run CMD per file,
+    // as an argv, not a command line. EVERY action group is collected, and
+    // each is walked as its own argv, exactly as this segment is. Joining
+    // them with spaces took `bash -lc "cat /etc/shadow"` apart; walking only
+    // the first missed the rest.
+    //
+    // A segment that STARTS with one of those actions is the tail of a find
+    // whose `;` was left unescaped: the shell split it there. It runs nothing
+    // in a real shell, and it is walked all the same -- the cheap direction to
+    // be wrong in.
+    const findAction = /^-(?:exec|execdir|ok|okdir)$/
+    if (name === 'find' || findAction.test(argv[0])) {
+      const from = name === 'find' ? 1 : 0
       const targets: string[][] = []
-      for (let i = 1; i < argv.length; i++) {
-        if (!/^-(?:exec|execdir|ok|okdir)$/.test(argv[i])) continue
+      for (let i = from; i < argv.length; i++) {
+        if (!findAction.test(argv[i])) continue
         const end = argv.findIndex((a, j) => j > i && (a === ';' || a === '+'))
         const cmd = argv.slice(i + 1, end < 0 ? undefined : end)
         if (cmd.length) targets.push(cmd)
@@ -702,9 +725,8 @@ function unwrapSegment(tokens: string[], nested: string[], stdinFed = false): Om
         i = end
       }
       if (targets.length) {
-        for (const later of targets.slice(1)) nested.push(later.map(shellQuote).join(' '))
-        t = targets[0]
-        continue
+        siblings.push(...targets)
+        return done([])
       }
     }
     if (name === 'sg') {
@@ -952,7 +974,14 @@ function walkCommand(command: string, visit: (facts: SegmentFacts) => void, dept
     // a pipe, or an input redirection (`<`, `<<`, `<<<`) that is not a
     // process substitution? A shell with no command string runs it.
     const redirectedIn = [...segment.matchAll(REDIRECTION)].some((m) => m[1].startsWith('<') && !m[2].startsWith('('))
-    visit({ segment, ...unwrapSegment(tokens, nested, piped[i] || redirectedIn) })
+    const walkArgv = (text: string, argv: string[], fed: boolean): void => {
+      const siblings: string[][] = []
+      visit({ segment: text, ...unwrapSegment(argv, nested, fed, siblings) })
+      // Redirections belong to the segment they were written on, so a
+      // sibling carries none of its own.
+      for (const sibling of siblings) walkArgv('', sibling, false)
+    }
+    walkArgv(segment, tokens, piped[i] || redirectedIn)
   })
   if (depth < MAX_DEPTH) for (const inner of nested) walkCommand(inner, visit, depth + 1)
   // Nested deeper than the walk goes: whatever is down there was not read, so
@@ -978,6 +1007,7 @@ export function classifyCommand(command: string): CommandClassification {
     if (f.escalated) out.isSudo = true
     if (f.shell) out.isUnrestrictedShell = true
     if (f.computed) out.computedCommand = true
+    if (f.nsRoot) out.namespaceRoot = true
   })
   // A refused shell is an escalation too, whatever spelled it.
   if (out.isUnrestrictedShell) out.isSudo = true
@@ -1349,7 +1379,7 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   const terminal = evaluateCapability(group, 'terminal')
   if (terminal.decision === 'deny') return { decision: 'deny', reason: 'Terminal access is denied for this access group.' }
 
-  const { isSudo, isUnrestrictedShell, computedCommand } = classifyCommand(command)
+  const { isSudo, isUnrestrictedShell, computedCommand, namespaceRoot } = classifyCommand(command)
   if (isUnrestrictedShell) {
     return {
       decision: 'deny',
@@ -1382,6 +1412,14 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   // it might be sudo, and a group that denies sudo would never know. Asked
   // about rather than refused, because `$HOME/bin/tool` is the same shape and
   // usually harmless; a human can tell which one it is.
+  // `unshare -r`: root, but only inside a new user namespace -- everyday
+  // rootless tooling, and not the host's root. Asked about, not refused.
+  if (base.decision === 'allow' && namespaceRoot) {
+    base = {
+      decision: 'ask',
+      reason: 'Requires approval: it runs as root inside a new user namespace (unshare -r).'
+    }
+  }
   if (base.decision === 'allow' && computedCommand) {
     base = {
       decision: 'ask',

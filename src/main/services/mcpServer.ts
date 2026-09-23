@@ -2088,8 +2088,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // A command word the walk cannot read literally (`$(which sudo) reboot`,
       // `{sudo,reboot}`, nesting past its depth) may be anything, sudo
       // included, so it is never covered by a remembered yes.
-      const computed = classifyCommand(command).computedCommand
-      const elevated = check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot || computed
+      const classified = classifyCommand(command)
+      const computed = classified.computedCommand
+      // `unshare -r` is root inside a user namespace: not the host's root,
+      // but not something a remembered yes about `df` should cover either.
+      const namespaceRoot = classified.namespaceRoot === true
+      const elevated =
+        check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot || computed || namespaceRoot
       // The reason names the rule that fired, in that order, because that is
       // the order the OR above evaluates -- and assessCommand already returns
       // the sentence for its own rule, so this quotes it rather than writing a
@@ -2100,11 +2105,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           ? 'the command runs as another user, most likely root (sudo, su, doas, pkexec, run0, runuser or systemd-run)'
           : runsAsRoot
             ? 'the command mentions sudo, so a remembered approval does not cover it'
-            : computed
-            ? 'the command it runs is computed when it runs, so OpsMaxx cannot tell what it is'
-          : assessed.reasons[0]
-            ? `OpsMaxx\u2019s command classifier graded it ${assessed.risk}: ${assessed.reasons[0]}`
-            : `OpsMaxx\u2019s command classifier graded it ${assessed.risk}`
+            : namespaceRoot
+              ? 'it runs as root inside a new user namespace (unshare -r)'
+              : computed
+                ? 'the command it runs is computed when it runs, so OpsMaxx cannot tell what it is'
+                : assessed.reasons[0]
+                  ? `OpsMaxx\u2019s command classifier graded it ${assessed.risk}: ${assessed.reasons[0]}`
+                  : `OpsMaxx\u2019s command classifier graded it ${assessed.risk}`
       const gated = await gate(
         ctx,
         check,
