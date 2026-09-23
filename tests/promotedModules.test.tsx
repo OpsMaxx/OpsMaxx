@@ -254,6 +254,20 @@ describe('the rail buttons', () => {
     expect(rule('.activity-scroll')).toMatch(/min-height:\s*0/)
   })
 
+  it('fades the cut-off end of the rail instead of clipping it hard', () => {
+    // Seen at 1280x680: the scroll worked, but with no scrollbar the half-scrolled
+    // Kubernetes button was clipped flush against Report bug and read as the two
+    // overlapping. The fade is what says "more below". Its trigger is a
+    // scroll-state query, not a scroll timeline: the timeline left a stale fade
+    // painted after the window grew tall enough not to scroll.
+    expect(rule('.activity-scroll')).toMatch(/container-type:\s*scroll-state/)
+    expect(CSS).toMatch(/@container scroll-state\(scrollable: bottom\)\s*\{\s*\.activity-scroll::after/)
+    expect(CSS).toMatch(/@container scroll-state\(scrollable: top\)\s*\{\s*\.activity-scroll::before/)
+    expect(CSS).not.toMatch(/animation-timeline:\s*scroll\(self\)/)
+    // And keyboard focus stops clear of the fade rather than under it.
+    expect(rule('.activity-scroll')).toMatch(/scroll-padding-block:/)
+  })
+
   it('does not add an ActivityView for any of them', () => {
     // Point 1, stated where it cannot be worked around. A promoted module that
     // became its own `activity` would mount a second subtree and unmount
