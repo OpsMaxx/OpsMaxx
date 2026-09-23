@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { KeyRound, ShieldAlert, Network } from 'lucide-react'
 import type { AgentApprovalRequest, ApprovalScope } from '../../../../shared/sshAgentHost'
 import { ToastSlot } from '../common/Toasts'
+import { useArming } from '../../hooks/useArming'
 
 /**
  * The prompt that appears when something asks the agent to sign.
@@ -38,12 +39,23 @@ export function AgentApprovalWatcher(): React.JSX.Element | null {
   }, [])
 
   const request = queue[0]
+  // Re-arms whenever the prompt at the front changes: answering one brings the
+  // next up under the pointer that just pressed.
+  const { armed, allow, noteKey } = useArming(request?.id ?? '')
   if (!request) return null
 
   const answer = (allow: boolean, scope: ApprovalScope = 'once'): void => {
     void window.opsmaxx?.sshAgent.resolve(request.id, allow ? { allow: true, scope } : { allow: false })
     setQueue((held) => held.filter((r) => r.id !== request.id))
   }
+  /** Props for a yes: inert until armed. Refuse is never held back. */
+  const yes = (scope: ApprovalScope): React.ButtonHTMLAttributes<HTMLButtonElement> => ({
+    'aria-disabled': !armed,
+    onKeyDown: noteKey,
+    onClick: (e) => {
+      if (allow(e)) answer(true, scope)
+    }
+  })
 
   return (
     <div className="agent-approval-scrim" role="dialog" aria-modal="true">
@@ -88,13 +100,13 @@ export function AgentApprovalWatcher(): React.JSX.Element | null {
           <button className="btn" autoFocus onClick={() => answer(false)}>
             Refuse
           </button>
-          <button className="btn" onClick={() => answer(true, 'once')}>
+          <button className="btn" {...yes('once')}>
             Allow once
           </button>
-          <button className="btn" onClick={() => answer(true, 'window')}>
+          <button className="btn" {...yes('window')}>
             Allow for a while
           </button>
-          <button className="btn" onClick={() => answer(true, 'session')}>
+          <button className="btn" {...yes('session')}>
             Allow until the vault locks
           </button>
         </div>

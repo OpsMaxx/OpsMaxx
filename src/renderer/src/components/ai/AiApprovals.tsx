@@ -4,6 +4,7 @@ import type { ApprovalRequest, ApprovalScope } from '../../../../shared/mcp'
 import { describeConsequence, formatRiskLabel, riskTone } from '../../../../shared/approvalRisk'
 import { bridgeOn } from '../../lib/bridge'
 import { LATER_WRITES_UNSEEN, WritePreview, capabilityLabel, sessionGrantLabel } from './ApprovalDialog'
+import { useArming } from '../../hooks/useArming'
 
 export function AiApprovals(): React.JSX.Element {
   // `null` until the first read comes back, NOT `[]`.
@@ -21,6 +22,10 @@ export function AiApprovals(): React.JSX.Element {
   // What recently resolved, including the ones nobody answered. Its own call:
   // these must never reach the modal queue or the sidebar badge.
   const [recent, setRecent] = useState<ApprovalRequest[]>([])
+  // Keyed on the whole list, not a row: a withdrawn row closes up the list and
+  // moves a different request's Approve under the pointer, so any change to
+  // what is waiting re-arms every yes on the page.
+  const { armed, allow, noteKey } = useArming((approvals ?? []).map((a) => a.id).join(','))
 
   const load = (): void => {
     void window.opsmaxx?.aiMcp
@@ -120,11 +125,25 @@ export function AiApprovals(): React.JSX.Element {
             <X size={13} /> Deny
           </button>
           {grantLabel && (
-            <button className="btn sm" onClick={() => respond(a.id, 'approved', 'session')}>
+            <button
+              className="btn sm"
+              aria-disabled={!armed}
+              onKeyDown={noteKey}
+              onClick={(e) => {
+                if (allow(e)) void respond(a.id, 'approved', 'session')
+              }}
+            >
               {grantLabel}
             </button>
           )}
-          <button className="btn sm" onClick={() => respond(a.id, 'approved', 'once')}>
+          <button
+            className="btn sm"
+            aria-disabled={!armed}
+            onKeyDown={noteKey}
+            onClick={(e) => {
+              if (allow(e)) void respond(a.id, 'approved', 'once')
+            }}
+          >
             <Check size={13} /> Approve once
           </button>
         </div>

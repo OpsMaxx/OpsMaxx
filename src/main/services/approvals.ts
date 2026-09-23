@@ -65,6 +65,23 @@ const DENY_COOLDOWN_MS = 30_000
 /** subject -> epoch ms the cooldown expires. Pruned lazily; see requestApproval. */
 const recentDenials = new Map<string, number>()
 
+// WITHDRAWALS. A request that ends `disconnected` was ended by the agent, not
+// by an answer or the fuse -- and that makes the agent able to swap what is on
+// screen at will: ask something benign, abort, ask something else, as fast as
+// it likes, so the question under the operator's pointer changes mid-click.
+// The renderer arms its yes buttons after each change (hooks/useArming.ts);
+// this bounds how often the swap can be tried at all. Per SESSION rather than
+// per subject, because the attack changes the subject every time.
+//
+// Past the limit the session's requests are `refused-withdrawn`: not asked, and
+// audited as not-asked with this reason -- nobody decided anything, so it is not
+// recorded as a denial. A containment request (the emergency brake) is still
+// asked, for the same reason it has its own volume budget.
+const WITHDRAWAL_WINDOW_MS = 60_000
+const MAX_WITHDRAWALS_PER_WINDOW = 3
+/** sessionId -> epoch ms of each withdrawal inside the window. */
+const withdrawals = new Map<string, number[]>()
+
 /**
  * The longest a request may wait to be SEEN.
  *
@@ -117,6 +134,7 @@ const subjectKey = (i: {
 /** Only for tests and for a fresh process: the guard holds no secrets. */
 export function resetApprovalVolumeForTests(): void {
   recentDenials.clear()
+  withdrawals.clear()
   recent.length = 0
 }
 
@@ -221,7 +239,15 @@ export interface CreateApprovalInput {
  * nobody was asked, and retrying now will be refused again. It used to be
  * written as `denied`, which the audit view read as the operator's refusal.
  */
-export type ApprovalDecision = 'approved' | 'approved-for-session' | 'denied' | 'timeout' | 'disconnected' | 'refused'
+export type ApprovalDecision =
+  | 'approved'
+  | 'approved-for-session'
+  | 'denied'
+  | 'timeout'
+  | 'disconnected'
+  | 'refused'
+  /** Not asked: this session withdrew too many requests recently. See `withdrawals`. */
+  | 'refused-withdrawn'
 
 // Generous on purpose. The point of passing these through remoteText is the
 // character filtering and the newline flattening, not the truncation: an
@@ -240,6 +266,13 @@ export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDec
   for (const [k, expires] of recentDenials) if (expires <= now) recentDenials.delete(k)
 
   if ((recentDenials.get(subject) ?? 0) > now) return Promise.resolve('refused')
+
+  const withdrawn = (withdrawals.get(input.sessionId) ?? []).filter((t) => t > now - WITHDRAWAL_WINDOW_MS)
+  if (withdrawn.length > 0) withdrawals.set(input.sessionId, withdrawn)
+  else withdrawals.delete(input.sessionId)
+  if (withdrawn.length >= MAX_WITHDRAWALS_PER_WINDOW && input.containment !== true) {
+    return Promise.resolve('refused-withdrawn')
+  }
 
   // Counted within this request's own class, for the reason at subjectKey: a
   // session's three open trigger prompts must not be what refuses its cancel.
@@ -384,6 +417,9 @@ function finish(
   // presses repeatedly rather than a decision. A timeout is not a decision, so
   // it starts no cooldown -- nobody was there.
   if (decision === 'denied') recentDenials.set(entry.subject, Date.now() + DENY_COOLDOWN_MS)
+  if (decision === 'disconnected') {
+    withdrawals.set(entry.request.sessionId, [...(withdrawals.get(entry.request.sessionId) ?? []), Date.now()])
+  }
   entry.resolve(forSession ? 'approved-for-session' : decision)
   emitter.emit('event', { type: 'resolved', request: entry.request } satisfies ApprovalEvent)
 }

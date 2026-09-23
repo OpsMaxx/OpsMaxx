@@ -1006,10 +1006,28 @@ async function gate(
       writeContent: subject.writeContent,
       signal: extra?.signal
     })
+    const approved = decision === 'approved' || decision === 'approved-for-session'
+    // Approved, but the client went while the operator was deciding. Nothing is
+    // run for a caller that is not there to receive it, and the session grant is
+    // not remembered either: a yes given to a request its own agent abandoned
+    // is not one to spend on whatever that session asks next.
+    if (approved && extra?.signal?.aborted) {
+      recordAudit({
+        ...auditBase(ctx),
+        approval: 'disconnected',
+        result: 'denied',
+        error: 'Approved, but the agent disconnected before it ran, so nothing was run'
+      })
+      return {
+        ok: false,
+        result: errorText('Cancelled: the request was withdrawn before it could run, so nothing ran.')
+      }
+    }
     // Only an explicit session answer is remembered. A plain `approved` is the
     // "Approve once" button and covers this call alone.
     if (decision === 'approved-for-session' && !perCall) sessionElevations.add(key)
-    if (decision !== 'approved' && decision !== 'approved-for-session') {
+    const notAsked = decision === 'refused' || decision === 'refused-withdrawn'
+    if (!approved) {
       recordAudit({
         agentName: ctx.session.agentName,
         sessionId: ctx.session.id,
@@ -1023,12 +1041,14 @@ async function gate(
         // this one denied moments ago -- and it used to be written as
         // `denied`, which the audit view rendered "You refused this request".
         // Nobody was asked. `not-asked` says so, and says why.
-        approval: decision === 'refused' ? 'not-asked' : decision,
+        approval: notAsked ? 'not-asked' : decision,
         result: 'denied',
         error:
           decision === 'refused'
             ? 'OpsMaxx did not ask: this session already had too many approval requests open, or the same action was denied moments ago'
-            : undefined
+            : decision === 'refused-withdrawn'
+              ? 'OpsMaxx did not ask: this session withdrew several approval requests in the last minute before they were answered'
+              : undefined
       })
       if (decision === 'refused') {
         return {
@@ -1038,6 +1058,16 @@ async function gate(
               'open already, or this same action was denied moments ago. Nobody saw a new prompt ' +
               'for it. Do something else, or ask the user to answer the requests already waiting ' +
               'in the OpsMaxx window.'
+          )
+        }
+      }
+      if (decision === 'refused-withdrawn') {
+        return {
+          ok: false,
+          result: errorText(
+            'Denied: OpsMaxx did not ask. This session withdrew several approval requests in the ' +
+              'last minute before the user answered them, so it is not being asked again for now. ' +
+              'Nobody saw a prompt for this. Wait a minute, then ask once and wait for the answer.'
           )
         }
       }

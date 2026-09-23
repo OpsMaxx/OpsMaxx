@@ -431,3 +431,66 @@ describe('an agent that disconnects while waiting', () => {
     expect(await again).toBe('denied')
   })
 })
+
+// A disconnect frees the prompt and starts no cooldown, so without a bound an
+// agent could cycle benign -> abort -> dangerous as fast as it likes. Past three
+// withdrawals a minute, the session is not asked again until they age out.
+describe('withdrawing requests too often', () => {
+  beforeEach(() => {
+    resetApprovalVolumeForTests()
+    resetMcpAuthForTests()
+    setMcpConfig({ approvalTimeoutSeconds: 60 })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    denyAllPending()
+    resetApprovalVolumeForTests()
+  })
+
+  async function withdraw(action: string, sessionId = 'sess-1'): Promise<void> {
+    const abort = new AbortController()
+    const p = req({ action, sessionId, signal: abort.signal })
+    abort.abort()
+    expect(await p).toBe('disconnected')
+  }
+
+  it('refuses the session\'s next request after three in a minute, without asking anyone', async () => {
+    await withdraw('a')
+    await withdraw('b')
+    await withdraw('c')
+
+    expect(await req({ action: 'd' })).toBe('refused-withdrawn')
+    expect(listPendingApprovals()).toHaveLength(0)
+  })
+
+  it('holds it to the session that withdrew', async () => {
+    await withdraw('a')
+    await withdraw('b')
+    await withdraw('c')
+
+    void req({ action: 'd', sessionId: 'sess-2' })
+    expect(listPendingApprovals()).toHaveLength(1)
+  })
+
+  it('still asks a containment request, the emergency brake', async () => {
+    await withdraw('a')
+    await withdraw('b')
+    await withdraw('c')
+
+    void req({ action: 'cancel', containment: true })
+    expect(listPendingApprovals()).toHaveLength(1)
+  })
+
+  it('asks again once the withdrawals are a minute old', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.parse('2026-09-23T10:00:00Z'))
+    await withdraw('a')
+    await withdraw('b')
+    await withdraw('c')
+    expect(await req({ action: 'd' })).toBe('refused-withdrawn')
+
+    vi.setSystemTime(Date.parse('2026-09-23T10:01:01Z'))
+    void req({ action: 'e' })
+    expect(listPendingApprovals()).toHaveLength(1)
+  })
+})

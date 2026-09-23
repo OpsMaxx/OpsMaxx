@@ -1206,6 +1206,12 @@ button {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* A yes that is not armed yet (useArming): dimmed and inert, but still in the
+   tab order, so arming does not move focus or skip it. */
+.btn[aria-disabled='true'] {
+  opacity: 0.5;
+  cursor: progress;
+}
 .btn.block {
   width: 100%;
 }

@@ -441,7 +441,23 @@ request only clears when:
   passes the request's abort signal through, and the request ends at once as `disconnected`:
   nothing runs, it is announced as "The agent disconnected before you answered", and it is audited
   as **Cancelled — agent disconnected**, not as a timeout or a denial. It starts no deny cooldown,
-  because nobody decided anything.
+  because nobody decided anything. If the operator's yes and the disconnect land together,
+  `gate()` re-reads the signal after the answer and runs nothing (audited the same way), and a
+  session grant given in that moment is not remembered.
+
+**Withdrawing is bounded, and a yes is armed.** Because an agent can now end its own request, it
+could otherwise ask something benign, withdraw it, and ask something else in its place while the
+operator is mid-click. Two things stop that:
+
+- **Click-arming.** For 750 ms after a new request appears — or, on the Approvals page, after the
+  list of waiting requests changes — **Approve once** and the session grant are dimmed,
+  `aria-disabled` and inert, and an Enter or Space that went down before they armed is ignored
+  when it lands. **Deny**, **Decide later** and the kill switch are never held back. The SSH
+  agent's signing prompt arms its Allow buttons the same way (`hooks/useArming.ts`).
+- **A withdrawal limit.** After three withdrawals from one session inside a minute, that
+  session's further requests are not asked until the oldest ages out. The agent is told why,
+  and the audit log records each one as **Denied — not asked** with that reason — never as a
+  refusal by you. A containment request (the emergency brake) is still asked.
 
 There is no code path from the MCP/HTTP surface into `respondToApproval` — approving a request
 requires the renderer's IPC handler, which only the human-facing UI calls. An agent cannot approve

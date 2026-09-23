@@ -5,6 +5,7 @@ import type { ApprovalRequest, AuditEntry, ContentPreview, McpAgentSession } fro
 import { describeConsequence, describeDenial, explainRisk } from '../../../../shared/approvalRisk'
 import { duration } from '../../lib/format'
 import { ToastSlot } from '../common/Toasts'
+import { useArming } from '../../hooks/useArming'
 import {
   KILL_SWITCH_FAILED,
   canExtendFuse,
@@ -270,6 +271,8 @@ export function ApprovalDialog({
   const extendable = canExtendFuse()
   const grantLabel = sessionGrantLabel(request)
   const [stopFailed, setStopFailed] = useState(false)
+  // The dialog is keyed on the request, so this re-arms for every new one.
+  const { armed, allow, noteKey } = useArming(request.id)
 
   const toneText =
     risk.tone === 'danger' ? 'var(--danger)' : risk.tone === 'warn' ? 'var(--warn)' : 'var(--text-muted)'
@@ -565,12 +568,23 @@ export function ApprovalDialog({
               <button
                 className="btn approval-grant"
                 title={grantLabel}
-                onClick={() => void respondToApproval(request.id, 'approved', 'session')}
+                aria-disabled={!armed}
+                onKeyDown={noteKey}
+                onClick={(e) => {
+                if (allow(e)) void respondToApproval(request.id, 'approved', 'session')
+              }}
               >
                 {sessionGrantShortLabel(request)}
               </button>
             )}
-            <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'once')}>
+            <button
+              className="btn"
+              aria-disabled={!armed}
+              onKeyDown={noteKey}
+              onClick={(e) => {
+                if (allow(e)) void respondToApproval(request.id, 'approved', 'once')
+              }}
+            >
               Approve once
             </button>
             <button

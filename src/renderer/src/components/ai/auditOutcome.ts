@@ -45,7 +45,11 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
       label: 'Cancelled — agent disconnected',
       decidedBy: null,
       tone: 'muted',
-      detail: 'The agent disconnected before anyone answered, so this did not run. Nobody decided it.'
+      // The error says which: gone before anyone answered, or approved and
+      // gone before it could run. Either way nothing ran.
+      detail: e.error
+        ? `${e.error}.`
+        : 'The agent disconnected before anyone answered, so this did not run. Nobody decided it.'
     }
   }
   if (e.approval === 'denied') {
