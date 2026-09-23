@@ -1660,12 +1660,31 @@ const EXEC_OUTPUT_CAP = 200_000 // bytes per stream, enough for inspection outpu
 // Used to bring connection setup inside the caller's timeout. `unref` so a
 // pending guard never holds the process open — the answer is already decided by
 // the time it fires.
-function withDeadline<T>(p: Promise<T>, ms: number, message: string): Promise<T> {
+//
+// The race does not cancel `p`. A connection that authenticates after the
+// deadline would be a live session nobody holds, so `onLate` is handed it to
+// dispose of.
+function withDeadline<T>(
+  p: Promise<T>,
+  ms: number,
+  message: string,
+  onLate?: (late: T) => void
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined
+  let timedOut = false
   const guard = new Promise<never>((_resolve, reject) => {
-    timer = setTimeout(() => reject(new Error(message)), ms)
+    timer = setTimeout(() => {
+      timedOut = true
+      reject(new Error(message))
+    }, ms)
     if (typeof timer.unref === 'function') timer.unref()
   })
+  p.then(
+    (late) => {
+      if (timedOut) onLate?.(late)
+    },
+    () => undefined
+  )
   // race attaches handlers to `p`, so a late settle is not an unhandled
   // rejection.
   return Promise.race([p, guard]).finally(() => clearTimeout(timer))
@@ -1690,7 +1709,8 @@ export async function sshExec(
     conn = await withDeadline(
       acquire(cfg, undefined, allowPrompt),
       timeoutMs,
-      `Timed out after ${timeoutMs}ms connecting`
+      `Timed out after ${timeoutMs}ms connecting`,
+      release
     )
     const first = await execOn(conn.client, command, timeoutMs)
     if (!isChannelOpenFailure(first.error)) return first
@@ -1711,7 +1731,8 @@ export async function sshExec(
     conn = await withDeadline(
       acquire(cfg, undefined, allowPrompt),
       timeoutMs,
-      `Timed out after ${timeoutMs}ms connecting`
+      `Timed out after ${timeoutMs}ms connecting`,
+      release
     )
     const second = await execOn(conn.client, command, timeoutMs)
     if (!isChannelOpenFailure(second.error)) return second
@@ -1920,7 +1941,8 @@ export async function sshOpenFresh(
      */
     openChain(cfg, undefined, true),
     timeoutMs,
-    `Timed out after ${timeoutMs}ms opening an independent session`
+    `Timed out after ${timeoutMs}ms opening an independent session`,
+    closeChain
   )
   const authenticatedAt = now()
   const pooled = [...new Set([...before, ...pooledConnectionIds()])]
@@ -1933,22 +1955,26 @@ export async function sshOpenFresh(
     close: () => {
       if (closed) return
       closed = true
-      // Every client in the chain, not just the last: a bastion opened for this
-      // one connection is this connection's to close, and leaving it up would
-      // be an authenticated session nothing is tracking.
-      for (const c of chain.clients) {
-        try {
-          c.end()
-        } catch {
-          /* already gone */
-        }
-      }
-      try {
-        chain.close?.()
-      } catch {
-        /* a VPN forward already closed must not break the teardown */
-      }
+      closeChain(chain)
     }
+  }
+}
+
+// Every client in the chain, not just the last: a bastion opened for this one
+// connection is this connection's to close, and leaving it up would be an
+// authenticated session nothing is tracking.
+function closeChain(chain: { clients: Client[]; close?: () => void }): void {
+  for (const c of chain.clients) {
+    try {
+      c.end()
+    } catch {
+      /* already gone */
+    }
+  }
+  try {
+    chain.close?.()
+  } catch {
+    /* a VPN forward already closed must not break the teardown */
   }
 }
 
@@ -2087,15 +2113,8 @@ export async function sshTest(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   } finally {
-    // Closed in a finally, and every client rather than the last: a chain that
-    // failed on hop three still opened hops one and two, and leaking those is
-    // how a form with a typo in it ends up holding connections open on a
-    // bastion.
-    try {
-      chain?.close?.()
-      for (const c of chain?.clients ?? []) c.end()
-    } catch {
-      /* already gone */
-    }
+    // Only a chain that opened reaches here with one; a chain that failed
+    // part-way was already closed by openChainDirect.
+    if (chain) closeChain(chain)
   }
 }

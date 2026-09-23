@@ -7,7 +7,7 @@ import { app } from 'electron'
 import { Client, Server, utils } from 'ssh2'
 import type { SshHop } from '../src/shared/ssh'
 import { fingerprint } from '../src/main/services/knownhosts'
-import { openChain, poolDisposeAll, poolList, sshExec } from '../src/main/services/ssh'
+import { openChain, poolDisposeAll, poolList, sshExec, sshOpenFresh } from '../src/main/services/ssh'
 import { metricsDisposeAll, metricsSample } from '../src/main/services/metrics'
 import type { SshConnectConfig } from '../src/shared/ssh'
 
@@ -422,5 +422,35 @@ describe('a pooled hop that fails before ssh2 takes its channel', () => {
       await new Promise((res) => setTimeout(res, 25))
     }
     expect(bastion.channels()).toBe(0)
+  })
+})
+
+describe('a connection that authenticates after its deadline', () => {
+  // The deadline races the connect; it does not cancel it. The late session
+  // used to be held by nobody: pooled with a reference never released, or an
+  // unpooled chain never closed.
+  const settle = async (done: () => boolean): Promise<void> => {
+    const deadline = Date.now() + 5000
+    while (!done() && Date.now() < deadline) await new Promise((r) => setTimeout(r, 25))
+  }
+
+  it('sshExec releases the pooled reference it no longer wants', async () => {
+    const r = await sshExec(behindBastion(), 'uptime', 1, false)
+    expect(r.error).toMatch(/Timed out/)
+    // The bastion's one reference is the target's, as its parent: the same as
+    // after a read that finished in time.
+    const targetEntry = (): { sessions: number } | undefined =>
+      poolList().find((p) => p.key === 'srv:srv-bastion>srv:srv-target')
+    await settle(() => targetEntry()?.sessions === 0)
+    expect(target.logins).toHaveLength(1)
+    expect(targetEntry()?.sessions).toBe(0)
+  })
+
+  it('sshOpenFresh closes the chain it no longer wants', async () => {
+    await expect(sshOpenFresh(behindBastion(), 1)).rejects.toThrow(/Timed out/)
+    await settle(() => target.logins.length === 1 && bastion.live() === 0 && target.live() === 0)
+    expect(target.logins).toHaveLength(1)
+    expect(bastion.live()).toBe(0)
+    expect(target.live()).toBe(0)
   })
 })
