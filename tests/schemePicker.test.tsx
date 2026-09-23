@@ -112,4 +112,18 @@ describe('terminal colour scheme swatches', () => {
     expect(nord.querySelector('.scheme-name svg')).not.toBeNull()
     expect(radios().filter((r) => r !== nord && r.querySelector('.scheme-name svg'))).toEqual([])
   })
+
+  // QA read these as "$ lsDracula" with no group name at all. The preview is
+  // decoration; each radio is named for its scheme outright, and the group's
+  // labelledby points at exactly one element — the visible row title.
+  it('names each radio for its scheme alone, and the group for its row', () => {
+    render(<Settings />)
+    for (const r of radios()) {
+      expect(r.getAttribute('aria-label')).toBe(label(r))
+      expect(r.getAttribute('aria-label')).not.toContain('$ ls')
+    }
+    const id = group().getAttribute('aria-labelledby')!
+    expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1)
+    expect(document.getElementById(id)!.textContent?.trim()).toBe('Colour scheme')
+  })
 })
