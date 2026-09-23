@@ -788,25 +788,34 @@ async function openChainDirect(
   const hops = cfg.hops ?? []
   const clients: Client[] = []
   let sock: NodeJS.ReadableStream | undefined
-  for (let i = 0; i < hops.length; i++) {
-    onHop?.(i, hops.length)
-    // Labelled here as well as on the pooled walk: tunnels, `Test route`,
-    // sshTest and the ephemeral forwards a database dials all come through
-    // this one, and a chain failure has to say which hop on every path that
-    // can show one to a person.
-    const client = await connectClient(hops[i], sock, allowPrompt).catch((err) => {
-      throw atHop(err, hops[i], i, hops.length)
-    })
+  try {
+    for (let i = 0; i < hops.length; i++) {
+      onHop?.(i, hops.length)
+      // Labelled here as well as on the pooled walk: tunnels, `Test route`,
+      // sshTest and the ephemeral forwards a database dials all come through
+      // this one, and a chain failure has to say which hop on every path that
+      // can show one to a person.
+      const client = await connectClient(hops[i], sock, allowPrompt).catch((err) => {
+        throw atHop(err, hops[i], i, hops.length)
+      })
+      clients.push(client)
+      sock = await hopForward(client, i + 1 < hops.length ? hops[i + 1] : cfg, {
+        hop: hops[i],
+        index: i,
+        count: hops.length
+      })
+    }
+    const client = await connectClient(cfg, sock, allowPrompt)
     clients.push(client)
-    sock = await hopForward(client, i + 1 < hops.length ? hops[i + 1] : cfg, {
-      hop: hops[i],
-      index: i,
-      count: hops.length
-    })
+    return { clients, client }
+  } catch (err) {
+    // Nobody else holds these: the chain is only handed out whole. A failure
+    // at hop i used to leave hops 0..i-1 authenticated and open, one session
+    // left on each bastion per failed attempt until the server timed it out.
+    // Ending a client also closes the channel forwarded through it.
+    for (const c of clients.reverse()) c.end()
+    throw err
   }
-  const client = await connectClient(cfg, sock, allowPrompt)
-  clients.push(client)
-  return { clients, client }
 }
 
 // ---------------------------------------------------------------- pooling

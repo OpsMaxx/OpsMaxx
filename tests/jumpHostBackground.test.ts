@@ -7,7 +7,7 @@ import { app } from 'electron'
 import { Client, Server, utils } from 'ssh2'
 import type { SshHop } from '../src/shared/ssh'
 import { fingerprint } from '../src/main/services/knownhosts'
-import { poolDisposeAll, poolList, sshExec } from '../src/main/services/ssh'
+import { openChain, poolDisposeAll, poolList, sshExec } from '../src/main/services/ssh'
 import { metricsDisposeAll, metricsSample } from '../src/main/services/metrics'
 import type { SshConnectConfig } from '../src/shared/ssh'
 
@@ -30,6 +30,8 @@ interface Fixture {
   port: number
   /** Every connection this sshd has authenticated. */
   logins: string[]
+  /** Connections accepted and not yet closed. */
+  live: () => number
 }
 
 let hostKey = ''
@@ -75,7 +77,10 @@ async function startServer(name: string, forwards: boolean): Promise<Fixture> {
   if (allowed instanceof Error) throw allowed
 
   const logins: string[] = []
+  let live = 0
   const server = new Server({ hostKeys: [hostKey] }, (conn) => {
+    live++
+    conn.on('close', () => live--)
     // Several tests below hang up part-way through a handshake on purpose —
     // that is what "the client refused this host" looks like from here — and
     // ssh2's Server raises KEY_EXCHANGE_FAILED for it. Unhandled, it fails the
@@ -122,7 +127,7 @@ async function startServer(name: string, forwards: boolean): Promise<Fixture> {
   })
 
   await new Promise<void>((resolve) => server.listen(0, HOST, resolve))
-  return { server, port: (server.address() as { port: number }).port, logins }
+  return { server, port: (server.address() as { port: number }).port, logins, live: () => live }
 }
 
 beforeAll(async () => {
@@ -377,5 +382,22 @@ describe('a failure part-way along the chain says where it happened', () => {
     const r = await sshExec(direct, 'uptime', 10_000, false)
     expect(r.ok).toBe(false)
     expect(r.error).not.toContain('Jump host')
+  })
+})
+
+describe('a jump chain that fails past the first hop', () => {
+  // The unpooled walk (tunnels, Test route, sshTest, database forwards) used to
+  // leave every hop it had already opened authenticated and connected when a
+  // later one failed: one session left on the bastion per failed attempt.
+  it('closes the bastion session it opened', async () => {
+    const wrong = utils.generateKeyPairSync('ed25519')
+    const cfg = { ...behindBastion(), privateKey: wrong.private }
+    await expect(openChain(cfg, undefined, false)).rejects.toThrow()
+    expect(bastion.logins).toHaveLength(1)
+    const deadline = Date.now() + 5000
+    while (bastion.live() > 0 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 25))
+    }
+    expect(bastion.live()).toBe(0)
   })
 })
