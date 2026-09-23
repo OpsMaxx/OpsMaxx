@@ -513,8 +513,16 @@ async function connectClient(
       }
       reject(err)
     })
+    // ssh2 validates the config (it parses the key, so a wrong passphrase
+    // lands here) and can throw BEFORE it attaches its own listeners to the
+    // socket. Only once connect() returns does ssh2 own it.
+    try {
+      client.connect(config)
+    } catch (err) {
+      clearDeadline()
+      throw err
+    }
     handedOff = true
-    client.connect(config)
   }).catch((err: unknown) => {
     if (!handedOff && !sock) (transport as net.Socket).destroy()
     throw err

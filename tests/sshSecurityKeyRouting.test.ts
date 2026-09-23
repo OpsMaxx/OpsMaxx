@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createServer, type Server } from 'node:net'
+import { utils } from 'ssh2'
 import { openChain } from '../src/main/services/ssh'
 
 // Does an sk- key actually REACH the agent, rather than merely being
@@ -19,10 +20,11 @@ import { openChain } from '../src/main/services/ssh'
 // ssh2 instead cannot produce that message at all, because nothing on that path
 // asks about an agent.
 //
-// It dials a socket that accepts and hangs up rather than a closed port,
-// because the auth configuration is assembled AFTER the TCP connection — ssh2
-// is handed an already-open `sock`. Against a closed port the connect error
-// arrives first and proves nothing about which auth path was chosen.
+// It dials a socket that accepts and hangs up rather than a closed port. The
+// credentials are now settled before the TCP connection, but a listening
+// socket keeps the test honest if that order ever flips back: against a closed
+// port the connect error could arrive first and prove nothing about which auth
+// path was chosen.
 //
 // WHAT THIS STILL DOES NOT COVER, and no test on this machine can: whether a
 // real YubiKey then authenticates. `ssh-keygen -t ed25519-sk` here reports "No
@@ -116,5 +118,47 @@ describe('a hardware-backed key on the connect path', () => {
     await expect(connect(write('id_ed25519', 'ssh-ed25519'))).rejects.not.toThrow(
       /No SSH agent was found/i
     )
+  })
+})
+
+// A failure after the TCP connection opens but before ssh2 attaches its own
+// listeners used to leave the socket with none at all. When the server then
+// reset it, the ECONNRESET was an uncaught exception in the main process. A
+// wrong passphrase reaches exactly that gap: ssh2 parses the key inside
+// connect() and throws before touching the socket. Vitest fails the run on an
+// unhandled error, so the wait after the rejection is the assertion.
+describe('a connect that fails before ssh2 owns the socket', () => {
+  it('closes the socket, so a later reset is not an uncaught error', async () => {
+    const resetting = createServer((sock) => {
+      setTimeout(() => sock.resetAndDestroy(), 150)
+    })
+    await new Promise<void>((r) => resetting.listen(0, '127.0.0.1', r))
+    const resetPort = (resetting.address() as { port: number }).port
+    try {
+      const keyPath = join(dir, 'id_ed25519_enc')
+      const pair = utils.generateKeyPairSync('ed25519', {
+        passphrase: 'right',
+        cipher: 'aes256-ctr',
+        rounds: 1
+      })
+      writeFileSync(keyPath, pair.private, { mode: 0o600 })
+      await expect(
+        openChain(
+          {
+            host: '127.0.0.1',
+            port: resetPort,
+            username: 'nobody',
+            auth: 'key',
+            keyPath,
+            passphrase: 'wrong'
+          } as never,
+          undefined,
+          false
+        )
+      ).rejects.toThrow(/passphrase|parse/i)
+      await new Promise((r) => setTimeout(r, 400))
+    } finally {
+      await new Promise<void>((r) => resetting.close(() => r()))
+    }
   })
 })
