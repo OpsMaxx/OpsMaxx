@@ -195,8 +195,10 @@ export function setupTerminalUX(
     const sel = term.getSelection()
     if (sel) window.opsmaxx?.clipboard.write(sel)
   }
-  const paste = (): void => {
-    const t = window.opsmaxx?.clipboard.read()
+  // Every paste goes through here, whatever started it: the shortcut and
+  // right-click read the clipboard themselves, and a DOM paste event (the
+  // Edit menu, Cmd+V when the shortcut is unbound) hands over its own text.
+  const guardedPaste = (t: string): void => {
     if (!t) return
     // A pasted block runs line by line the moment it lands. Confirm anything
     // multi-line so a stray paste cannot execute a script on a production box.
@@ -215,6 +217,24 @@ export function setupTerminalUX(
     }
     term.paste(t)
   }
+  const paste = (): void => guardedPaste(window.opsmaxx?.clipboard.read() ?? '')
+
+  // The paste EVENT, taken before xterm sees it.
+  //
+  // xterm listens for 'paste' on its own helper textarea and sends the text
+  // straight to the session, so any route that produces a DOM paste event --
+  // Edit > Paste from the menu bar, or Cmd+V with the shortcut unbound -- went
+  // around the confirmation entirely: "echo one\recho two" ran two commands
+  // without a dialog. Captured on the host, which is an ancestor of that
+  // textarea, so this runs first; stopping it here means xterm never pastes
+  // it, and guardedPaste is the one path that does. term.paste() inside it
+  // still brackets the text when the shell asked for bracketed paste.
+  const onPasteEvent = (ev: ClipboardEvent): void => {
+    ev.preventDefault()
+    ev.stopPropagation()
+    guardedPaste(ev.clipboardData?.getData('text/plain') ?? '')
+  }
+  host.addEventListener('paste', onPasteEvent, true)
 
   // onSelectionChange fires on every mouse move during a drag, and each copy
   // is a synchronous clipboard write across the context bridge. Coalesce to
@@ -249,6 +269,7 @@ export function setupTerminalUX(
     if (selTimer) clearTimeout(selTimer)
     selDisp.dispose()
     host.removeEventListener('contextmenu', onCtx)
+    host.removeEventListener('paste', onPasteEvent, true)
   }
 }
 

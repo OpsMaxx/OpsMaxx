@@ -47,3 +47,116 @@ describe('what counts as more than one line', () => {
     }
   })
 })
+
+// ---------------------------------------------------------------------------
+// Every route into a paste goes through the same guard
+// ---------------------------------------------------------------------------
+//
+// xterm listens for 'paste' on its helper textarea and sends the text straight
+// to the session. The Edit menu's Paste and an unbound Cmd+V produce exactly
+// that event, so they used to skip the confirmation. The textarea listener
+// below stands in for xterm's own.
+
+function mount(clip: string): {
+  confirm: ReturnType<typeof vi.fn>
+  written: ReturnType<typeof vi.fn>
+  xtermSent: ReturnType<typeof vi.fn>
+  textarea: HTMLTextAreaElement
+  key: (e: KeyboardEvent) => boolean
+  host: HTMLDivElement
+  dispose: () => void
+} {
+  stubBridge({ clipboard: { read: () => clip, write: vi.fn() } })
+  const written = vi.fn()
+  let key: (e: KeyboardEvent) => boolean = () => true
+  const term = {
+    getSelection: () => '',
+    onSelectionChange: () => ({ dispose: () => {} }),
+    attachCustomKeyEventHandler: (h: (e: KeyboardEvent) => boolean) => {
+      key = h
+    },
+    paste: written
+  } as unknown as Terminal
+  const host = document.createElement('div')
+  const xterm = document.createElement('div')
+  xterm.className = 'xterm'
+  const textarea = document.createElement('textarea')
+  textarea.className = 'xterm-helper-textarea'
+  xterm.appendChild(textarea)
+  host.appendChild(xterm)
+  document.body.appendChild(host)
+  const xtermSent = vi.fn()
+  textarea.addEventListener('paste', (e) =>
+    xtermSent((e as ClipboardEvent).clipboardData?.getData('text/plain'))
+  )
+  const confirm = vi.fn()
+  const dispose = setupTerminalUX(term, host, undefined, confirm)
+  return {
+    confirm,
+    written,
+    xtermSent,
+    textarea,
+    key: (e) => key(e),
+    host,
+    dispose: () => {
+      dispose()
+      host.remove()
+    }
+  }
+}
+
+/** A paste event as a menu or an unbound Cmd+V delivers it. jsdom has no
+ *  ClipboardEvent constructor worth using, so the data is attached by hand. */
+function pasteEvent(target: HTMLElement, text: string): Event {
+  const ev = new Event('paste', { bubbles: true, cancelable: true })
+  Object.defineProperty(ev, 'clipboardData', {
+    value: { getData: (type: string) => (type === 'text/plain' ? text : '') }
+  })
+  target.dispatchEvent(ev)
+  return ev
+}
+
+describe('a DOM paste event cannot go around the confirmation', () => {
+  it('asks for multi-line text and writes nothing, through either xterm or us', () => {
+    const t = mount('')
+    const ev = pasteEvent(t.textarea, 'echo one\recho two\recho three\r')
+    expect(t.confirm).toHaveBeenCalledWith('echo one\recho two\recho three\r', 3)
+    expect(t.written).not.toHaveBeenCalled()
+    expect(t.xtermSent).not.toHaveBeenCalled()
+    expect(ev.defaultPrevented).toBe(true)
+    t.dispose()
+  })
+
+  it('sends one line once, and only once', () => {
+    const t = mount('')
+    pasteEvent(t.textarea, 'uptime')
+    expect(t.confirm).not.toHaveBeenCalled()
+    expect(t.written).toHaveBeenCalledTimes(1)
+    expect(t.written).toHaveBeenCalledWith('uptime')
+    expect(t.xtermSent).not.toHaveBeenCalled()
+    t.dispose()
+  })
+
+  it('leaves the shortcut and right-click paths working', () => {
+    const t = mount('a\rb')
+    const handled = t.key(
+      new KeyboardEvent('keydown', { key: 'V', code: 'KeyV', ctrlKey: true, shiftKey: true })
+    )
+    expect(handled).toBe(false)
+    expect(t.confirm).toHaveBeenCalledTimes(1)
+    t.host.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+    expect(t.confirm).toHaveBeenCalledTimes(2)
+    expect(t.written).not.toHaveBeenCalled()
+    t.dispose()
+  })
+
+  it('stops listening when the terminal is torn down', () => {
+    const t = mount('')
+    t.dispose()
+    document.body.appendChild(t.host)
+    pasteEvent(t.textarea, 'a\rb')
+    expect(t.confirm).not.toHaveBeenCalled()
+    expect(t.xtermSent).toHaveBeenCalledTimes(1)
+    t.host.remove()
+  })
+})
