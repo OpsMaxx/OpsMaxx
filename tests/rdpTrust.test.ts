@@ -133,7 +133,7 @@ describe('a certificate that has changed', () => {
     // It still tells the user — but the dialog is an acknowledgement, not a
     // choice. Answering its only button must not grant trust.
     expect(warn).toHaveBeenCalledTimes(1)
-    expect(warn.mock.calls[0][0]).toMatchObject({ type: 'error', buttons: ['OK'] })
+    expect(warn.mock.calls[0][1]).toMatchObject({ type: 'error', buttons: ['OK'] })
   })
 
   it('keeps the original pin rather than adopting the new certificate', async () => {
@@ -153,7 +153,7 @@ describe('a certificate that has changed', () => {
 
     const ask = answerWith(0)
     await expect(verifyRdpCertificate('win-01', 3389, CERT_B)).resolves.toBe(true)
-    expect(ask.mock.calls[0][0]).toMatchObject({ type: 'warning' })
+    expect(ask.mock.calls[0][1]).toMatchObject({ type: 'warning' })
   })
 })
 

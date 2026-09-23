@@ -1,4 +1,5 @@
-import { app, dialog } from 'electron'
+import { app } from 'electron'
+import { askInWindow } from './promptWindow'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -114,8 +115,7 @@ export function verifyRdpCertificate(host: string, port: number, leafDer: Buffer
     // held the pin that would have refused this connection. Treating that as
     // "no pins" turns a hard refusal into a first-contact prompt, which makes
     // corrupting a local file cheaper than forging a certificate.
-    return dialog
-      .showMessageBox({
+    return askInWindow({
         type: 'error',
         title: 'Remote desktop certificates unreadable',
         message: 'The list of trusted remote desktop certificates could not be read.',
@@ -134,8 +134,7 @@ export function verifyRdpCertificate(host: string, port: number, leafDer: Buffer
     if (known.fingerprint === fp) return Promise.resolve(true)
     // A changed certificate is either a rebuilt or re-imaged machine — which is
     // common for Windows hosts — or an interception. Never decide it silently.
-    return dialog
-      .showMessageBox({
+    return askInWindow({
         type: 'error',
         title: 'Remote desktop certificate changed',
         message: `The certificate for ${id} does not match the one previously trusted.`,
@@ -153,8 +152,7 @@ export function verifyRdpCertificate(host: string, port: number, leafDer: Buffer
   const inFlight = pending.get(id)
   if (inFlight) return inFlight
 
-  const ask = dialog
-    .showMessageBox({
+  const ask = askInWindow({
       type: 'warning',
       title: 'Unrecognised remote desktop',
       message: `${id} is presenting a certificate this machine has not seen before.`,
@@ -170,7 +168,8 @@ export function verifyRdpCertificate(host: string, port: number, leafDer: Buffer
       cancelId: 1
     })
     .then((result) => {
-      if (result.response !== 0) return false
+      // No window to ask in is a refusal, as Cancel is: see askInWindow.
+      if (result?.response !== 0) return false
       // Re-read rather than reusing `map`: the answer came from a person, and
       // another session may have written a pin while they were reading. A
       // store that became unreadable in the meantime is not overwritten.
