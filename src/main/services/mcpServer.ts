@@ -810,24 +810,33 @@ function countSessionActions(sessionId: string): number | null {
 }
 
 /**
- * Does this command run as another user? ONE detector, the policy's own:
+ * Does this command run as another user, as the POLICY sees it?
+ *
  * classifyCommand finds sudo, doas, su, pkexec, run0, runuser, systemd-run,
  * sudoedit, `machinectl shell`, runas, gsudo and sudo.exe as the command word
- * of any segment, behind
- * grammar, wrappers and backslashes and inside `$(...)`, backticks, `sh -c`
- * and `eval` strings. What the policy allows is
- * still effectiveCommand's decision; this only decides the capability a
- * command is labelled, prompted and audited under, and makes it per-call.
- *
- * The `sudo` word test stays OR'd in as a raise, never a replacement: it is
- * looser (it fires on `grep sudo auth.log`), and a false positive here only
- * means the operator is asked again -- the cheap direction to be wrong in,
- * for a question about whether a remembered yes may cover a command.
+ * of any segment, behind grammar, wrappers and backslashes and inside
+ * `$(...)`, backticks, `sh -c` and `eval` strings. What the policy allows is
+ * still effectiveCommand's decision; this decides only the PERMISSION a
+ * command is labelled, prompted and audited under. So it is the policy's own
+ * detector and nothing looser: `grep sudo /var/log/auth.log` mentions sudo and
+ * runs as nobody else, and labelling it `sudo` made an ordinary allowed read
+ * look like an allowed sudo under a group that denies sudo.
  */
 const runsAsAnotherUser = (command: string): boolean => {
   const c = classifyCommand(command)
-  return c.isSudo || c.isUnrestrictedShell || /\bsudo\b/.test(command)
+  return c.isSudo || c.isUnrestrictedShell
 }
+
+/**
+ * Should a remembered approval be kept away from this command?
+ *
+ * The policy's detector, plus the word `sudo` anywhere, OR'd in as a raise and
+ * never a replacement: it is looser (it fires on `grep sudo auth.log`), and a
+ * false positive here only means the operator is asked again -- the cheap
+ * direction to be wrong in, for a question about whether a remembered yes may
+ * cover a command. It never changes the label.
+ */
+const mentionsElevation = (command: string): boolean => runsAsAnotherUser(command) || /\bsudo\b/.test(command)
 
 /**
  * Approvals already granted in this session, remembered.
@@ -2075,25 +2084,34 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // rule, but swapping one rule for another would quietly lower some
       // command somewhere and this is not the change to discover that in.
       const assessed = assessCommand(command)
-      const runsAsRoot = runsAsAnotherUser(command)
+      const runsAsRoot = mentionsElevation(command)
       // A command word the walk cannot read literally (`$(which sudo) reboot`,
       // `{sudo,reboot}`, nesting past its depth) may be anything, sudo
       // included, so it is never covered by a remembered yes.
-      const computed = classifyCommand(command).computedCommand
-      const elevated = check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot || computed
+      const classified = classifyCommand(command)
+      const computed = classified.computedCommand
+      // `unshare -r` is root inside a user namespace: not the host's root,
+      // but not something a remembered yes about `df` should cover either.
+      const namespaceRoot = classified.namespaceRoot === true
+      const elevated =
+        check.decision === 'deny' || assessed.risk !== 'ordinary' || runsAsRoot || computed || namespaceRoot
       // The reason names the rule that fired, in that order, because that is
       // the order the OR above evaluates -- and assessCommand already returns
       // the sentence for its own rule, so this quotes it rather than writing a
       // second description of the same regex that could drift from it.
       const because = !elevated
         ? 'it runs a shell command of the agent\u2019s own composition on the host'
-        : runsAsRoot
+        : runsAsAnotherUser(command)
           ? 'the command runs as another user, most likely root (sudo, su, doas, pkexec, run0, runuser or systemd-run)'
-          : computed
-            ? 'the command it runs is computed when it runs, so OpsMaxx cannot tell what it is'
-          : assessed.reasons[0]
-            ? `OpsMaxx\u2019s command classifier graded it ${assessed.risk}: ${assessed.reasons[0]}`
-            : `OpsMaxx\u2019s command classifier graded it ${assessed.risk}`
+          : runsAsRoot
+            ? 'the command mentions sudo, so a remembered approval does not cover it'
+            : namespaceRoot
+              ? 'it runs as root inside a new user namespace (unshare -r)'
+              : computed
+                ? 'the command it runs is computed when it runs, so OpsMaxx cannot tell what it is'
+                : assessed.reasons[0]
+                  ? `OpsMaxx\u2019s command classifier graded it ${assessed.risk}: ${assessed.reasons[0]}`
+                  : `OpsMaxx\u2019s command classifier graded it ${assessed.risk}`
       const gated = await gate(
         ctx,
         check,

@@ -109,12 +109,14 @@ before the command runs. `cat /etc/shadow` is refused exactly as `read_file /etc
 `sudo` does not bypass it.
 
 The same check runs on every segment the escalation check walks (`walkCommand`, described in
-docs/AI-SECURITY.md): inside `sh -c '…'` and the other shells, `su -c`, `env -S`, `eval`,
-`watch`, `flock -c`, `script -c`, `$(…)` and backticks, up to three levels deep, and past shell
-grammar (`if … then`, `{ … }`), backslash-quoted command words and every wrapper and escalator it
-steps over (`timeout`, `xargs`, `busybox`, `pkexec`, `run0`, `systemd-run` and the rest). So
-`bash -c 'cat /etc/shadow'`, `timeout 5 cat /etc/shadow` and `echo $(cat /root/.ssh/id_rsa)` are
-refused like `cat /etc/shadow`, and the two checks cannot disagree about what a command runs.
+docs/AI-SECURITY.md): inside a shell's command string (`sh -c`, and `-c` in a cluster such as
+`bash -lc` or `sh -ec`), `script -c`, `su -c`, `sg`, `env -S`, `eval`, `watch`, `flock -c`,
+`find -exec`, a `parallel` template, `$(…)`, `<(…)` and backticks, up to three levels deep, and past
+shell grammar (`if … then`, `{ … }`), backslash-quoted command words and every wrapper and escalator
+it steps over (`timeout`, `xargs`, `busybox`, `chroot`, `strace`, `bwrap`, `pkexec`, `run0`,
+`systemd-run` and the rest). So `bash -lc 'cat /etc/shadow'`, `timeout 5 cat /etc/shadow` and
+`echo $(cat /root/.ssh/id_rsa)` are refused like `cat /etc/shadow`, and the two checks cannot
+disagree about what a command runs.
 
 This is best-effort by design: only absolute paths and only recognised commands, because a
 relative operand cannot be matched against a pattern without knowing the remote working directory.
@@ -461,10 +463,12 @@ call asks, they show **Approve once** alone, and they never read a remembered gr
   `pkexec`, `run0`, `runuser`, `systemd-run`, `sudoedit`, `machinectl shell`, `runas`, `gsudo` or
   `sudo.exe` as the command word of any segment — see docs/AI-SECURITY.md), any command whose
   command word the walk cannot read literally (`$(which sudo) reboot`, `{sudo,reboot}`, or nested
-  past three levels), and, as a further raise, any command with the word
-  `sudo` anywhere in it. Those are also gated and audited as the `sudo` permission rather than
-  `terminal`, so an "Execute terminal commands" grant never reaches them. A false positive only
-  means being asked again;
+  past three levels), and, as a further raise, any command with the word `sudo` anywhere in it.
+  Only the commands the policy recognises as running as another user are also gated and audited
+  as the `sudo` permission rather than `terminal`, so an "Execute terminal commands" grant never
+  reaches them; one that merely mentions sudo (`grep sudo /var/log/auth.log`) is labelled
+  `terminal`, which is what it is, and is only kept per-call. A false positive there only means
+  being asked again;
 - `container_action` when stopping or restarting a container;
 - `query_database` for anything not classified as a read;
 - `set_tunnel` and `set_vpn` when starting.

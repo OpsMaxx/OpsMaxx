@@ -240,3 +240,22 @@ describe('a request OpsMaxx declined to ask', () => {
     }
   })
 })
+
+// The permission a command is audited under is the policy's reading of it.
+// The word `sudo` anywhere used to label the row `sudo`, so an ordinary read
+// under a group that denies sudo looked like an allowed sudo.
+describe('the permission a command is audited under', () => {
+  it('labels a command that only mentions sudo as terminal, and a real sudo as sudo', async () => {
+    const restore = withOpen({ sudo: 'deny' })
+    const { c, id } = await session()
+    try {
+      await call(c, 'execute_command', { serverName: 'Box', command: 'grep sudo /var/log/auth.log' })
+      expect(rowsFor(id)[0]).toMatchObject({ result: 'success', capability: 'terminal' })
+      expect(await call(c, 'execute_command', { serverName: 'Box', command: 'sudo id' })).toMatch(/Denied/)
+      expect(rowsFor(id)[0]).toMatchObject({ result: 'denied', capability: 'sudo' })
+    } finally {
+      restore()
+      await c.close()
+    }
+  })
+})

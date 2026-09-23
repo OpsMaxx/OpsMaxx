@@ -479,6 +479,22 @@ export function ApprovalDialog({
           </div>
         </div>
 
+        {/* Its own full-width line, above the buttons and outside their row.
+            Squeezed into the row it had to share the width with three
+            buttons, and at a desktop width it wrapped to one word a line. */}
+        {grantLabel && request.contentPreview && (
+          <div
+            data-testid="later-writes-note"
+            style={{
+              padding: '0 var(--sp-5)',
+              color: 'var(--warn)',
+              fontSize: 'var(--fs-caption)',
+              textAlign: 'right'
+            }}
+          >
+            {LATER_WRITES_UNSEEN}
+          </div>
+        )}
         <div className="modal-footer">
           {/* The kill switch, brought to where the alarm is. Its own copy lives
               three screens away in AI & MCP > Security; this calls the same IPC
@@ -510,11 +526,6 @@ export function ApprovalDialog({
               session, and its label is the grant's full extent. Absent for a
               per-call tool, where main would not honour it. Neither carries
               any weight: Deny keeps the fill and the focus. */}
-          {grantLabel && request.contentPreview && (
-            <span style={{ fontSize: 'var(--fs-caption)', color: 'var(--warn)', maxWidth: 180, textAlign: 'right' }}>
-              {LATER_WRITES_UNSEEN}
-            </span>
-          )}
           {grantLabel && (
             <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'session')}>
               {grantLabel}

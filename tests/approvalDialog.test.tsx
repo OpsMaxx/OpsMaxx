@@ -472,11 +472,17 @@ describe('what write_file will write', () => {
     expect(screen.getByRole('button', { name: 'Approve once' })).toBeTruthy()
   })
 
-  it('says, next to the session button, that later writes will not be shown', async () => {
+  it('says, above the session button, that later writes will not be shown', async () => {
     harness({ approvals: [{ ...writeRequest('x=1'), sessionGrant: 'capability' }] })
     render(<ApprovalWatcher />)
-    await screen.findByRole('button', { name: /Allow “Write files” on k3s-node-01 for this session/ })
-    expect(screen.getByText('Later writes in this session won’t be shown to you.')).toBeTruthy()
+    const grant = await screen.findByRole('button', { name: /Allow “Write files” on k3s-node-01 for this session/ })
+    const note = screen.getByText('Later writes in this session won’t be shown to you.')
+    // On its own line, not squeezed into the button row: in the row it had to
+    // share the width with three buttons and wrapped to one word a line.
+    const row = grant.closest('.modal-footer')
+    expect(row).toBeTruthy()
+    expect(row!.contains(note)).toBe(false)
+    expect(note.compareDocumentPosition(row!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it('does not say it when there is no session button to press', async () => {

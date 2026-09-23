@@ -90,6 +90,11 @@ export interface CommandClassification {
   isSudo: boolean
   isUnrestrictedShell: boolean
   /**
+   * Some segment runs under `unshare -r` / `--map-root-user`: root inside a
+   * new user namespace only. evaluateCommand asks about it, with that reason.
+   */
+  namespaceRoot?: boolean
+  /**
    * Some segment's command word is computed when it runs -- `$(which sudo)`,
    * `${SUDO:-sudo}`, a backtick -- so nothing here can say what it is.
    * evaluateCommand turns an `allow` into an `ask` for it.
@@ -147,7 +152,11 @@ export interface CommandClassification {
 // `sudo -n` privileged reads never pass through it.
 
 /** Names that run the rest of the line as another user. */
-const ESCALATORS = new Set(['sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser', 'systemd-run', 'runas', 'gsudo'])
+const ESCALATORS = new Set([
+  'sudo', 'doas', 'su', 'pkexec', 'run0', 'runuser', 'systemd-run', 'runas', 'gsudo',
+  // Enters another process's namespaces -- commonly pid 1's, which is the host.
+  'nsenter'
+])
 
 /**
  * The same, as a Windows command word: `C:\Windows\System32\runas.exe`,
@@ -206,6 +215,18 @@ const RUNNERS: Record<string, Set<string>> = {
   timeout: new Set(['-s', '-k']),
   xargs: new Set(['-a', '-d', '-E', '-I', '-L', '-n', '-P', '-s']),
   busybox: new Set(),
+  chroot: new Set(['--userspec', '--groups']),
+  strace: new Set(['-e', '-o', '-p', '-s', '-u', '-E', '-I', '-b', '-a', '-O', '-S', '-X', '-P', '-U']),
+  ltrace: new Set(['-e', '-o', '-p', '-s', '-u', '-n', '-a', '-A', '-D', '-F', '-l', '-w', '-x']),
+  firejail: new Set(),
+  bwrap: new Set([
+    '--chdir', '--uid', '--gid', '--tmpfs', '--proc', '--dev', '--dir', '--unsetenv', '--hostname',
+    '--remount-ro', '--mqueue', '--lock-file', '--sync-fd', '--info-fd', '--block-fd', '--userns',
+    '--userns2', '--pidns', '--seccomp', '--add-seccomp-fd', '--exec-label', '--file-label', '--cap-add',
+    '--cap-drop', '--argv0', '--perms', '--size', '--json-status-fd'
+  ]),
+  setarch: new Set(),
+  prlimit: new Set(['-p']),
   // `. runas …` in PowerShell runs runas; `. ./env.sh` in a POSIX shell reads
   // a script, which is judged by its own name (and is best-effort either way).
   '.': new Set(),
@@ -218,7 +239,36 @@ const RUNNERS: Record<string, Set<string>> = {
 }
 
 /** Wrappers whose first operand is not the command: a duration, a lock, a priority, a mask. */
-const RUNNER_OPERAND = new Set(['timeout', 'flock', 'chrt', 'taskset'])
+const RUNNER_OPERAND = new Set(['timeout', 'flock', 'chrt', 'taskset', 'chroot', 'setarch'])
+
+/**
+ * Tools that CHANGE PRIVILEGE, and the options of each that take a value.
+ * Read in unwrapSegment rather than stepped over as runners: stepping over
+ * them treated `setpriv --reuid 0 reboot` like `nice reboot`.
+ */
+const SETPRIV_VALUE_OPTIONS = new Set([
+  '--reuid', '--regid', '--groups', '--inh-caps', '--ambient-caps', '--bounding-set', '--securebits',
+  '--pdeathsig', '--selinux-label', '--apparmor-profile', '--landlock-access', '--landlock-rule'
+])
+const UNSHARE_VALUE_OPTIONS = new Set(['-S', '-G', '--setuid', '--setgid', '--map-user', '--map-group'])
+
+/** Everything after a command's own options. */
+function afterOptions(argv: string[], valueOptions: Set<string>): string[] {
+  let i = 1
+  while (i < argv.length && argv[i].startsWith('-') && argv[i] !== '-') {
+    if (argv[i] === '--') return argv.slice(i + 1)
+    i += valueOptions.has(argv[i]) ? 2 : 1
+  }
+  return argv.slice(i)
+}
+
+/** bwrap options that take TWO values (`--bind SRC DEST`). */
+const RUNNER_TWO_VALUES: Record<string, Set<string>> = {
+  bwrap: new Set([
+    '--bind', '--ro-bind', '--dev-bind', '--bind-try', '--ro-bind-try', '--dev-bind-try', '--symlink',
+    '--setenv', '--file', '--bind-data', '--ro-bind-data', '--chmod'
+  ])
+}
 
 /** Wrapper options whose value is a whole command line of its own. */
 const RUNNER_COMMAND_FLAGS: Record<string, Set<string>> = {
@@ -234,6 +284,7 @@ const RUN0_VALUE_FLAGS = [
 const ESCALATOR_VALUE_FLAGS: Record<string, Set<string>> = {
   sudo: new Set(['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U', '-R', '-T']),
   gsudo: new Set(['-u', '-i', '--user', '--integrity', '--loglevel']),
+  nsenter: new Set(['-t', '-S', '-G', '--target', '--setuid', '--setgid']),
   doas: new Set(['-u', '-C']),
   pkexec: new Set(['--user']),
   run0: new Set(RUN0_VALUE_FLAGS),
@@ -247,7 +298,7 @@ const baseName = (t: string): string => t.split('/').pop() ?? t
 /** A command word's basename. tokenize has already removed the shell's escapes. */
 const word = (t: string): string => baseName(t)
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/
-const REDIRECTION = /(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g
+const REDIRECTION = /(\d?>>?|<<<|<<-?|<)\s*("[^"]*"|'[^']*'|\S+)/g
 
 /**
  * The same redirections, removed before a segment is split into words -- but
@@ -259,7 +310,7 @@ const REDIRECTION = /(\d?>>?|<)\s*("[^"]*"|'[^']*'|\S+)/g
  */
 const withoutRedirections = (segment: string): string =>
   segment.replace(
-    /'[^']*'|"(?:[^"\\]|\\.)*"|\\.|(\d?>>?|<)(?!\()\s*("(?:[^"\\]|\\.)*"|'[^']*'|[^\s'"]+)/g,
+    /'[^']*'|"(?:[^"\\]|\\.)*"|\\.|(\d?>>?|<<<|<<-?|<)(?!\()\s*("(?:[^"\\]|\\.)*"|'[^']*'|[^\s'"]+)/g,
     (m, op: string | undefined) => (op ? ' ' : m)
   )
 
@@ -335,7 +386,7 @@ function stripRunners(tokens: string[], nested: string[]): string[] | null {
           }
           continue
         }
-        t = t.slice(valueFlags.has(flag) ? 2 : 1)
+        t = t.slice(RUNNER_TWO_VALUES[name]?.has(flag) ? 3 : valueFlags.has(flag) ? 2 : 1)
       }
       // `timeout 5 cmd`, `flock /tmp/l cmd`, `chrt 10 cmd`, `taskset 0x3 cmd`.
       if (round === 0 && RUNNER_OPERAND.has(name) && t.length) t = t.slice(1)
@@ -359,15 +410,72 @@ function runsBareShell(line: string, depth = 0): boolean {
   })
 }
 
+/**
+ * The command string a POSIX shell (or `script`) was handed, or undefined.
+ *
+ * ONE PLACE reads it, because every place that read it separately looked for
+ * an exact `-c` and nothing else -- so `bash -lc "sudo …"`, `sh -ec`, `zsh -ic`
+ * and `bash -lic`, the form Codex-style agents wrap every command in, were
+ * never walked and never met a path rule.
+ *
+ * For a shell, `-c` is a flag anywhere in an option cluster, and the string is
+ * the first operand after the options (`bash -c -x 'cmd'` is legal). `-o`,
+ * `+o`, `-O`, `+O`, `--rcfile` and `--init-file` take a value. For `script`,
+ * `-c` takes its value directly: the rest of the cluster, or the next word.
+ */
+function commandString(argv: string[]): string | undefined {
+  const isScript = word(argv[0]) === 'script'
+  let flagged = false
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i]
+    if (a.startsWith('--command=')) return a.slice('--command='.length)
+    if (a === '--command') return argv[i + 1]
+    if (a === '--') return flagged ? argv[i + 1] : undefined
+    if (/^[-+][oO]$/.test(a) || a === '--rcfile' || a === '--init-file') {
+      i++
+      continue
+    }
+    if (/^-[A-Za-z]+$/.test(a) && a.includes('c')) {
+      if (isScript) return a.endsWith('c') ? argv[i + 1] : a.slice(a.indexOf('c') + 1)
+      flagged = true
+      continue
+    }
+    if (a.startsWith('-') || (a.startsWith('+') && a.length > 1)) continue
+    // The first operand: the command string after a `-c`, or a script file.
+    return flagged ? a : undefined
+  }
+  return undefined
+}
+
+/**
+ * A shell's first operand -- the script it runs -- when it has no `-c`.
+ * Undefined with `-s`, which reads the script from stdin and makes every
+ * operand a positional parameter.
+ */
+function scriptOperand(argv: string[]): string | undefined {
+  for (let i = 1; i < argv.length; i++) {
+    const a = argv[i]
+    if (/^-[A-Za-z]*s[A-Za-z]*$/.test(a)) return undefined
+    if (/^[-+][oO]$/.test(a) || a === '--rcfile' || a === '--init-file') {
+      i++
+      continue
+    }
+    if (a === '--') return argv[i + 1]
+    if (a.startsWith('-') || (a.startsWith('+') && a.length > 1)) continue
+    return a
+  }
+  return undefined
+}
+
 function isBareShell(argv: string[], depth = 0): boolean {
   // cmd / PowerShell: bare unless told to run something and exit.
   if (WINDOWS_SHELLS.has(commandName(argv[0]).toLowerCase())) {
     return !argv.slice(1).some((a) => /^(?:\/[cr].*|-c|-command|-file|-encodedcommand)$/i.test(a))
   }
   if (!SHELLS.has(word(argv[0]))) return false
-  const c = argv.indexOf('-c')
-  if (c < 0) return true
-  return depth < MAX_DEPTH && argv[c + 1] !== undefined && runsBareShell(argv[c + 1], depth + 1)
+  const line = commandString(argv)
+  if (line === undefined) return true
+  return depth < MAX_DEPTH && runsBareShell(line, depth + 1)
 }
 
 /** What the escalator in `argv[0]` runs, and whether it is a shell. */
@@ -438,7 +546,7 @@ function escalation(argv: string[], nested: string[], name = word(argv[0])): { s
   if (name === 'su') return { shell: true, target: [] }
   if (name === 'runuser') return namedUser && target?.length ? { shell: false, target } : { shell: true, target: [] }
   // pkexec, run0, systemd-run and gsudo with nothing to run start a shell.
-  if (name === 'pkexec' || name === 'run0' || name === 'systemd-run' || name === 'gsudo') {
+  if (name === 'pkexec' || name === 'run0' || name === 'systemd-run' || name === 'gsudo' || name === 'nsenter') {
     return { shell: !target?.length, target: target ?? [] }
   }
   return { shell: shellFlag, target: target ?? [] }
@@ -456,11 +564,26 @@ interface SegmentFacts {
   shell: boolean
   /** The working command's own word is computed when it runs. */
   computed: boolean
+  /** Some `unshare -r` stood in front of it: root, but only in a new user namespace. */
+  nsRoot?: boolean
   /** The command that does the work: past runners AND escalators. Empty if none. */
   argv: string[]
 }
 
-function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, 'segment'> {
+/** parallel options that take a value. */
+const PARALLEL_VALUE_OPTIONS = new Set(['-j', '-S', '-a', '-I', '-n', '-N', '-P', '--jobs', '--sshlogin', '--arg-file'])
+
+/**
+ * `siblings` receives further argvs this segment runs in its own right, each to
+ * be walked exactly as the segment itself is -- every find -exec target, not
+ * the first one only.
+ */
+function unwrapSegment(
+  tokens: string[],
+  nested: string[],
+  stdinFed = false,
+  siblings: string[][] = []
+): Omit<SegmentFacts, 'segment'> {
   const head = stripRunners(tokens, nested) ?? []
   let t = head
   let escalated = false
@@ -468,6 +591,7 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
   // Set when the command hands over something this walk cannot read at all,
   // such as a base64 PowerShell command.
   let unreadable = false
+  let nsRoot = false
   const done = (argv: string[]): Omit<SegmentFacts, 'segment'> => ({
     head,
     escalated,
@@ -477,6 +601,7 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     // `f(){sudo` -- is one this code cannot name, so it is reported for
     // evaluateCommand to ask about rather than guessed at.
     computed: unreadable || (argv.length > 0 && argv[0] !== '[' && UNREADABLE_WORD.test(argv[0])),
+    nsRoot,
     argv
   })
   // Bounded: every pass consumes at least the command word.
@@ -510,6 +635,44 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
       t = cmd
       continue
     }
+    // `capsh … -- ARGS` hands ARGS to /bin/bash.
+    // `nsenter --help`, `sudo --version`: the tool describing itself. (The
+    // start-of-string sudo/doas test still counts those two as sudo.)
+    const privileged = ESCALATORS.has(name) || name === 'capsh' || name === 'setpriv' || name === 'unshare'
+    if (privileged && argv.length === 2 && (argv[1] === '--help' || argv[1] === '--version')) return done([])
+    // `capsh` changes identity with --user/--uid/--gid, and `capsh … -- ARGS`
+    // hands ARGS to /bin/bash -- a bare `--` is a shell.
+    if (name === 'capsh') {
+      if (argv.some((a) => /^--(?:user|uid|gid)=/.test(a) || a === '--')) escalated = true
+      const dash = argv.indexOf('--')
+      if (dash >= 0) {
+        t = ['bash', ...argv.slice(dash + 1)]
+        continue
+      }
+      return done(argv)
+    }
+    // `setpriv` sets the real and effective ids and the groups; given any of
+    // those it is an escalation. Otherwise (`setpriv --dump`, a capability
+    // tweak) it is stepped over like a runner.
+    if (name === 'setpriv') {
+      if (argv.some((a) => /^--(?:reuid|regid|ruid|euid|rgid|egid|init-groups|clear-groups|keep-groups|groups)\b/.test(a))) {
+        escalated = true
+      }
+      const target = afterOptions(argv, SETPRIV_VALUE_OPTIONS)
+      if (!target.length) return done([])
+      t = target
+      continue
+    }
+    // `unshare -r` / `--map-root-user` is root only inside a new user
+    // namespace, and it is everyday rootless tooling -- so it asks rather than
+    // being refused as sudo.
+    if (name === 'unshare') {
+      if (argv.some((a) => a === '--map-root-user' || /^-[A-Za-z]*r[A-Za-z]*$/.test(a))) nsRoot = true
+      const target = afterOptions(argv, UNSHARE_VALUE_OPTIONS)
+      if (!target.length) return done([])
+      t = target
+      continue
+    }
     if (ESCALATORS.has(name)) {
       escalated = true
       const e = escalation(argv, nested, name)
@@ -521,8 +684,72 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
 
     // The working command. Some of them run a command line of their own.
     if (SHELLS.has(name)) {
-      const c = argv.indexOf('-c')
-      if (c >= 0 && argv[c + 1] !== undefined) nested.push(argv[c + 1])
+      const line = commandString(argv)
+      if (line !== undefined) nested.push(line)
+      else {
+        // No command string: the shell runs its stdin, or a script. Fed by a
+        // pipe (`echo "sudo reboot" | sh`), a here-string or here-doc, an
+        // input redirection, or a process substitution in place of the
+        // script, what it runs is not on this line to read -- so it asks.
+        const script = scriptOperand(argv)
+        if (
+          (script === undefined && stdinFed) ||
+          (script !== undefined && /^(?:-|\/dev\/stdin|\/dev\/fd\/\d+|<\(.*)$/.test(script))
+        ) {
+          unreadable = true
+        }
+      }
+    }
+    // More commands that run a command of their own.
+    //
+    // find: `-exec CMD … ;` / `+`, `-execdir`, `-ok`, `-okdir` run CMD per file,
+    // as an argv, not a command line. EVERY action group is collected, and
+    // each is walked as its own argv, exactly as this segment is. Joining
+    // them with spaces took `bash -lc "cat /etc/shadow"` apart; walking only
+    // the first missed the rest.
+    //
+    // A segment that starts like the middle of a find expression -- a
+    // predicate or operator (`-o`, `-name`, `-fprint`, `-exec`), with `!`, `(`
+    // and `\(` already stepped over as grammar -- and holds an action is the
+    // tail of a find whose `;` was left unescaped: the shell split it there.
+    // It runs nothing in a real shell, and it is walked all the same -- the
+    // cheap direction to be wrong in. No real command word starts with `-`,
+    // so `echo -exec` or `grep -- -exec` are never read this way.
+    const findAction = /^-(?:exec|execdir|ok|okdir)$/
+    const findTail = argv[0].startsWith('-') && argv.some((a) => findAction.test(a))
+    if (name === 'find' || findTail) {
+      const from = name === 'find' ? 1 : 0
+      const targets: string[][] = []
+      for (let i = from; i < argv.length; i++) {
+        if (!findAction.test(argv[i])) continue
+        const end = argv.findIndex((a, j) => j > i && (a === ';' || a === '+'))
+        const cmd = argv.slice(i + 1, end < 0 ? undefined : end)
+        if (cmd.length) targets.push(cmd)
+        if (end < 0) break
+        i = end
+      }
+      if (targets.length) {
+        siblings.push(...targets)
+        return done([])
+      }
+    }
+    if (name === 'sg') {
+      // `sg [-] GROUP [-c] "command"`
+      const rest = argv.slice(1).filter((a) => a !== '-')
+      const cmd = rest.slice(1).filter((a) => a !== '-c')
+      if (cmd.length) nested.push(cmd.join(' '))
+    }
+    if (name === 'parallel') {
+      // `parallel [opts] TEMPLATE ::: args` runs the template per argument;
+      // with no template, each argument is itself the command.
+      let i = 1
+      while (i < argv.length && argv[i].startsWith('-') && !argv[i].startsWith(':::')) {
+        i += PARALLEL_VALUE_OPTIONS.has(argv[i]) ? 2 : 1
+      }
+      const sep = argv.findIndex((a, j) => j >= i && /^::::?\+?$/.test(a))
+      const template = argv.slice(i, sep < 0 ? undefined : sep)
+      if (template.length) nested.push(template.join(' '))
+      else if (sep >= 0) for (const a of argv.slice(sep + 1)) if (!/^::::?\+?$/.test(a)) nested.push(a)
     }
     // cmd and PowerShell run a command line too: everything after `/c` or
     // `/k`, or after `-Command` (which PowerShell lets you shorten to `-c`).
@@ -605,10 +832,8 @@ function unwrapSegment(tokens: string[], nested: string[]): Omit<SegmentFacts, '
     if (escalated && isBareShell(argv)) shell = true
     if (name === 'eval' && argv.length > 1) nested.push(argv.slice(1).join(' '))
     if (name === 'script') {
-      argv.forEach((a, i) => {
-        if ((a === '-c' || a === '--command') && argv[i + 1] !== undefined) nested.push(argv[i + 1])
-        if (a.startsWith('--command=')) nested.push(a.slice('--command='.length))
-      })
+      const line = commandString(argv)
+      if (line !== undefined) nested.push(line)
     }
     return done(argv)
   }
@@ -744,12 +969,24 @@ function walkCommand(command: string, visit: (facts: SegmentFacts) => void, dept
     visit({ segment: '', head: [], escalated: false, shell: false, computed: true, argv: [] })
   }
 
-  for (const segment of splitSegments(command)) {
+  const piped: boolean[] = []
+  splitSegments(command, piped).forEach((segment, i) => {
     // Redirection targets are files, never the command; the path rules read
     // them off `segment` directly.
     const tokens = tokenize(withoutRedirections(segment))
-    visit({ segment, ...unwrapSegment(tokens, nested) })
-  }
+    // Does this segment's stdin come from somewhere other than the terminal:
+    // a pipe, or an input redirection (`<`, `<<`, `<<<`) that is not a
+    // process substitution? A shell with no command string runs it.
+    const redirectedIn = [...segment.matchAll(REDIRECTION)].some((m) => m[1].startsWith('<') && !m[2].startsWith('('))
+    const walkArgv = (text: string, argv: string[], fed: boolean): void => {
+      const siblings: string[][] = []
+      visit({ segment: text, ...unwrapSegment(argv, nested, fed, siblings) })
+      // Redirections belong to the segment they were written on, so a
+      // sibling carries none of its own.
+      for (const sibling of siblings) walkArgv('', sibling, false)
+    }
+    walkArgv(segment, tokens, piped[i] || redirectedIn)
+  })
   if (depth < MAX_DEPTH) for (const inner of nested) walkCommand(inner, visit, depth + 1)
   // Nested deeper than the walk goes: whatever is down there was not read, so
   // it fails toward ask like any other command that cannot be named.
@@ -774,6 +1011,7 @@ export function classifyCommand(command: string): CommandClassification {
     if (f.escalated) out.isSudo = true
     if (f.shell) out.isUnrestrictedShell = true
     if (f.computed) out.computedCommand = true
+    if (f.nsRoot) out.namespaceRoot = true
   })
   // A refused shell is an escalation too, whatever spelled it.
   if (out.isUnrestrictedShell) out.isSudo = true
@@ -853,8 +1091,10 @@ export interface PathAccess {
 
 // Splits on the shell operators that start a new command, respecting quotes so
 // a separator inside an argument is not treated as one.
-function splitSegments(command: string): string[] {
+function splitSegments(command: string, piped?: boolean[]): string[] {
   const out: string[] = []
+  // One entry per separator: whether it was a single `|`.
+  const fed: boolean[] = []
   let current = ''
   let quote: string | null = null
   for (let i = 0; i < command.length; i++) {
@@ -885,6 +1125,7 @@ function splitSegments(command: string): string[] {
     const two = command.slice(i, i + 2)
     if (two === '&&' || two === '||') {
       out.push(current)
+      fed.push(false)
       current = ''
       i++
       continue
@@ -893,18 +1134,25 @@ function splitSegments(command: string): string[] {
     // and `>&` are redirections, not separators.
     if (c === '&' && command[i - 1] !== '>' && command[i - 1] !== '<' && command[i + 1] !== '>') {
       out.push(current)
+      fed.push(false)
       current = ''
       continue
     }
     if (c === ';' || c === '|' || c === '\n') {
       out.push(current)
+      fed.push(c === '|')
       current = ''
       continue
     }
     current += c
   }
   out.push(current)
-  return out.filter((s) => s.trim())
+  // `piped[i]` says whether segment i reads the output of the one before it,
+  // for walkCommand's `… | sh` rule. Kept in step with the empty-segment
+  // filter below.
+  const kept = out.map((segment, i) => ({ segment, piped: fed[i - 1] ?? false })).filter((x) => x.segment.trim())
+  piped?.push(...kept.map((x) => x.piped))
+  return kept.map((x) => x.segment)
 }
 
 /**
@@ -1135,7 +1383,7 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   const terminal = evaluateCapability(group, 'terminal')
   if (terminal.decision === 'deny') return { decision: 'deny', reason: 'Terminal access is denied for this access group.' }
 
-  const { isSudo, isUnrestrictedShell, computedCommand } = classifyCommand(command)
+  const { isSudo, isUnrestrictedShell, computedCommand, namespaceRoot } = classifyCommand(command)
   if (isUnrestrictedShell) {
     return {
       decision: 'deny',
@@ -1168,6 +1416,14 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   // it might be sudo, and a group that denies sudo would never know. Asked
   // about rather than refused, because `$HOME/bin/tool` is the same shape and
   // usually harmless; a human can tell which one it is.
+  // `unshare -r`: root, but only inside a new user namespace -- everyday
+  // rootless tooling, and not the host's root. Asked about, not refused.
+  if (base.decision === 'allow' && namespaceRoot) {
+    base = {
+      decision: 'ask',
+      reason: 'Requires approval: it runs as root inside a new user namespace (unshare -r).'
+    }
+  }
   if (base.decision === 'allow' && computedCommand) {
     base = {
       decision: 'ask',
