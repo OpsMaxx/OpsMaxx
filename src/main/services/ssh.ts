@@ -300,10 +300,20 @@ async function connectClient(
   sock?: NodeJS.ReadableStream,
   allowPrompt = true
 ): Promise<Client> {
+  // The credentials are settled BEFORE a socket exists. Resolving them can
+  // fail on its own (a hardware key with no agent to route it to), and that
+  // used to happen inside the promise below, after tcpSocket() had opened the
+  // connection and dropped its error listener. The rejected promise left the
+  // socket open with nothing listening, so the server hanging up surfaced as
+  // an uncaught ECONNRESET in the main process.
+  const auth = authFor(hop)
   // Hops ride an SSH channel, which has no TCP options of its own; only the
   // first, real socket needs the flag.
   const transport = sock ?? (await tcpSocket(hop.host, hop.port || 22))
-  return new Promise((resolve, reject) => {
+  // Until ssh2 takes the socket in client.connect(), nothing else owns it: any
+  // failure before that point has to close what WE opened.
+  let handedOff = false
+  return new Promise<Client>((resolve, reject) => {
     const client = new Client()
 
     /**
@@ -375,7 +385,7 @@ async function connectClient(
           cb(ok)
         })
       }) as never,
-      ...authFor(hop),
+      ...auth,
       // A pre-established socket: our own TCP connection, or the channel
       // opened through the previous hop.
       sock: transport as never
@@ -503,7 +513,11 @@ async function connectClient(
       }
       reject(err)
     })
+    handedOff = true
     client.connect(config)
+  }).catch((err: unknown) => {
+    if (!handedOff && !sock) (transport as net.Socket).destroy()
+    throw err
   })
 }
 
