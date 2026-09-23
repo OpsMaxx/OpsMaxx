@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { BrowserWindow, dialog } from 'electron'
+import { EventEmitter } from 'node:events'
+import { app, BrowserWindow, dialog } from 'electron'
 import { mainWindowStub } from './mocks/electron'
 
 /**
@@ -13,7 +14,7 @@ import { mainWindowStub } from './mocks/electron'
  * is an immediate refusal rather than a blocking box.
  */
 
-const { verifyHostKey, hostKeyUnaskable } = await import('../src/main/services/knownhosts')
+const { verifyHostKey, askedWithoutWindow } = await import('../src/main/services/knownhosts')
 const { verifyRdpCertificate } = await import('../src/main/services/rdpTrust')
 
 type Box = Awaited<ReturnType<typeof dialog.showMessageBox>>
@@ -64,12 +65,22 @@ describe('with no window at all', () => {
   })
 
   it('refuses at once instead of raising an app-modal box', async () => {
-    const h = host()
-    await expect(verifyHostKey(h, 22, Buffer.from('key-d'))).resolves.toBe(false)
+    const verdict = verifyHostKey(host(), 22, Buffer.from('key-d'))
+    await expect(verdict).resolves.toBe(false)
     expect(box).not.toHaveBeenCalled()
-    // And says why, once, for the connection error.
-    expect(hostKeyUnaskable(`${h}:22`)).toBe(true)
-    expect(hostKeyUnaskable(`${h}:22`)).toBe(false)
+    // And says why, for the connection error.
+    expect(askedWithoutWindow(verdict)).toBe(true)
+  })
+
+  // A terminal, SFTP and metrics can all connect at once on first use and
+  // join one prompt. Each of them has to be able to say why it failed.
+  it('tells every connection that joined the prompt why it was refused', async () => {
+    const h = host()
+    const a = verifyHostKey(h, 22, Buffer.from('key-f'))
+    const b = verifyHostKey(h, 22, Buffer.from('key-f'))
+    await Promise.all([a, b])
+    expect(askedWithoutWindow(a)).toBe(true)
+    expect(askedWithoutWindow(b)).toBe(true)
   })
 
   it('refuses a remote desktop certificate the same way', async () => {
@@ -86,10 +97,69 @@ describe('with no window at all', () => {
   })
 })
 
+describe('a window closed while its sheet is up', () => {
+  // A destroyed window's sheet never settles, and the prompt is the one every
+  // later connection to that host joins — so it has to settle on close.
+  it('counts as Cancel, and the next connect asks again', async () => {
+    const win = Object.assign(new EventEmitter(), {
+      isDestroyed: () => false,
+      isMinimized: () => false,
+      isVisible: () => true,
+      restore: () => undefined,
+      show: () => undefined,
+      focus: () => undefined
+    })
+    vi.spyOn(BrowserWindow, 'getFocusedWindow').mockReturnValue(win as never)
+    box.mockReturnValueOnce(new Promise(() => {}))
+    const h = host()
+    const first = verifyHostKey(h, 22, Buffer.from('key-g'))
+    await vi.waitFor(() => expect(box).toHaveBeenCalledTimes(1))
+    win.emit('closed')
+    await expect(first).resolves.toBe(false)
+    expect(win.listenerCount('closed')).toBe(0)
+
+    await verifyHostKey(h, 22, Buffer.from('key-g'))
+    expect(box).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('when the app is in the background on macOS', () => {
+  it('bounces the dock while the trust sheet waits', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform') as PropertyDescriptor
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+    const bounce = vi.fn()
+    Object.assign(app, { dock: { bounce } })
+    vi.spyOn(BrowserWindow, 'getFocusedWindow').mockReturnValue(null)
+    try {
+      await verifyHostKey(host(), 22, Buffer.from('key-h'))
+      expect(bounce).toHaveBeenCalledWith('critical')
+    } finally {
+      Object.defineProperty(process, 'platform', platform)
+      delete (app as { dock?: unknown }).dock
+    }
+  })
+
+  it('does not when a window already has focus', async () => {
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform') as PropertyDescriptor
+    Object.defineProperty(process, 'platform', { value: 'darwin' })
+    const bounce = vi.fn()
+    Object.assign(app, { dock: { bounce } })
+    try {
+      await verifyHostKey(host(), 22, Buffer.from('key-i'))
+      expect(bounce).not.toHaveBeenCalled()
+    } finally {
+      Object.defineProperty(process, 'platform', platform)
+      delete (app as { dock?: unknown }).dock
+    }
+  })
+})
+
 describe('no main-process message box is raised without a parent', () => {
   // A source check, because the failure is invisible in a test: an app-modal
   // box resolves the same way a sheet does. The runtime cost is only seen as
-  // a frozen app.
+  // a frozen app. Every message box goes through askInWindow, which is the
+  // one place allowed to call showMessageBox, and only with a window first;
+  // the Sync variant blocks by design and is not allowed anywhere.
   it('holds for every service', async () => {
     const { readFileSync, readdirSync } = await import('node:fs')
     const { join } = await import('node:path')
@@ -103,7 +173,15 @@ describe('no main-process message box is raised without a parent', () => {
       }
     }
     walk(root)
-    const offenders = files.filter((f) => /dialog\s*\.\s*showMessageBox\(\s*\{/.test(readFileSync(f, 'utf8')))
+    const offenders: string[] = []
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8')
+      if (/showMessageBoxSync/.test(src)) offenders.push(`${f}: showMessageBoxSync`)
+      const calls = [...src.matchAll(/showMessageBox\s*\(\s*([^,)]*)/g)].map((m) => m[1].trim())
+      if (!f.endsWith('promptWindow.ts')) {
+        if (calls.length) offenders.push(`${f}: showMessageBox outside promptWindow.ts`)
+      } else if (calls.some((arg) => arg !== 'win')) offenders.push(`${f}: showMessageBox without the window first`)
+    }
     expect(offenders).toEqual([])
   })
 })

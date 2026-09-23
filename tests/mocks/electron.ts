@@ -67,6 +67,9 @@ export const ipcMain = {
 // not raised at all — so a test that answers a host-key dialog needs one to
 // exist. Tests of the no-window path spy getFocusedWindow/getAllWindows.
 export const mainWindowStub = {
+  // A prompt listens for the window closing (promptWindow.ts).
+  once: (): void => undefined,
+  removeListener: (): void => undefined,
   isDestroyed: (): boolean => false,
   isMinimized: (): boolean => false,
   isVisible: (): boolean => true,

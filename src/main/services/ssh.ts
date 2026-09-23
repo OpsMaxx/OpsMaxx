@@ -8,7 +8,7 @@ import type { SshCloseInfo, SshConnectConfig, SshHop, SshStatus, SshStatusPhase 
 import type { CloudTarget } from '../../shared/cloud'
 import { agentForHop } from '../../shared/sshAgent'
 import { debugRecord } from './debugLog'
-import { hostKeyUnaskable, verifyHostKey } from './knownhosts'
+import { askedWithoutWindow, verifyHostKey } from './knownhosts'
 // Names only, and only for an error message: a hop is addressed by the
 // friendly name of a saved server, so that is what a failure has to say.
 import { getCachedServer } from './mcpDataCache'
@@ -333,6 +333,8 @@ async function connectClient(
     // Set by the host verifier below when WE hung up, so the error handler can
     // tell that apart from the host going away.
     let refusedHostKey = false
+    // ...and when that was because OpsMaxx had no window to ask in.
+    let noWindowToAsk = false
 
     const config: ConnectConfig = {
       host: hop.host,
@@ -361,13 +363,15 @@ async function connectClient(
       tryKeyboard: true,
       // Trust-on-first-use: unknown hosts prompt, changed keys are refused.
       hostVerifier: ((key: Buffer, cb: (ok: boolean) => void) => {
-        void verifyHostKey(hop.host, hop.port || 22, key, allowPrompt, hop.hostKeyId).then((ok) => {
+        const verdict = verifyHostKey(hop.host, hop.port || 22, key, allowPrompt, hop.hostKeyId)
+        void verdict.then((ok) => {
           // Remember that WE refused, so the error below can say so. ssh2's
           // own message for this is "Host denied (verification failed)", which
           // is true and tells the user nothing they can act on -- and reaching
           // the fleet monitor it became "did not answer the last check", which
           // is not even true: the host answered, and we hung up on it.
           if (!ok) refusedHostKey = true
+          if (!ok) noWindowToAsk = askedWithoutWindow(verdict)
           cb(ok)
         })
       }) as never,
@@ -485,7 +489,7 @@ async function connectClient(
         const keyId = hop.hostKeyId ?? `${hop.host}:${hop.port || 22}`
         reject(
           new Error(
-            hostKeyUnaskable(keyId)
+            noWindowToAsk
               ? `OpsMaxx has no trusted host key for ${keyId} and no open window to ask in. ` +
                 'Open OpsMaxx and connect to this server once to confirm its fingerprint.'
               : allowPrompt

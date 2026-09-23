@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, type MessageBoxOptions, type MessageBoxReturnValue } from 'electron'
+import { app, BrowserWindow, dialog, type MessageBoxOptions, type MessageBoxReturnValue } from 'electron'
 
 /**
  * A message box the main process raises on its own — a host key to trust, a
@@ -20,9 +20,31 @@ import { BrowserWindow, dialog, type MessageBoxOptions, type MessageBoxReturnVal
  * had been pressed, rather than blocking the process to ask.
  */
 export async function askInWindow(options: MessageBoxOptions): Promise<MessageBoxReturnValue | null> {
+  // Read before promptWindow focuses anything: no focused window means the
+  // app is in the background, and on macOS focusing a window does not bring
+  // the app forward. The dock is the one place that can say "a question is
+  // waiting" without stealing focus from whatever the user is doing.
+  const background = BrowserWindow.getFocusedWindow() === null
   const win = promptWindow()
   if (!win) return null
-  return dialog.showMessageBox(win, options)
+  if (background && process.platform === 'darwin') app.dock?.bounce('critical')
+  /**
+   * Raced against the window closing. A sheet whose window is destroyed never
+   * settles its promise, and the callers keep that promise as the one prompt
+   * per host every other connection joins — so without this, one closed
+   * window left that host waiting on it until the app restarted. Closing is
+   * answered the way Cancel is.
+   */
+  let onClosed = (): void => undefined
+  const closed = new Promise<null>((resolve) => {
+    onClosed = () => resolve(null)
+    win.once('closed', onClosed)
+  })
+  try {
+    return await Promise.race([dialog.showMessageBox(win, options), closed])
+  } finally {
+    win.removeListener('closed', onClosed)
+  }
 }
 
 function promptWindow(): BrowserWindow | null {

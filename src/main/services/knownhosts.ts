@@ -50,14 +50,19 @@ export function knownHostForget(id: string): void {
 }
 
 /**
- * Hosts whose first-contact prompt could not be shown because OpsMaxx had no
- * window open, so the connection error can say that instead of "not
- * accepted" — which reads as though somebody pressed Cancel. Read once.
+ * Prompts that could not be shown because OpsMaxx had no window open, so the
+ * connection error can say that instead of "not accepted" — which reads as
+ * though somebody pressed Cancel.
+ *
+ * Keyed by the prompt's own promise, not the host: every connection that
+ * joined the prompt holds that same promise and gets the same answer, and a
+ * later attempt, with its own prompt, is not coloured by this one.
  */
-const unaskable = new Set<string>()
+const noWindow = new WeakSet<Promise<boolean>>()
 
-export function hostKeyUnaskable(id: string): boolean {
-  return unaskable.delete(id)
+/** Whether `verdict`, from verifyHostKey, refused because nobody could be asked. */
+export function askedWithoutWindow(verdict: Promise<boolean>): boolean {
+  return noWindow.has(verdict)
 }
 
 // Collapses concurrent prompts for the same host into one dialog — metrics,
@@ -140,7 +145,7 @@ export function verifyHostKey(
   }
 
   const recognised = openssh.trusted
-  const prompt = askInWindow({
+  const prompt: Promise<boolean> = askInWindow({
       type: recognised ? 'question' : 'warning',
       title: recognised ? 'Confirm server' : 'Unknown server',
       message: recognised
@@ -162,7 +167,7 @@ export function verifyHostKey(
     })
     .then((r) => {
       // No window to ask in is a refusal, as Cancel is: see askInWindow.
-      if (!r) unaskable.add(id)
+      if (!r) noWindow.add(prompt)
       if (r?.response !== 0) return false
       const current = read()
       current[id] = { id, fingerprint: fp, addedAt: new Date().toISOString() }
