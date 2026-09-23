@@ -197,7 +197,7 @@ function CreateSessionForm({
           Streamable HTTP (e.g. Gemini CLI). <b>Claude Desktop cannot use it</b> — it ignores{' '}
           <code className="mono">url</code> and <code className="mono">headers</code> and only
           launches stdio servers; use <b>Overview → Connect Claude Desktop</b>, which writes the
-          bridge entry it does understand. For Claude Code, <b>Overview → Connect Claude Code</b>
+          bridge entry it does understand. For Claude Code, <b>Overview → Connect Claude Code</b>{' '}
           gives you a one-line command; Codex has{' '}
           <code className="mono">opsmaxx codex</code>.
         </div>

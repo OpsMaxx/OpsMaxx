@@ -58,7 +58,8 @@ formatting characters (such as the one that makes `invoice.exe` display as
 server asks first, with **Overwrite**, **Skip** (upload only the others) or
 **Cancel all**.
 
-**Multi-line pastes ask first.** Pasting more than one line into a shell shows a
+**Multi-line pastes ask first.** Pasting more than one line into a shell, by
+shortcut, right-click or the Edit menu, shows a
 preview and a confirmation that says what the paste will do. If the shell has
 bracketed paste on, as recent bash and zsh do, nothing runs until you press
 Enter. Otherwise each line runs as it lands, and a last line without a newline

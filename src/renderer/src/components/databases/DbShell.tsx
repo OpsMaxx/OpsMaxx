@@ -116,8 +116,8 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
     return true
   }
 
-  const pasteIntoInput = (): void => {
-    const t = window.opsmaxx?.clipboard.read()
+  const pasteIntoInput = async (): Promise<void> => {
+    const t = await window.opsmaxx?.clipboard.read()
     if (!t) return
     const el = inputRef.current
     if (el && document.activeElement === el) {
@@ -152,7 +152,7 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
       return
     }
     if (k === 'v' && document.activeElement !== ta) {
-      pasteIntoInput()
+      void pasteIntoInput()
       e.preventDefault()
       return
     }
@@ -166,7 +166,7 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
     const hasSelection = !!window.getSelection()?.toString()
     return [
       { label: 'Copy', icon: <Copy size={14} />, onClick: () => copySelection() },
-      { label: 'Paste', icon: <ClipboardPaste size={14} />, onClick: pasteIntoInput },
+      { label: 'Paste', icon: <ClipboardPaste size={14} />, onClick: () => void pasteIntoInput() },
       { separator: true, label: '' },
       { label: hasSelection ? 'Select all output' : 'Select all', icon: <TextSelect size={14} />, onClick: selectAllOutput },
       { label: 'Clear', icon: <Eraser size={14} />, onClick: () => setEntries([]) }
