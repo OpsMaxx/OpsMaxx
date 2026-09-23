@@ -576,3 +576,59 @@ describe('click-arming', () => {
     expect(ARM_MS).toBeGreaterThanOrEqual(500)
   })
 })
+
+// The workspace-wide reads (fleet_inventory and the like) name no server, and
+// the request arrives with serverId and serverName null. The dialog used to
+// read "is asking to act on " followed by nothing -- or "null" -- on exactly
+// the requests whose reach is widest.
+describe('a request about a whole workspace', () => {
+  const wide = (over: Partial<ApprovalRequest> = {}): ApprovalRequest =>
+    request({
+      serverId: null,
+      serverName: null,
+      workspaceName: 'Alpha',
+      capability: 'fleetRead',
+      action: 'fleet_inventory',
+      risk: 'medium',
+      toolName: 'fleet_inventory',
+      // What gate() sends for these: the grant is narrowed to the tool.
+      sessionGrant: 'tool',
+      ...over
+    })
+
+  it('names the workspace wherever a server would be named, and never prints null', async () => {
+    harness({ approvals: [wide()] })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText(/Claude Code is asking to act on the Alpha workspace/)).toBeTruthy()
+    expect(screen.getByText('Workspace: Alpha — the whole workspace, no single server')).toBeTruthy()
+    expect(screen.getByText(/Returns every server in the Alpha workspace with its OS, pending updates/)).toBeTruthy()
+    expect(screen.getByText(/nothing is read from the Alpha workspace/)).toBeTruthy()
+    const grant = screen.getByRole('button', { name: 'Allow fleet_inventory this session' })
+    expect(grant.getAttribute('title')).toBe('Allow fleet_inventory on the Alpha workspace for this session')
+    expect(document.body.textContent).not.toMatch(/\bnull\b|undefined/)
+    // One workspace, one question: no "k of N".
+    expect(screen.queryByText(/this call asks about/)).toBeNull()
+  })
+
+  it('says which of several workspaces this is, and that approving it alone returns nothing', async () => {
+    harness({ approvals: [wide({ workspaceOf: { index: 2, total: 3 } })] })
+    render(<ApprovalWatcher />)
+    expect(
+      await screen.findByText(
+        /Workspace 2 of 3 this call asks about\. It returns nothing unless you approve every one of them\./
+      )
+    ).toBeTruthy()
+  })
+
+  it.each([
+    ['fleet_drift', 'fleetRead', /whose watched configuration has changed/],
+    ['list_alerts', 'fleetRead', /alerts OpsMaxx has already raised for servers in the Alpha workspace/],
+    ['backup_status', 'backupRead', /every backup destination configured on this machine/],
+    ['list_ci_connections', 'ciRead', /names and providers of the CI\/CD connections in the Alpha workspace/]
+  ] as const)('describes %s by what it discloses', async (action, capability, says) => {
+    harness({ approvals: [wide({ action, toolName: action, capability })] })
+    render(<ApprovalWatcher />)
+    expect(await screen.findByText(says)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/\bnull\b|undefined/)
+  })
+})

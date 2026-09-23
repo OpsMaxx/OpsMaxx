@@ -2,7 +2,13 @@ import { useEffect, useState } from 'react'
 import { Clock, Octagon, ShieldAlert, X } from 'lucide-react'
 import { AI_CAPABILITIES } from '../../../../shared/mcp'
 import type { ApprovalRequest, AuditEntry, ContentPreview, McpAgentSession } from '../../../../shared/mcp'
-import { describeConsequence, describeDenial, explainRisk } from '../../../../shared/approvalRisk'
+import {
+  approvalTarget,
+  approvalWhere,
+  describeConsequence,
+  describeDenial,
+  explainRisk
+} from '../../../../shared/approvalRisk'
 import { duration } from '../../lib/format'
 import { ToastSlot } from '../common/Toasts'
 import { useArming } from '../../hooks/useArming'
@@ -159,10 +165,10 @@ export function capabilityLabel(capability: ApprovalRequest['capability']): stri
  */
 export function sessionGrantLabel(request: ApprovalRequest): string | null {
   if (request.sessionGrant === 'tool' && request.toolName) {
-    return `Allow ${request.toolName} on ${request.serverName} for this session`
+    return `Allow ${request.toolName} on ${approvalTarget(request)} for this session`
   }
   if (request.sessionGrant) {
-    return `Allow “${capabilityLabel(request.capability)}” on ${request.serverName} for this session`
+    return `Allow “${capabilityLabel(request.capability)}” on ${approvalTarget(request)} for this session`
   }
   return null
 }
@@ -292,11 +298,19 @@ export function ApprovalDialog({
           <div>
             <h2>
               <ShieldAlert size={15} style={{ verticalAlign: -2, marginRight: 6, color: toneText }} />
-              {request.agentName} is asking to act on {request.serverName}
+              {request.agentName} is asking to act on {approvalTarget(request)}
             </h2>
             <div className="sub">
               It is blocked until you answer. {waiting > 1 ? `${waiting - 1} more request(s) behind this one.` : ''}
             </div>
+            {/* One call, several near-identical dialogs: say which this is, and
+                that approving it alone returns nothing. */}
+            {request.workspaceOf && (
+              <div className="sub">
+                Workspace {request.workspaceOf.index} of {request.workspaceOf.total} this call asks about. It returns
+                nothing unless you approve every one of them.
+              </div>
+            )}
           </div>
           <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
             {/* The fuse, in the header, because it is a fact about the DIALOG
@@ -429,9 +443,7 @@ export function ApprovalDialog({
                 ''
               )}
             </Row>
-            <Row label="Where">
-              {request.workspaceName} / {request.serverName}
-            </Row>
+            <Row label="Where">{approvalWhere(request)}</Row>
             {/* Which permission a yes is spent on. The capability was the one
                 fact on the request the dialog only used internally, and it is
                 the unit a session grant is measured in. */}

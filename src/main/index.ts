@@ -76,6 +76,7 @@ import {
 } from './services/debugLog'
 import { buildDebugBundle, saveDebugBundle } from './services/debugBundle'
 import { mayOpenExternally } from '../shared/externalUrl'
+import { approvalTarget } from '../shared/approvalRisk'
 import type { DiagnosticsCrash } from '../shared/diagnostics'
 import { AUDIT_LOG_PATH, refreshAuditFloor } from './services/auditLog'
 import { LOCAL_SESSION_LOG_PATH } from './services/localSessionLog'
@@ -4687,7 +4688,7 @@ function notifyApprovalPending(request: ApprovalRequest): boolean {
   if (!Notification.isSupported()) return surfaced
   const n = new Notification({
     title: `${request.agentName} needs approval`,
-    body: `${request.action}\non ${request.serverName}`,
+    body: `${request.action}\non ${approvalTarget(request)}`,
     icon: appIcon()
   })
   n.on('click', () => {

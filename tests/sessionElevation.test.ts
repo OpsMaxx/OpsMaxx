@@ -35,7 +35,10 @@ describe('what one approval covers', () => {
     // Not session-wide: a person approving an action is looking at a server
     // name while they do it, and carrying that consent to a machine they were
     // not looking at is a different grant from the one they gave.
-    expect(SRC).toMatch(/const elevationKey = \(sessionId: string, serverId: string, scope: string\)/)
+    // The target is a server -- or, for a workspace-wide read, a workspace --
+    // tagged with which, so the two kinds of grant can never share a key.
+    expect(SRC).toMatch(/const elevationKey = \(sessionId: string, target: ApprovalTarget, scope: string\)/)
+    expect(SRC).toMatch(/`\$\{sessionId\}\\u0000\$\{target\.kind\}\\u0000\$\{target\.id\}\\u0000\$\{scope\}`/)
     // The scope defaults to the capability, which is what keeps that grain the
     // default for every caller that does not ask for a narrower one.
     expect(GATE).toMatch(/`\$\{subject\.elevationScope \?\? ctx\.capability\}\\u0000\$\{check\.reason\}`/)

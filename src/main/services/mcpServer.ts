@@ -62,7 +62,7 @@ import { getGroup, listAssignments } from './policyStore'
 import { refuseNonLoopback } from './loopbackGuard'
 import { fleetCached } from './fleetSampler'
 import type { CapacityReport } from '../../shared/capacity'
-import { requestApproval } from './approvals'
+import { requestApproval, wouldRefuse } from './approvals'
 import { remoteText, remoteName, hostReportedBlock } from '../../shared/remoteText'
 import { capacityDigest } from '../../shared/fleetForecast'
 import { recordAudit, AUDIT_LOG_PATH } from './auditLog'
@@ -192,7 +192,7 @@ interface ExtraLike {
 // reported. A progress notification is the only in-band way to say "still
 // alive, waiting on a human". Clients that sent no progressToken get nothing,
 // and a client that ignores progress is no worse off than before.
-async function noteAwaitingApproval(extra: ExtraLike, action: string, serverName: string): Promise<void> {
+async function noteAwaitingApproval(extra: ExtraLike, action: string, target: string): Promise<void> {
   const token = extra._meta?.progressToken
   if (token === undefined || !extra.sendNotification) return
   try {
@@ -201,7 +201,7 @@ async function noteAwaitingApproval(extra: ExtraLike, action: string, serverName
       params: {
         progressToken: token,
         progress: 0,
-        message: `Waiting for a human to approve "${action}" on ${serverName} in OpsMaxx. This is not stuck — approve or deny it in the OpsMaxx window.`
+        message: `Waiting for a human to approve "${action}" on ${target} in OpsMaxx. This is not stuck — approve or deny it in the OpsMaxx window.`
       }
     })
   } catch {
@@ -612,6 +612,14 @@ interface AuditContext {
   serverName: string | null
   action: string
   capability: AiCapability | null
+  /**
+   * This call is about the whole workspace, not a server in it. Set ONLY by
+   * gateWorkspaces. gate() does not infer it from a null server: a per-server
+   * tool that passed null by mistake would otherwise become a workspace ask
+   * that an existing workspace grant could answer. Without it, an ask with no
+   * server is refused.
+   */
+  workspaceWide?: true
 }
 
 /**
@@ -769,6 +777,8 @@ interface GateSubject {
    * which carries a byte count) and never goes back to the agent.
    */
   writeContent?: { content: string; knownSecrets: string[] }
+  /** Which of the workspaces one call is asking about this is. See gateWorkspaces. */
+  workspaceOf?: { index: number; total: number }
 }
 
 /**
@@ -844,7 +854,13 @@ const mentionsElevation = (command: string): boolean => runsAsAnotherUser(comman
 /**
  * Approvals already granted in this session, remembered.
  *
- * Keyed session + server + capability + the policy rule that asked. Answering
+ * Keyed session + server + capability + the policy rule that asked -- or, for
+ * a workspace-wide read that names no server (fleet_inventory, list_alerts,
+ * fleet_drift, backup_status, list_ci_connections), session + WORKSPACE +
+ * tool + rule (gateWorkspaces narrows the scope to the tool). The two are
+ * different kinds of key, tagged as such, so a
+ * yes to reading the whole workspace never answers a question about one of its
+ * servers, and a yes about one server never answers for the workspace. Answering
  * one ordinary `execute_command` on Scanner01 with "Allow … for this session"
  * stops the app asking again for ordinary terminal commands on Scanner01 for
  * the rest of that session. It never covers `sudo` or anything the command
@@ -862,8 +878,11 @@ const mentionsElevation = (command: string): boolean => runsAsAnotherUser(comman
  */
 const sessionElevations = new Set<string>()
 
-const elevationKey = (sessionId: string, serverId: string, scope: string): string =>
-  `${sessionId}\u0000${serverId}\u0000${scope}`
+const elevationKey = (sessionId: string, target: ApprovalTarget, scope: string): string =>
+  `${sessionId}\u0000${target.kind}\u0000${target.id}\u0000${scope}`
+
+/** What an approval is about: one server, or -- for the workspace-wide reads -- one workspace. */
+type ApprovalTarget = { kind: 'server'; id: string } | { kind: 'workspace'; id: string }
 
 /** Forget what a session was allowed the moment it stops existing. */
 export function clearSessionElevations(sessionId: string): void {
@@ -882,7 +901,7 @@ async function gate(
   check: { decision: 'allow' | 'ask' | 'deny'; reason: string },
   subject: GateSubject,
   extra?: ExtraLike
-): Promise<{ ok: true; approval: GateApproval } | { ok: false; result: CallToolResult }> {
+): Promise<{ ok: true; approval: GateApproval; granted?: string } | { ok: false; result: CallToolResult }> {
   if (check.decision === 'deny') {
     recordAudit({
       agentName: ctx.session.agentName,
@@ -901,14 +920,18 @@ async function gate(
   }
 
   if (check.decision === 'ask') {
-    if (!ctx.serverId || !ctx.serverName || !ctx.capability || !ctx.workspaceId || !ctx.workspaceName) {
-      // An approval names one server, and this call names none -- the
-      // fleet-wide reads pass serverId null -- so there is nobody to ask and
-      // it is refused. It used to be refused with no audit row at all, which
-      // made an `ask` on fleetRead, backupRead or ciRead a silent, unrecorded
-      // refusal. Recorded now as what it is: the policy's answer, not a
-      // human's.
-      const reason = 'this action requires approval, and an approval needs a single server to name, which this call does not have'
+    // An approval names the server it is about -- or, for a call gateWorkspaces
+    // marked workspace-wide, the workspace. Anything short of one of those two
+    // has nobody to put the question to and is refused, as the policy's answer
+    // rather than a human's.
+    const target: ApprovalTarget | null =
+      ctx.workspaceWide === true && ctx.serverId === null && ctx.serverName === null && ctx.workspaceId
+        ? { kind: 'workspace', id: ctx.workspaceId }
+        : ctx.serverId && ctx.serverName
+          ? { kind: 'server', id: ctx.serverId }
+          : null
+    if (!target || !ctx.capability || !ctx.workspaceId || !ctx.workspaceName) {
+      const reason = 'this action requires approval, and it names neither a server nor a workspace to ask about'
       recordAudit({
         agentName: ctx.session.agentName,
         sessionId: ctx.session.id,
@@ -924,6 +947,7 @@ async function gate(
       })
       return { ok: false, result: errorText(`Denied: ${reason}.`) }
     }
+    const where = ctx.serverName ?? `the ${ctx.workspaceName} workspace`
     // Already answered for this capability on this server, in this session.
     //
     // Only reached for an `ask`. A `deny` returns above and is never softened
@@ -954,11 +978,7 @@ async function gate(
     // one. check.reason is the policy engine's own sentence for the rule that
     // produced this `ask`, so a different rule is a different key -- a grant
     // can only ever be spent on the question it was given in answer to.
-    const key = elevationKey(
-      ctx.session.id,
-      ctx.serverId,
-      `${subject.elevationScope ?? ctx.capability}\u0000${check.reason}`
-    )
+    const key = elevationKey(ctx.session.id, target, `${subject.elevationScope ?? ctx.capability}\u0000${check.reason}`)
     if (!perCall && sessionElevations.has(key)) {
       // Reported as what it is -- allowed on the strength of an approval given
       // earlier in this session, not an action nobody approved. The audit log
@@ -969,7 +989,7 @@ async function gate(
       // the place that knows how the call actually ended.
       return { ok: true, approval: 'approved-earlier' }
     }
-    if (extra) await noteAwaitingApproval(extra, ctx.action, ctx.serverName)
+    if (extra) await noteAwaitingApproval(extra, ctx.action, where)
     // "Approve once" used to mean exactly this -- and then add the elevation
     // below anyway, so the button granted the rest of the session on every tool
     // that was not per-call. The grant is now a second, separately labelled
@@ -1004,6 +1024,7 @@ async function gate(
       actionsThisSession: countSessionActions(ctx.session.id) ?? undefined,
       sessionGrant,
       writeContent: subject.writeContent,
+      workspaceOf: subject.workspaceOf,
       signal: extra?.signal
     })
     const approved = decision === 'approved' || decision === 'approved-for-session'
@@ -1077,7 +1098,7 @@ async function gate(
           decision === 'disconnected'
             ? 'Cancelled: the request was withdrawn before the user answered, so nothing ran.'
             : decision === 'timeout'
-              ? `Denied: nobody answered the approval request for this action within the timeout. It was waiting in the OpsMaxx window. Ask the user to approve it there, or to raise the capability for ${ctx.serverName} from Ask to Allow in AI & MCP > Access, then retry.`
+              ? `Denied: nobody answered the approval request for this action within the timeout. It was waiting in the OpsMaxx window. Ask the user to approve it there, or to raise the capability for ${where} from Ask to Allow in AI & MCP > Access, then retry.`
               : 'Denied: the user rejected this action.'
         )
       }
@@ -1085,12 +1106,101 @@ async function gate(
     // A human answered this one just now; the audit row says whether they also
     // answered for the ones like it, so the `approved-earlier` rows that follow
     // have a row to point back to.
-    return { ok: true, approval: decision === 'approved-for-session' && !perCall ? 'approved-for-session' : 'approved' }
+    // `granted` names the grant just remembered, so a caller that asks several
+    // questions for one call can take it back if a later one is refused.
+    return decision === 'approved-for-session' && !perCall
+      ? { ok: true, approval: 'approved-for-session', granted: key }
+      : { ok: true, approval: 'approved' }
   }
 
   // Only an `allow` reaches here: every `ask` returned from its own branch.
   return { ok: true, approval: 'not-required' }
 }
+
+/**
+ * gate() for a workspace-wide read: one question per workspace that says ask.
+ *
+ * These tools name no server, so each question names a WORKSPACE, and the
+ * ctx is marked workspaceWide so gate() keys any session grant on session +
+ * workspace + TOOL + rule. The tool, not the capability: fleetRead covers
+ * list_alerts and fleet_drift both, and a yes to the low-risk one must not
+ * buy the high-risk one without a dialog.
+ *
+ * A session can hold several workspaces with different groups; asking once
+ * for all of them would put one workspace's name on a yes that reached the
+ * others, so every workspace that says ask is asked on its own, in turn, and
+ * the dialog says which of how many it is. Workspaces that allow outright are
+ * not asked about. Three things keep a sequence of questions honest:
+ *
+ *   - A workspace OpsMaxx would decline to ask about (deny cooldown, withdrawal
+ *     limit, pending cap) is gated FIRST, so the call is refused before anybody
+ *     has approved a workspace for nothing.
+ *   - Any no refuses the whole call, and a session grant given earlier in the
+ *     same call is taken back: the call it was given for never ran.
+ *   - The call writes ONE audit row, and when it covers several workspaces
+ *     the row's action names every one and how it was let through.
+ */
+async function gateWorkspaces(
+  base: Pick<AuditContext, 'session' | 'action'> & { capability: AiCapability },
+  checked: { workspace: { id: string; name: string }; check: Decision }[],
+  subject: GateSubject,
+  extra?: ExtraLike
+): Promise<{ ok: true; ctx: AuditContext; approval: GateApproval } | { ok: false; result: CallToolResult }> {
+  const at = (w: { id: string; name: string }): AuditContext => ({
+    ...base,
+    workspaceId: w.id,
+    workspaceName: w.name,
+    serverId: null,
+    serverName: null,
+    workspaceWide: true
+  })
+  const refuses = (w: { id: string }): boolean =>
+    wouldRefuse({
+      sessionId: base.session.id,
+      capability: base.capability,
+      workspaceId: w.id,
+      serverId: null,
+      containment: subject.containment
+    })
+  const asking = checked
+    .filter((c) => c.check.decision !== 'allow')
+    .sort((a, b) => Number(refuses(b.workspace)) - Number(refuses(a.workspace)))
+  const answers = new Map<string, GateApproval>()
+  const granted: string[] = []
+  let passed: { ctx: AuditContext; approval: GateApproval } | null = null
+  for (const [i, { workspace, check }] of asking.entries()) {
+    const ctx = at(workspace)
+    const gated = await gate(
+      ctx,
+      check,
+      {
+        ...subject,
+        elevationScope: subject.elevationScope ?? base.action,
+        workspaceOf: asking.length > 1 ? { index: i + 1, total: asking.length } : undefined
+      },
+      extra
+    )
+    if (!gated.ok) {
+      for (const key of granted) sessionElevations.delete(key)
+      return gated
+    }
+    if (gated.granted) granted.push(gated.granted)
+    answers.set(workspace.id, gated.approval)
+    if (!passed || passed.approval === 'approved-earlier') passed = { ctx, approval: gated.approval }
+  }
+  const row = passed ?? { ctx: at(checked[0].workspace), approval: 'not-required' as const }
+  if (checked.length > 1) {
+    const each = checked.map(({ workspace }) => {
+      const answer = answers.get(workspace.id)
+      return `${workspace.name}: ${answer === undefined || answer === 'not-required' ? 'allowed' : answer}`
+    })
+    row.ctx = { ...row.ctx, action: `${base.action} (${each.join(', ')})` }
+  }
+  return { ok: true, ...row }
+}
+
+/** gate() itself, for the tests that must reach a ctx no tool builds. */
+export const gateForTests = gate
 
 /**
  * How a call got past gate(), in the audit log's own words.
@@ -4216,33 +4326,18 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // several, they can be assigned different access groups, and answering
       // for all of them because one permits it would be the widest possible
       // reading of a grant the user made narrowly. Workspaces that do not
-      // permit it are left out of the answer rather than failing the call.
-      const permitted = workspaces.filter(
-        (w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead').decision !== 'deny'
-      )
-      if (permitted.length === 0) {
+      // permit it are left out of the answer rather than failing the call;
+      // each one that says ask is asked about by name (gateWorkspaces).
+      const checked = workspaces
+        .map((w) => ({ workspace: w, check: effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead') }))
+        .filter((c) => c.check.decision !== 'deny')
+      if (checked.length === 0) {
         return errorText('This session is not permitted to read the fleet in any of its workspaces.')
       }
-      // The strictest surviving decision governs. If any permitted workspace
-      // says ask, the call is REFUSED, not asked: an approval names one server
-      // and this call names none, so gate() has nobody to put it to (and
-      // records the refusal). Making the fleet-wide reads askable is its own
-      // piece of work.
-      const check = permitted
-        .map((w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead'))
-        .reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))
-      const ctx: AuditContext = {
-        session: auth.session,
-        workspaceId: permitted[0].id,
-        workspaceName: permitted[0].name,
-        serverId: null,
-        serverName: null,
-        action: 'fleet_inventory',
-        capability: 'fleetRead'
-      }
-      const gated = await gate(
-        ctx,
-        check,
+      const permitted = checked.map((c) => c.workspace)
+      const gated = await gateWorkspaces(
+        { session: auth.session, action: 'fleet_inventory', capability: 'fleetRead' },
+        checked,
         {
           toolName: 'fleet_inventory',
           level: 'medium',
@@ -4253,6 +4348,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         extra
       )
       if (!gated.ok) return gated.result
+      const { ctx } = gated
 
       if (!fleetReader) {
         auditError(ctx, gated.approval, 'the fleet is not being sampled on this machine')
@@ -4446,19 +4542,11 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           'This session is not permitted to read backup health in every workspace it holds, and the answer is machine-wide.'
         )
       }
-      const check = decisions.reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))
-      const ctx: AuditContext = {
-        session: auth.session,
-        workspaceId: workspaces[0].id,
-        workspaceName: workspaces[0].name,
-        serverId: null,
-        serverName: null,
-        action: 'backup_status',
-        capability: 'backupRead'
-      }
-      const gated = await gate(
-        ctx,
-        check,
+      // Every workspace that says ask is asked: the answer is machine-wide, so
+      // it reaches each of them.
+      const gated = await gateWorkspaces(
+        { session: auth.session, action: 'backup_status', capability: 'backupRead' },
+        workspaces.map((w, i) => ({ workspace: w, check: decisions[i] })),
         {
           toolName: 'backup_status',
           level: 'low',
@@ -4468,6 +4556,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         extra
       )
       if (!gated.ok) return gated.result
+      const { ctx } = gated
 
       if (!backupReader) {
         auditError(ctx, gated.approval, 'backup configuration cannot be read on this machine')
@@ -4596,27 +4685,16 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const workspaces = auth.session.workspaces
       if (workspaces.length === 0) return errorText('This session has no workspaces.')
 
-      const permitted = workspaces.filter(
-        (w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead').decision !== 'deny'
-      )
-      if (permitted.length === 0) {
+      const checked = workspaces
+        .map((w) => ({ workspace: w, check: effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead') }))
+        .filter((c) => c.check.decision !== 'deny')
+      if (checked.length === 0) {
         return errorText('This session is not permitted to read the fleet in any of its workspaces.')
       }
-      const check = permitted
-        .map((w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead'))
-        .reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))
-      const ctx: AuditContext = {
-        session: auth.session,
-        workspaceId: permitted[0].id,
-        workspaceName: permitted[0].name,
-        serverId: null,
-        serverName: null,
-        action: 'list_alerts',
-        capability: 'fleetRead'
-      }
-      const gated = await gate(
-        ctx,
-        check,
+      const permitted = checked.map((c) => c.workspace)
+      const gated = await gateWorkspaces(
+        { session: auth.session, action: 'list_alerts', capability: 'fleetRead' },
+        checked,
         {
           toolName: 'list_alerts',
           level: 'low',
@@ -4626,6 +4704,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         extra
       )
       if (!gated.ok) return gated.result
+      const { ctx } = gated
 
       if (!alertReader) {
         auditError(ctx, gated.approval, 'history is not being recorded on this machine')
@@ -4983,31 +5062,20 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const workspaces = auth.session.workspaces
       if (workspaces.length === 0) return errorText('This session has no workspaces.')
 
-      const permitted = workspaces.filter(
-        (w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead').decision !== 'deny'
-      )
-      if (permitted.length === 0) {
+      const checked = workspaces
+        .map((w) => ({ workspace: w, check: effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead') }))
+        .filter((c) => c.check.decision !== 'deny')
+      if (checked.length === 0) {
         return errorText('This session is not permitted to read the fleet in any of its workspaces.')
       }
-      const check = permitted
-        .map((w) => effectiveWorkspaceCapability(auth.session, w.id, 'fleetRead'))
-        .reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))
-      const ctx: AuditContext = {
-        session: auth.session,
-        workspaceId: permitted[0].id,
-        workspaceName: permitted[0].name,
-        serverId: null,
-        serverName: null,
-        action: 'fleet_drift',
-        capability: 'fleetRead'
-      }
+      const permitted = checked.map((c) => c.workspace)
       // 'high', which is a grade above every other read on this bridge and the
       // only one among them to carry it. The per-host version is 'medium'; this
       // is the same information about every host at once, and the difference
       // between those two is the whole reason this tool was argued about.
-      const gated = await gate(
-        ctx,
-        check,
+      const gated = await gateWorkspaces(
+        { session: auth.session, action: 'fleet_drift', capability: 'fleetRead' },
+        checked,
         {
           toolName: 'fleet_drift',
           level: 'high',
@@ -5018,6 +5086,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         extra
       )
       if (!gated.ok) return gated.result
+      const { ctx } = gated
 
       if (!fleetReader) {
         auditError(ctx, gated.approval, 'the fleet is not being sampled on this machine')
@@ -5114,27 +5183,16 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // Denied workspaces are dropped rather than failing the call: a session
       // spanning two workspaces should still be able to list the one it may
       // read, the way the fleet tools handle the same shape.
-      const permitted = workspaces.filter(
-        (w) => effectiveWorkspaceCapability(auth.session, w.id, 'ciRead').decision !== 'deny'
-      )
-      if (permitted.length === 0) {
+      const checked = workspaces
+        .map((w) => ({ workspace: w, check: effectiveWorkspaceCapability(auth.session, w.id, 'ciRead') }))
+        .filter((c) => c.check.decision !== 'deny')
+      if (checked.length === 0) {
         return errorText('This session is not permitted to read CI/CD connections in any of its workspaces.')
       }
-      const check = permitted
-        .map((w) => effectiveWorkspaceCapability(auth.session, w.id, 'ciRead'))
-        .reduce((strictest, d) => (d.decision === 'ask' ? d : strictest))
-      const ctx: AuditContext = {
-        session: auth.session,
-        workspaceId: permitted[0].id,
-        workspaceName: permitted[0].name,
-        serverId: null,
-        serverName: null,
-        action: 'list_ci_connections',
-        capability: 'ciRead'
-      }
-      const gated = await gate(
-        ctx,
-        check,
+      const permitted = checked.map((c) => c.workspace)
+      const gated = await gateWorkspaces(
+        { session: auth.session, action: 'list_ci_connections', capability: 'ciRead' },
+        checked,
         {
           toolName: 'list_ci_connections',
           level: 'low',
@@ -5144,6 +5202,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         extra
       )
       if (!gated.ok) return gated.result
+      const { ctx } = gated
 
       const conns = listCachedCicdConnections(permitted.map((w) => w.id))
       auditSuccess(ctx, gated.approval)

@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { useEffect, useState } from 'react'
 import type { ApprovalRequest, ApprovalScope } from '../../../shared/mcp'
-import { resolveFuseDeadline, formatFuse } from '../../../shared/approvalRisk'
+import { approvalTarget, resolveFuseDeadline, formatFuse } from '../../../shared/approvalRisk'
 import { bridgeOn, bridgeHas } from '../lib/bridge'
 import { toast } from './toast'
 import { openAi } from './nav'
@@ -50,7 +50,7 @@ export const useApprovalQueue = create<ApprovalQueueState>(() => ({
 }))
 
 function announce(request: ApprovalRequest): void {
-  const where = `${request.action} on ${request.serverName}`
+  const where = `${request.action} on ${approvalTarget(request)}`
   const audit = { label: 'View in audit log', run: () => openAi('audit') }
 
   if (request.status === 'approved') {
@@ -58,7 +58,7 @@ function announce(request: ApprovalRequest): void {
     // the half of the answer the operator will not see prompted again.
     const further =
       request.grantedScope === 'session'
-        ? ` Later requests like it on ${request.serverName} will not ask again this session.`
+        ? ` Later requests like it on ${approvalTarget(request)} will not ask again this session.`
         : ''
     toast(`Approved “${where}”. ${request.agentName} was allowed to run it.${further}`, 'info', audit)
     return

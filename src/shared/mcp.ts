@@ -420,8 +420,14 @@ export interface ApprovalRequest {
   agentName: string
   workspaceId: string
   workspaceName: string
-  serverId: string
-  serverName: string
+  /**
+   * Both null for a workspace-wide read (fleet_inventory, list_alerts,
+   * fleet_drift, backup_status, list_ci_connections): the request is about the
+   * workspace, not a server in it, and a session grant on it covers that
+   * workspace and nothing narrower or wider. Render it with approvalTarget().
+   */
+  serverId: string | null
+  serverName: string | null
   capability: AiCapability
   action: string
   risk: 'low' | 'medium' | 'high'
@@ -509,6 +515,13 @@ export interface ApprovalRequest {
    * renderer copy of it would be a second list somebody forgets to update.
    */
   sessionGrant?: 'capability' | 'tool'
+
+  /**
+   * This is question `index` of `total` that ONE workspace-wide call is asking,
+   * one per workspace that says ask. Absent when the call asks only one. The
+   * call returns nothing unless every one of them is approved.
+   */
+  workspaceOf?: { index: number; total: number }
 
   /** How far the operator's yes reached, once there was one. See ApprovalScope. */
   grantedScope?: ApprovalScope
