@@ -638,11 +638,13 @@ export function ConnectionTree(): React.JSX.Element {
           )}
         </div>
 
-        <div className="tree-section">
-          <div className="tree-section-label">
-            <ServerIcon size={11} /> Recent
-          </div>
-          {recent.length > 0 && (
+        {/* No header over nothing: until a server has been opened there is no
+            Recent, rather than a heading with an empty list under it. */}
+        {recent.length > 0 && (
+          <div className="tree-section">
+            <div className="tree-section-label">
+              <ServerIcon size={11} /> Recent
+            </div>
             <div role="tree" aria-label="Recent">
               {recent.map((s) => {
                 const key = `recent:${s.id}`
@@ -669,8 +671,8 @@ export function ConnectionTree(): React.JSX.Element {
                 )
               })}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {ctx && (

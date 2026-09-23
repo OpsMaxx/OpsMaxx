@@ -144,9 +144,9 @@ export function FrpProxyEditor({
         <Switch
           checked={!!proxy.acknowledgedExposure}
           label={exposureSentence}
-          // Out of the tab order until there is something to confirm; the
-          // sentence beside it says what to set first.
-          tabIndex={missing ? -1 : undefined}
+          // Nothing to confirm yet; the sentence beside it says what to set
+          // first.
+          disabled={!!missing}
           style={{ marginTop: 1 }}
           onChange={toggleExposure}
         />

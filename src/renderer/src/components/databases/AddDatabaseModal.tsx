@@ -600,7 +600,9 @@ export function AddDatabaseModal(): React.JSX.Element {
             <div className="field">
               <label className="field-label">TLS / SSL</label>
               <label className="row" style={{ height: 34, gap: 10 }}>
-                <Switch checked={ssl} onChange={setSsl} />
+                {/* Named for the setting: the words it sits beside are its
+                    state, and "Disabled, switch, off" says nothing. */}
+                <Switch checked={ssl} label="TLS / SSL" onChange={setSsl} />
                 <span className="muted">{ssl ? 'Enabled' : 'Disabled'}</span>
               </label>
             </div>

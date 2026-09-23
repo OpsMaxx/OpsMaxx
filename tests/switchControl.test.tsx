@@ -8,6 +8,7 @@ import { useState } from 'react'
 import { stubBridge } from './setup/renderer'
 import { Switch } from '../src/renderer/src/components/common/Switch'
 import { Settings } from '../src/renderer/src/components/settings/Settings'
+import { AddDatabaseModal } from '../src/renderer/src/components/databases/AddDatabaseModal'
 import { useApp } from '../src/renderer/src/store/app'
 import { useNav } from '../src/renderer/src/store/nav'
 import { MODULES, moduleEnabled } from '../src/shared/modules'
@@ -83,6 +84,16 @@ describe('Settings modules', () => {
     expect(String(moduleEnabled(useApp.getState().settings.modules, m.id))).toBe(sw.getAttribute('aria-checked'))
     // Every module row has one, named after it.
     for (const mod of MODULES) expect(within(document.body).getByRole('switch', { name: mod.label })).toBeTruthy()
+  })
+})
+
+describe('names', () => {
+  it('names the database TLS switch for the setting, not for its state', () => {
+    stubBridge({ db: { test: vi.fn() } })
+    render(<AddDatabaseModal />)
+    // The words beside it are "Enabled"/"Disabled"; a switch called
+    // "Disabled, off" tells nobody what it controls.
+    expect(screen.getByRole('switch', { name: 'TLS / SSL' })).toBeTruthy()
   })
 })
 

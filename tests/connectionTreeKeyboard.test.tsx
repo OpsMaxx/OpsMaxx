@@ -209,6 +209,8 @@ describe('Recent', () => {
     const { rerender } = render(<ConnectionTree />)
     // Never opened, never listed — it used to show the first three servers.
     expect(screen.queryByRole('tree', { name: 'Recent' })).toBeNull()
+    // And no header over an empty list.
+    expect(screen.queryByText('Recent')).toBeNull()
 
     // The real actions, not the stub `seed` installs.
     useApp.setState({ openServer: useApp.getInitialState().openServer })
