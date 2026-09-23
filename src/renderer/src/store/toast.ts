@@ -20,6 +20,11 @@ export interface ToastOptions {
    *  is the one that earns it. Reach for it only when the message reports
    *  something irreversible that the reader has to see. */
   sticky?: boolean
+  /** Replaces any toast already showing with the same key, and lets
+   *  `dismissToast(key)` clear it once the problem is gone. For a message about
+   *  one ongoing condition, where a second copy with a different number in it
+   *  would read as a second problem. */
+  key?: string
 }
 
 export interface Toast {
@@ -37,6 +42,7 @@ export interface Toast {
    *  seconds. Stacked up over a session that is a wall of notices nobody asked
    *  to keep. A button buys a longer window to reach it, not immortality. */
   sticky: boolean
+  key?: string
 }
 
 let tid = 0
@@ -66,8 +72,10 @@ export const useToasts = create<ToastState>((set) => ({
       // Collapse an identical message rather than stacking it. A failing
       // reconnect can emit the same sentence repeatedly, and three copies of
       // one problem reads as three problems.
-      const withoutDuplicate = s.toasts.filter((t) => t.message !== message)
-      return { toasts: [...withoutDuplicate, { id, kind, message, action, sticky }] }
+      const withoutDuplicate = s.toasts.filter(
+        (t) => t.message !== message && (opts?.key === undefined || t.key !== opts.key)
+      )
+      return { toasts: [...withoutDuplicate, { id, kind, message, action, sticky, key: opts?.key }] }
     })
     if (!sticky) {
       const ms = action ? ACTION_DISMISS_MS : AUTO_DISMISS_MS
@@ -96,3 +104,18 @@ export const toast = (
   action?: ToastAction,
   opts?: ToastOptions
 ): void => useToasts.getState().push(message, kind, action, opts)
+
+/** Clears the toast pushed with this `key`, if it is still showing. */
+export const dismissToast = (key: string): void =>
+  useToasts.setState((s) => ({ toasts: s.toasts.filter((t) => t.key !== key) }))
+
+/**
+ * Where toasts render while an approval is on screen.
+ *
+ * Toasts paint above the approval layer, because some of them are about the
+ * approval (the kill switch failing, a fuse running out). Floating in their
+ * corner they then covered the dialog's buttons. So an approval dialog carries
+ * a slot above itself, in its own layout, and the stack moves into it: laid out
+ * beside the dialog rather than over it, it cannot cover it at any size.
+ */
+export const useToastSlot = create<{ slots: HTMLElement[] }>(() => ({ slots: [] }))

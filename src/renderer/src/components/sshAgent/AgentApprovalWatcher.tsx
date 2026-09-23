@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { KeyRound, ShieldAlert, Network } from 'lucide-react'
 import type { AgentApprovalRequest, ApprovalScope } from '../../../../shared/sshAgentHost'
+import { ToastSlot } from '../common/Toasts'
 
 /**
  * The prompt that appears when something asks the agent to sign.
@@ -46,6 +47,8 @@ export function AgentApprovalWatcher(): React.JSX.Element | null {
 
   return (
     <div className="agent-approval-scrim" role="dialog" aria-modal="true">
+      {/* Toasts move here while this is up, so they cannot cover it. */}
+      <ToastSlot />
       <div className="agent-approval">
         <KeyRound size={28} className="agent-approval-icon" aria-hidden />
         <h2>Something wants to use an SSH key</h2>

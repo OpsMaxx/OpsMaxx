@@ -1,12 +1,31 @@
+import { createPortal } from 'react-dom'
 import { CheckCircle2, Info, AlertTriangle, X } from 'lucide-react'
-import { useToasts } from '../../store/toast'
+import { useToasts, useToastSlot } from '../../store/toast'
 import { clsx } from '../../lib/format'
+
+/**
+ * The place an approval dialog keeps for toasts, directly above itself. See
+ * `useToastSlot`. The newest slot wins when two approvals are up at once.
+ */
+export function ToastSlot(): React.JSX.Element {
+  return (
+    <div
+      className="toast-slot"
+      ref={(el) => {
+        if (!el) return
+        useToastSlot.setState((s) => ({ slots: [...s.slots, el] }))
+        return () => useToastSlot.setState((s) => ({ slots: s.slots.filter((x) => x !== el) }))
+      }}
+    />
+  )
+}
 
 export function Toasts(): React.JSX.Element {
   const toasts = useToasts((s) => s.toasts)
   const dismiss = useToasts((s) => s.dismiss)
-  return (
-    <div className="toasts">
+  const slot = useToastSlot((s) => s.slots.at(-1))
+  const stack = (
+    <div className={clsx('toasts', slot && 'in-slot')}>
       {toasts.map((t) => (
         <div
           key={t.id}
@@ -57,4 +76,5 @@ export function Toasts(): React.JSX.Element {
       ))}
     </div>
   )
+  return slot ? createPortal(stack, slot) : stack
 }

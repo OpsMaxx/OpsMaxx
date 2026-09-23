@@ -4,7 +4,9 @@ import { AI_CAPABILITIES } from '../../../../shared/mcp'
 import type { ApprovalRequest, AuditEntry, ContentPreview, McpAgentSession } from '../../../../shared/mcp'
 import { describeConsequence, describeDenial, explainRisk } from '../../../../shared/approvalRisk'
 import { duration } from '../../lib/format'
+import { ToastSlot } from '../common/Toasts'
 import {
+  KILL_SWITCH_FAILED,
   canExtendFuse,
   deferApproval,
   denyAndStopAllAi,
@@ -251,6 +253,7 @@ export function ApprovalDialog({
   const prov = useProvenance(request)
   const extendable = canExtendFuse()
   const grantLabel = sessionGrantLabel(request)
+  const [stopFailed, setStopFailed] = useState(false)
 
   const toneText =
     risk.tone === 'danger' ? 'var(--danger)' : risk.tone === 'warn' ? 'var(--warn)' : 'var(--text-muted)'
@@ -264,6 +267,7 @@ export function ApprovalDialog({
     // dismiss this dialog, and a dismissed dialog left an agent blocked with a
     // burning fuse and nothing on screen to say so.
     <div className="scrim approval-scrim">
+      <ToastSlot />
       <div className="modal" role="dialog" aria-modal aria-label="AI action requires approval">
         <div className="modal-header">
           <div>
@@ -495,58 +499,68 @@ export function ApprovalDialog({
             {LATER_WRITES_UNSEEN}
           </div>
         )}
-        <div className="modal-footer">
+        {stopFailed && (
+          <div className="approval-stop-failed state-alarm" role="alert">
+            <span className="state-dot is-alarm" aria-hidden="true" />
+            {KILL_SWITCH_FAILED}. This request is still waiting on you.
+          </div>
+        )}
+        {/* Two groups that wrap rather than one row that overflows. At 1440
+            wide, with a session grant label, the single row was wider than the
+            dialog and pushed the kill switch out past its left edge. */}
+        <div className="modal-footer approval-footer">
           {/* The kill switch, brought to where the alarm is. Its own copy lives
               three screens away in AI & MCP > Security; this calls the same IPC
               rather than reimplementing any of it. */}
           <button
             className="btn sm"
             style={{ color: 'var(--danger)', borderColor: 'transparent', background: 'transparent' }}
-            onClick={() => void denyAndStopAllAi()}
+            onClick={() => void denyAndStopAllAi().then((ok) => setStopFailed(!ok))}
           >
             <Octagon size={13} /> Deny and stop all AI access
           </button>
-          <div className="spacer" />
-          {/* Labelled, not a bare ✕.
-              The choice was between removing the dismiss control entirely and
-              naming what it does, and naming it won. A modal with no way out
-              traps the operator who wants to go and check something first —
-              which is the careful behaviour, the one this dialog most wants —
-              and a trapped operator clicks the affirmative to get their screen
-              back. Deferring is safe precisely because the default is
-              fail-closed: the fuse keeps burning, an unanswered request still
-              ends in a denial, and the status-bar chip keeps it visible and
-              clickable the whole time. A bare ✕ could not have been used for
-              this, because a ✕ does not say whether it denies or defers. */}
-          <button className="btn ghost" onClick={() => deferApproval(request.id)}>
-            <X size={13} /> Decide later
-          </button>
-          {/* Two yeses, and they say different things. "Approve once" is this
-              call; the second button remembers the answer for the rest of the
-              session, and its label is the grant's full extent. Absent for a
-              per-call tool, where main would not honour it. Neither carries
-              any weight: Deny keeps the fill and the focus. */}
-          {grantLabel && (
-            <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'session')}>
-              {grantLabel}
+          <div className="approval-answers">
+            {/* Labelled, not a bare ✕.
+                The choice was between removing the dismiss control entirely and
+                naming what it does, and naming it won. A modal with no way out
+                traps the operator who wants to go and check something first —
+                which is the careful behaviour, the one this dialog most wants —
+                and a trapped operator clicks the affirmative to get their screen
+                back. Deferring is safe precisely because the default is
+                fail-closed: the fuse keeps burning, an unanswered request still
+                ends in a denial, and the status-bar chip keeps it visible and
+                clickable the whole time. A bare ✕ could not have been used for
+                this, because a ✕ does not say whether it denies or defers. */}
+            <button className="btn ghost" onClick={() => deferApproval(request.id)}>
+              <X size={13} /> Decide later
             </button>
-          )}
-          <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'once')}>
-            Approve once
-          </button>
-          <button
-            className="btn"
-            autoFocus
-            style={{
-              background: 'var(--danger-soft)',
-              borderColor: 'var(--danger)',
-              color: 'var(--danger)',
-              fontWeight: 650
-            }}
-            onClick={() => void respondToApproval(request.id, 'denied')}
-          >
-            Deny
-          </button>
+            {/* Two yeses, and they say different things. "Approve once" is this
+                call; the second button remembers the answer for the rest of the
+                session, and its label is the grant's full extent. Absent for a
+                per-call tool, where main would not honour it. Neither carries
+                any weight: Deny keeps the fill and the focus. */}
+            {grantLabel && (
+              <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'session')}>
+                {grantLabel}
+              </button>
+            )}
+            <button className="btn" onClick={() => void respondToApproval(request.id, 'approved', 'once')}>
+              Approve once
+            </button>
+            <button
+              className="btn"
+              autoFocus
+              style={{
+                background: 'var(--danger-soft)',
+                borderColor: 'var(--danger)',
+                color: 'var(--danger)',
+                fontWeight: 650
+              }}
+              onClick={() => void respondToApproval(request.id, 'denied')}
+            >
+              Deny
+            </button>
+          </div>
         </div>
       </div>
     </div>

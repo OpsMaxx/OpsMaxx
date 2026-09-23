@@ -203,11 +203,12 @@
   /* Layers. Every z-index in the renderer is one of these, so the order of
      things that can cover each other is readable in one place instead of being
      reconstructed from a grep. The numbers are the ones each rule already had,
-     except four, each moved on purpose:
+     except five, each moved on purpose:
        - the AI approval dialog, 100 -> --z-approval (it shared `.scrim`);
        - the SSH agent signing prompt, 9000 -> --z-approval, beside it;
        - toasts, 300 -> above the approvals (see below);
-       - the revocation screen, 10000 -> above the toasts, still the top.
+       - the revocation screen, 10000 -> above the toasts, still the top;
+       - feature tips, 880 -> under the dialogs, see --z-tip.
 
      The in-pane layers only compete inside their own stacking context — a
      resizer at 5 never meets a toast — but they are named here too, so that a
@@ -224,10 +225,11 @@
      approval on screen: the kill switch reports that it failed to stop AI
      access only as a toast, and a fuse that runs out says so as a toast while
      the next queued dialog opens. Under the scrim, both were said to nobody.
-     A toast is small, in a corner and dismisses itself, so it costs the dialog
-     nothing. It also now sits over the walkthrough and tip cards, which share
-     its corner: a transient message over a card that is still there when it
-     goes, rather than a message nobody can read. */
+     Above, but never ON: floated in their corner they covered the dialog's
+     buttons, so while an approval is up the stack is moved into the dialog's
+     own layout, above it (`ToastSlot`, `.toasts.in-slot`), and this layer only
+     matters for the frames in between. Beside the walkthrough and tip cards,
+     which share their corner, toasts move left of the card (`.toasts`). */
   --z-raised: 1;
   --z-pane-overlay: 4;
   --z-resizer: 5;
@@ -236,12 +238,15 @@
   --z-pane-control: 15;
   --z-popover: 20;
   --z-dropdown: 40;
+  /* Feature tips: a note beside a view, never in front of anything the user
+     opened. At 880 a tip drew over the command palette's scrim and every
+     dialog; it belongs under all of them. */
+  --z-tip: 90;
   /* Dialogs. `Modal` stacks open dialogs on top of this one step at a time;
      `--z-menu` is the headroom above them. */
   --z-modal: 100;
   --z-menu: 150;
   --z-palette: 200;
-  --z-tip: 880;
   --z-onboarding: 900;
   /* A decision that owns the window: the sync conflict chooser. */
   --z-blocking: 9000;

@@ -51,6 +51,13 @@ button {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+/* A heading given `tabindex="-1"` is focused by code, so a screen reader
+   announces the new step; it is not something a person tabbed to, and a ring
+   round it read as a control that does nothing. Out of the tab order, so no
+   keyboard user can land there looking for the ring. */
+:is(h1, h2, h3)[tabindex='-1']:focus-visible {
+  outline: none;
+}
 
 /* Scrollbars */
 ::-webkit-scrollbar {
@@ -1387,9 +1394,51 @@ button {
   z-index: calc(var(--z-modal) + var(--modal-layer, 0));
   animation: fade 0.12s ease;
 }
-/* The AI approval dialog: same scrim, top layer. See `--z-approval`. */
+/* The AI approval dialog: same scrim, top layer. See `--z-approval`.
+   Rows sized to their content and centred together, so the toast slot sits
+   directly above the dialog instead of taking half the height. */
 .scrim.approval-scrim {
   z-index: var(--z-approval);
+  align-content: center;
+}
+/* Toasts, while an approval is up: moved into the approval's own layout,
+   above it, by `ToastSlot`. Laid out beside the dialog, not floated over it, so
+   no number of them can cover its buttons — a tall stack scrolls the scrim. */
+.toasts.in-slot {
+  position: static;
+  width: min(620px, 92vw);
+  margin-bottom: var(--sp-3);
+}
+.toasts.in-slot:empty {
+  margin-bottom: 0;
+}
+/* The approval footer: the kill switch on the left, the answers as a group on
+   the right, and both allowed to wrap. One unwrapping row was wider than the
+   dialog at 1440 with a session-grant label, and pushed the kill switch out
+   past the dialog's left edge. A grant label that names a long server wraps
+   inside its own button rather than widening the row. */
+.approval-footer {
+  flex-wrap: wrap;
+}
+.approval-answers {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  margin-left: auto;
+  min-width: 0;
+}
+.approval-answers .btn {
+  height: auto;
+  min-height: 32px;
+  white-space: normal;
+  text-align: center;
+}
+.approval-stop-failed {
+  display: flex;
+  align-items: center;
+  padding: var(--sp-2) var(--sp-5);
+  font-weight: 600;
 }
 @keyframes fade {
   from {
@@ -2447,6 +2496,12 @@ details[open] > .disclosure-head .chev {
   flex-direction: column;
   gap: var(--sp-2);
   z-index: var(--z-toast);
+}
+/* The walkthrough and feature tip cards share this corner, and a toast above
+   one covered its Next button. While one is up the stack moves to its left:
+   the card's 380px plus its 20px inset, or as far as the window allows. */
+body:has(.tour-card, .tip-card) .toasts:not(.in-slot) {
+  right: min(calc(400px + var(--sp-3)), calc(100vw - 260px - var(--sp-4)));
 }
 .toast {
   display: flex;

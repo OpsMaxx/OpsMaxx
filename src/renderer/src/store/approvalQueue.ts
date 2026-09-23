@@ -173,20 +173,27 @@ export async function respondToApproval(
 }
 
 /**
+ * What the kill switch reports when it did not work. Said in a toast AND in the
+ * dialog's own footer: the dialog stays up when it fails, and a failure only a
+ * toast reports is one an operator mid-panic can miss.
+ */
+export const KILL_SWITCH_FAILED = 'AI access was not stopped — every session is still live'
+
+/**
  * The kill switch, reached from the modal rather than only from AI & MCP >
  * Security three screens away. Same IPC the Security page calls — the copy
  * there ("revokes every active session and denies every pending approval
  * request") is the contract, and reimplementing any part of it here would be a
  * second thing to keep in step with it.
  */
-export async function denyAndStopAllAi(): Promise<void> {
+export async function denyAndStopAllAi(): Promise<boolean> {
   const result = await window.opsmaxx?.aiMcp?.killAllSessions?.()
   if (!result) {
-    toast('AI access was not stopped — every session is still live.', 'error', {
+    toast(`${KILL_SWITCH_FAILED}.`, 'error', {
       label: 'Open AI security',
       run: () => openAi('security')
     })
-    return
+    return false
   }
   toast(
     `Stopped every agent: ${result.revoked} session(s) revoked, ${result.denied} waiting request(s) denied.`,
@@ -198,6 +205,7 @@ export async function denyAndStopAllAi(): Promise<void> {
     // away needs them still to be there.
     { sticky: true }
   )
+  return true
 }
 
 /**
