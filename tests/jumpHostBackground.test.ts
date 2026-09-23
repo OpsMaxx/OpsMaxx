@@ -32,6 +32,8 @@ interface Fixture {
   logins: string[]
   /** Connections accepted and not yet closed. */
   live: () => number
+  /** `direct-tcpip` channels opened through this sshd and not yet closed. */
+  channels: () => number
 }
 
 let hostKey = ''
@@ -78,6 +80,7 @@ async function startServer(name: string, forwards: boolean): Promise<Fixture> {
 
   const logins: string[] = []
   let live = 0
+  let channels = 0
   const server = new Server({ hostKeys: [hostKey] }, (conn) => {
     live++
     conn.on('close', () => live--)
@@ -118,6 +121,8 @@ async function startServer(name: string, forwards: boolean): Promise<Fixture> {
         conn.on('tcpip', (accept, reject, info) => {
           const socket = tcpConnect(info.destPort, info.destIP, () => {
             const channel = accept()
+            channels++
+            channel.on('close', () => channels--)
             channel.pipe(socket).pipe(channel)
           })
           socket.on('error', () => reject())
@@ -127,7 +132,7 @@ async function startServer(name: string, forwards: boolean): Promise<Fixture> {
   })
 
   await new Promise<void>((resolve) => server.listen(0, HOST, resolve))
-  return { server, port: (server.address() as { port: number }).port, logins, live: () => live }
+  return { server, port: (server.address() as { port: number }).port, logins, live: () => live, channels: () => channels }
 }
 
 beforeAll(async () => {
@@ -399,5 +404,23 @@ describe('a jump chain that fails past the first hop', () => {
       await new Promise((r) => setTimeout(r, 25))
     }
     expect(bastion.live()).toBe(0)
+  })
+})
+
+describe('a pooled hop that fails before ssh2 takes its channel', () => {
+  // A wrong passphrase makes ssh2 throw inside connect(), before it owns the
+  // channel forwarded through the bastion. The bastion is pooled and outlives
+  // the failure, so nothing closed that channel until the bastion itself went.
+  it('closes the channel it was forwarded through', async () => {
+    const enc = utils.generateKeyPairSync('ed25519', { passphrase: 'right', cipher: 'aes256-ctr', rounds: 1 })
+    const cfg = { ...behindBastion(), privateKey: enc.private, passphrase: 'wrong' }
+    const r = await sshExec(cfg, 'uptime', 10_000, false)
+    expect(r.error).toBeDefined()
+    expect(bastion.logins).toHaveLength(1)
+    const deadline = Date.now() + 5000
+    while (bastion.channels() > 0 && Date.now() < deadline) {
+      await new Promise((res) => setTimeout(res, 25))
+    }
+    expect(bastion.channels()).toBe(0)
   })
 })

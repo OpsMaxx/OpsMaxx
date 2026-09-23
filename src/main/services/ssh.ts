@@ -306,12 +306,24 @@ async function connectClient(
   // connection and dropped its error listener. The rejected promise left the
   // socket open with nothing listening, so the server hanging up surfaced as
   // an uncaught ECONNRESET in the main process.
-  const auth = authFor(hop)
+  //
+  // A `sock` handed in is a channel forwarded for this connection alone, so
+  // it is ours to close as well: on a pooled bastion nothing else would until
+  // the bastion itself went away.
+  const discard = (t: NodeJS.ReadableStream | undefined): void =>
+    (t as { destroy?: () => void } | undefined)?.destroy?.()
+  let auth: ReturnType<typeof authFor>
+  try {
+    auth = authFor(hop)
+  } catch (err) {
+    discard(sock)
+    throw err
+  }
   // Hops ride an SSH channel, which has no TCP options of its own; only the
   // first, real socket needs the flag.
   const transport = sock ?? (await tcpSocket(hop.host, hop.port || 22))
-  // Until ssh2 takes the socket in client.connect(), nothing else owns it: any
-  // failure before that point has to close what WE opened.
+  // Until ssh2 takes the transport in client.connect(), nothing else owns it:
+  // any failure before that point has to close it here.
   let handedOff = false
   return new Promise<Client>((resolve, reject) => {
     const client = new Client()
@@ -524,7 +536,7 @@ async function connectClient(
     }
     handedOff = true
   }).catch((err: unknown) => {
-    if (!handedOff && !sock) (transport as net.Socket).destroy()
+    if (!handedOff) discard(transport)
     throw err
   })
 }
@@ -813,7 +825,13 @@ async function openChainDirect(
     // at hop i used to leave hops 0..i-1 authenticated and open, one session
     // left on each bastion per failed attempt until the server timed it out.
     // Ending a client also closes the channel forwarded through it.
-    for (const c of clients.reverse()) c.end()
+    for (const c of clients.reverse()) {
+      try {
+        c.end()
+      } catch {
+        /* a transport already gone must not replace the error naming the hop */
+      }
+    }
     throw err
   }
 }
