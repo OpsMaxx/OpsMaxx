@@ -591,7 +591,8 @@ describe('a request about a whole workspace', () => {
       action: 'fleet_inventory',
       risk: 'medium',
       toolName: 'fleet_inventory',
-      sessionGrant: 'capability',
+      // What gate() sends for these: the grant is narrowed to the tool.
+      sessionGrant: 'tool',
       ...over
     })
 
@@ -602,11 +603,21 @@ describe('a request about a whole workspace', () => {
     expect(screen.getByText('Workspace: Alpha — the whole workspace, no single server')).toBeTruthy()
     expect(screen.getByText(/Returns every server in the Alpha workspace with its OS, pending updates/)).toBeTruthy()
     expect(screen.getByText(/nothing is read from the Alpha workspace/)).toBeTruthy()
-    const grant = screen.getByRole('button', { name: 'Allow “Fleet: read across many servers at once” this session' })
-    expect(grant.getAttribute('title')).toBe(
-      'Allow “Fleet: read across many servers at once” on the Alpha workspace for this session'
-    )
+    const grant = screen.getByRole('button', { name: 'Allow fleet_inventory this session' })
+    expect(grant.getAttribute('title')).toBe('Allow fleet_inventory on the Alpha workspace for this session')
     expect(document.body.textContent).not.toMatch(/\bnull\b|undefined/)
+    // One workspace, one question: no "k of N".
+    expect(screen.queryByText(/this call asks about/)).toBeNull()
+  })
+
+  it('says which of several workspaces this is, and that approving it alone returns nothing', async () => {
+    harness({ approvals: [wide({ workspaceOf: { index: 2, total: 3 } })] })
+    render(<ApprovalWatcher />)
+    expect(
+      await screen.findByText(
+        /Workspace 2 of 3 this call asks about\. It returns nothing unless you approve every one of them\./
+      )
+    ).toBeTruthy()
   })
 
   it.each([

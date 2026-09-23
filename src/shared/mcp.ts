@@ -516,6 +516,13 @@ export interface ApprovalRequest {
    */
   sessionGrant?: 'capability' | 'tool'
 
+  /**
+   * This is question `index` of `total` that ONE workspace-wide call is asking,
+   * one per workspace that says ask. Absent when the call asks only one. The
+   * call returns nothing unless every one of them is approved.
+   */
+  workspaceOf?: { index: number; total: number }
+
   /** How far the operator's yes reached, once there was one. See ApprovalScope. */
   grantedScope?: ApprovalScope
 

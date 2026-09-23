@@ -62,7 +62,7 @@ import { getGroup, listAssignments } from './policyStore'
 import { refuseNonLoopback } from './loopbackGuard'
 import { fleetCached } from './fleetSampler'
 import type { CapacityReport } from '../../shared/capacity'
-import { requestApproval } from './approvals'
+import { requestApproval, wouldRefuse } from './approvals'
 import { remoteText, remoteName, hostReportedBlock } from '../../shared/remoteText'
 import { capacityDigest } from '../../shared/fleetForecast'
 import { recordAudit, AUDIT_LOG_PATH } from './auditLog'
@@ -612,6 +612,14 @@ interface AuditContext {
   serverName: string | null
   action: string
   capability: AiCapability | null
+  /**
+   * This call is about the whole workspace, not a server in it. Set ONLY by
+   * gateWorkspaces. gate() does not infer it from a null server: a per-server
+   * tool that passed null by mistake would otherwise become a workspace ask
+   * that an existing workspace grant could answer. Without it, an ask with no
+   * server is refused.
+   */
+  workspaceWide?: true
 }
 
 /**
@@ -769,6 +777,8 @@ interface GateSubject {
    * which carries a byte count) and never goes back to the agent.
    */
   writeContent?: { content: string; knownSecrets: string[] }
+  /** Which of the workspaces one call is asking about this is. See gateWorkspaces. */
+  workspaceOf?: { index: number; total: number }
 }
 
 /**
@@ -847,7 +857,8 @@ const mentionsElevation = (command: string): boolean => runsAsAnotherUser(comman
  * Keyed session + server + capability + the policy rule that asked -- or, for
  * a workspace-wide read that names no server (fleet_inventory, list_alerts,
  * fleet_drift, backup_status, list_ci_connections), session + WORKSPACE +
- * capability + rule. The two are different kinds of key, tagged as such, so a
+ * tool + rule (gateWorkspaces narrows the scope to the tool). The two are
+ * different kinds of key, tagged as such, so a
  * yes to reading the whole workspace never answers a question about one of its
  * servers, and a yes about one server never answers for the workspace. Answering
  * one ordinary `execute_command` on Scanner01 with "Allow … for this session"
@@ -890,7 +901,7 @@ async function gate(
   check: { decision: 'allow' | 'ask' | 'deny'; reason: string },
   subject: GateSubject,
   extra?: ExtraLike
-): Promise<{ ok: true; approval: GateApproval } | { ok: false; result: CallToolResult }> {
+): Promise<{ ok: true; approval: GateApproval; granted?: string } | { ok: false; result: CallToolResult }> {
   if (check.decision === 'deny') {
     recordAudit({
       agentName: ctx.session.agentName,
@@ -909,12 +920,12 @@ async function gate(
   }
 
   if (check.decision === 'ask') {
-    // An approval names the server it is about -- or, for a workspace-wide read
-    // that passes serverId AND serverName null, the workspace. Anything short of
-    // one of those two has nobody to put the question to and is refused, as the
-    // policy's answer rather than a human's.
+    // An approval names the server it is about -- or, for a call gateWorkspaces
+    // marked workspace-wide, the workspace. Anything short of one of those two
+    // has nobody to put the question to and is refused, as the policy's answer
+    // rather than a human's.
     const target: ApprovalTarget | null =
-      ctx.serverId === null && ctx.serverName === null && ctx.workspaceId
+      ctx.workspaceWide === true && ctx.serverId === null && ctx.serverName === null && ctx.workspaceId
         ? { kind: 'workspace', id: ctx.workspaceId }
         : ctx.serverId && ctx.serverName
           ? { kind: 'server', id: ctx.serverId }
@@ -1013,6 +1024,7 @@ async function gate(
       actionsThisSession: countSessionActions(ctx.session.id) ?? undefined,
       sessionGrant,
       writeContent: subject.writeContent,
+      workspaceOf: subject.workspaceOf,
       signal: extra?.signal
     })
     const approved = decision === 'approved' || decision === 'approved-for-session'
@@ -1094,7 +1106,11 @@ async function gate(
     // A human answered this one just now; the audit row says whether they also
     // answered for the ones like it, so the `approved-earlier` rows that follow
     // have a row to point back to.
-    return { ok: true, approval: decision === 'approved-for-session' && !perCall ? 'approved-for-session' : 'approved' }
+    // `granted` names the grant just remembered, so a caller that asks several
+    // questions for one call can take it back if a later one is refused.
+    return decision === 'approved-for-session' && !perCall
+      ? { ok: true, approval: 'approved-for-session', granted: key }
+      : { ok: true, approval: 'approved' }
   }
 
   // Only an `allow` reaches here: every `ask` returned from its own branch.
@@ -1104,22 +1120,28 @@ async function gate(
 /**
  * gate() for a workspace-wide read: one question per workspace that says ask.
  *
- * These tools name no server, so each question names a WORKSPACE -- gate()
- * sees serverId and serverName null and keys any session grant on session +
- * workspace + capability + rule. A session can hold several workspaces with
- * different groups; asking once for all of them would put one workspace's name
- * on a yes that reached the others, so every workspace that says ask is asked
- * on its own, in turn, and any no refuses the whole call. Workspaces that
- * allow outright are not asked about.
+ * These tools name no server, so each question names a WORKSPACE, and the
+ * ctx is marked workspaceWide so gate() keys any session grant on session +
+ * workspace + TOOL + rule. The tool, not the capability: fleetRead covers
+ * list_alerts and fleet_drift both, and a yes to the low-risk one must not
+ * buy the high-risk one without a dialog.
  *
- * The call still writes ONE audit row, however many workspaces it asked about.
- * It names the first workspace that asked -- or, when none did, the first
- * workspace -- and carries an answer a human gave during this call in
- * preference to an `approved-earlier`. The other workspaces' answers are in
- * the Approvals page's history, not the audit log.
+ * A session can hold several workspaces with different groups; asking once
+ * for all of them would put one workspace's name on a yes that reached the
+ * others, so every workspace that says ask is asked on its own, in turn, and
+ * the dialog says which of how many it is. Workspaces that allow outright are
+ * not asked about. Three things keep a sequence of questions honest:
+ *
+ *   - A workspace OpsMaxx would decline to ask about (deny cooldown, withdrawal
+ *     limit, pending cap) is gated FIRST, so the call is refused before anybody
+ *     has approved a workspace for nothing.
+ *   - Any no refuses the whole call, and a session grant given earlier in the
+ *     same call is taken back: the call it was given for never ran.
+ *   - The call writes ONE audit row, and when it covers several workspaces
+ *     the row's action names every one and how it was let through.
  */
 async function gateWorkspaces(
-  base: Pick<AuditContext, 'session' | 'action' | 'capability'>,
+  base: Pick<AuditContext, 'session' | 'action'> & { capability: AiCapability },
   checked: { workspace: { id: string; name: string }; check: Decision }[],
   subject: GateSubject,
   extra?: ExtraLike
@@ -1129,19 +1151,56 @@ async function gateWorkspaces(
     workspaceId: w.id,
     workspaceName: w.name,
     serverId: null,
-    serverName: null
+    serverName: null,
+    workspaceWide: true
   })
-  const asking = checked.filter((c) => c.check.decision !== 'allow')
-  if (asking.length === 0) return { ok: true, ctx: at(checked[0].workspace), approval: 'not-required' }
+  const refuses = (w: { id: string }): boolean =>
+    wouldRefuse({
+      sessionId: base.session.id,
+      capability: base.capability,
+      workspaceId: w.id,
+      serverId: null,
+      containment: subject.containment
+    })
+  const asking = checked
+    .filter((c) => c.check.decision !== 'allow')
+    .sort((a, b) => Number(refuses(b.workspace)) - Number(refuses(a.workspace)))
+  const answers = new Map<string, GateApproval>()
+  const granted: string[] = []
   let passed: { ctx: AuditContext; approval: GateApproval } | null = null
-  for (const { workspace, check } of asking) {
+  for (const [i, { workspace, check }] of asking.entries()) {
     const ctx = at(workspace)
-    const gated = await gate(ctx, check, subject, extra)
-    if (!gated.ok) return gated
+    const gated = await gate(
+      ctx,
+      check,
+      {
+        ...subject,
+        elevationScope: subject.elevationScope ?? base.action,
+        workspaceOf: asking.length > 1 ? { index: i + 1, total: asking.length } : undefined
+      },
+      extra
+    )
+    if (!gated.ok) {
+      for (const key of granted) sessionElevations.delete(key)
+      return gated
+    }
+    if (gated.granted) granted.push(gated.granted)
+    answers.set(workspace.id, gated.approval)
     if (!passed || passed.approval === 'approved-earlier') passed = { ctx, approval: gated.approval }
   }
-  return { ok: true, ...passed! }
+  const row = passed ?? { ctx: at(checked[0].workspace), approval: 'not-required' as const }
+  if (checked.length > 1) {
+    const each = checked.map(({ workspace }) => {
+      const answer = answers.get(workspace.id)
+      return `${workspace.name}: ${answer === undefined || answer === 'not-required' ? 'allowed' : answer}`
+    })
+    row.ctx = { ...row.ctx, action: `${base.action} (${each.join(', ')})` }
+  }
+  return { ok: true, ...row }
 }
+
+/** gate() itself, for the tests that must reach a ctx no tool builds. */
+export const gateForTests = gate
 
 /**
  * How a call got past gate(), in the audit log's own words.

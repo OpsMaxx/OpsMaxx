@@ -10,15 +10,22 @@ import type { ApprovalRequest } from '../src/shared/mcp'
 // named no server -- "an approval needs a single server to name" -- so setting
 // fleetRead, backupRead or ciRead to Ask behaved exactly like Deny, and nobody
 // was ever asked. The request now names the workspace, and a session grant on
-// it is keyed session + workspace + capability + rule: a different kind of key
-// from a server's, so neither can answer the other, and workspace A's grant
-// cannot answer for workspace B.
+// it is keyed session + workspace + TOOL + rule: a different kind of key from a
+// server's, so neither can answer the other, workspace A's grant cannot answer
+// workspace B, and a yes to list_alerts does not buy fleet_drift.
 
 const { refreshMcpDataCache } = await import('../src/main/services/mcpDataCache')
 const { setAssignment, saveGroup, getGroup, resetPolicyCacheForTests } = await import('../src/main/services/policyStore')
 const { setMcpConfig, createSession, resetMcpAuthForTests } = await import('../src/main/services/mcpAuth')
-const { startMcpServer, stopMcpServer, setFleetReader, setAlertReader, setBackupReader, clearAllSessionElevations } =
-  await import('../src/main/services/mcpServer')
+const {
+  startMcpServer,
+  stopMcpServer,
+  setFleetReader,
+  setAlertReader,
+  setBackupReader,
+  clearAllSessionElevations,
+  gateForTests
+} = await import('../src/main/services/mcpServer')
 const { listAudit } = await import('../src/main/services/auditLog')
 const { onApprovalEvent, respondToApproval, resetApprovalVolumeForTests } = await import('../src/main/services/approvals')
 const { auditOutcome } = await import('../src/renderer/src/components/ai/auditOutcome')
@@ -78,7 +85,9 @@ beforeEach(() => {
   answer = () => ['denied']
 })
 
-async function session(workspaces = [ALPHA]): Promise<{ c: Client; id: string }> {
+async function session(
+  workspaces = [ALPHA]
+): Promise<{ c: Client; id: string; s: ReturnType<typeof createSession>['session'] }> {
   const { token, session: s } = createSession({
     agentName: 'Workspace Reader',
     workspaces,
@@ -91,7 +100,7 @@ async function session(workspaces = [ALPHA]): Promise<{ c: Client; id: string }>
   })
   const c = new Client({ name: 'workspace-approval', version: '1.0.0' })
   await c.connect(transport)
-  return { c, id: s.id }
+  return { c, id: s.id, s }
 }
 
 async function call(c: Client, name: string, args: Record<string, unknown> = {}): Promise<string> {
@@ -125,7 +134,8 @@ describe('an ask on a workspace-wide read', () => {
         serverName: null,
         capability,
         toolName: tool,
-        sessionGrant: 'capability'
+        // Narrowed to the tool: see "how far a yes about a workspace reaches".
+        sessionGrant: 'tool'
       })
       const rows = rowsFor(id)
       expect(rows).toHaveLength(1)
@@ -178,17 +188,31 @@ describe('how far a yes about a workspace reaches', () => {
     }
   })
 
-  it('a session grant carries later calls on that workspace, audited as approved earlier', async () => {
+  it('a session grant carries later calls of that tool on that workspace, audited as approved earlier', async () => {
     answer = () => ['approved', 'session']
     const { c, id } = await session()
     try {
       await call(c, 'fleet_inventory')
-      // Same capability, same workspace, same rule: list_alerts is carried too.
-      expect(await call(c, 'list_alerts')).toMatch(/CPU ran hot/)
+      expect(await call(c, 'fleet_inventory')).toMatch(/AlphaBox/)
       expect(asked).toHaveLength(1)
       const [second, first] = rowsFor(id)
       expect(first.approval).toBe('approved-for-session')
       expect(second.approval).toBe('approved-earlier')
+    } finally {
+      await c.close()
+    }
+  })
+
+  // fleetRead covers all three fleet reads, and they are graded low (alerts),
+  // medium (inventory) and high (drift). A grant keyed on the capability let a
+  // yes to the first buy the last without a dialog.
+  it.each(['list_alerts', 'fleet_inventory'])('a session grant on %s does not cover fleet_drift', async (first) => {
+    answer = () => ['approved', 'session']
+    const { c } = await session()
+    try {
+      await call(c, first)
+      await call(c, 'fleet_drift')
+      expect(asked.map((r) => r.toolName)).toEqual([first, 'fleet_drift'])
     } finally {
       await c.close()
     }
@@ -231,6 +255,11 @@ describe('how far a yes about a workspace reaches', () => {
       expect(out).toMatch(/AlphaBox/)
       expect(out).toMatch(/BetaBox/)
       expect(asked.map((r) => r.workspaceId)).toEqual(['wsA', 'wsB'])
+      // Each dialog says which of how many it is.
+      expect(asked.map((r) => r.workspaceOf)).toEqual([
+        { index: 1, total: 2 },
+        { index: 2, total: 2 }
+      ])
 
       await call(c, 'fleet_inventory')
       // Alpha's grant carried; Beta was asked again.
@@ -260,6 +289,84 @@ describe('how far a yes about a workspace reaches', () => {
       clearAllSessionElevations()
       await call(c, 'fleet_inventory')
       expect(asked).toHaveLength(2)
+    } finally {
+      await c.close()
+    }
+  })
+  it('writes one row that names every workspace the data covers and how each was let through', async () => {
+    answer = (r) => (r.workspaceId === 'wsA' ? ['approved', 'session'] : ['approved', 'once'])
+    const { c, id } = await session([ALPHA, BETA])
+    try {
+      await call(c, 'fleet_inventory')
+      await call(c, 'fleet_inventory')
+      expect(rowsFor(id)).toHaveLength(2)
+      const [second, first] = rowsFor(id)
+      expect(first.action).toBe('fleet_inventory (Alpha: approved-for-session, Beta: approved)')
+      expect(second.action).toBe('fleet_inventory (Alpha: approved-earlier, Beta: approved)')
+    } finally {
+      await c.close()
+    }
+  })
+
+  it('takes back a session grant given earlier in a call that is then refused', async () => {
+    answer = (r) => (r.workspaceId === 'wsA' ? ['approved', 'session'] : ['denied'])
+    const { c } = await session([ALPHA, BETA])
+    try {
+      expect(await call(c, 'fleet_inventory')).toMatch(/Denied: the user rejected this action/)
+      // Clears Beta's deny cooldown; session grants live elsewhere and survive it.
+      resetApprovalVolumeForTests()
+      answer = () => ['approved', 'once']
+      await call(c, 'fleet_inventory')
+      // Alpha is asked again: its grant was for a call that never ran.
+      expect(asked.map((r) => r.workspaceId)).toEqual(['wsA', 'wsB', 'wsA', 'wsB'])
+    } finally {
+      await c.close()
+    }
+  })
+
+  it('asks nobody when a later workspace would be refused without asking', async () => {
+    answer = (r) => (r.workspaceId === 'wsA' ? ['approved', 'once'] : ['denied'])
+    const { c, id } = await session([ALPHA, BETA])
+    try {
+      await call(c, 'fleet_inventory')
+      expect(asked).toHaveLength(2)
+      // Beta is in its deny cooldown. Alpha must not be put to the operator for
+      // a call that is going to be refused anyway.
+      expect(await call(c, 'fleet_inventory')).toMatch(/did not ask/)
+      expect(asked).toHaveLength(2)
+      expect(rowsFor(id)[0]).toMatchObject({ approval: 'not-asked', result: 'denied', workspaceId: 'wsB' })
+    } finally {
+      await c.close()
+    }
+  })
+})
+
+describe('an ask gate() is not told is about a workspace', () => {
+  // Only gateWorkspaces marks a call workspace-wide. A per-server tool that
+  // passed a null server by mistake must be refused, not quietly turned into a
+  // workspace question an existing workspace grant could answer.
+  it('is refused, as the policy’s answer, and nobody is asked', async () => {
+    const { c, id, s } = await session()
+    try {
+      const gated = await gateForTests(
+        {
+          session: s,
+          workspaceId: 'wsA',
+          workspaceName: 'Alpha',
+          serverId: null,
+          serverName: null,
+          action: 'get_config_drift',
+          capability: 'fleetRead'
+        },
+        { decision: 'ask', reason: 'Fleet: ask' },
+        { toolName: 'get_config_drift', level: 'medium', because: 'test' }
+      )
+      expect(gated.ok).toBe(false)
+      expect(asked).toHaveLength(0)
+      const rows = rowsFor(id)
+      expect(rows).toHaveLength(1)
+      expect(auditOutcome(rows[0]).label).toBe('Blocked by policy')
+      expect(rows[0].error).toMatch(/names neither a server nor a workspace/)
     } finally {
       await c.close()
     }

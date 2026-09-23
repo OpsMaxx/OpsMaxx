@@ -228,6 +228,7 @@ export interface CreateApprovalInput {
    * has to keep.
    */
   writeContent?: { content: string; knownSecrets: string[] }
+  workspaceOf?: ApprovalRequest['workspaceOf']
   /**
    * Aborted when the agent's MCP request goes away — the client was killed, or
    * cancelled the call. The request then ends as `disconnected` at once rather
@@ -262,8 +263,10 @@ export type ApprovalDecision =
 const ACTION_MAX_CHARS = 4000
 const NAME_MAX_CHARS = 200
 
-export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDecision> {
-  const subject = subjectKey(input)
+type RationingInput = Pick<CreateApprovalInput, 'sessionId' | 'capability' | 'workspaceId' | 'serverId' | 'containment'>
+
+/** Would requestApproval decline to ask this right now, and with which answer? */
+function refusal(input: RationingInput): 'refused' | 'refused-withdrawn' | null {
   const now = Date.now()
 
   // Prune first, so the map cannot grow with one entry per subject a long
@@ -271,29 +274,46 @@ export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDec
   // any bookkeeping that would avoid one.
   for (const [k, expires] of recentDenials) if (expires <= now) recentDenials.delete(k)
 
-  if ((recentDenials.get(subject) ?? 0) > now) return Promise.resolve('refused')
+  if ((recentDenials.get(subjectKey(input)) ?? 0) > now) return 'refused'
 
   const withdrawn = (withdrawals.get(input.sessionId) ?? []).filter((t) => t > now - WITHDRAWAL_WINDOW_MS)
   if (withdrawn.length > 0) withdrawals.set(input.sessionId, withdrawn)
   else withdrawals.delete(input.sessionId)
-  if (withdrawn.length >= MAX_WITHDRAWALS_PER_WINDOW && input.containment !== true) {
-    return Promise.resolve('refused-withdrawn')
-  }
+  if (withdrawn.length >= MAX_WITHDRAWALS_PER_WINDOW && input.containment !== true) return 'refused-withdrawn'
 
   // Counted within this request's own class, for the reason at subjectKey: a
   // session's three open trigger prompts must not be what refuses its cancel.
-  // Destructured off the request itself: it is a rationing input, not something
-  // the operator's dialog shows.
+  const containment = input.containment === true
+  let live = 0
+  for (const e of pending.values())
+    if (e.request.sessionId === input.sessionId && e.containment === containment) live++
+  return live >= MAX_PENDING_PER_SESSION ? 'refused' : null
+}
+
+/**
+ * Whether requestApproval would decline to ask this, as things stand now.
+ *
+ * For a caller about to put several questions in a row -- gateWorkspaces asks
+ * once per workspace -- and that must not spend an operator's yes on the first
+ * when a later one will be refused without anybody being asked.
+ */
+export function wouldRefuse(input: RationingInput): boolean {
+  return refusal(input) !== null
+}
+
+export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDecision> {
+  const subject = subjectKey(input)
+  const refused = refusal(input)
+  if (refused) return Promise.resolve(refused)
+
+  // Destructured off the request itself: `containment` is a rationing input,
+  // not something the operator's dialog shows.
   // `writeContent` goes the same way, and for a harder reason: it is the raw
   // file, secrets and all, and a request is broadcast to the renderer, listed
   // over IPC and kept in `recent`. Only the preview built from it below may
   // travel.
   const { containment: asked, writeContent, signal, ...forRequest } = input
   const containment = asked === true
-  let live = 0
-  for (const e of pending.values())
-    if (e.request.sessionId === input.sessionId && e.containment === containment) live++
-  if (live >= MAX_PENDING_PER_SESSION) return Promise.resolve('refused')
 
   const request: ApprovalRequest = {
     id: `appr-${randomBytes(6).toString('hex')}`,

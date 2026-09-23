@@ -303,6 +303,14 @@ export function ApprovalDialog({
             <div className="sub">
               It is blocked until you answer. {waiting > 1 ? `${waiting - 1} more request(s) behind this one.` : ''}
             </div>
+            {/* One call, several near-identical dialogs: say which this is, and
+                that approving it alone returns nothing. */}
+            {request.workspaceOf && (
+              <div className="sub">
+                Workspace {request.workspaceOf.index} of {request.workspaceOf.total} this call asks about. It returns
+                nothing unless you approve every one of them.
+              </div>
+            )}
           </div>
           <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
             {/* The fuse, in the header, because it is a fact about the DIALOG
