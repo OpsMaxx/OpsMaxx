@@ -184,9 +184,9 @@ export interface CreateApprovalInput {
    * Required for the same reason `riskReason` is: the gate knows it, and every
    * other place that could show it would be re-deriving main's rules by hand.
    * `riskReason` says what the ACTION is; this says which layer said ask --
-   * "Ask Before Commands: terminal = ask" -- which is the question an operator
-   * actually has when they have set a session's ceiling to Full Access and are
-   * still being prompted on every command.
+   * the session's mode, a Protected target, the group, or a restriction on the
+   * target -- which is the question an operator actually has when they are
+   * being prompted and did not expect to be.
    */
   policyReason: string
   /** The MCP tool the agent called. */
@@ -211,6 +211,9 @@ export interface CreateApprovalInput {
   intent?: string
   sessionStartedAt?: string
   sessionGroupName?: string
+  /** See ApprovalRequest.sessionMode / protectedTarget: why the card is here at all. */
+  sessionMode?: ApprovalRequest['sessionMode']
+  protectedTarget?: boolean
   /** Exact, or omitted. Never a partial count — see ApprovalRequest. */
   actionsThisSession?: number
   /**

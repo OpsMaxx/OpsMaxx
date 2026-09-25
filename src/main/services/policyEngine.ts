@@ -1,10 +1,29 @@
-import type { AccessGroup, AiCapability, PermissionValue, PolicyAssignment } from '../../shared/mcp'
+import type { AccessGroup, AiCapability, PermissionValue, PolicyAssignment, SessionMode } from '../../shared/mcp'
 import type { VpnKind } from '../../shared/vpn'
 import { assessCommand, SUDO_REASON } from '../../shared/commandRisk'
 
 export interface Decision {
   decision: PermissionValue
   reason: string
+  /**
+   * The target is outside what this session can reach at all: set to No AI
+   * Access, or the session has no access group. That is scope, not a
+   * permission, so no mode -- Bypass included -- lifts it.
+   */
+  outOfScope?: true
+  /** Allowed only because the session is in Bypass mode. Audited as such. */
+  bypassed?: true
+  /** Asked only because the target is Protected. Shown on the approval card. */
+  protectedTarget?: true
+}
+
+/**
+ * "Confirm risky actions" on this group. Absent is ON: a group saved before the
+ * switch existed keeps every upgrade it always had. Every allow-to-ask upgrade
+ * below is conditional on this and on nothing else a user cannot see.
+ */
+export function confirmsRisky(group: AccessGroup): boolean {
+  return group.confirmRisky !== false
 }
 
 // Server-specific assignment overrides the workspace default; a target with no
@@ -65,17 +84,18 @@ export function evaluateCapability(group: AccessGroup | null, capability: AiCapa
 const RANK: Record<PermissionValue, number> = { deny: 0, ask: 1, allow: 2 }
 
 // The session's own access group (chosen when the user created the session)
-// is a ceiling: a per-server/workspace assignment can only narrow what that
-// session is allowed to do, never widen it. Whichever side is more
-// restrictive wins.
+// is the grant; a per-server/workspace assignment is an optional restriction
+// that can only narrow it, never widen it. Whichever side is more restrictive
+// wins.
 export function mostRestrictive(a: Decision, b: Decision): Decision {
   return RANK[a.decision] <= RANK[b.decision] ? a : b
 }
 
 // Commands that hand the AI an interactive/unrestricted shell as root. These
-// are always denied — never ASK, never ALLOW, regardless of access group —
+// are denied — never ASK, never ALLOW, whatever the access group says —
 // because approving one is indistinguishable from granting an unrestricted
-// root shell, which the brief says must never happen even implicitly.
+// root shell. The one exception is a session the human has put in Bypass
+// mode, which by its own description runs everything (see applyMode).
 const UNRESTRICTED_SHELL_PATTERNS = [
   /^sudo\s+-i\b/,
   /^sudo\s+su\b/,
@@ -1331,6 +1351,8 @@ function pathsFromArgv(tokens: string[], found: PathAccess[]): void {
   }
 }
 
+const STREAM_DEVICE = /^\/dev\/(null|zero|stdin|stdout|stderr|tty|fd\/\d+)$/
+
 export function extractPathAccesses(command: string): PathAccess[] {
   const found: PathAccess[] = []
 
@@ -1367,9 +1389,13 @@ export function extractPathAccesses(command: string): PathAccess[] {
     if (argv.join('\u0000') !== tokens.join('\u0000')) pathsFromArgv(argv, found)
   })
 
-  // One entry per path and mode, first occurrence first.
+  // One entry per path and mode, first occurrence first. The kernel's stream
+  // devices are not files anyone owns: `2>/dev/null` is not a write, and
+  // counting it as one made `ls 2>/dev/null` ask -- or be refused -- under any
+  // group that gates writes.
   const seen = new Set<string>()
   return found.filter((f) => {
+    if (STREAM_DEVICE.test(f.path)) return false
     const key = `${f.mode}\u0000${f.path}`
     if (seen.has(key)) return false
     seen.add(key)
@@ -1387,7 +1413,7 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   if (isUnrestrictedShell) {
     return {
       decision: 'deny',
-      reason: 'Unrestricted privilege-escalation shells (sudo -i, su, sudo bash, ...) are always blocked.'
+      reason: 'Unrestricted privilege-escalation shells (sudo -i, su, sudo bash, ...) are blocked outside Bypass mode.'
     }
   }
 
@@ -1418,23 +1444,31 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   // usually harmless; a human can tell which one it is.
   // `unshare -r`: root, but only inside a new user namespace -- everyday
   // rootless tooling, and not the host's root. Asked about, not refused.
-  if (base.decision === 'allow' && namespaceRoot) {
+  // Every upgrade from here to the path check is "Confirm risky actions", and
+  // a group that has switched it off gets exactly what its capabilities say.
+  const risky = confirmsRisky(group)
+  if (risky && base.decision === 'allow' && namespaceRoot) {
     base = {
       decision: 'ask',
       reason: 'Requires approval: it runs as root inside a new user namespace (unshare -r).'
     }
   }
-  if (base.decision === 'allow' && computedCommand) {
+  if (risky && base.decision === 'allow' && computedCommand) {
     base = {
       decision: 'ask',
       reason: 'Requires approval: the command it runs is computed when it runs, so OpsMaxx cannot tell what it is.'
     }
   }
 
-  // THE DANGEROUS FORM IS NEVER GRANTED SILENTLY, WHATEVER THE GROUP SAYS.
+  // THE DANGEROUS FORM IS NOT GRANTED SILENTLY WHILE CONFIRM RISKY ACTIONS IS ON.
   //
-  // That sentence is thirty lines further down this file, about DROP TABLE,
-  // and the terminal path did not have it. `terminal` is `allow` in all four
+  // It used to be "whatever the group says", and that was the complaint: a
+  // group the user had set to allow everything still asked, for reasons no
+  // screen showed. The upgrade is now the group's own visible switch, on by
+  // default everywhere but Full Access. What follows is why it exists.
+  //
+  // The same rule sits further down this file, about DROP TABLE, and the
+  // terminal path did not have it. `terminal` is `allow` in all four
   // built-in groups, so `docker volume rm data`, `rm -rf /var/lib` and
   // `systemctl stop postgresql` reached an agent with no approval card at all.
   // Grading them `high` in mcpServer.ts does not fix that on its own: a
@@ -1454,11 +1488,12 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   // seconds is a denial. `destructive` is NOT waived — `assessCommand` stops
   // collecting `elevated` reasons the moment a DESTRUCTIVE rule matches, so
   // `sudo rm -rf /var/lib`, `sudo mkfs`, `sudo dd` and `zfs destroy` still ask
-  // whatever the group says. That tier is the one no setting may switch off.
+  // while Confirm risky actions is on. That tier is the one no capability
+  // setting switches off -- only the switch named for it does.
   const assessed = assessCommand(command)
   const beyondSudo = assessed.reasons.filter((r) => r !== SUDO_REASON)
   const waived = sudoGranted && assessed.risk === 'elevated'
-  if (base.decision === 'allow' && assessed.risk !== 'ordinary' && beyondSudo.length > 0 && !waived) {
+  if (risky && base.decision === 'allow' && assessed.risk !== 'ordinary' && beyondSudo.length > 0 && !waived) {
     base = {
       decision: 'ask',
       reason: `Requires approval: this command ${beyondSudo.join(', and ')}.`
@@ -1681,9 +1716,12 @@ export function evaluateDatabaseStatement(group: AccessGroup | null, sql: string
     }
   }
   const combined = mostRestrictive(access, write)
-  // Never silently: a write or a DDL always surfaces an approval prompt.
-  return combined.decision === 'allow'
-    ? { decision: 'ask', reason: `Statements that ${kind === 'destructive' ? 'change schema or permissions' : 'modify data'} always require approval.` }
+  // Not silently while Confirm risky actions is on: a write or a DDL asks.
+  return combined.decision === 'allow' && confirmsRisky(group)
+    ? {
+        decision: 'ask',
+        reason: `Statements that ${kind === 'destructive' ? 'change schema or permissions' : 'modify data'} require approval (Confirm risky actions is on for ${group.name}).`
+      }
     : combined
 }
 
@@ -1693,8 +1731,11 @@ export function evaluateTunnelOpen(group: AccessGroup | null): Decision {
   if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
   const tunnel = evaluateCapability(group, 'sshTunnel')
   if (tunnel.decision === 'deny') return { decision: 'deny', reason: 'SSH tunnels are denied for this access group.' }
-  return tunnel.decision === 'allow'
-    ? { decision: 'ask', reason: 'Opening a tunnel binds a port on your machine and always requires approval.' }
+  return tunnel.decision === 'allow' && confirmsRisky(group)
+    ? {
+        decision: 'ask',
+        reason: `Opening a tunnel binds a port on your machine and requires approval (Confirm risky actions is on for ${group.name}).`
+      }
     : tunnel
 }
 
@@ -1710,8 +1751,11 @@ export function evaluateTunnelDefine(group: AccessGroup | null): Decision {
   if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
   const tunnel = evaluateCapability(group, 'sshTunnel')
   if (tunnel.decision === 'deny') return { decision: 'deny', reason: 'SSH tunnels are denied for this access group.' }
-  return tunnel.decision === 'allow'
-    ? { decision: 'ask', reason: 'Defining or removing a tunnel always requires approval.' }
+  return tunnel.decision === 'allow' && confirmsRisky(group)
+    ? {
+        decision: 'ask',
+        reason: `Defining or removing a tunnel requires approval (Confirm risky actions is on for ${group.name}).`
+      }
     : tunnel
 }
 
@@ -1745,13 +1789,12 @@ export function evaluateServerWrite(group: AccessGroup | null, act: 'change' | '
   const manage = evaluateCapability(group, 'manageServers')
   if (manage.decision === 'deny')
     return { decision: 'deny', reason: 'Managing servers is denied for this access group.' }
-  return manage.decision === 'allow'
+  return manage.decision === 'allow' && confirmsRisky(group)
     ? {
         decision: 'ask',
         reason:
-          act === 'delete'
-            ? 'Deleting a saved connection always requires approval.'
-            : 'Changing a saved connection always requires approval.'
+          `${act === 'delete' ? 'Deleting' : 'Changing'} a saved connection requires approval ` +
+          `(Confirm risky actions is on for ${group.name}).`
       }
     : manage
 }
@@ -1773,8 +1816,8 @@ export function isVpnKindRefusedForAi(kind: VpnKind): boolean {
 
 // Starting a VPN is a bigger act than opening a tunnel: a tunnel binds one
 // port, a VPN changes which network everything downstream of it travels over.
-// So it is never silent — not even for a group that says 'allow' — and a stop
-// that would cut live sessions surfaces that fact before it happens.
+// So while Confirm risky actions is on it is not silent even for a group that
+// says 'allow', and a stop that would cut live sessions asks first.
 export function evaluateVpnControl(
   group: AccessGroup | null,
   action: 'start' | 'stop',
@@ -1784,11 +1827,14 @@ export function evaluateVpnControl(
   const cap = evaluateCapability(group, 'vpnControl')
   if (cap.decision === 'deny') return { decision: 'deny', reason: 'VPN control is denied for this access group.' }
   if (action === 'start') {
-    return cap.decision === 'allow'
-      ? { decision: 'ask', reason: 'Starting a VPN changes where your traffic goes and always requires approval.' }
+    return cap.decision === 'allow' && confirmsRisky(group)
+      ? {
+          decision: 'ask',
+          reason: `Starting a VPN changes where your traffic goes and requires approval (Confirm risky actions is on for ${group.name}).`
+        }
       : cap
   }
-  if (hasLiveDependents && cap.decision === 'allow') {
+  if (hasLiveDependents && cap.decision === 'allow' && confirmsRisky(group)) {
     return { decision: 'ask', reason: 'Stopping this VPN will close sessions that depend on it.' }
   }
   return cap
@@ -1801,21 +1847,105 @@ export function evaluateVpnControl(
 // provider has accepted it -- STOP ALL AI ACCESS does not reach a build
 // already running.
 //
-// So 'allow' is not a state this capability can be in at the moment it
-// matters. An operator may set ciTrigger to allow on any group, or run a Full
-// Access session; both arrive here and both come out as 'ask'. That is
-// deliberate and matches the VPN rule stated in docs/AI-SECURITY.md: there is
-// no configuration in which a build starts silently at an agent's request.
+// So while the group's Confirm risky actions switch is on, 'allow' comes out
+// as 'ask' here. Turning the switch off -- or running the session in Bypass --
+// is the operator saying in so many words that builds may start unasked, and
+// both are visible where they are set.
 export function evaluateCiTrigger(group: AccessGroup | null): Decision {
   if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
   const cap = evaluateCapability(group, 'ciTrigger')
   if (cap.decision === 'deny') return { decision: 'deny', reason: 'CI/CD control is denied for this access group.' }
-  return cap.decision === 'allow'
+  return cap.decision === 'allow' && confirmsRisky(group)
     ? {
         decision: 'ask',
         reason:
           'Starting a build runs whatever that pipeline says, on infrastructure OpsMaxx cannot ' +
-          'inspect and cannot stop once it has begun, so it always requires approval.'
+          `inspect and cannot stop once it has begun, so it requires approval (Confirm risky actions is on for ${group.name}).`
       }
     : cap
+}
+
+// ---------------------------------------------------------------------------
+// Session modes
+// ---------------------------------------------------------------------------
+
+/**
+ * Capabilities whose use changes something. Read-only mode refuses them and
+ * Ask-first mode asks for them; reads are left to the group in both.
+ * databaseAccess is not here because it is both: query_database passes
+ * `mutating` per statement.
+ */
+export const MUTATING_CAPABILITIES: ReadonlySet<AiCapability> = new Set<AiCapability>([
+  'terminal',
+  'sudo',
+  'writeFiles',
+  'sftpUpload',
+  'sshTunnel',
+  'manageServers',
+  'vpnControl',
+  'containerControl',
+  'ciTrigger'
+])
+
+/**
+ * A capability evaluated the way the tool that uses it evaluates it, so a
+ * permissions screen reading ALLOW is not describing an action that asks. The
+ * capabilities not listed here are enforced by evaluateCapability as-is.
+ */
+export function evaluateAsEnforced(group: AccessGroup | null, capability: AiCapability): Decision {
+  if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this server.' }
+  switch (capability) {
+    case 'ciTrigger':
+      return evaluateCiTrigger(group)
+    case 'sshTunnel':
+      return evaluateTunnelOpen(group)
+    case 'vpnControl':
+      return evaluateVpnControl(group, 'start', false)
+    default:
+      return evaluateCapability(group, capability)
+  }
+}
+
+/**
+ * The session's mode, applied to what the group (and any restriction on the
+ * target) decided. The ONE place a mode changes an answer, so every tool, the
+ * Effective access table and describe_capabilities all agree.
+ *
+ *   outOfScope        unchanged. No AI Access / no group is scope, not a
+ *                     permission, and no mode reaches past it.
+ *   protectedTarget   auto and bypass are capped at ask; read-only stays.
+ *   bypass            anything not allowed becomes allowed, and says so.
+ *   readOnly          a change is refused; a read keeps the group's answer.
+ *   ask               a change the group allows is asked for; deny stays deny.
+ *   auto              unchanged: the group, literally.
+ *
+ * Idempotent, so a caller that is unsure whether it has been applied may apply
+ * it again.
+ */
+export function applyMode(
+  d: Decision,
+  o: { mode: SessionMode; protectedTarget: boolean; mutating: boolean }
+): Decision {
+  if (d.outOfScope) return d
+  const mode: SessionMode = o.protectedTarget && (o.mode === 'auto' || o.mode === 'bypass') ? 'ask' : o.mode
+  switch (mode) {
+    case 'bypass':
+      return d.decision === 'allow' ? d : { decision: 'allow', reason: `Bypass mode: ${d.reason}`, bypassed: true }
+    case 'readOnly':
+      return o.mutating && d.decision !== 'deny'
+        ? { decision: 'deny', reason: 'Read-only mode: this session can look but not change anything.' }
+        : d
+    case 'ask':
+      return o.mutating && d.decision === 'allow'
+        ? o.protectedTarget
+          ? {
+              decision: 'ask',
+              reason: 'This target is Protected: every change is approved first, whatever the session mode.',
+              protectedTarget: true
+            }
+          : { decision: 'ask', reason: 'Ask-first mode: every change is approved first.' }
+        : d
+    default:
+      return d
+  }
 }

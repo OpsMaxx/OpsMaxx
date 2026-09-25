@@ -7,6 +7,61 @@
 
 export type PermissionValue = 'allow' | 'ask' | 'deny'
 
+/**
+ * How an agent session treats the answers its access group gives.
+ *
+ * The group says WHAT an agent may do; the mode says how much the human wants
+ * to be in the loop while it does it. Each one means exactly its sentence below,
+ * with no hidden exceptions, because a permission setting that does not mean
+ * what it says is the thing this model was rebuilt to get rid of:
+ *
+ *   readOnly — reads follow the group, anything that changes something is refused.
+ *   ask      — reads follow the group, every change the group permits is asked for.
+ *   auto     — the group's allow / ask / deny, literally, plus its own visible
+ *              "Confirm risky actions" switch.
+ *   bypass   — nothing asks and nothing is refused. Only the human can pick it.
+ *
+ * A target marked Protected caps auto and bypass at `ask`. Only the human sets
+ * either: no MCP tool can change a session's mode or a target's protection.
+ */
+export type SessionMode = 'readOnly' | 'ask' | 'auto' | 'bypass'
+
+export const SESSION_MODES: { id: SessionMode; label: string; detail: string; shortcut: string }[] = [
+  { id: 'readOnly', label: 'Read only', detail: 'Look around, never change anything', shortcut: '1' },
+  { id: 'ask', label: 'Ask first', detail: 'Approve every change before it runs', shortcut: '2' },
+  { id: 'auto', label: 'Auto', detail: 'Follow the access group exactly', shortcut: '3' },
+  { id: 'bypass', label: 'Bypass permissions', detail: 'Runs everything. No prompts, no blocks', shortcut: '4' }
+]
+
+export const DEFAULT_SESSION_MODE: SessionMode = 'auto'
+
+export function isSessionMode(v: unknown): v is SessionMode {
+  return SESSION_MODES.some((m) => m.id === v)
+}
+
+export function sessionModeLabel(mode: SessionMode | undefined): string {
+  return SESSION_MODES.find((m) => m.id === (mode ?? DEFAULT_SESSION_MODE))?.label ?? 'Auto'
+}
+
+/**
+ * What "Confirm risky actions" covers, in the order the UI lists it. One list,
+ * so the group editor, the card sentence and the docs cannot drift from what
+ * policyEngine.ts actually upgrades.
+ */
+export const RISKY_ACTIONS: string[] = [
+  'destructive or elevated commands (rm -rf, mkfs, reboot, package installs, service restarts)',
+  'commands whose program is computed at run time, and unshare -r',
+  'database writes and schema changes',
+  'opening, defining or deleting SSH tunnels',
+  'changing or removing saved servers',
+  'starting a VPN, or stopping one other sessions depend on',
+  'starting, cancelling or re-running CI/CD pipelines'
+]
+
+/** The sentence every tool that can ask uses about when it asks. */
+export const CONDITIONAL_ASK =
+  "asks when the session's mode, a Protected target, or the access group's Confirm risky actions setting requires it"
+
 export type AiCapability =
   | 'viewServer'
   | 'terminal'
@@ -258,6 +313,13 @@ export interface AccessGroup {
   builtIn: boolean
   capabilities: AiCapabilityPolicy
   filePolicies: FilePathRule[]
+  /**
+   * "Confirm risky actions". When on, an `allow` still asks for the actions in
+   * RISKY_ACTIONS; when off, `allow` means allow. Absent reads as ON, so a
+   * group written before this existed keeps exactly the behaviour it had.
+   * Only consulted in `auto` mode -- ask asks anyway, bypass never asks.
+   */
+  confirmRisky?: boolean
 }
 
 export type PolicyScope =
@@ -300,6 +362,8 @@ export interface McpGlobalConfig {
    * resolveDefaultSessionGroup() is how this field is read, everywhere.
    */
   defaultSessionGroupId?: string
+  /** The mode a new agent session starts in. Absent means `auto`. */
+  defaultSessionMode?: SessionMode
 }
 
 /**
@@ -405,6 +469,9 @@ export interface McpAgentSession {
    *            can check rather than take a client's word for.
    */
   kind?: 'oauth' | 'relay'
+  /** See SessionMode. Absent reads as `auto`, which is how every session
+   *  created before modes existed behaved. Set only by the human, over IPC. */
+  mode?: SessionMode
 }
 
 // Everything below `status` is optional, and the optionality is not laziness —
@@ -482,15 +549,17 @@ export interface ApprovalRequest {
    * WHY approval was needed at all, as the policy engine put it.
    *
    * Distinct from `riskReason`, which describes the ACTION -- "the command runs
-   * as root". This describes the RULE: "Ask Before Commands: terminal = ask".
-   * Without it an operator who has set a session's ceiling to Full Access and
-   * is still being asked on every command has no way to find out which of the
-   * two layers said no. The ceiling is a cap, the workspace or server
-   * assignment is the grant, and the effective answer is the more restrictive
-   * of the two -- a model the approval card was in the best position to explain
-   * and was the one place not explaining it.
+   * as root". This describes the RULE: "Ask first mode: every change is
+   * approved first", "Read & Write: writeFiles = ask", "Confirm risky actions
+   * is on for Full Access". Without it an operator who is being asked has no
+   * way to find out which layer asked -- the session's mode, a Protected
+   * target, the group, or a restriction on the target.
    */
   policyReason?: string
+  /** The session's mode when this was asked. */
+  sessionMode?: SessionMode
+  /** The target is marked Protected, which capped the session at Ask. */
+  protectedTarget?: boolean
   /**
    * Audited actions this session took before this one — EXACT, or absent.
    *
@@ -587,6 +656,12 @@ export type AuditApproval =
    * ago. The action did not happen, and nobody decided that it should not.
    */
   | 'not-asked'
+  /**
+   * Ran without asking because the session was in Bypass mode, and the policy
+   * would otherwise have asked or refused. Kept apart from `not-required` so
+   * the log shows exactly which actions only happened because of Bypass.
+   */
+  | 'bypassed'
 export type AuditResult = 'success' | 'error' | 'denied'
 
 export interface AuditEntry {
@@ -604,6 +679,39 @@ export interface AuditEntry {
   result: AuditResult
   exitCode?: number
   error?: string
+  /** The session's mode when the call was made. Absent on rows written before modes. */
+  mode?: SessionMode
+}
+
+/**
+ * One row of the "Effective access" table: what an agent session gets for one
+ * capability on one target, and why. Computed by the same functions the tools
+ * call (explainSessionAccess), so the table cannot drift from enforcement.
+ */
+export interface CapabilityExplanation {
+  capability: AiCapability
+  label: string
+  decision: PermissionValue
+  reason: string
+  fromScope: PermissionValue
+  fromSession: PermissionValue | null
+  decidedBy: 'scope' | 'session' | 'both'
+  /** The group the restriction came from, so the UI can send the user to the
+   *  one that actually decided. `null` for an explicit No AI Access, which is
+   *  not a group, and for a row nothing narrowed. */
+  scopeGroupId: string | null
+  scopeGroupName: string | null
+  /** Which of the session's workspaces that assignment hangs off. Named in the
+   *  UI because a session spanning several has no single "the workspace". */
+  scopeWorkspaceId: string | null
+  scopeWorkspaceName: string | null
+  /** The session's mode, applied to `decision` already. */
+  mode: SessionMode
+  /** The target is Protected, which capped the mode at Ask. */
+  protectedTarget: boolean
+  /** Reads ALLOW, but some calls under it will still ask: a risky command, a
+   *  database write, changing or removing a server. */
+  partlyAsks: boolean
 }
 
 /**
@@ -625,9 +733,18 @@ export interface PolicyState {
    * 2 — the session's group grants, and an assignment is an optional
    *     restriction. Reaching 2 clears every assignment written under rule 1,
    *     because each of them was made to mean the opposite thing.
+   * 3 — groups carry `confirmRisky`, Full Access is Full Access (everything
+   *     but sudo on allow), and targets can be marked Protected.
    */
-  version: 1 | 2
+  version: 1 | 2 | 3
   groups: AccessGroup[]
+  /**
+   * Workspaces and servers marked Protected: any session acting on one is
+   * capped at Ask, whatever its mode. Kept in the policy file rather than the
+   * server store so nothing an agent can call (add_server, update_server) can
+   * write it.
+   */
+  protectedScopes?: PolicyScope[]
   assignments: PolicyAssignment[]
   /**
    * What the version-2 migration removed, kept so the user can be told.

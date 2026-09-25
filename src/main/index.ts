@@ -457,13 +457,15 @@ import {
   setAssignment,
   removeAssignment,
   listServerMeta,
-  setServerAliases
+  setServerAliases,
+  listProtected,
+  setProtected
 } from './services/policyStore'
 // The same resolution the MCP bridge uses for a server: the assignment on the
 // server wins over the one on its workspace. Imported for the firewall rule
 // gate below — see groupForServer.
 import { resolveGroupId } from './services/policyEngine'
-import type { AccessGroup, ApprovalRequest, McpGlobalConfig, PolicyAssignment } from '../shared/mcp'
+import type { AccessGroup, ApprovalRequest, McpGlobalConfig, PolicyAssignment, PolicyScope, SessionMode } from '../shared/mcp'
 import {
   getMcpConfig,
   setMcpConfig,
@@ -473,6 +475,7 @@ import {
   deleteSession,
   killAllSessions,
   setSessionGroup,
+  setSessionMode,
   type CreateSessionInput
 } from './services/mcpAuth'
 import {
@@ -5787,6 +5790,16 @@ ipcMain.handle('aiPolicy:listServerMeta', () => listServerMeta())
 ipcMain.handle('aiPolicy:setServerAliases', (_e, serverId: string, aliases: string[]) =>
   setServerAliases(serverId, aliases)
 )
+// Protected targets cap every session at Ask. Written here and nowhere else:
+// the MCP bridge can read the flag but has no path to set it.
+ipcMain.handle('aiPolicy:listProtected', () => listProtected())
+ipcMain.handle('aiPolicy:setProtected', (_e, scope: PolicyScope, on: boolean) => {
+  const valid =
+    (scope?.level === 'workspace' && typeof scope.workspaceId === 'string' && scope.workspaceId !== '') ||
+    (scope?.level === 'server' && typeof scope.serverId === 'string' && scope.serverId !== '')
+  if (!valid) throw new Error('Invalid scope')
+  return setProtected(scope, on === true)
+})
 
 // ---- AI & MCP: server/workspace directory (read-only view for the UI) ----
 ipcMain.handle('aiPolicy:listWorkspaces', () => listCachedWorkspaces())
@@ -5829,6 +5842,8 @@ ipcMain.handle('aiMcp:deleteSession', (_e, id: string) => {
 ipcMain.handle('aiMcp:setSessionGroup', (_e, id: string, groupId: string | null, groupName: string) =>
   setSessionGroup(id, groupId, groupName)
 )
+// The human's switch, and the only one: no MCP tool reaches setSessionMode.
+ipcMain.handle('aiMcp:setSessionMode', (_e, id: string, mode: SessionMode) => setSessionMode(id, mode))
 ipcMain.handle('aiMcp:explainAccess', (_e, sessionId: string, serverId: string | null) =>
   explainSessionAccess(sessionId, serverId)
 )

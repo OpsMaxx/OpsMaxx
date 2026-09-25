@@ -2,8 +2,8 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto'
-import type { McpAgentSession, McpGlobalConfig, WorkspaceRef } from '../../shared/mcp'
-import { DEFAULT_MCP_PORT } from '../../shared/mcp'
+import type { McpAgentSession, McpGlobalConfig, SessionMode, WorkspaceRef } from '../../shared/mcp'
+import { DEFAULT_MCP_PORT, DEFAULT_SESSION_MODE, isSessionMode } from '../../shared/mcp'
 import { atomicWriteFileSync } from './atomicWrite'
 
 const CONFIG_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-config.json')
@@ -115,6 +115,15 @@ export interface CreateSessionInput {
   groupName: string
   ttlMinutes: number | null // null = no expiration
   kind?: 'oauth' | 'relay'
+  /** Absent: the configured default mode, else `auto`. */
+  mode?: SessionMode
+}
+
+/** The mode a new session gets: the one asked for, else the configured default, else auto. */
+function initialMode(asked: unknown): SessionMode {
+  if (isSessionMode(asked)) return asked
+  const configured = loadConfig().defaultSessionMode
+  return isSessionMode(configured) ? configured : DEFAULT_SESSION_MODE
 }
 
 export function createSession(input: CreateSessionInput): { session: McpAgentSession; token: string } {
@@ -132,7 +141,8 @@ export function createSession(input: CreateSessionInput): { session: McpAgentSes
     expiresAt: input.ttlMinutes ? new Date(now.getTime() + input.ttlMinutes * 60_000).toISOString() : null,
     lastActiveAt: now.toISOString(),
     revoked: false,
-    kind: input.kind
+    kind: input.kind,
+    mode: initialMode(input.mode)
   }
   const list = loadSessions()
   list.push(session)
@@ -184,6 +194,23 @@ export function setSessionGroup(id: string, groupId: string | null, groupName: s
   if (!session) return null
   session.groupId = groupId
   session.groupName = groupName
+  writeSessions()
+  return session
+}
+
+/**
+ * Change a live session's mode. Takes effect on its next tool call: tools read
+ * the session record they authenticated, which is this same object.
+ *
+ * Only IPC calls this -- the human, in the OpsMaxx window. An agent asking for
+ * Bypass through any MCP tool has no path here, and tests/permissionModes
+ * holds mcpServer.ts to never referencing it.
+ */
+export function setSessionMode(id: string, mode: SessionMode): McpAgentSession | null {
+  if (!isSessionMode(mode)) return null
+  const session = loadSessions().find((s) => s.id === id)
+  if (!session) return null
+  session.mode = mode
   writeSessions()
   return session
 }

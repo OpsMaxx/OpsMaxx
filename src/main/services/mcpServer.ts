@@ -41,8 +41,11 @@ import {
 } from './mcpDataCache'
 import { resolveServerByName, formatAmbiguity, type ServerMatch } from './serverResolver'
 import {
-  resolveGroupId,
   resolveRestriction,
+  applyMode,
+  evaluateAsEnforced,
+  confirmsRisky,
+  MUTATING_CAPABILITIES,
   evaluateCapability,
   classifyCommand,
   evaluateCommand,
@@ -52,20 +55,19 @@ import {
   evaluateTunnelDefine,
   evaluateServerWrite,
   evaluateVpnControl,
-  evaluateCiTrigger,
   isVpnKindRefusedForAi,
   classifyStatement,
   mostRestrictive,
   type Decision
 } from './policyEngine'
-import { getGroup, listAssignments } from './policyStore'
+import { getGroup, isProtected, listAssignments } from './policyStore'
 import { refuseNonLoopback } from './loopbackGuard'
 import { fleetCached } from './fleetSampler'
 import type { CapacityReport } from '../../shared/capacity'
 import { requestApproval, wouldRefuse } from './approvals'
 import { remoteText, remoteName, hostReportedBlock } from '../../shared/remoteText'
 import { capacityDigest } from '../../shared/fleetForecast'
-import { recordAudit, AUDIT_LOG_PATH } from './auditLog'
+import { recordAudit as appendAudit, AUDIT_LOG_PATH } from './auditLog'
 import { redactOutput } from './secretRedaction'
 import {
   CLOUD_PROVIDER_LABEL,
@@ -110,9 +112,16 @@ import { metricsSample } from './metrics'
 import { HostFactsReader } from './hostFacts'
 import type { FactSourceId, HostFacts } from '../../shared/hostFacts'
 import { FACT_STATUS_HELP, SECURITY_COUNT_SUPPORT, factSource } from '../../shared/hostFacts'
-import { AI_CAPABILITIES } from '../../shared/mcp'
+import { AI_CAPABILITIES, CONDITIONAL_ASK, DEFAULT_SESSION_MODE, SESSION_MODES, sessionModeLabel } from '../../shared/mcp'
 import { VAULT_LOCKED } from '../../shared/vault'
-import type { AccessGroup, AiCapability, McpAgentSession } from '../../shared/mcp'
+import type {
+  AccessGroup,
+  AiCapability,
+  AuditEntry,
+  CapabilityExplanation,
+  McpAgentSession,
+  SessionMode
+} from '../../shared/mcp'
 
 function text(s: string): CallToolResult {
   return { content: [{ type: 'text', text: s }] }
@@ -405,16 +414,7 @@ function serverWriteCheck(
   server: CachedServer,
   act: 'change' | 'delete'
 ): Decision {
-  const sessionGroup = sessionGroupFor(session)
-  const found = resolveRestriction(listAssignments(), server.id, server.workspaceId)
-  if (found.kind === 'no-ai-access') return NO_AI_ACCESS
-  if (!sessionGroup) return { decision: 'deny', reason: 'This AI session has no access group.' }
-  const scopeGroup = found.kind === 'group' ? getGroup(found.groupId) : null
-  return withRestriction(
-    evaluateServerWrite(sessionGroup, act),
-    scopeGroup ? evaluateServerWrite(scopeGroup, act) : null,
-    `the server's own access group ("${scopeGroup?.name}")`
-  )
+  return serverCheck(session, server.id, (g) => evaluateServerWrite(g, act), true)
 }
 
 /** The jump chain as the audit entry and the approval dialog should read it.
@@ -449,20 +449,6 @@ async function probeServer(server: CachedServer): Promise<{ ok: boolean; reason:
   return { ok: false, reason: agentFaultSentence(result.error) }
 }
 
-// The server/workspace assignment (Phase 4) decides which group governs a
-// given server; the session's own group (chosen when it was created) is a
-// ceiling on top of that. Every check below evaluates both sides and takes
-// whichever is more restrictive — a session can never do more than either
-// side allows. The group lookup is keyed on the server's OWN workspace, not
-// the session's — a session can now span several workspaces, so the two are
-// no longer interchangeable.
-function serverGroupFor(serverId: string): AccessGroup | null {
-  const server = getCachedServer(serverId)
-  if (!server) return null
-  const groupId = resolveGroupId(listAssignments(), serverId, server.workspaceId)
-  return groupId ? getGroup(groupId) : null
-}
-
 function sessionGroupFor(session: McpAgentSession): AccessGroup | null {
   return session.groupId ? getGroup(session.groupId) : null
 }
@@ -490,7 +476,45 @@ function sessionGroupFor(session: McpAgentSession): AccessGroup | null {
  */
 const NO_AI_ACCESS: Decision = {
   decision: 'deny',
-  reason: 'This target is set to No AI Access.'
+  reason: 'This target is set to No AI Access.',
+  outOfScope: true
+}
+
+const NO_GROUP: Decision = {
+  decision: 'deny',
+  reason: 'This AI session has no access group.',
+  outOfScope: true
+}
+
+/** A session's mode. Absent is how every session before modes behaved. */
+function modeOf(session: McpAgentSession | null | undefined): SessionMode {
+  return session?.mode ?? DEFAULT_SESSION_MODE
+}
+
+/**
+ * Every audit row this module writes carries the mode its session was in, so
+ * an action that only happened because of Bypass can be told apart from one
+ * the group allowed outright -- after the fact, from the log alone.
+ */
+function recordAudit(entry: Omit<AuditEntry, 'id' | 'timestamp'>): AuditEntry {
+  return appendAudit({ ...entry, mode: entry.mode ?? modeOf(getSession(entry.sessionId)) })
+}
+
+/**
+ * The three things besides the access group that decide whether a call asks,
+ * as get_server_details and describe_capabilities tell the agent. Stated so an
+ * agent plans around them instead of discovering them by tripping over them --
+ * and says who sets them, so it does not ask the user to switch to Bypass as a
+ * way around a refusal.
+ */
+function modeHeader(session: McpAgentSession, serverId: string | null, workspaceId: string | null): string {
+  const mode = SESSION_MODES.find((m) => m.id === modeOf(session))
+  const group = sessionGroupFor(session)
+  return [
+    `Session mode: ${sessionModeLabel(mode?.id)} — ${mode?.detail ?? ''}. Set by the user in OpsMaxx; an agent cannot change it.`,
+    `Protected target: ${isProtected(serverId, workspaceId) ? 'yes — every change here is asked for, whatever the mode' : 'no'}`,
+    `Confirm risky actions: ${group ? `${confirmsRisky(group) ? 'on' : 'off'} (${group.name})` : 'n/a — no access group'}`
+  ].join('\n')
 }
 
 /**
@@ -537,47 +561,106 @@ function withRestriction(grant: Decision, restriction: Decision | null, label: s
   }
 }
 
-function effectiveCapability(session: McpAgentSession, serverId: string, capability: AiCapability): Decision {
+/**
+ * EVERY PERMISSION ANSWER ON THIS BRIDGE COMES THROUGH ONE OF THESE TWO.
+ *
+ * The grant (the session's group), the optional restriction on the target, then
+ * the session's mode and the target's protection -- in that order, in one
+ * place, so a tool cannot get the mode wrong by forgetting to apply it, and the
+ * Effective access table and describe_capabilities read exactly what the tools
+ * enforce.
+ *
+ * `mutating` is whether THIS call changes something. Read-only mode refuses it
+ * and Ask-first mode asks for it; for a read neither mode changes the group's
+ * answer.
+ */
+function serverCheck(
+  session: McpAgentSession,
+  serverId: string,
+  evaluate: (g: AccessGroup) => Decision,
+  mutating: boolean
+): Decision {
+  const server = getCachedServer(serverId)
   const { grant, restriction, shut } = resolveGroups(session, serverId)
   if (shut) return NO_AI_ACCESS
-  if (!grant) return { decision: 'deny', reason: 'This AI session has no access group.' }
-  return withRestriction(
-    evaluateCapability(grant, capability),
-    restriction ? evaluateCapability(restriction, capability) : null,
-    `the server's own access group ("${restriction?.name}")`
+  if (!grant) return NO_GROUP
+  return applyMode(
+    withRestriction(
+      evaluate(grant),
+      restriction ? evaluate(restriction) : null,
+      `the server's own access group ("${restriction?.name}")`
+    ),
+    { mode: modeOf(session), protectedTarget: isProtected(serverId, server?.workspaceId ?? null), mutating }
+  )
+}
+
+/**
+ * The same for an act on a WORKSPACE: something with no server of its own for
+ * the per-server layer to look at (a database, a tunnel, a VPN, a CI
+ * connection, a server that does not exist yet). `protectServerId` is the
+ * server the act rides on, when there is one -- a tunnel's carrier -- so that
+ * marking that server Protected caps it too.
+ */
+function workspaceCheck(
+  session: McpAgentSession,
+  workspaceId: string,
+  evaluate: (g: AccessGroup) => Decision,
+  mutating: boolean,
+  protectServerId: string | null = null
+): Decision {
+  const grant = sessionGroupFor(session)
+  if (!grant) return NO_GROUP
+  // resolveRestriction, never resolveGroupId: the latter reads an explicit No
+  // AI Access as "no assignment", and the database, tunnel and VPN tools used
+  // it -- so a workspace somebody had deliberately shut stayed open to them.
+  const found = resolveRestriction(listAssignments(), '', workspaceId)
+  if (found.kind === 'no-ai-access') return NO_AI_ACCESS
+  const restriction = found.kind === 'group' ? getGroup(found.groupId) : null
+  return applyMode(
+    withRestriction(
+      evaluate(grant),
+      restriction ? evaluate(restriction) : null,
+      `the workspace's access group ("${restriction?.name}")`
+    ),
+    { mode: modeOf(session), protectedTarget: isProtected(protectServerId, workspaceId), mutating }
+  )
+}
+
+function effectiveCapability(
+  session: McpAgentSession,
+  serverId: string,
+  capability: AiCapability,
+  opts: { mutating?: boolean } = {}
+): Decision {
+  return serverCheck(
+    session,
+    serverId,
+    (g) => evaluateAsEnforced(g, capability),
+    opts.mutating ?? MUTATING_CAPABILITIES.has(capability)
   )
 }
 
 // add_server acts on a workspace, not on a server that exists yet, so the
-// per-server override layer has nothing to look at. Resolve the workspace's own
-// assignment instead and keep the session group as the same ceiling it is
-// everywhere else.
+// per-server override layer has nothing to look at. The workspace's own
+// assignment is the restriction instead. ciTrigger resolves through
+// evaluateAsEnforced to evaluateCiTrigger, which is what used to need a helper
+// of its own (effectiveCiTrigger).
 function effectiveWorkspaceCapability(
   session: McpAgentSession,
   workspaceId: string,
-  capability: AiCapability
+  capability: AiCapability,
+  opts: { mutating?: boolean } = {}
 ): Decision {
-  const grant = sessionGroupFor(session)
-  if (!grant) return { decision: 'deny', reason: 'This AI session has no access group.' }
-  const found = resolveRestriction(listAssignments(), '', workspaceId)
-  if (found.kind === 'no-ai-access') return NO_AI_ACCESS
-  const restriction = found.kind === 'group' ? getGroup(found.groupId) : null
-  return withRestriction(
-    evaluateCapability(grant, capability),
-    restriction ? evaluateCapability(restriction, capability) : null,
-    `the workspace's access group ("${restriction?.name}")`
+  return workspaceCheck(
+    session,
+    workspaceId,
+    (g) => evaluateAsEnforced(g, capability),
+    opts.mutating ?? MUTATING_CAPABILITIES.has(capability)
   )
 }
 
 function effectiveCommand(session: McpAgentSession, serverId: string, command: string): Decision {
-  const { grant, restriction, shut } = resolveGroups(session, serverId)
-  if (shut) return NO_AI_ACCESS
-  if (!grant) return { decision: 'deny', reason: 'This AI session has no access group.' }
-  return withRestriction(
-    evaluateCommand(grant, command),
-    restriction ? evaluateCommand(restriction, command) : null,
-    `the server's own access group ("${restriction?.name}")`
-  )
+  return serverCheck(session, serverId, (g) => evaluateCommand(g, command), true)
 }
 
 // read_file, list_files and write_file are the SFTP transport, so the transport
@@ -586,18 +669,12 @@ function effectiveCommand(session: McpAgentSession, serverId: string, command: s
 // changed nothing — a permission that is displayed but not enforced is worse
 // than one that does not exist, because the user believes they have set it.
 function effectiveFilePath(session: McpAgentSession, serverId: string, path: string, mode: 'read' | 'write'): Decision {
-  const { grant, restriction, shut } = resolveGroups(session, serverId)
-  if (shut) return NO_AI_ACCESS
-  if (!grant) return { decision: 'deny', reason: 'This AI session has no access group.' }
   const transport: AiCapability = mode === 'read' ? 'sftpDownload' : 'sftpUpload'
-
-  const forGroup = (g: AccessGroup): Decision =>
-    mostRestrictive(evaluateFilePath(g, path, mode), evaluateCapability(g, transport))
-
-  return withRestriction(
-    forGroup(grant),
-    restriction ? forGroup(restriction) : null,
-    `the server's own access group ("${restriction?.name}")`
+  return serverCheck(
+    session,
+    serverId,
+    (g) => mostRestrictive(evaluateFilePath(g, path, mode), evaluateCapability(g, transport)),
+    mode === 'write'
   )
 }
 
@@ -898,7 +975,7 @@ export function clearAllSessionElevations(): void {
 
 async function gate(
   ctx: AuditContext,
-  check: { decision: 'allow' | 'ask' | 'deny'; reason: string },
+  check: Decision,
   subject: GateSubject,
   extra?: ExtraLike
 ): Promise<{ ok: true; approval: GateApproval; granted?: string } | { ok: false; result: CallToolResult }> {
@@ -1018,6 +1095,8 @@ async function gate(
       // request entirely instead of turning it into a zero.
       sessionStartedAt: ctx.session.createdAt,
       sessionGroupName: ctx.session.groupName,
+      sessionMode: modeOf(ctx.session),
+      protectedTarget: check.protectedTarget === true,
       // The rule that produced this `ask`, which gate() has had in hand all
       // along and dropped on the floor.
       policyReason: check.reason,
@@ -1098,7 +1177,7 @@ async function gate(
           decision === 'disconnected'
             ? 'Cancelled: the request was withdrawn before the user answered, so nothing ran.'
             : decision === 'timeout'
-              ? `Denied: nobody answered the approval request for this action within the timeout. It was waiting in the OpsMaxx window. Ask the user to approve it there, or to raise the capability for ${where} from Ask to Allow in AI & MCP > Access, then retry.`
+              ? `Denied: nobody answered the approval request for this action within the timeout. It was waiting in the OpsMaxx window. Ask the user to approve it there, or to raise the capability for ${where} from Ask to Allow — or change this session's mode — in AI & MCP, then retry.`
               : 'Denied: the user rejected this action.'
         )
       }
@@ -1114,7 +1193,9 @@ async function gate(
   }
 
   // Only an `allow` reaches here: every `ask` returned from its own branch.
-  return { ok: true, approval: 'not-required' }
+  // One the group would have asked about or refused, let through by Bypass,
+  // is recorded as exactly that.
+  return { ok: true, approval: check.bypassed ? 'bypassed' : 'not-required' }
 }
 
 /**
@@ -1188,7 +1269,10 @@ async function gateWorkspaces(
     answers.set(workspace.id, gated.approval)
     if (!passed || passed.approval === 'approved-earlier') passed = { ctx, approval: gated.approval }
   }
-  const row = passed ?? { ctx: at(checked[0].workspace), approval: 'not-required' as const }
+  const row = passed ?? {
+    ctx: at(checked[0].workspace),
+    approval: checked.some((c) => c.check.bypassed) ? ('bypassed' as const) : ('not-required' as const)
+  }
   if (checked.length > 1) {
     const each = checked.map(({ workspace }) => {
       const answer = answers.get(workspace.id)
@@ -1212,7 +1296,7 @@ export const gateForTests = gate
  * just looked at -- on top of the 'approved-earlier' row gate() had already
  * written for it. Two rows, and the louder one was the untrue one.
  */
-type GateApproval = 'not-required' | 'approved' | 'approved-for-session' | 'approved-earlier'
+type GateApproval = 'not-required' | 'approved' | 'approved-for-session' | 'approved-earlier' | 'bypassed'
 
 /**
  * The row for a call that got past gate() and then failed.
@@ -1322,6 +1406,12 @@ Permissions
   try to work around a path rule by expressing the same access as a shell command.
 - Some capabilities may be denied entirely for this session. get_server_details lists the
   effective permissions for a given server.
+- The user also chooses a MODE for this session, and it is part of the answer: Read only (look,
+  never change), Ask first (every change is approved), Auto (the access group, literally, plus
+  its Confirm risky actions setting) or Bypass (nothing asks and nothing is refused). A server or
+  workspace the user marked Protected is held at Ask first whatever the mode. describe_capabilities
+  and get_server_details state all three. Only the user can change them, in OpsMaxx; no tool here
+  can, and asking the user to switch to Bypass to get past a refusal is not a workaround to offer.
 
 Not available
 - No file upload or download beyond read_file/write_file. Do not attempt a transfer through
@@ -1611,37 +1701,6 @@ function cicdErrorResult(toolName: string, conn: CachedCicdConnection, e: unknow
 }
 
 /**
- * `ciTrigger`, resolved the way `set_vpn` resolves `vpnControl`.
- *
- * Same shape as effectiveWorkspaceCapability — a connection is its own entity
- * and has no server for the per-server override layer to look at, so the
- * assignment is resolved at workspace level with an empty serverId — but it
- * runs `evaluateCiTrigger` rather than `evaluateCapability`, and that
- * substitution is the entire point of the function.
- *
- * evaluateCiTrigger upgrades `allow` to `ask` unconditionally. Without it an
- * operator who raises ciTrigger to allow, or runs a Full Access session, gets
- * an agent that starts production builds in a loop with no prompt at all:
- * gate() handles `deny`, then opens `if (check.decision === 'ask')`, and an
- * `allow` falls past both to `return { ok: true }`. The per-call exclusion from
- * sessionElevations inside gate() lives in the `ask` branch, so on an `allow`
- * it never executes — it defends a path that was never taken. This is the call
- * site that makes that path the only one there is.
- */
-function effectiveCiTrigger(session: McpAgentSession, workspaceId: string): Decision {
-  const grant = sessionGroupFor(session)
-  if (!grant) return { decision: 'deny', reason: 'This AI session has no access group.' }
-  const found = resolveRestriction(listAssignments(), '', workspaceId)
-  if (found.kind === 'no-ai-access') return NO_AI_ACCESS
-  const restriction = found.kind === 'group' ? getGroup(found.groupId) : null
-  return withRestriction(
-    evaluateCiTrigger(grant),
-    restriction ? evaluateCiTrigger(restriction) : null,
-    `the workspace's access group ("${restriction?.name}")`
-  )
-}
-
-/**
  * Remote-derived text, made safe to interpolate.
  *
  * `remoteName` is wrong for most of what a CI provider returns: it deletes
@@ -1729,11 +1788,10 @@ async function cicdRead(
 }
 
 /**
- * The same seven steps for a write, with two differences that are the module's
- * whole security posture: the decision comes from `effectiveCiTrigger`, which
- * makes `allow` unreachable, and the risk is declared here rather than graded
- * from the string — `assessCommand` grades shell verbs and a pipeline ref
- * carries none.
+ * The same seven steps for a write, with two differences: the decision is
+ * ciTrigger's, which asks while the group's Confirm risky actions is on, and
+ * the risk is declared here rather than graded from the string —
+ * `assessCommand` grades shell verbs and a pipeline ref carries none.
  */
 async function cicdWrite(
   extra: ExtraLike,
@@ -1753,7 +1811,9 @@ async function cicdWrite(
   const resolved = resolveCicdOrError(auth.session, args.connectionName)
   if ('error' in resolved) return resolved.error
   const { conn } = resolved
-  const check = effectiveCiTrigger(auth.session, conn.workspaceId)
+  // evaluateAsEnforced routes ciTrigger to evaluateCiTrigger, so Confirm risky
+  // actions applies exactly as it does everywhere else.
+  const check = effectiveWorkspaceCapability(auth.session, conn.workspaceId, 'ciTrigger')
   const ctx: AuditContext = {
     session: auth.session,
     workspaceId: conn.workspaceId,
@@ -2157,7 +2217,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const { server: s, workspace } = resolved.match
       const view = effectiveCapability(auth.session, s.id, 'viewServer')
       if (view.decision !== 'allow') return errorText(`Denied: ${view.reason}`)
-      const serverGroup = serverGroupFor(s.id)
+      const { grant, restriction, shut } = resolveGroups(auth.session, s.id)
       const caps = AI_CAPABILITIES.map(
         ({ id, label }) => `- ${label}: ${effectiveCapability(auth.session, s.id, id).decision.toUpperCase()}`
       ).join('\n')
@@ -2170,7 +2230,12 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           // already has a name can check "is this the same box as that one"
           // without listing everything again.
           `Identity: ${dedupToken(auth.session, s)} (opaque; equal identities mean the same machine — the same host, port and account, or the same cloud instance)`,
-          `Access group: ${serverGroup?.name ?? 'No AI Access'}`,
+          // The session's group is the grant; this line used to print the
+          // server's ASSIGNMENT instead, and so read "No AI Access" for every
+          // server nobody had restricted -- beside a list of ALLOW rows.
+          `Access group: ${grant?.name ?? 'none (this session has no access group)'}`,
+          `Restriction on this server: ${shut ? 'No AI Access' : (restriction?.name ?? 'none')}`,
+          modeHeader(auth.session, s.id, s.workspaceId),
           `Effective permissions for this session:\n${caps}`
         ].join('\n')
       )
@@ -2187,7 +2252,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         'list_files over `ls`, write_file over a redirect, and get_server_metrics over `top`/`free`/`df`: ' +
         'those state their intent exactly, so the path rules apply precisely instead of being inferred from ' +
         'a command string, and they are less likely to require approval. Interactive commands, shells and ' +
-        'privilege-escalation shells (sudo -i, su, sudo bash) are always refused. May block while the user approves it.',
+        'privilege-escalation shells (sudo -i, su, sudo bash) are refused unless the user has put this session in Bypass ' +
+        `mode. Blocks while the user approves it when it ${CONDITIONAL_ASK}.`,
       inputSchema: {
         serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
         command: z
@@ -2381,7 +2447,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       description:
         'Writes a text file over SFTP, replacing it entirely if it exists. There is no append mode — read the ' +
         'file first and write back the full contents. Prefer this over a shell redirect: the path is checked ' +
-        'against the per-path rules directly. Often requires approval.',
+        `against the per-path rules directly. Asks when a path rule or the session's mode says so.`,
       inputSchema: {
         serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
         path: z.string().describe('Absolute remote path, e.g. /etc/nginx/conf.d/site.conf'),
@@ -2863,7 +2929,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       description:
         'Runs a statement against a saved database connection and returns the rows. Reads are governed ' +
         'by the databaseAccess capability; anything that modifies data or schema is additionally bounded ' +
-        'by writeFiles and always requires user approval, whatever the access group says. Address the ' +
+        `by writeFiles, and ${CONDITIONAL_ASK}. Address the ` +
         'database by the friendly name from list_databases — connection details and credentials are ' +
         'resolved by OpsMaxx and never visible here.',
       inputSchema: {
@@ -2891,16 +2957,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const db = matches[0]
       const workspace = getCachedWorkspace(db.workspaceId)
 
-      const scopeGroupId = resolveGroupId(listAssignments(), '', db.workspaceId)
-      const scopeGroup = scopeGroupId ? getGroup(scopeGroupId) : null
-      const dbGrant = sessionGroupFor(session)
-      const check = dbGrant
-        ? withRestriction(
-            evaluateDatabaseStatement(dbGrant, statement),
-            scopeGroup ? evaluateDatabaseStatement(scopeGroup, statement) : null,
-            `the workspace's access group ("${scopeGroup?.name}")`
-          )
-        : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+      const reads = classifyStatement(statement) === 'read'
+      const check = workspaceCheck(session, db.workspaceId, (g) => evaluateDatabaseStatement(g, statement), !reads)
 
       const ctx: AuditContext = {
         session,
@@ -2914,7 +2972,6 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         capability: 'databaseAccess'
       }
 
-      const reads = classifyStatement(statement) === 'read'
       const gated = await gate(
         ctx,
         check,
@@ -2925,11 +2982,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             ? 'OpsMaxx classified this statement as a read'
             : 'OpsMaxx could not classify this statement as a read, so it is treated as one that changes data',
           intent,
-          // A write "always requires approval" (evaluateDatabaseStatement), and
-          // that sentence was false the moment anything was remembered: a
-          // session grant given on a SELECT covered the DROP TABLE after it,
-          // because both are `databaseAccess` on the same database. Reads may
-          // be granted for the session; anything else asks every time.
+          // When a write asks, it asks every time: a session grant given on a
+          // SELECT used to cover the DROP TABLE after it, because both are
+          // `databaseAccess` on the same database. Reads may be granted for the
+          // session; anything else is per call.
           perCall: !reads
         },
         extra
@@ -2977,7 +3033,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const tunnels = listCachedTunnels(
         session.workspaces
           .map((w) => w.id)
-          .filter((id) => effectiveWorkspaceCapability(session, id, 'sshTunnel').decision !== 'deny')
+          // Listing is a read, so Read-only mode still shows tunnels.
+          .filter((id) => effectiveWorkspaceCapability(session, id, 'sshTunnel', { mutating: false }).decision !== 'deny')
       )
       if (tunnels.length === 0) return text('No tunnels are configured in this session\'s workspaces.')
       const live = new Map(tunnelList().map((t) => [t.id, t]))
@@ -2999,8 +3056,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       title: 'Start or stop a tunnel',
       description:
         'Starts or stops a tunnel that is already configured in OpsMaxx. Requires the sshTunnel ' +
-        'capability, and starting one always requires user approval whatever the access group says, ' +
-        'because it binds a listening port on the user\'s own machine. This cannot create a tunnel or ' +
+        `capability. Starting one binds a listening port on the user's own machine, and ${CONDITIONAL_ASK}. ` +
+        'This cannot create a tunnel or ' +
         'change where one points — only run one the user has already defined.',
       inputSchema: {
         tunnelName: z.string().describe('Friendly name exactly as returned by list_tunnels'),
@@ -3023,26 +3080,15 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const tunnel = matches[0]
       const workspace = getCachedWorkspace(tunnel.workspaceId)
 
-      const scopeGroupId = resolveGroupId(listAssignments(), '', tunnel.workspaceId)
-      const scopeGroup = scopeGroupId ? getGroup(scopeGroupId) : null
-      const sessionGroup = sessionGroupFor(session)
-
       // Stopping is bounded by the same capability but is not the dangerous
-      // direction, so it does not force an approval the way starting does.
-      const evaluate = (g: AccessGroup | null): Decision =>
-        running
-          ? evaluateTunnelOpen(g)
-          : g
-            ? evaluateCapability(g, 'sshTunnel')
-            : { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
-
-      const check = sessionGroup
-        ? withRestriction(
-            evaluate(sessionGroup),
-            scopeGroup ? evaluate(scopeGroup) : null,
-            `the workspace's access group ("${scopeGroup?.name}")`
-          )
-        : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+      // direction, so Confirm risky actions does not reach it the way it
+      // reaches starting.
+      const check = workspaceCheck(
+        session,
+        tunnel.workspaceId,
+        (g) => (running ? evaluateTunnelOpen(g) : evaluateCapability(g, 'sshTunnel')),
+        true
+      )
 
       const ctx: AuditContext = {
         session,
@@ -3064,9 +3110,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             ? 'it opens a network path between this machine and a port on the server'
             : 'it closes a tunnel that other things may still be using',
           intent,
-          // Opening one "always requires approval" (evaluateTunnelOpen) -- each
-          // time, which a session grant from an earlier start or stop would
-          // otherwise quietly stop being.
+          // When opening one asks, it asks each time -- which a session grant
+          // from an earlier start or stop would otherwise quietly stop being.
           perCall: running
         },
         extra
@@ -3151,10 +3196,11 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       title: 'Start or stop a VPN',
       description:
         'Starts or stops a VPN that is already configured in OpsMaxx. Requires the vpnControl ' +
-        'capability, and starting one always requires user approval whatever the access group says, ' +
-        "because it changes which network the user's later SSH and database sessions travel over. " +
+        "capability. Starting one changes which network the user's later SSH and database sessions " +
+        `travel over, and ${CONDITIONAL_ASK}. ` +
         'Reverse proxies (frp) are refused outright here and no access group can permit them, because ' +
-        "an frp proxy makes a port on the user's own machine reachable from the internet. This cannot " +
+        "an frp proxy makes a port on the user's own machine reachable from the internet — only a " +
+        'session the user put in Bypass mode can. This cannot ' +
         'create a VPN profile or change where one points — only run one the user has already defined.',
       inputSchema: {
         vpnName: z.string().describe('Friendly name exactly as returned by list_vpns'),
@@ -3177,9 +3223,27 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const vpn = matches[0]
       const workspace = getCachedWorkspace(vpn.workspaceId)
 
-      // Decided before the access group is even looked at, and not expressible
-      // as a permission: see AI_REFUSED_VPN_KINDS in policyEngine.ts.
-      const refused = isVpnKindRefusedForAi(vpn.kind)
+      // frp is refused whatever the access group says: see AI_REFUSED_VPN_KINDS
+      // in policyEngine.ts. It is still a Decision rather than an early return,
+      // so the one thing that reaches past it is the one the user chose in so
+      // many words -- a session they put in Bypass mode -- and it still
+      // respects No AI Access and a Protected workspace, like everything else.
+      const frpCheck = isVpnKindRefusedForAi(vpn.kind)
+        ? workspaceCheck(
+            session,
+            vpn.workspaceId,
+            () => ({
+              decision: 'deny',
+              reason:
+                `"${vpn.name}" is a reverse proxy (frp). Each of its proxies makes a port on the user's ` +
+                'own machine reachable from the frp server, so OpsMaxx does not let an AI agent open or ' +
+                'close one unless the user has put this session in Bypass mode. No access group can ' +
+                'permit it — ask the user to do it in OpsMaxx themselves.'
+            }),
+            true
+          )
+        : null
+      const refused = frpCheck !== null && frpCheck.decision !== 'allow'
       if (!refused && !isVpnManagerReady()) {
         return errorText('OpsMaxx has not finished starting its VPN manager. Try again in a moment.')
       }
@@ -3190,29 +3254,14 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const dependents = !refused && !running ? vpnDependentsOf(vpn.id) : []
       const liveDependents = dependents.filter((d) => d.live).length
 
-      const evaluate = (g: AccessGroup | null): Decision =>
-        evaluateVpnControl(g, running ? 'start' : 'stop', liveDependents > 0)
-
-      const scopeGroupId = resolveGroupId(listAssignments(), '', vpn.workspaceId)
-      const scopeGroup = scopeGroupId ? getGroup(scopeGroupId) : null
-      const sessionGroup = sessionGroupFor(session)
-
-      const check: Decision = refused
-        ? {
-            decision: 'deny',
-            reason:
-              `"${vpn.name}" is a reverse proxy (frp). Each of its proxies makes a port on the user's ` +
-              'own machine reachable from the frp server, so OpsMaxx never lets an AI agent open or ' +
-              'close one. This is not a permission that can be raised — ask the user to do it in ' +
-              'OpsMaxx themselves.'
-          }
-        : sessionGroup
-          ? withRestriction(
-              evaluate(sessionGroup),
-              scopeGroup ? evaluate(scopeGroup) : null,
-              `the workspace's access group ("${scopeGroup?.name}")`
-            )
-          : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+      const check: Decision =
+        frpCheck ??
+        workspaceCheck(
+          session,
+          vpn.workspaceId,
+          (g) => evaluateVpnControl(g, running ? 'start' : 'stop', liveDependents > 0),
+          true
+        )
 
       const ctx: AuditContext = {
         session,
@@ -3236,9 +3285,9 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
               ? `it stops a VPN that ${liveDependents} live session(s) reach their host through`
               : 'it stops a VPN that other sessions may depend on',
           intent,
-          // docs/AI-SECURITY.md: there is no configuration in which a VPN comes
-          // up silently. A start remembered from an earlier start, or from a
-          // stop, would be one. Starts ask every time.
+          // When a start asks, it asks every time: a start remembered from an
+          // earlier start, or from a stop, would be a VPN coming up silently
+          // under a setting that said it should not.
           perCall: running
         },
         extra
@@ -3293,8 +3342,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       description:
         'Adds a new SSH connection to a workspace in OpsMaxx, so later calls can address it by name. ' +
         'Use only when the user asks for a server to be added; it changes their saved configuration. ' +
-        'Requires the manageServers capability and, ' +
-        'unless the access group allows it outright, explicit approval from the user. Credentials are written ' +
+        'Requires the manageServers capability, and asks the user when the access group or the ' +
+        "session's mode says so. Credentials are written " +
         "straight to the operating system's secure storage and are never readable back through this bridge.",
       inputSchema: {
         name: z.string().describe('Friendly name for the connection, e.g. "Web Server Staging". Must be unique.'),
@@ -3731,7 +3780,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         'Deletes a saved connection from OpsMaxx, along with the credential stored for it. It does ' +
         'not touch the machine itself. OpsMaxx keeps no copy, so this cannot be undone from here — ' +
         'prefer update_server when an entry is wrong rather than absent. Requires the manageServers ' +
-        'capability, and always asks the user, whatever the access group says.',
+        `capability, and ${CONDITIONAL_ASK}.`,
       inputSchema: {
         serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
         intent: INTENT_PARAM
@@ -3882,7 +3931,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         'it — use set_tunnel for that, which takes its own approval. Prefer a jump host on the ' +
         'server itself (add_server / update_server jumpHosts) when the goal is simply to reach a ' +
         'machine behind a bastion: that is authenticated at every hop and needs no listening port. ' +
-        'Requires the sshTunnel capability and always asks the user.',
+        `Requires the sshTunnel capability, and ${CONDITIONAL_ASK}.`,
       inputSchema: {
         name: z.string().describe('Friendly name for the tunnel, e.g. "Postgres forward". Must be unique.'),
         kind: z
@@ -3951,16 +4000,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         capability: 'sshTunnel'
       }
 
-      const sessionGroup = sessionGroupFor(session)
-      const scopeGroupId = resolveGroupId(listAssignments(), '', carrier.workspaceId)
-      const scopeGroup = scopeGroupId ? getGroup(scopeGroupId) : null
-      const check = sessionGroup
-        ? withRestriction(
-            evaluateTunnelDefine(sessionGroup),
-            scopeGroup ? evaluateTunnelDefine(scopeGroup) : null,
-            `the workspace's access group ("${scopeGroup?.name}")`
-          )
-        : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+      const check = workspaceCheck(session, carrier.workspaceId, evaluateTunnelDefine, true, carrier.id)
 
       const gated = await gate(
         ctx,
@@ -4011,7 +4051,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
       description:
         'Deletes a saved tunnel from OpsMaxx. If it is running it is stopped first, so anything ' +
-        'using it loses its connection. Requires the sshTunnel capability and always asks the user.',
+        `using it loses its connection. Requires the sshTunnel capability, and ${CONDITIONAL_ASK}.`,
       inputSchema: {
         tunnelName: z.string().describe('Friendly name exactly as returned by list_tunnels'),
         intent: INTENT_PARAM
@@ -4041,16 +4081,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         capability: 'sshTunnel'
       }
 
-      const sessionGroup = sessionGroupFor(session)
-      const scopeGroupId = resolveGroupId(listAssignments(), '', tunnel.workspaceId)
-      const scopeGroup = scopeGroupId ? getGroup(scopeGroupId) : null
-      const check = sessionGroup
-        ? withRestriction(
-            evaluateTunnelDefine(sessionGroup),
-            scopeGroup ? evaluateTunnelDefine(scopeGroup) : null,
-            `the workspace's access group ("${scopeGroup?.name}")`
-          )
-        : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+      const check = workspaceCheck(session, tunnel.workspaceId, evaluateTunnelDefine, true, tunnel.serverId)
 
       const gated = await gate(
         ctx,
@@ -4622,11 +4653,13 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // whole cost this tool exists to remove.
       let rows: { id: string; label: string; detail: string; decision: string; reason: string }[]
       let scope: string
+      let header: string
       if (serverName) {
         const resolved = resolveServerOrError(auth.session, serverName)
         if ('error' in resolved) return resolved.error
         const { server: s } = resolved.match
         scope = `on ${s.name}`
+        header = modeHeader(auth.session, s.id, s.workspaceId)
         rows = AI_CAPABILITIES.map((c) => {
           const d = effectiveCapability(auth.session, s.id, c.id)
           return { id: c.id, label: c.label, detail: c.detail, decision: d.decision, reason: d.reason }
@@ -4635,6 +4668,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         const ws = auth.session.workspaces[0]
         if (!ws) return errorText('This session has no workspaces.')
         scope = `in ${ws.name}`
+        header = modeHeader(auth.session, null, ws.id)
         rows = AI_CAPABILITIES.map((c) => {
           const d = effectiveWorkspaceCapability(auth.session, ws.id, c.id)
           return { id: c.id, label: c.label, detail: c.detail, decision: d.decision, reason: d.reason }
@@ -4654,7 +4688,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         )
         .join('\n\n')
       return text(
-        `What this session may do ${scope}:\n\n${body}\n\n` +
+        `${header}\n\nWhat this session may do ${scope}:\n\n${body}\n\n` +
           `Not present at any setting, by design: running jobs, defining rules, a shell on the ` +
           `OpsMaxx machine itself, reading the vault, and restoring a backup.`
       )
@@ -5485,8 +5519,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       description:
         'Starts ONE pipeline on a CI/CD connection. One per call, deliberately: a mistake then costs ' +
         'one pipeline rather than a fleet. ' +
-        'This ALWAYS requires user approval, on every access group, including one raised to allow — ' +
-        'and unlike every other capability here, one approval never covers the next call. ' +
+        `It ${CONDITIONAL_ASK} — and when it asks, one approval never covers the next call. ` +
         'What the run then does is defined on the provider: OpsMaxx has not read the pipeline, cannot ' +
         'tell you what it deploys or where, and CANNOT STOP IT once the provider has accepted it — ' +
         'not even with stop-all-AI-access. ' +
@@ -5539,8 +5572,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     {
       title: 'Cancel a running pipeline',
       description:
-        'Asks the provider to stop ONE run that is already going. It always requires user approval, ' +
-        'and one approval never covers the next call. ' +
+        `Asks the provider to stop ONE run that is already going. It ${CONDITIONAL_ASK}, ` +
+        'and when it asks, one approval never covers the next call. ' +
         'A cancel is a REQUEST, not a guarantee: steps already executing stop on the provider\'s ' +
         'schedule, and a pipeline stopped part-way has finished some of its work and not the rest. ' +
         'OpsMaxx cannot tell you which, so do not report a cancelled deploy as one that never ran.',
@@ -5593,8 +5626,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     {
       title: 'Re-run a pipeline run',
       description:
-        'Runs ONE existing run again. It always requires user approval, and one approval never covers ' +
-        'the next call. ' +
+        `Runs ONE existing run again. It ${CONDITIONAL_ASK}, and when it asks, one approval never ` +
+        'covers the next call. ' +
         'GITHUB ONLY. There it creates a new ATTEMPT of the same run rather than a new run — the id ' +
         'is reused and run_attempt goes up, which is why a run is named by the pair. ' +
         'Jenkins has no re-run at all and GitLab\'s retry is a different subject per endpoint, so on ' +
@@ -5881,24 +5914,7 @@ async function handlePairConfirm(req: IncomingMessage, res: ServerResponse): Pro
   }
 }
 
-export interface CapabilityExplanation {
-  capability: AiCapability
-  label: string
-  decision: 'allow' | 'ask' | 'deny'
-  reason: string
-  fromScope: 'allow' | 'ask' | 'deny'
-  fromSession: 'allow' | 'ask' | 'deny' | null
-  decidedBy: 'scope' | 'session' | 'both'
-  /** The group the restriction came from, so the UI can send the user to the
-   *  one that actually decided. `null` for an explicit No AI Access, which is
-   *  not a group, and for a row nothing narrowed. */
-  scopeGroupId: string | null
-  scopeGroupName: string | null
-  /** Which of the session's workspaces that assignment hangs off. Named in the
-   *  UI because a session spanning several has no single "the workspace". */
-  scopeWorkspaceId: string | null
-  scopeWorkspaceName: string | null
-}
+export type { CapabilityExplanation }
 
 /** One workspace's deliberate restriction, resolved once per explain call. */
 interface ScopeSource {
@@ -5943,16 +5959,30 @@ function scopeSourcesFor(session: McpAgentSession, serverId: string | null): Sco
 // worse than no permissions screen, because it will eventually disagree with
 // reality and be believed.
 //
-// ONE DRIFT REMAINS AND IS DELIBERATE: this is capability-shaped, and
-// `execute_command` is additionally graded per command by `evaluateCommand`.
-// A row here reading ALLOW can still ask when the command itself carries a
-// destructive finding. SessionAccess.tsx says so under the table.
+// Capability-shaped, where some tools are graded per call: a command by what
+// it runs, a query by whether it writes, a server by whether it is changed or
+// added. A row that reads ALLOW but has calls under it that will still ask says
+// so in `partlyAsks`, rather than leaving the table to claim more than it knows.
+const PARTLY_ASKS: ReadonlySet<AiCapability> = new Set<AiCapability>([
+  'terminal',
+  'sudo',
+  'databaseAccess',
+  'manageServers',
+  'vpnControl'
+])
 export function explainSessionAccess(sessionId: string, serverId: string | null): CapabilityExplanation[] | null {
   const session = getSession(sessionId)
   if (!session) return null
 
   const sessionGroup = sessionGroupFor(session)
   const sources = scopeSourcesFor(session, serverId)
+  const mode = modeOf(session)
+  const server = serverId ? getCachedServer(serverId) : null
+  const protectedTarget = serverId
+    ? isProtected(serverId, server?.workspaceId ?? null)
+    : session.workspaces.some((w) => isProtected(null, w.id))
+  // What the mode is in effect, once a Protected target has capped it.
+  const effective: SessionMode = protectedTarget && (mode === 'auto' || mode === 'bypass') ? 'ask' : mode
 
   return AI_CAPABILITIES.map(({ id, label }) => {
     // `fromSession` is now the GRANT and `fromScope` the optional restriction,
@@ -5962,9 +5992,7 @@ export function explainSessionAccess(sessionId: string, serverId: string | null)
     // of them decides when there is no assignment at all -- then there is no
     // restriction, and the session's own group is the answer rather than a
     // denial.
-    const sess = sessionGroup
-      ? evaluateCapability(sessionGroup, id)
-      : { decision: 'deny' as const, reason: 'This AI session has no access group.' }
+    const sess = sessionGroup ? evaluateAsEnforced(sessionGroup, id) : NO_GROUP
 
     // The strictest restriction across the session's workspaces, and which one
     // it came from. `resolveRestriction`, not `resolveGroupId`: the latter
@@ -5976,7 +6004,7 @@ export function explainSessionAccess(sessionId: string, serverId: string | null)
       const decision = source.shut
         ? NO_AI_ACCESS
         : source.group
-          ? evaluateCapability(source.group, id)
+          ? evaluateAsEnforced(source.group, id)
           : null
       if (!decision) continue
       // `mostRestrictive` prefers its first argument on a tie, so this replaces
@@ -6001,11 +6029,21 @@ export function explainSessionAccess(sessionId: string, serverId: string | null)
         : combined.decision === scope.decision
           ? ('scope' as const)
           : ('session' as const)
+    const final = applyMode(combined, { mode, protectedTarget, mutating: MUTATING_CAPABILITIES.has(id) })
+    const partlyAsks =
+      final.decision === 'allow' &&
+      PARTLY_ASKS.has(id) &&
+      (effective === 'ask'
+        ? id === 'databaseAccess'
+        : effective === 'auto' && sessionGroup !== null && confirmsRisky(sessionGroup))
     return {
       capability: id,
       label,
-      decision: combined.decision,
-      reason: combined.reason,
+      decision: final.decision,
+      reason: final.reason,
+      mode,
+      protectedTarget,
+      partlyAsks,
       fromScope: scope ? scope.decision : sess.decision,
       fromSession: sess.decision,
       decidedBy,

@@ -7,6 +7,7 @@ import type {
   AccessGroup,
   PermissionValue,
   PolicyAssignment,
+  PolicyScope,
   PolicyState,
   ServerAiMeta
 } from '../../shared/mcp'
@@ -35,8 +36,12 @@ function allowAll(overrides: Partial<AccessGroup['capabilities']> = {}): AccessG
     databaseAccess: 'allow',
     sudo: 'allow',
     serverMetrics: 'allow',
-    // Denied on every seeded group, and NONE of them opts in below — the only
-    // capability here of which that is true.
+    // The capabilities from here down are 'deny' in this helper, and each
+    // seeded group opts in explicitly. Full Access opts into all of them but
+    // firewallRules and sudoersRead (see the note on grp-full), because "Full
+    // Access" has to mean full: a user who picked it and was still refused or
+    // asked, for reasons no screen showed, is why permission modes exist.
+    // Everything below explains why the NARROWER groups leave them denied.
     //
     // It returns how many unpatched security updates a host is carrying and
     // against which distribution, which is a vulnerability report rather than a
@@ -167,6 +172,28 @@ function defaultFilePolicies(): AccessGroup['filePolicies'] {
   ]
 }
 
+// What grp-full grants on top of allowAll(). Also the target of the version-3
+// migration, which is why it is a constant rather than an inline literal.
+const FULL_ACCESS_GRANTS: Partial<AccessGroup['capabilities']> = {
+  sudo: 'ask',
+  hostFacts: 'allow',
+  ciRead: 'allow',
+  ciTrigger: 'allow',
+  manageServers: 'allow',
+  vpnControl: 'allow'
+}
+
+// grp-full as versions 1 and 2 seeded it, for the keys version 3 changed. A key
+// still holding one of these was never touched by the user and moves; any
+// other value is their edit and stays.
+const FULL_ACCESS_V2: Partial<AccessGroup['capabilities']> = {
+  hostFacts: 'deny',
+  ciRead: 'deny',
+  ciTrigger: 'deny',
+  manageServers: 'ask',
+  vpnControl: 'ask'
+}
+
 function defaultGroups(): AccessGroup[] {
   return [
     // THE genuinely read-only tier, and the reason the group below was renamed.
@@ -220,7 +247,8 @@ function defaultGroups(): AccessGroup[] {
         ciRead: 'deny',
         ciTrigger: 'deny'
       },
-      filePolicies: defaultFilePolicies()
+      filePolicies: defaultFilePolicies(),
+      confirmRisky: true
     },
     // Was called "Read Only", which it never was. The id is unchanged so every
     // existing assignment keeps pointing at exactly the grant it already had —
@@ -237,7 +265,8 @@ function defaultGroups(): AccessGroup[] {
         sshTunnel: 'deny',
         sudo: 'deny'
       }),
-      filePolicies: defaultFilePolicies()
+      filePolicies: defaultFilePolicies(),
+      confirmRisky: true
     },
     {
       id: 'grp-read-write',
@@ -251,7 +280,8 @@ function defaultGroups(): AccessGroup[] {
         manageServers: 'ask',
         vpnControl: 'ask'
       }),
-      filePolicies: defaultFilePolicies()
+      filePolicies: defaultFilePolicies(),
+      confirmRisky: true
     },
     {
       id: 'grp-sudo',
@@ -265,18 +295,25 @@ function defaultGroups(): AccessGroup[] {
         manageServers: 'ask',
         vpnControl: 'ask'
       }),
-      filePolicies: defaultFilePolicies()
+      filePolicies: defaultFilePolicies(),
+      confirmRisky: true
     },
     {
       id: 'grp-full',
       name: 'Full Access',
       builtIn: true,
-      // Even "Full Access" keeps sudo at ASK by default: the brief is explicit
-      // that root access must never be granted silently. The user can raise
-      // this to 'allow' themselves, which is then an explicit choice, not a
-      // default.
-      capabilities: allowAll({ sudo: 'ask', manageServers: 'ask', vpnControl: 'ask' }),
-      filePolicies: defaultFilePolicies()
+      // Every capability an agent tool uses, on allow, with sudo the one
+      // exception the user chose to keep: root is asked for by default and
+      // raising it is their explicit act. Confirm risky actions is OFF -- on
+      // this group, allow means allow.
+      //
+      // firewallRules and sudoersRead stay denied because no agent tool uses
+      // them. They are consent for OpsMaxx's own unattended background
+      // collection on servers assigned this group (posture.ts, access.ts), and
+      // flipping them here would silently start collecting on every such box.
+      capabilities: allowAll(FULL_ACCESS_GRANTS),
+      filePolicies: defaultFilePolicies(),
+      confirmRisky: false
     }
   ]
 }
@@ -285,7 +322,7 @@ function seed(): PolicyState {
   // Stamped at the latest generation: defaultFilePolicies() already contains
   // every seeded pattern, so a fresh install has nothing to backfill.
   return {
-    version: ASSIGNMENTS_CLEARED_VERSION,
+    version: POLICY_VERSION,
     groups: defaultGroups(),
     assignments: [],
     serverMeta: [],
@@ -482,8 +519,8 @@ function read(): PolicyState {
     if (existsSync(FILE)) {
       const parsed = JSON.parse(readFileSync(FILE, 'utf8')) as PolicyState
       if (parsed && Array.isArray(parsed.groups)) {
-        return dropLegacyAssignments(
-          backfillFilePolicies(backfillCapabilities(backfillGroups(parsed)))
+        return migrateToV3(
+          dropLegacyAssignments(backfillFilePolicies(backfillCapabilities(backfillGroups(parsed))))
         )
       }
     }
@@ -532,6 +569,38 @@ function dropLegacyAssignments(state: PolicyState): PolicyState {
   }
 }
 
+/**
+ * Version 3: permission modes.
+ *
+ *   - Every group gets an explicit `confirmRisky`. Custom and narrower built-in
+ *     groups get ON, which is exactly the behaviour they already had -- it was
+ *     hard-coded before and is now a switch they can see. Full Access gets OFF.
+ *   - Full Access's keys that version 3 changed move to the new seed, but only
+ *     where they still hold the value we shipped. A user's edit is intent on
+ *     record and outranks this.
+ *
+ * Idempotent: a state already at 3 is returned untouched.
+ */
+const POLICY_VERSION = 3
+
+function migrateToV3(state: PolicyState): PolicyState {
+  if ((state.version ?? 1) >= POLICY_VERSION) return state
+  for (const group of state.groups) {
+    const full = group.id === 'grp-full'
+    if (group.confirmRisky === undefined) group.confirmRisky = !full
+    if (!full) continue
+    for (const [key, was] of Object.entries(FULL_ACCESS_V2) as [keyof AccessGroup['capabilities'], PermissionValue][]) {
+      if (group.capabilities[key] === was) group.capabilities[key] = FULL_ACCESS_GRANTS[key] ?? 'allow'
+    }
+  }
+  return { ...state, version: POLICY_VERSION }
+}
+
+/** The version-3 migration, exposed so a test can drive it directly. */
+export function migrateV3ForTests(state: PolicyState): PolicyState {
+  return migrateToV3(state)
+}
+
 function write(state: PolicyState): void {
   atomicWriteFileSync(FILE, JSON.stringify(state))
 }
@@ -569,6 +638,7 @@ export function createGroup(name: string): AccessGroup {
     id: uid('grp'),
     name,
     builtIn: false,
+    confirmRisky: true,
     capabilities: allowAll({
       terminal: 'ask',
       writeFiles: 'deny',
@@ -625,6 +695,35 @@ export function removeAssignment(id: string): void {
   const state = load()
   state.assignments = state.assignments.filter((a) => a.id !== id)
   write(state)
+}
+
+/**
+ * Protected targets: a session acting on one is capped at Ask whatever its
+ * mode. Written only over IPC by the human -- nothing on the MCP bridge imports
+ * the setter (tests/permissionModes.test.ts holds that).
+ */
+export function listProtected(): PolicyScope[] {
+  return load().protectedScopes ?? []
+}
+
+const sameScope = (a: PolicyScope, b: PolicyScope): boolean =>
+  a.level === 'workspace'
+    ? b.level === 'workspace' && a.workspaceId === b.workspaceId
+    : b.level === 'server' && a.serverId === b.serverId
+
+export function setProtected(scope: PolicyScope, on: boolean): PolicyScope[] {
+  const state = load()
+  const rest = (state.protectedScopes ?? []).filter((p) => !sameScope(p, scope))
+  state.protectedScopes = on ? [...rest, scope] : rest
+  write(state)
+  return state.protectedScopes
+}
+
+/** Is this server, or the workspace it lives in, Protected? Either id may be empty. */
+export function isProtected(serverId: string | null, workspaceId: string | null): boolean {
+  return listProtected().some((p) =>
+    p.level === 'server' ? !!serverId && p.serverId === serverId : !!workspaceId && p.workspaceId === workspaceId
+  )
 }
 
 export function getServerMeta(serverId: string): ServerAiMeta {

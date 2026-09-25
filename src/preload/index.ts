@@ -229,7 +229,10 @@ import type {
   ApprovalScope,
   AuditEntry,
   AuditIntegrity,
-  CliPairingRequest
+  CapabilityExplanation,
+  CliPairingRequest,
+  PolicyScope,
+  SessionMode
 } from '../shared/mcp'
 
 type WindowAction = 'minimize' | 'toggle-maximize' | 'close'
@@ -2149,7 +2152,10 @@ const api = {
       ipcRenderer.invoke('aiPolicy:setServerAliases', serverId, aliases),
     listWorkspaces: (): Promise<{ id: string; name: string }[]> => ipcRenderer.invoke('aiPolicy:listWorkspaces'),
     listServers: (workspaceId?: string): Promise<{ id: string; workspaceId: string; name: string }[]> =>
-      ipcRenderer.invoke('aiPolicy:listServers', workspaceId)
+      ipcRenderer.invoke('aiPolicy:listServers', workspaceId),
+    listProtected: (): Promise<PolicyScope[]> => ipcRenderer.invoke('aiPolicy:listProtected'),
+    setProtected: (scope: PolicyScope, on: boolean): Promise<PolicyScope[]> =>
+      ipcRenderer.invoke('aiPolicy:setProtected', scope, on)
   },
   aiMcp: {
     getConfig: (): Promise<McpGlobalConfig> => ipcRenderer.invoke('aiMcp:getConfig'),
@@ -2163,12 +2169,15 @@ const api = {
       groupId: string | null
       groupName: string
       ttlMinutes: number | null
+      mode?: SessionMode
     }): Promise<{ session: McpAgentSession; token: string }> => ipcRenderer.invoke('aiMcp:createSession', input),
     listSessions: (): Promise<McpAgentSession[]> => ipcRenderer.invoke('aiMcp:listSessions'),
     revokeSession: (id: string): Promise<void> => ipcRenderer.invoke('aiMcp:revokeSession', id),
     deleteSession: (id: string): Promise<boolean> => ipcRenderer.invoke('aiMcp:deleteSession', id),
     setSessionGroup: (id: string, groupId: string | null, groupName: string): Promise<McpAgentSession | null> =>
       ipcRenderer.invoke('aiMcp:setSessionGroup', id, groupId, groupName),
+    setSessionMode: (id: string, mode: SessionMode): Promise<McpAgentSession | null> =>
+      ipcRenderer.invoke('aiMcp:setSessionMode', id, mode),
     // A client waiting on the OAuth flow. It holds nothing but what is needed to
     // decide: who is asking, and where the browser will be sent back to. The
     // PKCE challenge and the code stay in main.
@@ -2185,17 +2194,7 @@ const api = {
     explainAccess: (
       sessionId: string,
       serverId: string | null
-    ): Promise<
-      {
-        capability: string
-        label: string
-        decision: 'allow' | 'ask' | 'deny'
-        reason: string
-        fromScope: 'allow' | 'ask' | 'deny'
-        fromSession: 'allow' | 'ask' | 'deny' | null
-        decidedBy: 'scope' | 'session' | 'both'
-      }[] | null
-    > => ipcRenderer.invoke('aiMcp:explainAccess', sessionId, serverId),
+    ): Promise<CapabilityExplanation[] | null> => ipcRenderer.invoke('aiMcp:explainAccess', sessionId, serverId),
     killAllSessions: (): Promise<{ revoked: number; denied: number }> =>
       ipcRenderer.invoke('aiMcp:killAllSessions'),
     listApprovals: (): Promise<ApprovalRequest[]> => ipcRenderer.invoke('aiMcp:listApprovals'),
