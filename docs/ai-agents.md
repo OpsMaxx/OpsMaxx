@@ -86,7 +86,8 @@ Bypass does not lift.
 ### Connecting an agent
 
 The quickest route is **AI & MCP → Overview → Connect an agent**. One click turns on the bridge,
-gives any unassigned workspace an access group, creates a session, and hands it to the client:
+creates a session with the access group and mode you picked, and hands it to the client. It writes
+no workspace assignment, so it never holds a later session below this one's group:
 
 | Button | What it does |
 |---|---|

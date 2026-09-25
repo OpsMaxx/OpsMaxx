@@ -129,21 +129,12 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
 
       const group = groups.find((g) => g.id === groupId) ?? null
 
-      // Pins every unassigned workspace to this group. No longer needed for
-      // access (with no assignment the session's own group applies), and it
-      // holds later sessions there to at most this group. Only ever fills gaps —
-      // a workspace the user has already assigned (to No AI Access included) is
-      // left exactly as they set it.
-      const assignments = (await api.aiPolicy.listAssignments()) ?? []
-      const assigned = new Set(
-        assignments.filter((a) => a.scope.level === 'workspace').map((a) => (a.scope as { workspaceId: string }).workspaceId)
-      )
-      for (const w of workspaces) {
-        if (!assigned.has(w.id)) {
-          await api.aiPolicy.setAssignment({ level: 'workspace', workspaceId: w.id }, group?.id ?? null)
-        }
-      }
-
+      // Connecting writes NO workspace assignment. It used to pin every
+      // unassigned workspace to the chosen group -- a leftover from when an
+      // assignment was the grant. Now the session's own group is the grant and
+      // an assignment is a restriction, so that pin silently held every LATER
+      // session in those workspaces to this group: widen an agent to Full
+      // Access and it still read "Held below this group".
       const created = await api.aiMcp.createSession({
         agentName,
         workspaces: workspaces.map((w) => ({ id: w.id, name: w.name })),
@@ -199,17 +190,15 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
     <div style={{ marginTop: 24 }}>
       <h3>Connect an agent</h3>
       <div className="s-desc" style={{ marginBottom: 12 }}>
-        Turns on the bridge, gives every workspace an access group if it has none, creates a session
-        and hands it to the client. The session does not expire — revoke it under Active Sessions.
+        Turns on the bridge, creates a session across your workspaces and hands it to the client. The session does not expire — revoke it under Active Sessions.
       </div>
 
       <div className="setting-row">
         <div className="s-info">
           <div className="s-title">Access group</div>
           <div className="s-desc">
-            What the agent may do — the grant. It is also assigned to any workspace that has no group
-            yet, which holds sessions there to at most this group; workspaces you have already assigned
-            are left alone. You can change a live session’s group under Active Sessions.
+            What the agent may do — the grant. You can change a live session’s group, and its mode,
+            under Active Sessions.
           </div>
         </div>
         <select

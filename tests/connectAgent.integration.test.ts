@@ -15,7 +15,7 @@ import { writeClaudeDesktopConfigTo, writeCodexConfigTo, claudeCodeCommand } fro
 import { resolveDefaultSessionGroup } from '../src/shared/mcp'
 
 // Exercises exactly what the "Connect Claude Code" / "Connect Claude Desktop"
-// buttons do, end to end: gap-fill the workspace assignments, mint a session,
+// buttons do, end to end: mint a session (writing no assignment),
 // then reach OpsMaxx with the credential each button hands out. Clicking the
 // buttons proves a session was created; only this proves the agent on the other
 // end can actually see a server, which is the part that silently fails.
@@ -56,19 +56,6 @@ afterAll(async () => {
   await stopMcpServer()
   rmSync(dir, { recursive: true, force: true })
 })
-
-// The renderer's connect() loop, extracted so the test drives the same rules the
-// button does rather than a paraphrase of them.
-function fillAssignmentGaps(groupId: string | null): void {
-  const assigned = new Set(
-    listAssignments()
-      .filter((a) => a.scope.level === 'workspace')
-      .map((a) => (a.scope as { workspaceId: string }).workspaceId)
-  )
-  for (const w of listCachedWorkspaces()) {
-    if (!assigned.has(w.id)) setAssignment({ level: 'workspace', workspaceId: w.id }, groupId)
-  }
-}
 
 function newSession(
   agentName: string,
@@ -136,26 +123,32 @@ describe('connect flow', () => {
     }
   })
 
-  it('fills the assignment gaps and the agent then sees the server', async () => {
-    const readOnly = listGroups().find((g) => g.id === 'grp-read-only')!
-    fillAssignmentGaps(readOnly.id)
-
-    expect(listAssignments().map((a) => a.groupId)).toEqual([readOnly.id, readOnly.id])
-
-    const token = newSession('Claude Code', readOnly.id, readOnly.name)
-    const client = await httpClient(token)
-    try {
-      expect(await callText(client, 'list_servers')).toContain('Nginx Server Prod')
-      expect(await callText(client, 'list_workspaces')).toContain('Production')
-    } finally {
-      await client.close()
-    }
+  it('writes no workspace assignment, so it never caps a later session', () => {
+    // Connecting used to pin every unassigned workspace to the chosen group.
+    // An assignment is a RESTRICTION now, so that pin held every later session
+    // in those workspaces to the first agent's group -- widening an agent to
+    // Full Access then read "Held below this group". The button writes none.
+    const src = readFileSync(join(__dirname, '../src/renderer/src/components/ai/ConnectAgent.tsx'), 'utf8')
+    expect(src).not.toMatch(/setAssignment\s*\(/)
   })
 
-  it('never overwrites a workspace the user has already assigned', () => {
+  it('a wider session after a narrower one is not held below it', async () => {
+    newSession('First', 'grp-read-only', 'Read Only')
+    const { session } = createSession({
+      agentName: 'Second',
+      workspaces: listCachedWorkspaces().map((w) => ({ id: w.id, name: w.name })),
+      groupId: 'grp-full',
+      groupName: 'Full Access',
+      ttlMinutes: null
+    })
+    expect(listAssignments()).toHaveLength(0)
+    const write = explainSessionAccess(session.id, 's1')?.find((c) => c.capability === 'writeFiles')
+    expect(write?.decision).toBe('allow')
+  })
+
+  it('an assignment the user set themselves still holds', () => {
     // A workspace deliberately set to No AI Access must stay that way.
     setAssignment({ level: 'workspace', workspaceId: 'ws-dev' }, null)
-    fillAssignmentGaps('grp-full')
     const dev = listAssignments().find(
       (a) => a.scope.level === 'workspace' && (a.scope as { workspaceId: string }).workspaceId === 'ws-dev'
     )
