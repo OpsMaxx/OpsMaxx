@@ -1453,7 +1453,12 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
       reason: 'Requires approval: it runs as root inside a new user namespace (unshare -r).'
     }
   }
-  if (risky && base.decision === 'allow' && computedCommand) {
+  // A computed command word may BE sudo, so it is asked about whenever the
+  // group has not granted sudo outright -- Confirm risky actions or not.
+  // Otherwise switching the risky confirmations off would let `$(which sudo)
+  // reboot` walk past a sudo that the same group says to ask about or refuse.
+  const sudoOutright = evaluateCapability(group, 'sudo').decision === 'allow'
+  if ((risky || !sudoOutright) && base.decision === 'allow' && computedCommand) {
     base = {
       decision: 'ask',
       reason: 'Requires approval: the command it runs is computed when it runs, so OpsMaxx cannot tell what it is.'

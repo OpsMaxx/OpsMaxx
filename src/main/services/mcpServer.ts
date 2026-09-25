@@ -3087,7 +3087,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         session,
         tunnel.workspaceId,
         (g) => (running ? evaluateTunnelOpen(g) : evaluateCapability(g, 'sshTunnel')),
-        true
+        true,
+        tunnel.serverId
       )
 
       const ctx: AuditContext = {
