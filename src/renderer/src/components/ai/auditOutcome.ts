@@ -104,7 +104,9 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
         ? 'Approved earlier'
         : e.approval === 'approved'
           ? 'Approved'
-          : 'Allowed'
+          : e.approval === 'bypassed'
+            ? 'Bypassed'
+            : 'Allowed'
   const because =
     e.approval === 'approved'
       ? 'You approved this request.'
@@ -116,10 +118,14 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
             // operator never knew was a session grant, and nothing in a row
             // says which era wrote it.
             'Nothing was asked: an approval given earlier in this session covered it.'
-          : 'The access group allowed this outright, so nothing was asked.'
+          : e.approval === 'bypassed'
+            ? // Kept apart from "allowed outright": the policy would have asked
+              // or refused, and only the session's mode let it through.
+              'Ran without asking: session in Bypass mode. Its access group would otherwise have asked or refused.'
+            : 'The access group allowed this outright, so nothing was asked.'
 
   if (e.result === 'denied') {
-    // Approval said yes and something downstream still said no. Only a row
+    // Approval said yes (or Bypass skipped asking) and something downstream still said no. Only a row
     // with a human approval reaches here -- a policy refusal returned above --
     // so "then" is always true of it.
     return {
@@ -140,7 +146,12 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
   return {
     label: `${prefix}, ran${code}`,
     decidedBy: who,
-    tone: e.approval === 'approved' || e.approval === 'approved-for-session' ? 'ok' : 'muted',
+    tone:
+      e.approval === 'bypassed'
+        ? 'warn'
+        : e.approval === 'approved' || e.approval === 'approved-for-session'
+          ? 'ok'
+          : 'muted',
     detail: `${because} It ran and returned success.`
   }
 }

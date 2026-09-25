@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Clock, Octagon, ShieldAlert, X } from 'lucide-react'
-import { AI_CAPABILITIES } from '../../../../shared/mcp'
-import type { ApprovalRequest, AuditEntry, ContentPreview, McpAgentSession } from '../../../../shared/mcp'
+import { AI_CAPABILITIES, DEFAULT_SESSION_MODE, sessionModeLabel } from '../../../../shared/mcp'
+import type { ApprovalRequest, AuditEntry, ContentPreview, McpAgentSession, SessionMode } from '../../../../shared/mcp'
 import {
   approvalTarget,
   approvalWhere,
@@ -9,8 +9,10 @@ import {
   describeDenial,
   explainRisk
 } from '../../../../shared/approvalRisk'
-import { duration } from '../../lib/format'
+import { clsx, duration } from '../../lib/format'
+import { toast } from '../../store/toast'
 import { ToastSlot } from '../common/Toasts'
+import { ModePicker } from './ModePicker'
 import { useArming } from '../../hooks/useArming'
 import {
   KILL_SWITCH_FAILED,
@@ -277,6 +279,18 @@ export function ApprovalDialog({
   const extendable = canExtendFuse()
   const grantLabel = sessionGrantLabel(request)
   const [stopFailed, setStopFailed] = useState(false)
+  // The session's mode from here on. Changing it answers nothing: this request
+  // was raised under the old mode and still waits on the buttons below.
+  const [mode, setMode] = useState<SessionMode>(request.sessionMode ?? DEFAULT_SESSION_MODE)
+  const changeMode = async (next: SessionMode): Promise<void> => {
+    const updated = await window.opsmaxx?.aiMcp?.setSessionMode?.(request.sessionId, next).catch(() => null)
+    if (!updated) {
+      toast(`${request.agentName}’s mode was not changed — it is still ${sessionModeLabel(mode)}.`, 'error')
+      return
+    }
+    setMode(next)
+    toast(`${request.agentName} is now in ${sessionModeLabel(next)} for later calls. This request still needs your answer.`, 'ok')
+  }
   // The dialog is keyed on the request, so this re-arms for every new one.
   const { armed, allow, noteKey } = useArming(request.id)
 
@@ -303,6 +317,28 @@ export function ApprovalDialog({
             <div className="sub">
               It is blocked until you answer. {waiting > 1 ? `${waiting - 1} more request(s) behind this one.` : ''}
             </div>
+            {(request.sessionMode || request.protectedTarget) && (
+              <div className="row" style={{ gap: 6, marginTop: 6 }}>
+                {request.sessionMode && (
+                  <span
+                    className={clsx('chip', request.sessionMode === 'bypass' && 'danger')}
+                    data-testid="approval-mode"
+                    title="The session’s mode when it asked"
+                  >
+                    Mode: {sessionModeLabel(request.sessionMode)}
+                  </span>
+                )}
+                {request.protectedTarget && (
+                  <span
+                    className="chip warn"
+                    data-testid="approval-protected"
+                    title="This target is Protected: every change is approved first, whatever the session’s mode."
+                  >
+                    Protected
+                  </span>
+                )}
+              </div>
+            )}
             {/* One call, several near-identical dialogs: say which this is, and
                 that approving it alone returns nothing. */}
             {request.workspaceOf && (
@@ -371,13 +407,12 @@ export function ApprovalDialog({
             <div style={{ color: toneText, fontWeight: 700, fontSize: 12, letterSpacing: 0.3 }}>{risk.label}</div>
             <div style={{ color: 'var(--text)', fontSize: 12, marginTop: 4, lineHeight: 1.5 }}>{risk.sentence}</div>
             {/* WHICH RULE ASKED, not what the action is.
-                An operator who has set a session's ceiling to Full Access and is
-                still being prompted on every command has no way to find out
-                which of the two layers said no -- the ceiling is a cap, the
-                workspace or server assignment is the grant, and the effective
-                answer is the more restrictive of the two. The policy engine
-                names the rule in one sentence and the card was the one place
-                not showing it. */}
+                An operator who has given a session Full Access and is still
+                being prompted has no way to find out which layer asked -- the
+                session's mode, a Protected target, the group's Confirm risky
+                actions, or an assignment holding the target lower. The policy
+                engine names the rule in one sentence and the card was the one
+                place not showing it. */}
             {request.policyReason && (
               <div
                 style={{
@@ -525,6 +560,17 @@ export function ApprovalDialog({
             {LATER_WRITES_UNSEEN}
           </div>
         )}
+        {/* Future calls only, and said so: a mode change here is not an answer. */}
+        <div className="approval-note approval-mode">
+          <span>Change mode for this agent</span>
+          <ModePicker
+            value={mode}
+            onChange={changeMode}
+            protectedCount={request.protectedTarget ? 1 : 0}
+            size="sm"
+            title="Applies to this agent’s later calls. This request still needs an answer."
+          />
+        </div>
         {stopFailed && (
           <div className="approval-note approval-stop-failed state-alarm" role="alert">
             <span className="state-dot is-alarm" aria-hidden="true" />

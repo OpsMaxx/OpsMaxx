@@ -1,4 +1,4 @@
-import { Fragment, ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { Fragment, ReactNode, useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import '../common/primitives.css'
@@ -10,8 +10,11 @@ export interface MenuEntry {
   danger?: boolean
   separator?: boolean
   disabled?: boolean
-  /** Shortcut text shown at the right, e.g. "⌘D". */
+  /** Shortcut text shown at the right, e.g. "⌘D". A single digit is also a
+   *  key: pressing it while the menu is open picks this entry. */
   shortcut?: string
+  /** A muted second line under the label: what choosing this does. */
+  detail?: string
   /** A checkbox item, or the selected item of a `radio` group. */
   checked?: boolean
   /** Radio group name; the item renders as `menuitemradio`. */
@@ -27,10 +30,16 @@ interface ContextMenuProps {
   onClose: () => void
   /** Open against this element's rect rather than at x/y. */
   anchor?: DOMRect
+  /** Where to mount it. A menu opened inside the approval dialog has to live in
+   *  that layer, or it paints underneath the dialog it was opened from. */
+  container?: Element
+  /** A muted closing line under the entries: a fact about all of them. */
+  footer?: string
 }
 
-export function ContextMenu({ x, y, entries, onClose, anchor }: ContextMenuProps): React.JSX.Element {
+export function ContextMenu({ x, y, entries, onClose, anchor, container, footer }: ContextMenuProps): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
+  const uid = useId()
   useClickOutside(ref, onClose)
   // First paint at the requested point, then corrected against the menu's
   // real size before the browser shows it. A fixed 230×320 estimate put a
@@ -75,6 +84,23 @@ export function ContextMenu({ x, y, entries, onClose, anchor }: ContextMenuProps
           onClose()
           return
         }
+        // Handled here rather than left to the document listener, so the one
+        // press closes the menu and not also the dialog it was opened from.
+        if (e.key === 'Escape') {
+          e.preventDefault()
+          e.stopPropagation()
+          onClose()
+          return
+        }
+        if (/^\d$/.test(e.key) && !e.metaKey && !e.ctrlKey && !e.altKey) {
+          const hit = entries.find((x) => x.shortcut === e.key && !x.separator && !x.disabled)
+          if (hit) {
+            e.preventDefault()
+            hit.onClick?.()
+            onClose()
+          }
+          return
+        }
         const items = [...(ref.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') ?? [])]
         const i = items.indexOf(document.activeElement as HTMLButtonElement)
         const target =
@@ -106,6 +132,7 @@ export function ContextMenu({ x, y, entries, onClose, anchor }: ContextMenuProps
               role={e.radio !== undefined ? 'menuitemradio' : e.checked !== undefined ? 'menuitemcheckbox' : 'menuitem'}
               aria-checked={e.radio !== undefined || e.checked !== undefined ? !!e.checked : undefined}
               className={`menu-item${e.danger ? ' danger' : ''}`}
+              aria-describedby={e.detail ? `${uid}-${i}` : undefined}
               disabled={e.disabled}
               onClick={() => {
                 e.onClick?.()
@@ -118,7 +145,16 @@ export function ContextMenu({ x, y, entries, onClose, anchor }: ContextMenuProps
                 </span>
               )}
               {e.icon}
-              <span>{e.label}</span>
+              {e.detail ? (
+                <span className="hc-menu-text">
+                  <span>{e.label}</span>
+                  <span className="hc-menu-detail" id={`${uid}-${i}`} aria-hidden="true">
+                    {e.detail}
+                  </span>
+                </span>
+              ) : (
+                <span>{e.label}</span>
+              )}
               {e.shortcut && (
                 <span className="hc-menu-shortcut" aria-hidden="true">
                   {e.shortcut}
@@ -128,8 +164,13 @@ export function ContextMenu({ x, y, entries, onClose, anchor }: ContextMenuProps
           )}
         </Fragment>
       ))}
+      {footer && (
+        <div className="hc-menu-foot" role="presentation">
+          {footer}
+        </div>
+      )}
     </div>,
-    document.body
+    container ?? document.body
   )
 }
 

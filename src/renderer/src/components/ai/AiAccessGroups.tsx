@@ -1,12 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Plus, Trash2, Save, SlidersHorizontal, FolderTree, ChevronRight, TriangleAlert, X } from 'lucide-react'
+import {
+  Plus,
+  Trash2,
+  Save,
+  SlidersHorizontal,
+  FolderTree,
+  ChevronRight,
+  TriangleAlert,
+  X,
+  ShieldAlert
+} from 'lucide-react'
 import { toast } from '../../store/toast'
 import { useNav } from '../../store/nav'
-import { AI_CAPABILITIES } from '../../../../shared/mcp'
+import { AI_CAPABILITIES, RISKY_ACTIONS } from '../../../../shared/mcp'
 import { clsx } from '../../lib/format'
+import { Switch } from '../common/Switch'
 import { summariseAccessGroup, summariseFilePolicies } from './accessGroupSummary'
 import type { AccessGroupSummary } from './accessGroupSummary'
-import type { AccessGroup, AiCapability, FilePathRule, PermissionValue, PolicyAssignment } from '../../../../shared/mcp'
+import type {
+  AccessGroup,
+  AiCapability,
+  FilePathRule,
+  PermissionValue,
+  PolicyAssignment,
+  PolicyScope
+} from '../../../../shared/mcp'
 
 const PERM_OPTIONS: PermissionValue[] = ['allow', 'ask', 'deny']
 
@@ -136,6 +154,7 @@ function GroupCard({
       <div className="ag-card-head">
         <span className="ag-card-name">{group.name}</span>
         {group.builtIn && <span className="chip">Built-in</span>}
+        {group.confirmRisky !== false && <span className="chip warn">Confirms risky actions</span>}
         {summary.elevated.length > 0 && (
           <span className="chip danger">
             <TriangleAlert size={10} /> No prompt
@@ -220,6 +239,32 @@ function GroupEditor({ group, summary, onChange, onSave, onDelete }: {
         </div>
       )}
 
+      <div className="setting-row" style={{ alignItems: 'flex-start' }}>
+        <div className="s-info">
+          <div className="s-title">Confirm risky actions</div>
+          <div className="s-desc">
+            On: the actions below still ask even where a capability says Allow. Off: Allow means allow. Only
+            applies in Auto mode — Ask first asks for every change anyway, and Bypass never asks.
+          </div>
+          <details className="disclosure" style={{ marginTop: 6 }}>
+            <summary className="disclosure-head">
+              <ChevronRight size={14} className="chev" />
+              What counts as risky
+            </summary>
+            <ul className="s-desc" style={{ margin: '4px 0 0', paddingLeft: 18 }}>
+              {RISKY_ACTIONS.map((a) => (
+                <li key={a}>{a}</li>
+              ))}
+            </ul>
+          </details>
+        </div>
+        <Switch
+          checked={group.confirmRisky !== false}
+          onChange={(confirmRisky) => onChange({ ...group, confirmRisky })}
+          label="Confirm risky actions"
+        />
+      </div>
+
       <details className="disclosure" style={{ marginTop: 18 }}>
         <summary className="disclosure-head">
           <ChevronRight size={14} className="chev" />
@@ -262,7 +307,8 @@ function GroupEditor({ group, summary, onChange, onSave, onDelete }: {
         <div className="disclosure-body" style={{ gap: 0 }}>
           <div className="s-desc">
             The most specific matching pattern wins; anything unmatched falls back to Read/Write Files above.
-            Sudo -i/su/bash-style unrestricted shells are always blocked and are not configurable here.
+            Sudo -i/su/bash-style unrestricted shells are blocked in every mode except Bypass, and are not
+            configurable here.
           </div>
           {group.filePolicies.map((rule) => (
             <div className="setting-row" key={rule.id}>
@@ -340,6 +386,7 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
   const [workspaces, setWorkspaces] = useState<WorkspaceOpt[]>([])
   const [servers, setServers] = useState<ServerOpt[]>([])
   const [assignments, setAssignments] = useState<PolicyAssignment[]>([])
+  const [protectedScopes, setProtectedScopes] = useState<PolicyScope[]>([])
   const [activeWorkspaceId, setActiveWorkspaceId] = useState('')
 
   const load = (): void => {
@@ -349,6 +396,7 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
     })
     void window.opsmaxx?.aiPolicy.listServers().then((s) => setServers(s ?? []))
     void window.opsmaxx?.aiPolicy.listAssignments().then((a) => setAssignments(a ?? []))
+    void window.opsmaxx?.aiPolicy.listProtected?.().then((p) => setProtectedScopes(p ?? []))
   }
   useEffect(load, [])
 
@@ -367,7 +415,7 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
     try {
       await change()
     } catch (err) {
-      toast(`That assignment was not saved: ${err instanceof Error ? err.message : String(err)}`, 'error', {
+      toast(`That change was not saved: ${err instanceof Error ? err.message : String(err)}`, 'error', {
         label: 'Try again',
         run: retry
       })
@@ -400,6 +448,25 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
       () => void setServerOverride(serverId, groupId)
     )
   }
+  const isProtected = (scope: PolicyScope): boolean =>
+    protectedScopes.some((p) =>
+      p.level === 'workspace'
+        ? scope.level === 'workspace' && scope.workspaceId === p.workspaceId
+        : scope.level === 'server' && scope.serverId === p.serverId
+    )
+  const setProtected = async (scope: PolicyScope, on: boolean): Promise<void> => {
+    await apply(
+      () => window.opsmaxx?.aiPolicy.setProtected(scope, on),
+      () => void setProtected(scope, on)
+    )
+  }
+  const protectedBadge = (
+    <span className="chip warn">
+      <ShieldAlert size={10} /> Protected
+    </span>
+  )
+  const workspaceScope: PolicyScope = { level: 'workspace', workspaceId: activeWorkspaceId }
+
   const clearServerOverride = async (serverId: string): Promise<void> => {
     const existing = assignments.find((a) => a.scope.level === 'server' && a.scope.serverId === serverId)
     if (!existing) return load()
@@ -415,8 +482,12 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
       <div className="sub">
         Nothing here is needed to give an agent access — a session's own access group is the grant, and
         a workspace with no assignment leaves it exactly as written. What an assignment does is hold a
-        workspace <i>below</i> that grant, for servers that must stay locked down whatever an agent was
-        issued. A server with no override inherits its workspace's assignment.
+        workspace <i>below</i> that grant, whatever group an agent was issued. A server with no override
+        inherits its workspace's assignment.
+      </div>
+      <div className="sub">
+        <b>Protected</b> is the other optional restriction: agents are held at Ask first there, whatever their
+        mode — for production. A session in Read only stays read-only.
       </div>
 
       <div className="setting-row">
@@ -434,6 +505,10 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
       <div className="setting-row">
         <div className="s-info">
           <div className="s-title">Default access group for this workspace</div>
+          <div className="s-desc">
+            A restriction narrows Auto and Ask-first sessions. To hold this target even against Bypass, mark it
+            Protected. No AI Access holds in every mode.
+          </div>
         </div>
         <select
           className="input"
@@ -453,15 +528,42 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
         </select>
       </div>
 
+      <div className="setting-row">
+        <div className="s-info">
+          <div className="s-title">
+            Protected workspace {isProtected(workspaceScope) && protectedBadge}
+          </div>
+          <div className="s-desc">
+            Agents are held at Ask first here, whatever their mode — for production.
+          </div>
+        </div>
+        <Switch
+          checked={isProtected(workspaceScope)}
+          disabled={!activeWorkspaceId}
+          onChange={(on) => void setProtected(workspaceScope, on)}
+          label="Protected workspace"
+        />
+      </div>
+
       <h3 style={{ marginTop: 16 }}>Per-server overrides</h3>
       {serversHere.length === 0 && <div className="s-desc">No servers in this workspace.</div>}
       {serversHere.map((s) => {
         const override = assignments.find((a) => a.scope.level === 'server' && a.scope.serverId === s.id)
+        const scope: PolicyScope = { level: 'server', serverId: s.id }
         return (
           <div className="setting-row" key={s.id}>
             <div className="s-info">
-              <div className="s-title">{s.name}</div>
+              <div className="s-title">
+                {s.name} {isProtected(scope) && protectedBadge}
+              </div>
+              {isProtected(workspaceScope) && !isProtected(scope) && (
+                <div className="s-desc">Protected through its workspace.</div>
+              )}
             </div>
+            <label className="row" style={{ gap: 6, alignItems: 'center' }}>
+              <span className="s-desc">Protected</span>
+              <Switch checked={isProtected(scope)} onChange={(on) => void setProtected(scope, on)} />
+            </label>
             <select
               className="input"
               value={override ? override.groupId ?? '' : '__inherit'}
@@ -721,8 +823,8 @@ export function AiAccessGroups(): React.JSX.Element {
           <div className="s-info">
             <div className="s-title">Name the new group</div>
             <div className="s-desc">
-              A new group starts by allowing reads, asking before terminal and database access, and
-              refusing writes and sudo. You can change all of it next.
+              A new group starts by allowing reads, asking before terminal and database access,
+              refusing writes and sudo, and confirming risky actions. You can change all of it next.
             </div>
           </div>
           <input

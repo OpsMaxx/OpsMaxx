@@ -3,26 +3,31 @@ import { ChevronDown, ChevronRight, ShieldCheck } from 'lucide-react'
 import { toast } from '../../store/toast'
 import { openAi, openSettings } from '../../store/nav'
 import { clsx } from '../../lib/format'
-import type { AccessGroup, McpAgentSession } from '../../../../shared/mcp'
+import { DEFAULT_SESSION_MODE, SESSION_MODES, sessionModeLabel } from '../../../../shared/mcp'
+import type {
+  AccessGroup,
+  CapabilityExplanation,
+  McpAgentSession,
+  PermissionValue,
+  SessionMode
+} from '../../../../shared/mcp'
+import { ModePicker } from './ModePicker'
 
-interface Explanation {
-  capability: string
-  label: string
-  decision: 'allow' | 'ask' | 'deny'
-  reason: string
-  fromScope: 'allow' | 'ask' | 'deny'
-  fromSession: 'allow' | 'ask' | 'deny' | null
-  decidedBy: 'scope' | 'session' | 'both'
-  scopeGroupId: string | null
-  scopeGroupName: string | null
-  scopeWorkspaceId: string | null
-  scopeWorkspaceName: string | null
+const VERDICT: Record<PermissionValue, string> = { allow: 'ALLOW', ask: 'ASK', deny: 'DENY' }
+
+/** Protected scopes that fall inside this session's workspaces. */
+async function protectedCountFor(session: McpAgentSession): Promise<number> {
+  const api = window.opsmaxx?.aiPolicy
+  const [scopes, servers] = await Promise.all([api?.listProtected?.(), api?.listServers?.()])
+  const mine = new Set(session.workspaces.map((w) => w.id))
+  const workspaceOf = new Map((servers ?? []).map((s) => [s.id, s.workspaceId]))
+  return (scopes ?? []).filter((s) =>
+    mine.has(s.level === 'workspace' ? s.workspaceId : (workspaceOf.get(s.serverId) ?? ''))
+  ).length
 }
 
-const VERDICT: Record<string, string> = { allow: 'ALLOW', ask: 'ASK', deny: 'DENY' }
-
 // Answers the question the permission model actually raises — "what can this
-// agent do, and which of the two layers decided that" — in the place the user
+// agent do, and which layer decided that" — in the place the user
 // is already looking. Until now nothing in the app could answer it: the only
 // thing that computed effective permissions was the get_server_details MCP
 // tool, so the agent could see the answer and the person could not.
@@ -36,29 +41,35 @@ export function SessionAccess({
   onChanged: () => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
-  const [rows, setRows] = useState<Explanation[] | null>(null)
+  const [rows, setRows] = useState<CapabilityExplanation[] | null>(null)
+  const [protectedCount, setProtectedCount] = useState(0)
+  const mode: SessionMode = session.mode ?? DEFAULT_SESSION_MODE
 
   // Fetched whether or not the table is open.
   //
   // It used to load only on expand, which meant the one fact that explains the
-  // whole permission model -- that the ceiling is a CAP and the workspace or
-  // server assignment is the GRANT -- was available exclusively to someone who
-  // had already guessed there was something to look at. The reported symptom is
-  // always the same: "I set the ceiling to Full Access and it still asks on
-  // every command", or denies. It is a local call against data already in
-  // memory, so there is nothing to save by waiting.
+  // whole permission model -- that the session's group is the GRANT and a
+  // workspace or server assignment can only hold it lower -- was available
+  // exclusively to someone who had already guessed there was something to look
+  // at. It is a local call against data already in memory, so there is nothing
+  // to save by waiting.
   useEffect(() => {
-    void window.opsmaxx?.aiMcp
-      .explainAccess?.(session.id, null)
-      .then((r) => setRows((r as Explanation[] | null) ?? []))
-  }, [session.id, session.groupId])
+    void window.opsmaxx?.aiMcp.explainAccess?.(session.id, null).then((r) => setRows(r ?? []))
+  }, [session.id, session.groupId, mode])
+
+  useEffect(() => {
+    protectedCountFor(session)
+      .then(setProtectedCount)
+      .catch(() => setProtectedCount(0))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session.id])
 
   /**
-   * Capabilities the assignment holds BELOW the ceiling.
+   * Capabilities an assignment holds BELOW the session's group.
    *
    * `decidedBy: 'scope'` is precisely "the workspace's or server's own access
-   * group was the narrower of the two", which is the case the ceiling control
-   * cannot express and the user cannot see.
+   * group was the narrower of the two", which the group picker cannot express
+   * and the user cannot otherwise see.
    */
   const narrowed = (rows ?? []).filter(
     (r) => r.decidedBy === 'scope' && r.decision !== 'allow' && r.fromSession !== r.decision
@@ -101,6 +112,23 @@ export function SessionAccess({
     toast(`${session.agentName} can now do at most what ${name} allows.`, 'ok')
   }
 
+  const changeMode = async (next: SessionMode): Promise<void> => {
+    const updated = await window.opsmaxx?.aiMcp.setSessionMode?.(session.id, next)
+    setRows(null)
+    onChanged()
+    if (!updated) {
+      toast(`${session.agentName} was not changed — it is still in ${sessionModeLabel(mode)}.`, 'error', {
+        label: 'Try again',
+        run: () => void changeMode(next)
+      })
+      return
+    }
+    toast(`${session.agentName} is now in ${sessionModeLabel(next)}.`, 'ok')
+  }
+
+  const shielded = rows?.some((r) => r.protectedTarget) ?? false
+  const partly = rows?.some((r) => r.partlyAsks) ?? false
+
   return (
     <div style={{ width: '100%' }}>
       <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6 }}>
@@ -117,13 +145,15 @@ export function SessionAccess({
             </option>
           ))}
         </select>
+        <span className="s-desc">Mode</span>
+        <ModePicker value={mode} onChange={changeMode} protectedCount={protectedCount} size="sm" />
         <button className="btn sm" onClick={() => setOpen((v) => !v)}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Effective access
         </button>
       </div>
 
       {/* The sentence that answers "but I granted Full Access".
-          Raising the ceiling cannot widen what an assignment allows, and until
+          Widening the session's group cannot lift an assignment, and until
           this line existed the screen showed only the half the user had just
           changed.
           SHOWN WHETHER OR NOT THE TABLE IS OPEN. It used to be `!open &&`, so
@@ -145,6 +175,16 @@ export function SessionAccess({
 
       {open && (
         <div style={{ marginTop: 8 }}>
+          <div className="s-desc" style={{ marginBottom: 6 }}>
+            Mode: <b>{sessionModeLabel(mode)}</b> — {SESSION_MODES.find((m) => m.id === mode)?.detail}.
+            {shielded && (
+              <>
+                {' '}
+                <span className="chip warn">Protected</span> A protected target holds this session at Ask first
+                there.
+              </>
+            )}
+          </div>
           {rows === null && <div className="s-desc">Working it out…</div>}
           {rows?.length === 0 && <div className="s-desc">This session is scoped to no workspace.</div>}
           {rows && rows.length > 0 && (
@@ -154,7 +194,7 @@ export function SessionAccess({
                   <th>Capability</th>
                   <th>Workspace</th>
                   <th>This session</th>
-                  <th>Result</th>
+                  <th>Result · why</th>
                 </tr>
               </thead>
               <tbody>
@@ -165,20 +205,28 @@ export function SessionAccess({
                     <td className={clsx('mono', r.decidedBy === 'session' && 'strong')}>
                       {r.fromSession ? VERDICT[r.fromSession] : '—'}
                     </td>
-                    <td className="mono strong">{VERDICT[r.decision]}</td>
+                    <td>
+                      <span className="mono strong">
+                        {VERDICT[r.decision]}
+                        {r.partlyAsks && '*'}
+                      </span>
+                      <div className="s-desc">{r.reason}</div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           )}
+          {partly && (
+            <div className="s-desc" style={{ marginTop: 6 }}>
+              * Some calls under this still ask — risky commands, database writes, changing or removing
+              servers — because Confirm risky actions is on (or the mode is Ask first).
+            </div>
+          )}
           <div className="s-desc" style={{ marginTop: 6 }}>
-            The stricter of the two wins. The bolded column is the one that decided — if it is
-            <b> This session</b>, change the ceiling above; if it is <b>Workspace</b>, the group
-            assigned to the workspace is what has to change.
-          </div>
-          <div className="s-desc" style={{ marginTop: 4 }}>
-            These are capabilities. A single command can still ask on top of them when the command
-            itself is destructive — the approval card says which finding asked.
+            <b>This session</b> is the access group picked above, the grant. <b>Workspace</b> is an optional
+            assignment under Access Groups, which can only hold it lower. The bolded column is the one that
+            decided, and the mode is applied last.
           </div>
           <button
             className="btn sm"

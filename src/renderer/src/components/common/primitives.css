@@ -52,6 +52,38 @@
   color: var(--text-faint);
   font-size: var(--fs-caption);
 }
+/* An entry with a `detail`: bold label, one muted line of what it does. */
+.hc-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.hc-menu-text > :first-child {
+  font-weight: 600;
+}
+.hc-menu-detail {
+  max-width: 260px;
+  color: var(--text-muted);
+  font-size: var(--fs-caption);
+  white-space: normal;
+}
+.hc-menu-foot {
+  max-width: 300px;
+  margin-top: var(--sp-1);
+  padding: var(--sp-2) var(--sp-3) var(--sp-1);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--fs-caption);
+}
+
+/* ---- ModePicker (components/ai/ModePicker.tsx) ---- */
+/* Bypass lifts every refusal, so the control that shows it is never quiet. */
+.hc-mode-picker.is-bypass {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
 
 /* ---- Popover ---- */
 .hc-popover {

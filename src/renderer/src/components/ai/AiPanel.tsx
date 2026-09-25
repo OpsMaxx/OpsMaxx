@@ -74,12 +74,16 @@ function Overview(): React.JSX.Element {
 
       <h3 style={{ marginTop: 24 }}>How it works</h3>
       <ol className="s-desc" style={{ lineHeight: 1.8 }}>
-        <li>Create an access group (or use a default) describing what AI is allowed to do.</li>
-        <li>Assign your workspaces/servers to an access group — most servers default to No AI Access.</li>
-        <li>Create an AI Agent session scoped to one or more workspaces and an access group, and copy its token.</li>
+        <li>Pick an access group (or use a built-in one) — it is the grant: what the agent may do.</li>
+        <li>Pick a mode — how much you stay in the loop: Read only, Ask first, Auto (follow the group) or Bypass.</li>
+        <li>Create an AI Agent session scoped to one or more workspaces with that group and mode, and copy its token.</li>
         <li>Point Claude Code, Codex or another MCP client at OpsMaxx's local MCP server with that token.</li>
-        <li>Approve or deny sensitive actions as they come up — the AI waits for your answer.</li>
+        <li>Approve or deny actions as they come up — the AI waits for your answer.</li>
       </ol>
+      <div className="s-desc">
+        Optional: under Access Groups, hold a workspace or server below every session's group with an
+        assignment, or mark it Protected so agents there are held at Ask first — for production.
+      </div>
       <div className="s-desc">
         <b>Connect an agent</b> above does steps 1–4 in one click. Codex and Gemini CLI are still
         wired up by hand — <code className="mono">opsmaxx codex</code>, or the snippet under AI

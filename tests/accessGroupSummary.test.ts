@@ -3,7 +3,8 @@ import {
   summariseAccessGroup,
   summariseFilePolicies,
   capabilityDecisions,
-  ELEVATED_CAPABILITIES
+  ELEVATED_CAPABILITIES,
+  RISKY_CLAUSE
 } from '../src/renderer/src/components/ai/accessGroupSummary'
 import { evaluateCapability, evaluateFilePath } from '../src/main/services/policyEngine'
 import { AI_CAPABILITIES } from '../src/shared/mcp'
@@ -90,7 +91,8 @@ describe('summariseAccessGroup — built-in groups', () => {
     expect(s.sentence).toBe(
       'Can see server details, run commands, read files, download files, query databases, read server metrics, ' +
         'list containers and read their logs, start and stop containers, see backup health, and read across the fleet without asking. ' +
-        'Cannot use sudo, add, change and remove servers in the workspace, start and stop VPNs, and list reverse proxies, start and cancel CI pipelines, write files, upload files, define and open SSH tunnels, read the server inventory and its pending security updates, collect this server’s firewall rule list, collect this server’s sudoers rules, or read CI pipelines and build output.'
+        'Cannot use sudo, add, change and remove servers in the workspace, start and stop VPNs, and list reverse proxies, start and cancel CI pipelines, write files, upload files, define and open SSH tunnels, read the server inventory and its pending security updates, collect this server’s firewall rule list, collect this server’s sudoers rules, or read CI pipelines and build output. ' +
+        RISKY_CLAUSE
     )
     expect(s.counts).toEqual({ allow: 10, ask: 0, deny: 11 })
     expect(s.elevated).toEqual([])
@@ -134,7 +136,8 @@ describe('summariseAccessGroup — built-in groups', () => {
         })
       )
     )
-    expect(s.clauses).toHaveLength(3)
+    expect(s.clauses).toHaveLength(4)
+    expect(s.clauses[3]).toBe(RISKY_CLAUSE)
     expect(s.clauses[1]).toContain('Asks you first before using sudo,')
     // Not "denies nothing" any more. hostFacts is seeded at deny on every group
     // including this one, because a count of unpatched security updates is a
@@ -193,9 +196,19 @@ describe('summariseAccessGroup — edge cases', () => {
   it('names the dangerous capabilities when everything is allowed', () => {
     const s = summariseAccessGroup(group(everything('allow')))
     expect(s.sentence).toBe(
-      'Can do everything without asking — including using sudo, adding, changing and removing servers in the workspace, starting and stopping VPNs, and listing reverse proxies, and starting and cancelling CI pipelines.'
+      'Can do everything without asking — including using sudo, adding, changing and removing servers in the workspace, starting and stopping VPNs, and listing reverse proxies, and starting and cancelling CI pipelines. ' +
+        RISKY_CLAUSE
     )
     expect(s.elevated).toEqual(ELEVATED_CAPABILITIES)
+  })
+
+  it('says risky actions are confirmed unless the group turns that off', () => {
+    // Absent reads as ON, exactly as policyEngine.confirmsRisky reads it.
+    expect(summariseAccessGroup(group(everything('allow'))).clauses).toContain(RISKY_CLAUSE)
+    const off = { ...group(everything('allow')), confirmRisky: false }
+    expect(summariseAccessGroup(off).clauses).not.toContain(RISKY_CLAUSE)
+    // It qualifies an Allow, so a group that allows nothing does not say it.
+    expect(summariseAccessGroup(group(everything('deny'))).clauses).not.toContain(RISKY_CLAUSE)
   })
 
   it('has no Can clause when every capability needs a prompt', () => {
@@ -405,7 +418,8 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
       'Can see server details, run commands, download files, query databases, read server metrics, list containers and read their logs, start and stop containers, see backup health, and read across the fleet without asking.',
       `Cannot use sudo, add, change and remove servers in the workspace, start and stop VPNs, and list reverse proxies, ${CIT}, upload files, define and open SSH tunnels, ${HF}, ${FW}, ${SU}, or ${CIR}.`,
       'Can read files without asking — except 19 path rules that block it.',
-      'Cannot write files — except 2 path rules that ask you first.'
+      'Cannot write files — except 2 path rules that ask you first.',
+      RISKY_CLAUSE
     ])
     // The grid still shows what the grid shows; the rules qualify it.
     expect(s.counts).toEqual({ allow: 10, ask: 0, deny: 11 })
