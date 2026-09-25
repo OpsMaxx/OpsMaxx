@@ -1,6 +1,7 @@
 import { createServer, type Server as HttpServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { createHmac, randomUUID } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { hostname, networkInterfaces } from 'node:os'
 import { app } from 'electron'
 import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -400,6 +401,86 @@ function serversBehind(serverId: string): { names: string[]; unmatchedHops: numb
 }
 
 /**
+ * Is this host the machine OpsMaxx itself runs on?
+ *
+ * Loopback, the unspecified addresses, this machine's name, and every address
+ * on its own interfaces. Hostnames are compared as written, never resolved --
+ * this is a fence against the obvious aliases, not a DNS audit.
+ */
+function isThisMachine(host: string): boolean {
+  const h = host.trim().toLowerCase().replace(/^\[|\]$/g, '')
+  if (!h) return false
+  if (h === 'localhost' || h.endsWith('.localhost') || /^127\./.test(h)) return true
+  if (h === '::1' || h === '0.0.0.0' || h === '::' || h === '0:0:0:0:0:0:0:1') return true
+  const me = hostname().toLowerCase()
+  if (h === me || h === `${me}.local` || h === me.split('.')[0]) return true
+  for (const list of Object.values(networkInterfaces()))
+    for (const a of list ?? []) if (a.address.toLowerCase() === h) return true
+  return false
+}
+
+/**
+ * Would an entry an agent is about to write point at a machine the user has
+ * fenced off? Protected and No AI Access are keyed by ENTRY, so without this an
+ * agent could add a second entry for a Protected box -- or for this machine --
+ * and act through it unfenced. Returns the fence, or null.
+ *
+ *   this machine        refused in every mode. No tool on the bridge is a shell
+ *                       on the OpsMaxx host, and an entry pointing here would be
+ *                       one, from which the policy file itself is editable.
+ *   a No AI Access box  refused in every mode: that is scope, not permission.
+ *   a Protected box     asks, Bypass included -- the same cap the box has.
+ *
+ * Matched on host and port as written. Servers outside the session are
+ * compared but never named, so the answer leaks nothing about them.
+ */
+function fenceForTarget(
+  session: McpAgentSession,
+  host: string,
+  port: number,
+  excludeId: string | null
+): Decision | null {
+  const h = host.trim().toLowerCase()
+  if (!h) return null
+  if (isThisMachine(h)) {
+    return {
+      decision: 'deny',
+      reason:
+        'That address is the machine OpsMaxx itself runs on. An agent may not save a connection to it in any ' +
+        'mode: it would be a shell on the OpsMaxx host, which this bridge never offers.',
+      outOfScope: true
+    }
+  }
+  const inSession = new Set(session.workspaces.map((w) => w.id))
+  for (const s of listCachedServers()) {
+    if (s.id === excludeId || s.cloud || s.port !== port || s.host.trim().toLowerCase() !== h) continue
+    const named = inSession.has(s.workspaceId) ? `"${s.name}"` : 'a server outside this session'
+    if (resolveRestriction(listAssignments(), s.id, s.workspaceId).kind === 'no-ai-access') {
+      return {
+        decision: 'deny',
+        reason: `That address and port are the same machine as ${named}, which is set to No AI Access.`,
+        outOfScope: true
+      }
+    }
+    if (isProtected(s.id, s.workspaceId)) {
+      return {
+        decision: 'ask',
+        reason: `That address and port are the same machine as ${named}, which is Protected: every change is approved first.`,
+        protectedTarget: true
+      }
+    }
+  }
+  return null
+}
+
+/** The fence, applied on top of a check: a refusal wins, a Protected fence caps at ask. */
+function withFence(check: Decision, fence: Decision | null): Decision {
+  if (!fence) return check
+  if (fence.decision === 'deny') return fence
+  return check.decision === 'deny' ? check : fence
+}
+
+/**
  * May this session change or delete THIS saved connection?
  *
  * Shaped like `effectiveCapability` -- the session's group is the grant, the
@@ -680,6 +761,13 @@ function effectiveFilePath(session: McpAgentSession, serverId: string, path: str
 
 interface AuditContext {
   session: McpAgentSession
+  /**
+   * The session's mode when the call was CHECKED, stamped by gate(). A mode
+   * can change while a request waits -- the approval dialog offers exactly
+   * that -- and the row must record the mode the decision was made under, not
+   * the one in force when the tool finished.
+   */
+  mode?: SessionMode
   // The specific server's own workspace, not the session's — a session can
   // span several workspaces now, so only the resolved server's workspace is
   // correct for an audit entry about acting on it.
@@ -979,6 +1067,7 @@ async function gate(
   subject: GateSubject,
   extra?: ExtraLike
 ): Promise<{ ok: true; approval: GateApproval; granted?: string } | { ok: false; result: CallToolResult }> {
+  ctx.mode ??= modeOf(ctx.session)
   if (check.decision === 'deny') {
     recordAudit({
       agentName: ctx.session.agentName,
@@ -989,6 +1078,7 @@ async function gate(
       serverName: ctx.serverName,
       action: ctx.action,
       capability: ctx.capability,
+      mode: ctx.mode,
       approval: 'not-required',
       result: 'denied',
       error: check.reason
@@ -1018,6 +1108,7 @@ async function gate(
         serverName: ctx.serverName,
         action: ctx.action,
         capability: ctx.capability,
+        mode: ctx.mode,
         approval: 'not-required',
         result: 'denied',
         error: reason
@@ -1045,7 +1136,9 @@ async function gate(
     // because an `allow` never reaches this branch at all -- it falls past both
     // of gate()'s tests to `return { ok: true }` and would make this exclusion
     // dead code on exactly the configuration it was written for.
-    const perCall = ctx.capability === 'ciTrigger' || subject.perCall === true
+    // A Protected target is "every change is approved first": one yes there
+    // must not quietly become a standing grant for the rest of the session.
+    const perCall = ctx.capability === 'ciTrigger' || subject.perCall === true || check.protectedTarget === true
     // Defaults to the capability, so every caller that names no scope keeps the
     // grain it has always had.
     //
@@ -1137,6 +1230,7 @@ async function gate(
         serverName: ctx.serverName,
         action: ctx.action,
         capability: ctx.capability,
+        mode: ctx.mode,
         // `refused` is OpsMaxx declining to ask -- too many requests open, or
         // this one denied moments ago -- and it used to be written as
         // `denied`, which the audit view rendered "You refused this request".
@@ -1276,7 +1370,9 @@ async function gateWorkspaces(
   if (checked.length > 1) {
     const each = checked.map(({ workspace }) => {
       const answer = answers.get(workspace.id)
-      return `${workspace.name}: ${answer === undefined || answer === 'not-required' ? 'allowed' : answer}`
+      const check = checked.find((c) => c.workspace.id === workspace.id)?.check
+      const label = answer === undefined || answer === 'not-required' ? (check?.bypassed ? 'bypassed' : 'allowed') : answer
+      return `${workspace.name}: ${label}`
     })
     row.ctx = { ...row.ctx, action: `${base.action} (${each.join(', ')})` }
   }
@@ -1321,6 +1417,7 @@ function auditSuccess(ctx: AuditContext, approval: GateApproval, extra: { exitCo
     serverName: ctx.serverName,
     action: ctx.action,
     capability: ctx.capability,
+    mode: ctx.mode,
     approval,
     result: 'success',
     exitCode: extra.exitCode
@@ -2363,6 +2460,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           serverName: s.name,
           action: command,
           capability: ctx.capability,
+          mode: ctx.mode,
           approval: gated.approval,
           result: 'error',
           error: result.error
@@ -2958,7 +3056,15 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const workspace = getCachedWorkspace(db.workspaceId)
 
       const reads = classifyStatement(statement) === 'read'
-      const check = workspaceCheck(session, db.workspaceId, (g) => evaluateDatabaseStatement(g, statement), !reads)
+      // The SSH server a database is reached through is its carrier, as a
+      // tunnel's is: marking that server Protected caps the database too.
+      const check = workspaceCheck(
+        session,
+        db.workspaceId,
+        (g) => evaluateDatabaseStatement(g, statement),
+        !reads,
+        db.sshServerId ?? null
+      )
 
       const ctx: AuditContext = {
         session,
@@ -3482,7 +3588,10 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         capability: 'manageServers'
       }
 
-      const check = effectiveWorkspaceCapability(session, workspace.id, 'manageServers')
+      const check = withFence(
+        effectiveWorkspaceCapability(session, workspace.id, 'manageServers'),
+        hostGiven ? fenceForTarget(session, hostGiven, port, null) : null
+      )
       const gated = await gate(
         ctx,
         check,
@@ -3730,7 +3839,12 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // the operator had just said yes to. `elevationScope` keeps the approval
       // pinned to this tool and this server, so the yes does not spread to
       // remove_server, to another connection, or past the end of the session.
-      const check = serverWriteCheck(session, target, 'change')
+      // Repointing an entry at a fenced machine is fenced like adding one.
+      const repointed = args.host !== undefined || args.port !== undefined
+      const check = withFence(
+        serverWriteCheck(session, target, 'change'),
+        repointed && !target.cloud ? fenceForTarget(session, patch.host ?? target.host, patch.port ?? target.port, target.id) : null
+      )
       const gated = await gate(
         ctx,
         check,
@@ -5691,6 +5805,7 @@ function auditBase(ctx: AuditContext): {
   serverName: string | null
   action: string
   capability: AiCapability | null
+  mode?: SessionMode
 } {
   return {
     agentName: ctx.session.agentName,
@@ -5700,7 +5815,8 @@ function auditBase(ctx: AuditContext): {
     serverId: ctx.serverId,
     serverName: ctx.serverName,
     action: ctx.action,
-    capability: ctx.capability
+    capability: ctx.capability,
+    mode: ctx.mode
   }
 }
 
@@ -6030,7 +6146,13 @@ export function explainSessionAccess(sessionId: string, serverId: string | null)
         : combined.decision === scope.decision
           ? ('scope' as const)
           : ('session' as const)
-    const final = applyMode(combined, { mode, protectedTarget, mutating: MUTATING_CAPABILITIES.has(id) })
+    const applied = applyMode(combined, { mode, protectedTarget, mutating: MUTATING_CAPABILITIES.has(id) })
+    // databaseAccess is a read AND a write, graded per statement, so the mode
+    // cannot be applied to the row as a whole. Say what Read only does to it.
+    const final: Decision =
+      effective === 'readOnly' && id === 'databaseAccess' && applied.decision === 'allow'
+        ? { ...applied, reason: 'Reads only: Read-only mode refuses any statement that writes.' }
+        : applied
     const partlyAsks =
       final.decision === 'allow' &&
       PARTLY_ASKS.has(id) &&

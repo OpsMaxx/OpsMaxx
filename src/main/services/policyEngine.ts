@@ -1351,6 +1351,9 @@ function pathsFromArgv(tokens: string[], found: PathAccess[]): void {
   }
 }
 
+const CONTAINER_LIFECYCLE =
+  /\b(?:docker|podman|nerdctl)(?:\s+compose)?(?:\s+container)?\s+(?:stop|kill|restart|rm|start|pause|unpause|down|prune)\b|\bkubectl\s+(?:delete|scale|drain|cordon|rollout)\b/
+
 const STREAM_DEVICE = /^\/dev\/(null|zero|stdin|stdout|stderr|tty|fd\/\d+)$/
 
 export function extractPathAccesses(command: string): PathAccess[] {
@@ -1498,10 +1501,33 @@ export function evaluateCommand(group: AccessGroup | null, command: string): Dec
   const assessed = assessCommand(command)
   const beyondSudo = assessed.reasons.filter((r) => r !== SUDO_REASON)
   const waived = sudoGranted && assessed.risk === 'elevated'
-  if (risky && base.decision === 'allow' && assessed.risk !== 'ordinary' && beyondSudo.length > 0 && !waived) {
+  // With the switch off, this upgrade still stands wherever the command would
+  // otherwise walk past ANOTHER capability the group set below allow -- the
+  // same rule as the computed-command case above. The path check below catches
+  // `rm /x` and `> /x`, but not `find / -delete`, `mkfs /dev/sdb` or
+  // `systemctl stop db`, which name no file to write; and `docker stop` is
+  // containerControl's act, whatever the terminal says.
+  const walksPastWrites = assessed.risk === 'destructive' && evaluateCapability(group, 'writeFiles').decision !== 'allow'
+  if ((risky || walksPastWrites) && base.decision === 'allow' && assessed.risk !== 'ordinary' && beyondSudo.length > 0 && !waived) {
     base = {
       decision: 'ask',
       reason: `Requires approval: this command ${beyondSudo.join(', and ')}.`
+    }
+  }
+
+  // A container's lifecycle is containerControl's act, whatever the terminal
+  // says and however the classifier grades it -- `docker restart` is not graded
+  // at all. A group that does not allow it outright is asked, switch or no
+  // switch, and granting sudo does not answer it: sudo is "may it run as root",
+  // not "may it stop containers". `docker build` is not a lifecycle act.
+  if (
+    base.decision === 'allow' &&
+    CONTAINER_LIFECYCLE.test(command) &&
+    evaluateCapability(group, 'containerControl').decision !== 'allow'
+  ) {
+    base = {
+      decision: 'ask',
+      reason: 'Requires approval: it starts, stops or removes containers, and this access group does not allow Container control.'
     }
   }
 
@@ -1607,7 +1633,7 @@ const READ = /^(select|show|explain|describe|desc|with|values|table|get|mget|key
 // defensible is that the functions somebody reaches for DURING AN INCIDENT --
 // when they are in a hurry and an agent is helping -- are the ones here.
 const SIDE_EFFECT_FN =
-  /\b(pg_terminate_backend|pg_cancel_backend|pg_switch_wal|pg_switch_xlog|pg_promote|pg_reload_conf|pg_rotate_logfile|pg_drop_replication_slot|pg_create_restore_point|\w*_reset)\s*\(/
+  /\b(pg_terminate_backend|pg_cancel_backend|pg_switch_wal|pg_switch_xlog|pg_promote|pg_reload_conf|pg_rotate_logfile|pg_drop_replication_slot|pg_create_restore_point|\w*_reset|dblink_exec|dblink|lo_unlink|lo_import|lo_export|lo_create|lo_put|lo_truncate|setval|nextval)\s*\(/
 
 // `SELECT * INTO newtable FROM t` CREATES A RELATION -- Postgres and MSSQL
 // both. The verb is still `select`.
@@ -1668,6 +1694,9 @@ function classifyMongo(s: string): StatementKind | null {
   if (!m) return null
   const method = m[1].toLowerCase()
   if (MONGO_DESTRUCTIVE.has(method)) return 'destructive'
+  // An aggregation ending in $out replaces a collection, and $merge writes into
+  // one. The method is `aggregate`, which is otherwise a read.
+  if (method === 'aggregate' && /\$(out|merge)\b/.test(s)) return 'destructive'
   return MONGO_READ.has(method) ? 'read' : 'mutating'
 }
 
@@ -1695,7 +1724,12 @@ export function classifyStatement(sql: string): StatementKind {
     }
 
     if (DESTRUCTIVE.test(s)) return 'destructive'
-    if (MUTATING.test(s) || SIDE_EFFECT_FN.test(s) || SELECT_INTO.test(s)) worst = 'mutating'
+    // A data-modifying CTE: `WITH d AS (DELETE FROM t RETURNING *) SELECT ...`.
+    // The leading verb is `with`, a read, and the DELETE runs all the same. A
+    // column that happens to be called `update` makes this over-cautious,
+    // which is the cheap direction to be wrong in.
+    const dmlInCte = /^with\b/.test(s) && /\b(insert|update|delete|merge)\b/.test(s)
+    if (MUTATING.test(s) || SIDE_EFFECT_FN.test(s) || SELECT_INTO.test(s) || dmlInCte) worst = 'mutating'
     // An unrecognised verb is treated as mutating rather than read. There are
     // far too many dialects to enumerate, and guessing "harmless" is the
     // expensive direction to be wrong in.

@@ -401,6 +401,13 @@ While it is on, `allow` still asks for the actions that are hard to take back:
 - starting a VPN, or stopping one other sessions depend on;
 - starting, cancelling or re-running CI/CD pipelines.
 
+Turning the switch off never lets one capability walk past another the group set below `allow`.
+Three command upgrades therefore stay whatever the switch says: a computed command word unless
+`sudo` is `allow` (above); a destructive command that names no file for the path rules to catch
+(`find / -delete`, `mkfs /dev/sdb`, `systemctl stop db`) unless `writeFiles` is `allow`; and a
+container's lifecycle (`docker stop`, `docker restart`, `kubectl delete`, …) unless
+`containerControl` is `allow` — granting `sudo` does not answer that one.
+
 That list is `RISKY_ACTIONS` in `shared/mcp.ts`, and every allow-to-ask upgrade in
 `policyEngine.ts` is conditional on `confirmsRisky(group)` and on nothing else. These upgrades used
 to be unconditional, which meant a group set to allow everything still asked, for reasons no screen
@@ -555,6 +562,11 @@ asked for) **or assign it No AI Access** (unreachable). Assigning it a narrower 
 - **The audit log.** Every row records the session's mode, and a call that ran only because of
   Bypass — one the group would have asked about or refused — is audited as `bypassed`, never as
   `not-required`. After the fact, the log alone says which actions only happened because of Bypass.
+- **Saving a connection to a fenced machine.** `add_server` and `update_server` refuse an address
+  that is the OpsMaxx machine itself (loopback, its hostname, its own interface addresses) and one
+  that matches a No AI Access entry by host and port, in every mode; one matching a Protected entry
+  is held at Ask first. Protected and No AI Access are set per entry, and this is what stops a
+  second entry for the same machine from escaping them.
 - **What is absent from the bridge.** Bypass cannot reach a tool that does not exist: there is
   still no local shell, no vault read, no job runner, no backup run or restore, no tool that reads
   firewall rules or sudoers, and no tool that creates a VPN profile or CI connection.

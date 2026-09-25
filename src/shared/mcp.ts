@@ -49,7 +49,7 @@ export function sessionModeLabel(mode: SessionMode | undefined): string {
  * policyEngine.ts actually upgrades.
  */
 export const RISKY_ACTIONS: string[] = [
-  'destructive or elevated commands (rm -rf, mkfs, reboot, package installs, service restarts)',
+  'destructive or elevated commands (rm -rf, mkfs, reboot, package installs, service restarts) — a destructive one also asks with the switch off unless Write files is Allow, and stopping or removing containers unless Container control is Allow',
   'commands whose program is computed at run time (these also ask with the switch off, unless Sudo is Allow), and unshare -r',
   'database writes and schema changes',
   'opening, defining or deleting SSH tunnels',
