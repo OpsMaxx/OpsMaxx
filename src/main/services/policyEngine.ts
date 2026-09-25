@@ -1580,14 +1580,14 @@ export function evaluateFilePath(
 //
 // databaseAccess defaults to ALLOW in every built-in group, because until now
 // nothing was gated on it. Shipping a query tool that simply honoured that
-// would hand a Full Access agent a silent DROP TABLE, so this follows the rule
-// the codebase already applies to sudo: the dangerous form is never granted
-// silently, whatever the group says.
+// would hand an agent a silent DROP TABLE, so a write follows the rule the
+// terminal path follows: while the group's Confirm risky actions is on, the
+// dangerous form is not granted silently.
 //
 // Reads are governed by databaseAccess alone. Anything that writes is also
 // bounded by writeFiles — a group whose whole point is that it cannot change
-// anything should not be able to change a row either — and can never resolve
-// better than ASK.
+// anything should not be able to change a row either — and resolves no better
+// than ASK while Confirm risky actions is on.
 export type StatementKind = 'read' | 'mutating' | 'destructive'
 
 const DESTRUCTIVE = /^(drop|truncate|alter|create|rename|grant|revoke|flushall|flushdb|shutdown)\b/
@@ -1750,8 +1750,9 @@ export function evaluateTunnelOpen(group: AccessGroup | null): Decision {
 // survives the session that created it -- the next person to press Start in the
 // Tunnels view starts whatever an agent wrote there. A `remote` forward is the
 // sharp end: it listens ON THE SERVER, so a non-loopback listen address
-// publishes the port to that server's whole network. So this is never silent
-// either, and the tool grades a non-loopback remote forward higher again.
+// publishes the port to that server's whole network. So it asks while Confirm
+// risky actions is on, and the tool grades a non-loopback remote forward
+// higher again.
 export function evaluateTunnelDefine(group: AccessGroup | null): Decision {
   if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
   const tunnel = evaluateCapability(group, 'sshTunnel')

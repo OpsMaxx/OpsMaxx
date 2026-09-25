@@ -3715,7 +3715,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         action: `Change server "${target.name}" (${changes.join(', ')})`,
         capability: 'manageServers'
       }
-      // Never silent, whatever the group says. Repointing a connection is the
+      // Not silent while Confirm risky actions is on. Repointing a connection is the
       // quietest dangerous thing on this bridge: deleting "Prod DB" is loud and
       // the next call fails, while changing where it points keeps the name, the
       // stored credential and the sidebar entry, and every later use of it --
@@ -3723,7 +3723,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // somewhere new. `manageServers` set to ALLOW means "add servers without
       // asking me" and cannot carry that.
       //
-      // So the FIRST change to a given server always opens a card. What it no
+      // So the FIRST change to a given server opens a card. What it no
       // longer does is open one for every change after it: this was `perCall`,
       // and an agent walking a server through two edits -- set the host, then
       // set the jump chain -- produced two identical dialogs about a connection

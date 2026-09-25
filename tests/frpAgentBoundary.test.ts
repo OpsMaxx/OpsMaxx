@@ -248,10 +248,12 @@ describe('the AI permission model has no word for publishing a port', () => {
     // The sentence beside the toggle in Settings. It used to end "and starts or
     // stops them", which reads as a promise that turning this on lets an agent
     // start a reverse proxy. It never has, at any value.
+    // It now also has to say the one exception the user chose -- a session they
+    // put in Bypass mode -- because a sentence that omits it overstates the
+    // boundary, which is the other way of not meaning what it says.
     const vpn = AI_CAPABILITIES.find((c) => c.id === 'vpnControl')
-    expect(vpn?.detail).toBe(
-      'Lists VPN profiles and reverse proxies, and starts or stops the VPNs. Reverse proxies ' +
-        'are never started or stopped by an agent, at any setting.'
-    )
+    expect(vpn?.detail).toContain('Reverse proxies are refused to an agent whatever this is set to')
+    expect(vpn?.detail).toContain('only a session you have put in Bypass mode can start or stop one')
+    expect(vpn?.detail).not.toMatch(/and starts or stops them\b/)
   })
 })

@@ -215,7 +215,10 @@ describe('Confirm risky actions', () => {
   beforeEach(() => {
     resetPolicyCacheForTests()
     const full = listGroups().find((g) => g.id === 'grp-full')!
-    literal = { ...full, confirmRisky: false }
+    // sudo raised to allow on the literal group: a computed command word may BE
+    // sudo, so with sudo at ask (the seed) it asks whatever the switch says --
+    // pinned on its own below.
+    literal = { ...full, confirmRisky: false, capabilities: { ...full.capabilities, sudo: 'allow' } }
     on = { ...full, confirmRisky: true }
     absent = { ...full }
     delete absent.confirmRisky
@@ -247,6 +250,18 @@ describe('Confirm risky actions', () => {
 
   it.each(EVALUATORS)('%s: absent is on, and asks', (_label, evaluate) => {
     expect(evaluate(absent).decision).toBe('ask')
+  })
+
+  it('a computed command word still asks with the switch off, unless sudo is allowed outright', () => {
+    // It may be sudo, and switching risky confirmations off must not let
+    // `$(which sudo) reboot` walk past a group that asks about or refuses sudo.
+    const full = listGroups().find((g) => g.id === 'grp-full')!
+    expect(full.confirmRisky).toBe(false)
+    expect(full.capabilities.sudo).toBe('ask')
+    expect(evaluateCommand(full, '$(which sudo) reboot').decision).toBe('ask')
+    const sudoDenied = { ...full, capabilities: { ...full.capabilities, sudo: 'deny' as const } }
+    expect(evaluateCommand(sudoDenied, '$(which sudo) reboot').decision).toBe('ask')
+    expect(evaluateCommand(literal, '$(which sudo) reboot').decision).toBe('allow')
   })
 
   it('reads absent as on, and only false as off', () => {
@@ -441,7 +456,8 @@ describe('modes on the live bridge', () => {
         { id: 'db1', workspaceId: 'wsShut', name: 'Orders', kind: 'postgres', host: '10.0.0.5', port: 5432, username: 'app', database: 'orders', ssl: false, uri: false, sshServerId: null }
       ],
       tunnels: [
-        { id: 't1', workspaceId: 'ws', name: 'DB Forward', kind: 'local', serverId: 's1', listen: '127.0.0.1:15432', target: '10.0.0.5:5432' }
+        { id: 't1', workspaceId: 'ws', name: 'DB Forward', kind: 'local', serverId: 's1', listen: '127.0.0.1:15432', target: '10.0.0.5:5432' },
+        { id: 't2', workspaceId: 'ws', name: 'Vault Forward', kind: 'local', serverId: 's2', listen: '127.0.0.1:15433', target: '10.0.0.6:5432' }
       ],
       cicdConnections: [{ id: 'ci1', workspaceId: 'ws', name: 'platform-gitlab', provider: 'gitlab', enabled: true }],
       vpns: [
@@ -585,6 +601,22 @@ describe('modes on the live bridge', () => {
     expect(await call(c, 'execute_command', { serverName: 'Box', command: 'uptime' })).toContain('ran')
     expect(asked).toEqual([])
     expect(ran).toEqual([{ server: '10.0.0.1', command: 'uptime' }])
+  })
+
+  it('a Protected carrier server caps starting the tunnel it carries', async () => {
+    // Only the server is marked, not its workspace: set_tunnel has to pass the
+    // tunnel's carrier for the mark to reach it.
+    const { c } = await agent('bypass')
+    const out = await call(c, 'set_tunnel', { tunnelName: 'Vault Forward', running: true })
+    expect(asked).toHaveLength(1)
+    expect(asked[0].protectedTarget).toBe(true)
+    expect(out).toContain('Denied')
+  })
+
+  it('...while the tunnel on an unprotected carrier starts under Bypass without asking', async () => {
+    const { c } = await agent('bypass')
+    await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: true })
+    expect(asked).toEqual([])
   })
 
   it('an explicit No AI Access still denies under Bypass, and asks nobody', async () => {
