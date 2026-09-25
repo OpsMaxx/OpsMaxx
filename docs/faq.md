@@ -190,13 +190,16 @@ allows.
 
 ### Is it safe to let an AI agent run commands on my servers?
 
-It's as safe as the access group you assign it, and that's a real limitation, not a slogan — see
-[docs/AI-SECURITY.md](AI-SECURITY.md) for what this design does and does not protect against.
-What OpsMaxx does provide: the bridge only listens on `127.0.0.1`, every capability (run
+It's as safe as the access group and mode you give it, and that's a real limitation, not a
+slogan — see [docs/AI-SECURITY.md](AI-SECURITY.md) for what this design does and does not protect
+against. What OpsMaxx does provide: the bridge only listens on `127.0.0.1`, every capability (run
 commands, read/write files, SFTP, tunnels, database access, sudo, metrics) is independently
-ALLOW/ASK/DENY, sudo/unrestricted shells are hard-blocked regardless of group, and anything marked
-ASK stops and waits for you to approve or deny it in OpsMaxx — an agent can never approve its
-own request. Every action is logged in the Audit Log with secrets redacted.
+ALLOW/ASK/DENY, unrestricted root shells (`sudo -i`, `su`, ...) are refused whatever the group
+says, and anything that asks stops and waits for you to approve or deny it in OpsMaxx — an agent
+can never approve its own request. Each session also has a mode only you can set: Read only, Ask
+first, Auto, or Bypass permissions, which runs everything without asking, root shells included.
+Mark a server Protected and no mode runs a change there unasked. Every action is logged in the
+Audit Log with secrets redacted, including which ones only ran because of Bypass.
 
 ### How do I move my setup to another machine?
 

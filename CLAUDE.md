@@ -106,7 +106,8 @@ ask the resolver rather than assume a relative path.
 
 This repo is public and the audience checks things. Two claims that were wrong on the site
 and had to be corrected: "sudo is refused" (only escalation *shells* — `sudo -i`, `su`,
-`sudo bash` — are refused; `sudo -n` is used for privileged reads and is on by default),
+`sudo bash` — are refused, and not even those in a session the user has put in Bypass mode;
+`sudo -n` is used for privileged reads and is on by default),
 and "every release is scanned by 70+ engines" (VirusTotal is a `continue-on-error` step that
 only runs when `VT_API_KEY` is set, so a release can exist without it; ClamAV and Defender are
 the two that can fail the build).

@@ -13,6 +13,7 @@ another MCP client. For the short pitch and the security summary, see the
 - [Sessions](#sessions)
 - [Workspaces](#workspaces)
 - [Access Groups](#access-groups)
+- [Permission modes](#permission-modes)
 - [Approvals](#approvals)
 - [Audit Log](#audit-log)
 - [Credential isolation](#credential-isolation)
@@ -35,8 +36,11 @@ another MCP client. For the short pitch and the security summary, see the
 3. Every tool call authenticates the bearer token against a session (`mcpAuth.ts`), then resolves
    the target server **by friendly name** (`serverResolver.ts`) — never by hostname, IP or username,
    because the tool call never carries one.
-4. The **access group** governing that server/workspace is evaluated for the specific capability
-   the tool needs (`policyEngine.ts`), producing `allow`, `ask` or `deny`.
+4. The session's **access group** is evaluated for the specific capability the tool needs
+   (`policyEngine.ts`), together with any restriction assigned to that server or workspace,
+   producing `allow`, `ask` or `deny`. The session's **mode** and whether the target is
+   **Protected** are then applied to that answer (`applyMode`) — see
+   [Permission modes](#permission-modes).
 5. `ask` blocks on a human decision (`approvals.ts`) before anything happens. `deny` returns an
    error immediately. `allow` proceeds.
 6. Only at this point does OpsMaxx resolve the server's actual SSH/database credential
@@ -56,7 +60,7 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `list_workspaces` | — | The workspace(s) this session is scoped to |
 | `list_servers` | `viewServer` | Friendly names only, filtered to what the session can see |
 | `get_server_details` | `viewServer` | Name, OS, access group, effective ALLOW/ASK/DENY per capability — **never hostname/IP/username** |
-| `execute_command` | `terminal` (+ `sudo` if the command is sudo/doas, + file path rules for any absolute path it names) | stdout/stderr/exit code, redacted |
+| `execute_command` | `terminal` (+ `sudo` if the command is sudo/doas, + file path rules for any absolute path it names); a destructive, elevated or run-time-computed command is **risky** | stdout/stderr/exit code, redacted |
 | `read_file` | `readFiles` + `sftpDownload` (+ file path rules) | File contents, redacted |
 | `write_file` | `writeFiles` + `sftpUpload` (+ file path rules) | Bytes written |
 | `list_files` | `readFiles` + `sftpDownload` (+ file path rules) | Directory listing |
@@ -64,16 +68,16 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `get_server_metrics` | `serverMetrics` | CPU/memory/disk/uptime — and every failed systemd unit and listening port with its owning process, which is a service and port inventory as much as a capacity read |
 | `get_host_facts` | `hostFacts` | Distribution, architecture, CPU model, virtualisation, package manager, pending updates and how many are security updates, and whether a reboot is owed. Its own capability rather than a widening of metrics, because it is a patch-status report. It never refreshes a package cache. A count reported as NOT AVAILABLE is not zero |
 | `list_databases` | `viewServer` | Friendly names and engines, never a hostname or credential |
-| `query_database` | `databaseAccess` for reads; `+ writeFiles` and always ASK for anything that writes | Rows, capped |
+| `query_database` | `databaseAccess` for reads; `+ writeFiles` for anything that writes, which is **risky** | Rows, capped |
 | `list_tunnels` | `sshTunnel` | Configured tunnels and whether each is running |
-| `set_tunnel` | `sshTunnel`, always ASK to start | Confirmation, with the bound port |
-| `create_tunnel` | `sshTunnel`, **always ASK**, **never cached** | A saved tunnel — **not a running one**. Starting it is `set_tunnel` and a second approval. A `remote` forward binding a non-loopback address is graded higher, and the prompt says it publishes that port on the server's network |
-| `delete_tunnel` | `sshTunnel`, **always ASK**, **never cached** | That the tunnel is gone; it is stopped first if running |
+| `set_tunnel` | `sshTunnel`; starting is **risky** | Confirmation, with the bound port |
+| `create_tunnel` | `sshTunnel`, **risky**, **never cached** | A saved tunnel — **not a running one**. Starting it is `set_tunnel` and a second approval. A `remote` forward binding a non-loopback address is graded higher, and the prompt says it publishes that port on the server's network |
+| `delete_tunnel` | `sshTunnel`, **risky**, **never cached** | That the tunnel is gone; it is stopped first if running |
 | `list_vpns` | `vpnControl` | Names, engine, mode and state — **never an endpoint, key or listener address** |
-| `set_vpn` | `vpnControl`, always ASK to start; **frp refused outright** | Confirmation, with a listener count |
-| `add_server` | `manageServers`, resolved on the **workspace**, **never cached** | The name the new connection was saved under. `jumpHosts` names existing servers to reach it through, so a bastion-only host can be onboarded without disclosing one; `verify: true` dials it once and reports whether it came up rather than reporting a dead entry as added |
-| `update_server` | `manageServers`, **always ASK even on ALLOW**, **never cached** | Which fields changed. Only what you pass is touched — a port change does not disturb the stored credential |
-| `remove_server` | `manageServers`, **always ASK even on ALLOW**, **never cached** | That the connection and its stored credential are gone. The approval names what the removal takes with it when the server is another server's jump host |
+| `set_vpn` | `vpnControl`; starting, or stopping with live sessions depending on it, is **risky**; **frp refused outside Bypass** | Confirmation, with a listener count |
+| `add_server` | `manageServers`, resolved on the **workspace**, **never cached**; not risky, so ALLOW adds without asking | The name the new connection was saved under. `jumpHosts` names existing servers to reach it through, so a bastion-only host can be onboarded without disclosing one; `verify: true` dials it once and reports whether it came up rather than reporting a dead entry as added |
+| `update_server` | `manageServers`, **risky**; a session grant covers only further changes to that one server | Which fields changed. Only what you pass is touched — a port change does not disturb the stored credential |
+| `remove_server` | `manageServers`, **risky**, **never cached** | That the connection and its stored credential are gone. The approval names what the removal takes with it when the server is another server's jump host |
 | `test_connection` | `viewServer` | Whether the connection came up, and the *category* of failure if not — never a hostname, port or username, and never the driver's own text, which contains the address |
 | `list_containers` | `containers` | Containers on one server: image, state, the runtime's own status line, published ports and compose project. It says when it fell back to root, and distinguishes "not in a project" from "the runtime could not say" |
 | `container_logs` | `containers`, weighed higher at the prompt than the list | The last lines a container wrote. **It never follows** — a stream would outlive the approval that authorised it, and the stop-all-AI-access switch works by resolving requests still pending |
@@ -91,9 +95,14 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `list_runs` | `ciRead` | Recent runs of one pipeline, newest first, capped. Fenced as untrusted |
 | `get_run` | `ciRead` | One run: status, timing, per-step outcomes. Fenced as untrusted |
 | `get_run_logs` | `ciRead` | Build output, redacted, tailed, and fenced as untrusted |
-| `trigger_run` | `ciTrigger`, **always ASK, never cached** | What the provider returned — a run, a queue item, or an honest "requested" |
-| `cancel_run` | `ciTrigger`, **always ASK, never cached** | That the provider accepted the request, not that the run stopped |
-| `rerun_run` | `ciTrigger`, **always ASK, never cached** | A new attempt of the same run — **GitHub only**; Jenkins and GitLab refuse and say to start a new run |
+| `trigger_run` | `ciTrigger`, **risky**, **never cached** | What the provider returned — a run, a queue item, or an honest "requested" |
+| `cancel_run` | `ciTrigger`, **risky**, **never cached** | That the provider accepted the request, not that the run stopped |
+| `rerun_run` | `ciTrigger`, **risky**, **never cached** | A new attempt of the same run — **GitHub only**; Jenkins and GitLab refuse and say to start a new run |
+
+**Risky** means an ALLOW on that capability still asks while the access group's **Confirm risky
+actions** switch is on — the default on every group but Full Access. **Never cached** means that when
+the call asks, one approval covers that call and no later one. Every row is also subject to the
+session's mode and to a Protected target — see [Permission modes](#permission-modes).
 
 Each tool carries a `title`, an MCP annotation set (`readOnlyHint`, `destructiveHint`,
 `openWorldHint`) and a description of every parameter, and the server sends `instructions` on
@@ -132,9 +141,11 @@ forms and can only ever narrow a decision, never widen one; a file that must sta
 `query_database` classifies the statement before running it. Reads are governed by
 `databaseAccess` alone; anything that modifies data or schema is additionally bounded by
 `writeFiles` — a group whose point is that it cannot change anything should not be able to change
-a row either — and can never resolve better than ASK. That clamp exists because `databaseAccess`
-defaults to ALLOW in every built-in group, so honouring it plainly would have handed a Full Access
-agent a silent `DROP TABLE`.
+a row either — and, while the group's Confirm risky actions switch is on, never resolves better
+than ASK. That clamp exists because `databaseAccess` is ALLOW in every built-in group that grants it
+at all, so honouring it plainly hands an agent a silent `DROP TABLE`. Full Access ships with the
+switch off, so a Full Access session in Auto mode does run a write without asking: on that group,
+ALLOW means allow.
 
 A read cannot smuggle a write behind a semicolon, comments cannot hide the verb, and an
 unrecognised verb counts as a write: there are too many dialects to enumerate and guessing
@@ -142,10 +153,11 @@ unrecognised verb counts as a write: there are too many dialects to enumerate an
 since `db.users.find({})` leads with the collection rather than the verb.
 
 `set_tunnel` starts and stops tunnels; `create_tunnel` and `delete_tunnel` define and remove them.
-Starting always requires approval whatever the group says, because it binds a listening port on the
-user's own machine. Stopping does not, being the safe direction.
+Starting binds a listening port on the user's own machine, so it asks even at ALLOW while the
+group's Confirm risky actions switch is on (`evaluateTunnelOpen`). Stopping does not, being the
+safe direction.
 
-Defining one asks too, and for a reason worth stating: a tunnel an agent writes **outlives the
+Defining one is risky too, and for a reason worth stating: a tunnel an agent writes **outlives the
 session that wrote it**, and the next person to press Start starts what the agent wrote. Defining
 does not start it — that stays a separate approval, so nothing an agent writes carries traffic
 without a second yes. The sharp case is a `remote` forward, which listens **on the server**: a
@@ -162,16 +174,20 @@ exists to enforce.
 `sshTunnel`. It can start or stop a VPN profile the user has already defined; it cannot create one
 or change where one points, and **there is no `add_vpn` or `edit_vpn` tool** — not an omission to
 be filled in later, but a decision, because a profile determines which network everything
-downstream of it travels over. Starting is always ASK, even for a group set to ALLOW
-(`evaluateVpnControl`, `policyEngine.ts`). Stopping is ASK too whenever live sessions depend on the
-VPN, so "close 3 sessions" is never something an agent does quietly.
+downstream of it travels over. While the group's Confirm risky actions switch is on, starting asks
+even for a group set to ALLOW (`evaluateVpnControl`, `policyEngine.ts`), and so does a stop that
+would close sessions depending on the VPN, so "close 3 sessions" is not something an agent does
+quietly.
 
-**Reverse proxies (frp) are refused unconditionally.** An frp proxy makes a port on the user's own
-machine reachable from the frp server — which is to say from the internet — and an approval prompt
-would not help, because "Start VPN office" is indistinguishable, to the person clicking it, from
-consent to publish a port. So it is not a permission an administrator could raise: the refusal is
-hard-coded (`AI_REFUSED_VPN_KINDS`, `policyEngine.ts`), the same treatment as unrestricted root
-shells, and it applies to stopping as well as starting.
+**Reverse proxies (frp) are refused to every access group.** An frp proxy makes a port on the
+user's own machine reachable from the frp server — which is to say from the internet — and an
+approval prompt would not help, because "Start VPN office" is indistinguishable, to the person
+clicking it, from consent to publish a port. So it is not a permission an administrator can raise
+on a group: the refusal is hard-coded (`AI_REFUSED_VPN_KINDS`, `policyEngine.ts`), the same
+treatment as unrestricted root shells, and it applies to stopping as well as starting. It is
+expressed as a refusal *decision* rather than an early return, so the one thing that reaches past
+it is the same one that reaches past a root shell: a session the human has put in **Bypass** mode,
+on a workspace that is not Protected.
 
 `list_vpns` reports which profiles exist, which engine carries each one, whether it is up, and
 frp's per-proxy status table. It never reports an endpoint, a key, or a listener's bind address —
@@ -196,10 +212,12 @@ Main resolves the name to a real record and merges the token at request time.
 `set_vpn` and for a sharper reason: an agent that could add one would choose the base URL it points
 at, and could then ask the user to paste a token into it.
 
-**`trigger_run`, `cancel_run` and `rerun_run` are always ASK and never cached.** `evaluateCiTrigger`
-(`policyEngine.ts`) upgrades `allow` to `ask` before `gate()` runs, and `gate()` excludes
-`ciTrigger` from `sessionElevations` in both directions. Every run is its own approval. One
-pipeline per call, so a mistake costs one pipeline rather than a fleet.
+**`trigger_run`, `cancel_run` and `rerun_run` are risky and never cached.** While the group's
+Confirm risky actions switch is on, `evaluateCiTrigger` (`policyEngine.ts`) upgrades `allow` to
+`ask` before `gate()` runs, and `gate()` excludes `ciTrigger` from `sessionElevations` in both
+directions, so every run that asks is its own approval. With the switch off (Full Access as
+shipped) or in Bypass mode, a run starts without asking. One pipeline per call, so a mistake costs
+one pipeline rather than a fleet.
 
 `trigger_run`, `cancel_run` and `rerun_run` call `cicd/wiring` — the same functions the panel's
 own buttons call. The difference between the two callers is entirely the gate: a second copy of the
@@ -232,18 +250,19 @@ one-way ratchet: an agent that wrote a wrong entry could not correct or withdraw
 mistake became manual cleanup and the rational move was to stop using `add_server` at all. Two
 consequences of closing that are deliberate and are not left to the capability's plain reading:
 
-- **Changing and removing always ask**, on every group, including one raised to ALLOW
-  (`evaluateServerWrite`, `policyEngine.ts`). An administrator who set this to ALLOW meant "add
-  servers without asking me"; that cannot be read as consent to repoint or delete the ones
-  already there, and an upgrade must not turn the first into the second in silence. Adding is
-  the only part of this capability an ALLOW can make silent.
+- **Changing and removing are risky**: while the group's Confirm risky actions switch is on they
+  ask even at ALLOW (`evaluateServerWrite`, `policyEngine.ts`). An administrator who set this to
+  ALLOW on such a group meant "add servers without asking me"; that cannot be read as consent to
+  repoint or delete the ones already there. Adding is the only part of this capability an ALLOW
+  makes silent there. Turning the switch off — Full Access ships with it off — is the explicit
+  consent to the rest.
 
   Changing is in that rule and not only deleting, because it is the quieter of the two.
   Deleting `Prod DB` is loud and the next call that names it fails; repointing it keeps the
   name, the stored credential and the sidebar entry, and every later use — by this agent,
   another agent, or the person clicking it — goes to the new host.
-- **An approval never spreads.** `add_server` and `remove_server` are marked per-call, so an
-  approval authorises the call in front of the user and never the next one. Without that,
+- **An approval never spreads.** `add_server` and `remove_server` are marked per-call, so when
+  they ask, an approval authorises the call in front of the user and never the next one. Without that,
   `add_server` — which has no server id yet and so shares one elevation key across every add in a
   session — approved the first write and then wrote every one after it silently. `update_server`
   is scoped to itself rather than per-call: its dialog offers a second answer, **Allow
@@ -275,10 +294,10 @@ and is worse for privacy than the non-secret metadata it was avoiding.
 
 ### `add_server`
 
-An agent can add an SSH connection, including its credential, when the workspace's access group
-grants `manageServers`. Only **Read & Write**, **Sudo Access** and **Full Access** grant it, and all
-three set it to ASK, so every add surfaces an approval dialog naming the connection, the user and
-the server. The credential itself never appears in that dialog or in the audit log — only the fact
+An agent can add an SSH connection, including its credential, when the session's access group
+grants `manageServers`. Of the built-in groups, **Read & Write** and **Sudo Access** set it to ASK,
+so every add surfaces an approval dialog naming the connection, the user and the server; **Full
+Access** sets it to ALLOW, so there an add in Auto mode does not ask. The credential itself never appears in that dialog or in the audit log — only the fact
 that one was supplied. It goes straight to the OS keychain and cannot be read back through the
 bridge.
 
@@ -322,7 +341,9 @@ CLI pairing. Each one has:
 
 - an **agent name** (a label, e.g. "Claude Code")
 - **one or more workspaces**, chosen explicitly — never "all workspaces including future ones"
-- exactly **one access-group ceiling**
+- exactly **one access group**, which is the grant — see [Access Groups](#access-groups)
+- a **mode** — Read only, Ask first, Auto or Bypass permissions — which only the human sets, in the
+  OpsMaxx window; see [Permission modes](#permission-modes)
 - an **expiry**: 15 minutes, 1 hour, 8 hours, 7 days, or never (CLI pairing always issues 8 hours —
   `TTL_MINUTES = 480` in `cliPairing.ts`)
 - a bearer token, shown **once** at creation
@@ -345,10 +366,11 @@ workspaces including future ones" — and every tool resolves servers against ex
 belonging to a granted workspace in the first place. A workspace left out isn't denied to the
 session — it is invisible, because it's never in the candidate list `serverResolver.ts` searches.
 
-Policy resolution still happens per server, not per session: `serverGroupFor()` (`mcpServer.ts`)
-looks up the access group governing a server using **that server's own workspace**, not "the
-session's workspace" — which matters once a session spans more than one, since a server's
-governing group can differ per workspace even inside the same multi-workspace session.
+Restrictions still resolve per server, not per session: `resolveRestriction` (`policyEngine.ts`)
+looks up any assignment on a server using **that server's own workspace**, not "the session's
+workspace" — which matters once a session spans more than one, since two servers in the same
+multi-workspace session can carry different restrictions. The same is true of Protected: a server
+is capped if it, or the workspace it lives in, is marked.
 
 CLI-paired sessions (`opsmaxx claude`/`codex`/`run`) are a special case: there's no workspace
 picker at pairing time, so a paired session is granted every workspace that exists at the moment
@@ -366,6 +388,26 @@ host facts & pending security updates, firewall rules, sudoers, add servers to t
 VPN & reverse proxies, containers, container control, fleet reads, backup status, CI/CD reads and
 CI/CD triggers. Each is independently `allow`, `ask` or `deny`.
 
+Each group also carries one switch, **Confirm risky actions** (`confirmRisky`; absent reads as on).
+While it is on, `allow` still asks for the actions that are hard to take back:
+
+- destructive or elevated commands (`rm -rf`, `mkfs`, `reboot`, package installs, service
+  restarts), commands whose program is computed at run time, and `unshare -r`;
+- database writes and schema changes;
+- opening, defining or deleting SSH tunnels;
+- changing or removing saved servers;
+- starting a VPN, or stopping one other sessions depend on;
+- starting, cancelling or re-running CI/CD pipelines.
+
+That list is `RISKY_ACTIONS` in `shared/mcp.ts`, and every allow-to-ask upgrade in
+`policyEngine.ts` is conditional on `confirmsRisky(group)` and on nothing else. These upgrades used
+to be unconditional, which meant a group set to allow everything still asked, for reasons no screen
+showed; the switch makes the same behaviour visible and lets a group turn it off. With it off,
+`allow` means allow. It only matters in Auto mode: Ask first asks for every change anyway, and
+Bypass asks for nothing. Each group's switch governs its own answer, so a restriction group with the
+switch on still asks for a risky action on the target it is assigned to. It does not touch file path
+rules — a rule saying `ask` or `deny` for a path still does so.
+
 Two of them gate no tool at all. **Firewall rules** and **sudoers** are the addresses a host
 accepts traffic on and the accounts that can become root on it — between them, the shortest
 description of how to take the machine — so no MCP tool exposes either at any setting. What
@@ -381,7 +423,11 @@ Five built-in groups ship with OpsMaxx (`policyStore.ts`), in this order:
 | **Commands, no writes** (`grp-read-only`) | Runs commands, queries databases, reads and controls containers, reads the fleet. What is `deny` here is file writes, SFTP upload, SSH tunnels and sudo — "no writes" means no *file* writes, and a group that runs arbitrary commands is not a read-only one |
 | **Read & Write** (`grp-read-write`) | The above plus writes, SFTP upload, SSH tunnels, adding servers and VPN control — each at `ask`. Sudo is `deny` |
 | **Sudo Access** (`grp-sudo`) | Read & Write with sudo raised from `deny` to `ask` |
-| **Full Access** (`grp-full`) | The widest seeded group, and still not everything: sudo, adding servers and VPN control stay at `ask` — the brief is explicit that root must never be granted silently — and the five below are `deny` here too |
+| **Full Access** (`grp-full`) | Every capability an agent tool uses at `allow`, including host facts, CI read, CI trigger, managing servers and VPN control — except **sudo, which stays at `ask`**, so root is asked for until you raise it yourself. Firewall rules and sudoers stay `deny`: no agent tool uses either, and they are consent for OpsMaxx's own background collection (below). **Confirm risky actions is off**, so on this group `allow` means allow |
+
+Confirm risky actions is on for the first four and off for Full Access. The default file path rules
+(`/etc/shadow`, SSH keys, shell histories and the rest denied; writes under `/etc/nginx` and
+`/var/www` asked) are seeded on all five, Full Access included.
 
 **"Read Only" was renamed, and the group under that name today is a different one.** The group now
 called *Commands, no writes* used to be called *Read Only* while leaving `terminal` at `allow` — so
@@ -390,30 +436,43 @@ granted an agent unattended arbitrary shell. The fix was to add the genuinely re
 it and rename the old one to say what it does; the rename matches on the exact stale string and
 never touches `capabilities`, so an existing assignment keeps precisely the grant it already had.
 
-Five capabilities are seeded `deny` on **every** built-in group and opted into by none: host facts,
-firewall rules, sudoers, CI read and CI trigger. That is mechanical as well as substantive —
-`backfillCapabilities` gives a built-in group whatever a fresh install would have given it, so
-seeding any of them at `ask` on the permissive groups would quietly hand it to every upgraded
-install.
+Two capabilities are seeded `deny` on **every** built-in group, Full Access included: firewall
+rules and sudoers. Three more — host facts, CI read and CI trigger — are `deny` on every built-in
+group but Full Access. That is mechanical as well as substantive: `backfillCapabilities` gives a
+built-in group whatever a fresh install would have given it, so seeding any of them at `ask` on the
+narrower groups would quietly hand it to every upgraded install.
+
+**Upgrading to policy version 3 widens an unedited Full Access.** `migrateToV3` (`policyStore.ts`)
+gives every group an explicit Confirm risky actions value — on for custom groups and the other four
+built-ins, which is the behaviour they already had, and off for Full Access. It then moves Full
+Access's `hostFacts`, `ciRead` and `ciTrigger` from `deny` to `allow`, and `manageServers` and
+`vpnControl` from `ask` to `allow`, **only where each still holds the value OpsMaxx shipped**. A
+value you edited is left as you set it. If you want the old Full Access, edit those five values
+back, or turn Confirm risky actions on.
 
 Every field on a built-in group, capabilities included, is editable. They cannot be deleted (so an
 assignment referencing one never dangles), but there is no hard-coded five-tier model underneath;
 create as many custom groups as you want.
 
-**Two layers always win over policy, no exceptions:**
+**What no access group can grant.** Two refusals do not depend on any capability value, and no
+setting on any group reaches past them. Only a session the human has put in **Bypass** mode does —
+see [Permission modes](#permission-modes).
 
-- **Reverse proxies are hard-refused for AI.** `set_vpn` refuses any profile whose kind is `frp`
-  before the access group is consulted (`isVpnKindRefusedForAi`, `policyEngine.ts`). There is no
-  capability value, on any group, that reaches past it.
-- **Unrestricted shells are hard-denied**, independent of any capability setting. `evaluateCommand`
-  (`policyEngine.ts`) checks the command against a fixed pattern list — `sudo -i`, `sudo -s`,
-  `sudo su`, `sudo bash`/`sh`/`zsh`/`dash`, bare `su`/`su -` — and returns `deny` before the access
-  group is even consulted. There is no ALLOW that reaches this branch.
-- **The most restrictive of two applicable groups always wins.** A server/workspace assignment
-  decides the *server's* group; the session's own group (chosen at creation) is a ceiling on top
-  of that. `effectiveCapability`/`effectiveCommand`/`effectiveFilePath` (`mcpServer.ts`) evaluate
-  both and take whichever is stricter (`mostRestrictive`, `policyEngine.ts`) — a session can never
-  do more than either side allows on its own.
+- **Reverse proxies.** `set_vpn` refuses any profile whose kind is `frp` before the access group is
+  consulted (`isVpnKindRefusedForAi`, `policyEngine.ts`).
+- **Unrestricted shells.** `evaluateCommand` (`policyEngine.ts`) checks the command against a fixed
+  pattern list — `sudo -i`, `sudo -s`, `sudo su`, `sudo bash`/`sh`/`zsh`/`dash`, bare `su`/`su -`
+  — and returns `deny` whatever the group's `terminal` and `sudo` values are. There is no ALLOW
+  that reaches past this branch.
+
+**The session's group is the grant; an assignment is an optional restriction.** The group chosen
+when the session was created decides what it may do. A group assigned to a server or workspace
+under **Server & workspace assignment** can only narrow that: `serverCheck`/`workspaceCheck`
+(`mcpServer.ts`) evaluate both and take whichever is stricter (`mostRestrictive`,
+`policyEngine.ts`). Assigning **No AI Access** takes the target out of every session's reach.
+A restriction group's answer is a permission like any other, so Bypass lifts it; No AI Access is
+scope, not a permission, and no mode lifts it. To hold a server below Bypass, mark it Protected or
+set it to No AI Access.
 
 **File path rules** override the blanket `readFiles`/`writeFiles` capability for specific paths.
 Rules are glob patterns (`**` crosses directories, `*` stays within one segment); when more than
@@ -421,17 +480,83 @@ one rule matches a path, **the longest pattern string wins** (`evaluateFilePath`
 `policyEngine.ts`) — not "most specific" in any deeper sense, just the longest string. A path
 matching no rule falls back to the blanket capability.
 
-**Server & workspace assignment**: an access group has no effect until it's assigned. Assign a
-default group per workspace, then override individual servers; a server with no override inherits
-its workspace's default, and a workspace with no assignment at all is **No AI Access**
-(`resolveGroupId`, `policyEngine.ts`).
+**Server & workspace assignment** is optional. With nothing assigned, the session's own group
+applies as written. Assign a group to a workspace, or override one server, to hold that target
+below what a session's group allows; a server with no override inherits its workspace's
+assignment (`resolveRestriction`, `policyEngine.ts`). Assign **No AI Access** to shut a target
+entirely.
 
 ![File path rules and per-server/workspace assignment](images/ai-access-groups-assignment.png)
 
+## Permission modes
+
+The access group says **what** an agent may do. The session's **mode** says how much the human
+wants to be in the loop while it does it (`SessionMode`, `shared/mcp.ts`). There are four, and each
+means exactly its sentence:
+
+| Mode | What it does |
+|---|---|
+| **Read only** | Reads follow the group. Every change is refused, whatever the group says |
+| **Ask first** | Reads follow the group. Every change the group permits is asked for first; what the group denies stays denied |
+| **Auto** (default) | The group's `allow`/`ask`/`deny`, literally, plus that group's Confirm risky actions switch |
+| **Bypass permissions** | Nothing asks and nothing is refused |
+
+A "change" is any call on a capability that changes something (`MUTATING_CAPABILITIES`,
+`policyEngine.ts`: terminal, sudo, file writes and SFTP upload, tunnels, managing servers, VPN
+control, container control and CI triggers), plus a database statement that is not classified as a
+read. **Every `execute_command` counts as a change**, because OpsMaxx cannot tell from a command
+line that it only reads: in Read only mode every command is refused, and in Ask first every command
+asks. Use `read_file`, `list_files` and the other read tools in those modes.
+
+The mode is applied in one place, `applyMode` (`policyEngine.ts`), after the session's group and any
+restriction on the target have produced their answer. `serverCheck` and `workspaceCheck`
+(`mcpServer.ts`) route every tool through it, and the Effective access table and
+`describe_capabilities` read the same function, so what a screen shows is what a tool enforces.
+
+**Who sets it.** Only the human, in the OpsMaxx window. A new session starts in the default mode
+configured for the bridge (`defaultSessionMode`; Auto if none is set), or in the mode chosen when it
+was created, and a change to a live session applies from its next tool call (`setSessionMode`,
+`mcpAuth.ts`). No MCP tool can change it: `get_server_details` and `describe_capabilities` tell
+the agent which mode it is in and that it cannot change it, and the server instructions tell it
+not to suggest Bypass as a way around a refusal.
+
+**Protected targets.** A workspace or server can be marked **Protected** (`protectedScopes`, stored
+in the policy file, written only over IPC by the human). A session acting on a Protected target is
+held at **Ask first** whatever its mode — Auto and Bypass both become Ask first there, and Read only
+stays Read only. The approval request gives Protected as its reason, so an unexpected prompt
+explains itself. A server is Protected if it or its workspace is marked. Tunnel, database, VPN and
+CI calls are checked against their workspace; defining or deleting a tunnel is also capped when the
+server carrying it is marked.
+
+### What Bypass lifts, and what it does not
+
+Bypass is the mode for a person who has decided to let an agent run and does not want to be
+interrupted. It lifts every `ask` and every `deny` that comes from a **permission**:
+
+- the group's `deny` and `ask` on any capability, and Confirm risky actions;
+- file path rules, including the seeded denies on `/etc/shadow` and SSH keys;
+- a restriction group assigned to the server or workspace;
+- unrestricted privilege-escalation shells (`sudo -i`, `su`, `sudo bash`, ...);
+- the refusal of reverse-proxy (frp) profiles.
+
+It does **not** lift:
+
+- **Scope.** A target set to No AI Access and a session with no access group are refused in every
+  mode (`outOfScope` on the decision), and a server outside the session's workspaces is never in
+  the list a tool resolves against at all.
+- **Protected.** A Protected target holds a Bypass session at Ask first.
+- **Stop all AI access, Revoke and expiry.** They end the session; its mode goes with it.
+- **The audit log.** Every row records the session's mode, and a call that ran only because of
+  Bypass — one the group would have asked about or refused — is audited as `bypassed`, never as
+  `not-required`. After the fact, the log alone says which actions only happened because of Bypass.
+- **What is absent from the bridge.** Bypass cannot reach a tool that does not exist: there is
+  still no local shell, no vault read, no job runner, no backup run or restore, no tool that reads
+  firewall rules or sudoers, and no tool that creates a VPN profile or CI connection.
+
 ## Approvals
 
-Any capability evaluating to `ask` calls `requestApproval` (`approvals.ts`), which blocks the MCP
-tool call on an in-memory pending request — nothing is written to disk until it resolves. The
+Any call whose final answer — the session's group, any restriction on the target, then the mode
+and Protected — is `ask` calls `requestApproval` (`approvals.ts`), which blocks the MCP tool call on an in-memory pending request — nothing is written to disk until it resolves. The
 request only clears when:
 
 - a human answers it in the approval dialog or on the **Approvals** screen (`respondToApproval`),
@@ -509,8 +634,10 @@ Alpha — the whole workspace, no single server* (`gateWorkspaces`, `mcpServer.t
 Tests: `tests/workspaceApproval.integration.test.ts`. Before this, `gate()` refused every Ask that
 named no server, so Ask on these three permissions behaved exactly like Deny and nobody was asked.
 
-The second button is only offered where `gate()` would honour it. These are per-call — every
-call asks, they show **Approve once** alone, and they never read a remembered grant:
+The second button is only offered where `gate()` would honour it. These are per-call — whenever
+one of them asks, it asks on every call, shows **Approve once** alone, and never reads a remembered
+grant. Whether they ask at all is the group's, the mode's and Protected's to decide, as for any
+other call:
 
 - `add_server`, `remove_server`, `create_tunnel`, `delete_tunnel`, and the `ciTrigger` tools
   `trigger_run`, `cancel_run` and `rerun_run`;
@@ -564,7 +691,10 @@ refusal by the policy itself is shown as **Blocked by policy** with the rule tha
 as allowed. A request OpsMaxx declined to put to anyone,
 because the session already had too many open or the same action was just denied, is shown as
 **Denied — not asked**, never as a refusal by you, and one whose agent disconnected while it waited
-as **Cancelled — agent disconnected**. Rows are written one per line, **append-only** (a crash
+as **Cancelled — agent disconnected**. A call that ran without asking only because the session was
+in Bypass mode — one the policy would otherwise have asked about or refused — is recorded as
+`bypassed`, not `not-required`, and every row carries the mode its session was in (`mode` on
+`AuditEntry`). Rows are written one per line, **append-only** (a crash
 mid-write can corrupt at most the last line). Every free-text field (`action`, `error`) is passed
 through the same redaction (`secretRedaction.ts`) used for tool output before it's written, so the
 audit trail itself never becomes a place secrets end up.
@@ -734,13 +864,20 @@ launch.
 deleted, revoked (individually or via Stop all AI access), or its expiry passed. Create a new
 session, or re-run `opsmaxx claude`/`codex` to re-pair.
 
-**"No AI access is assigned to this server."** — The server's workspace has no access-group
-assignment (defaults to No AI Access), and there's no server-level override either. Assign one
-under **AI & MCP → Access Groups → Server & workspace assignment**.
+**"This AI session has no access group."** — The session was created without one, or the group it
+named has since been deleted. Give it a group under **AI & MCP → AI Agents**.
+
+**"This target is set to No AI Access."** — Someone assigned No AI Access to that server or its
+workspace under **AI & MCP → Access Groups → Server & workspace assignment**. No mode reaches past
+it; remove the assignment to lift it.
+
+**"Read-only mode: …" or every command asks.** — The session is in Read only or Ask first mode, or
+the target is Protected. Both treat every `execute_command` as a change. See
+[Permission modes](#permission-modes).
 
 **A `sudo` command is denied even though the access group allows sudo.** — Check whether it
 matches an unrestricted-shell pattern (`sudo -i`, `sudo su`, `sudo bash`, plain `su`, ...) — those
-are denied unconditionally, independent of the group's `sudo` capability.
+are denied whatever the group's `sudo` capability says, in every mode but Bypass.
 
 **Connecting from inside WSL to a OpsMaxx instance running on Windows.** — The bridge only
 binds to `127.0.0.1`, so WSL2 needs to actually reach the Windows loopback address. If a request

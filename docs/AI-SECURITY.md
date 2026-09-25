@@ -47,7 +47,8 @@ Regardless of which access group a session holds:
   server — sudo capability is a policy decision about whether a command that runs as another user
   is allowed to run over the SSH connection that's already authenticated, not a credential handed
   to anything. Unrestricted root shells (`sudo -i`, `sudo su`, `sudo bash`, `pkexec bash`,
-  `su -c bash`, bare `su`, `pkexec` or `run0`) are refused whatever the access group says.
+  `su -c bash`, bare `su`, `pkexec` or `run0`) are refused whatever the access group says, in
+  every mode except Bypass — see [Permission modes and Bypass](#permission-modes-and-bypass).
 
   **How a command is recognised as running as another user** (`classifyCommand`, built on
   `walkCommand`, `policyEngine.ts`). It is the command WORD that counts, in every segment of the
@@ -95,8 +96,9 @@ Regardless of which access group a session holds:
   options), `gsudo`, `sudo.exe` or `Start-Process … -Verb RunAs` — the command is governed by the
   **Sudo** capability, and what it runs is judged too — `sudo env bash` and `gsudo cmd` are
   elevated shells. `unshare -r` / `--map-root-user` is root only inside a new user namespace and
-  is everyday rootless tooling, so it asks, with that as the reason, rather than counting as sudo,
-  and a remembered approval never covers it. A privileged tool asked
+  is everyday rootless tooling, so — while the group's Confirm risky actions switch is on — it
+  asks, with that as the reason, rather than counting as sudo, and a remembered approval never
+  covers it. A privileged tool asked
   only `--help` or `--version` is describing itself and is not an escalation. So
   `/usr/bin/sudo reboot`, `env sudo reboot`, `if true; then sudo reboot; fi`,
   `\sudo reboot`, `eval sudo reboot` and `su -c "rm -rf /x"` are all sudo, and a group that denies
@@ -121,6 +123,12 @@ Regardless of which access group a session holds:
   Such a command is asked about, never allowed and never refused on a guess. Only a leading home
   directory is let through: `$HOME/bin/tool`, `${HOME}/bin/tool` and `~/bin/tool` are judged by
   their literal basename, so `~/bin/sudo` is still sudo.
+
+  **This upgrade is part of Confirm risky actions.** A group with that switch off gets what its
+  `terminal` value says for a command it cannot name. On Full Access as shipped — `terminal` ALLOW,
+  `sudo` ASK, switch off — that means `$(which sudo) reboot` runs without asking where
+  `sudo reboot` would ask: the sudo prompt covers the escalations the walk can name, not the ones it
+  cannot. If sudo asking is the property you want, keep Confirm risky actions on.
 
   The quoting is tested with a generated matrix rather than hand-picked cases
   (`tests/escalationQuotingMatrix.test.ts`): every nest of `eval '…'`, `sh -c '…'`, `sh -c "…"`,
@@ -201,8 +209,10 @@ Those are fine, and the reasons they are fine are exactly the properties a shell
 
   Cloud servers are the one place an agent's input reaches an argv at all, and they are covered
   separately below.
-- **They are behind `vpnControl` and an approval.** No built-in group grants it outright, and
-  starting a VPN is ASK on every group including one raised to ALLOW — see the section below.
+- **They are behind `vpnControl`, and usually an approval.** Read & Write and Sudo Access set it
+  to ASK, and on any group whose Confirm risky actions switch is on, starting a VPN asks even at
+  ALLOW. Full Access sets it to ALLOW with the switch off, so there an agent can start one unasked
+  — see the section below.
 - **The two `src/cli` spawns are not agent-driven at all.** They are what `opsmaxx claude`,
   `opsmaxx codex` and `opsmaxx run -- …` do when a human types them in their own terminal:
   launch that agent's CLI as a child of the CLI process, before any MCP session exists. No tool call
@@ -244,8 +254,10 @@ checked in code, not by convention:
 
 There is no separate capability for this. A cloud server is reached under the same
 `viewServer`/`terminal`/`readFiles` grants as any other, and creating or changing one needs
-`manageServers`, which always asks. If that trade is not one you want, deny `manageServers` and
-keep cloud servers in a workspace your agent sessions do not cover.
+`manageServers`. Adding asks when `manageServers` is ASK; changing asks even at ALLOW while the
+group's Confirm risky actions switch is on. On Full Access as shipped, neither asks. If that trade
+is not one you want, deny `manageServers` and keep cloud servers in a workspace your agent sessions
+do not cover.
 
 What OpsMaxx still will not do is let an agent choose the *program*. It picks which of three
 known tools runs, with which known subcommand, and the agent fills in names that must look like
@@ -257,14 +269,15 @@ names.
 |---|---|---|
 | Credential exposure to a model's context (and whatever a provider retains of it) | Credentials are resolved inside the main process at connect time and never placed in a tool response | `credentialResolver.ts` |
 | Network/topology exposure — leaking internal IPs, hostnames, usernames just by listing servers | Tool responses carry only names, OS and permissions | `mcpServer.ts` (`list_servers`, `get_server_details`) |
-| Prompt-injection or a confused agent running something destructive | Any capability set to ASK blocks until a human approves; the agent has no path to approve its own request | `approvals.ts`, `mcpServer.ts` |
-| Sudo / privilege escalation, including via disguised unrestricted shells | Unrestricted root shells are denied whatever the access group says; every other command that runs as another user — recognised as the command word of any segment, behind wrappers and inside `sh -c` and `$(...)` — is governed by the Sudo capability (see *How a command is recognised as running as another user* above) | `policyEngine.ts` (`classifyCommand`, `evaluateCommand`) |
-| An agent silently changing which network the user's traffic crosses | Starting a VPN is always ASK, on every group, including one set to ALLOW; stopping one is ASK whenever live sessions depend on it | `policyEngine.ts` (`evaluateVpnControl`) |
-| An agent publishing a local port to the internet through a reverse proxy | `set_vpn` refuses `frp` profiles before the access group is consulted, in either direction; no capability value reaches past it, and there is no tool that can create one | `policyEngine.ts` (`isVpnKindRefusedForAi`), `mcpServer.ts` (`set_vpn`) |
+| Prompt-injection or a confused agent running something destructive | Any capability set to ASK — and, while the group's Confirm risky actions switch is on, any destructive command, database write, tunnel, server change, VPN start or CI run even at ALLOW — blocks until a human approves; the agent has no path to approve its own request. Read only and Ask first modes refuse or ask for every change. A session in Bypass, or on a group with the switch off, has none of this — that is what those settings are for | `approvals.ts`, `mcpServer.ts`, `policyEngine.ts` (`applyMode`) |
+| An agent raising its own permissions — asking for Bypass, un-protecting a target, widening its group | The mode, Protected targets and access groups are written only over IPC from the OpsMaxx window. No MCP tool references `setSessionMode` or the Protected setter | `mcpAuth.ts` (`setSessionMode`), `policyStore.ts` (`setProtected`), `main/index.ts` |
+| Sudo / privilege escalation, including via disguised unrestricted shells | Unrestricted root shells are denied whatever the access group says, in every mode but Bypass; every other command that runs as another user — recognised as the command word of any segment, behind wrappers and inside `sh -c` and `$(...)` — is governed by the Sudo capability (see *How a command is recognised as running as another user* above) | `policyEngine.ts` (`classifyCommand`, `evaluateCommand`) |
+| An agent silently changing which network the user's traffic crosses | While the group's Confirm risky actions switch is on, starting a VPN asks even at ALLOW, and so does stopping one live sessions depend on. Full Access ships with the switch off | `policyEngine.ts` (`evaluateVpnControl`) |
+| An agent publishing a local port to the internet through a reverse proxy | `set_vpn` refuses `frp` profiles before the access group is consulted, in either direction; no capability value reaches past it, only a session the user has put in Bypass mode on a workspace that is not Protected, and there is no tool that can create one | `policyEngine.ts` (`isVpnKindRefusedForAi`), `mcpServer.ts` (`set_vpn`) |
 | Secrets leaking through command output (`env`, a misconfigured app, a `cat` of a file with a key in it) | Known credential values blanked verbatim; pattern rules catch `PASSWORD=`/`TOKEN=`-style assignments, PEM key blocks, bearer tokens, AWS access key IDs, connection-string passwords | `secretRedaction.ts` |
 | A leaked or stolen token granting standing access | Only a SHA-256 hash + 4-character preview is ever stored; every session has its own expiry and is individually revocable, or all revocable at once | `mcpAuth.ts` |
 | Lateral movement — a session reaching a workspace it wasn't granted | A server outside the session's granted workspace(s) is never in the candidate list a tool call resolves against — invisible, not merely denied. Workspaces are chosen explicitly per session, never "all, including future ones" | `mcpDataCache.ts`, `serverResolver.ts` |
-| No record of what an agent actually did | Every decision the bridge makes — allowed, asked, approved, denied, failed — is written to an append-only, redacted audit log. It records the *bridge*, not the whole application — see the note under this table | `auditLog.ts` |
+| No record of what an agent actually did | Every decision the bridge makes — allowed, asked, approved, denied, failed — is written to an append-only, redacted audit log, with the session's mode on every row and anything Bypass let through recorded as `bypassed`. It records the *bridge*, not the whole application — see the note under this table | `auditLog.ts` |
 | A compromised local process trying to complete CLI pairing on its own | The pairing code is shown only inside the OpsMaxx window, never returned over HTTP to whatever process asked for it | `cliPairing.ts` |
 
 **What the audit log does and does not cover.** `recordAudit` is called from `mcpServer.ts` and
@@ -322,6 +335,48 @@ original, which is atomic within a filesystem — at every instant a reader sees
 the whole new one. The mode stays `0600` across the rewrite, and the common case, nothing due,
 does not touch the file at all.
 
+## Permission modes and Bypass
+
+Every session has a mode — **Read only**, **Ask first**, **Auto** (the default) or **Bypass
+permissions** — applied after the access group has answered (`applyMode`, `policyEngine.ts`).
+The first three only ever keep or tighten the group's answer. Bypass is the exception, and it is
+deliberately total: **nothing asks and nothing is refused.** That includes the refusals this
+document otherwise describes as holding whatever the access group says — unrestricted root shells,
+the seeded path rules on `/etc/shadow` and SSH keys, frp reverse proxies, a restriction group
+assigned to a production server — and Confirm risky actions, so an agent in Bypass runs `rm -rf`,
+`DROP TABLE` and a production pipeline without a prompt.
+
+It exists because the previous model had exceptions nobody could see: a session set to Full
+Access still asked, and still refused, for reasons no screen showed ("even after giving full access
+it keeps asking for permission"). The fix was to make every one of those exceptions a setting a
+person can see — Confirm risky actions on the group, Protected on the target — and to offer one
+mode that says plainly "this runs everything", chosen on purpose, rather than a permission screen
+that does not mean what it says.
+
+What bounds it:
+
+- **Only the human sets it.** The mode is written over IPC from the OpsMaxx window
+  (`setSessionMode`, `mcpAuth.ts`) and nowhere else; no MCP tool can change a session's mode, mark
+  or unmark a Protected target, or edit an access group. `get_server_details` and
+  `describe_capabilities` tell the agent its mode and that it cannot change it, and the server
+  instructions tell it not to suggest Bypass as a way past a refusal. What this does not stop is an
+  agent *asking the user in chat* to switch — the control is that the user has to go to the app and
+  do it.
+- **Scope still holds.** A target assigned **No AI Access**, a session with no access group, and a
+  workspace the session was not granted stay out of reach in every mode. Bypass lifts
+  permissions, not scope.
+- **Protected caps it.** A workspace or server marked Protected holds every session acting on it at
+  Ask first, Bypass included. That is the setting for the box an agent must never touch unasked;
+  a restriction group is not, because Bypass lifts a restriction group like any other permission.
+- **Revocation still works.** Stop all AI access, Revoke and expiry end the session whatever its
+  mode.
+- **It is audited as itself.** Every audit row carries the session's mode, and a call that ran only
+  because of Bypass is recorded as `bypassed` rather than `not-required`, so the log alone
+  distinguishes what the group allowed from what Bypass let through.
+- **It cannot reach what is not there.** The bridge still has no local shell, no vault read, no job
+  runner, no backup run or restore, no tool that reads firewall rules or sudoers, and no tool that
+  authors a VPN profile or CI connection. Bypass changes answers; it adds no tools.
+
 ## Granting `vpnControl` is a bigger decision than it looks
 
 Read this before setting `vpnControl` to anything other than `deny`.
@@ -335,23 +390,28 @@ Production API" without going anywhere near that server's configuration.
 Combined with `manageServers`, the two compose into something neither grants alone: an agent could
 add a server *and* bring up a VPN that server's traffic is routed through, and both actions would
 look ordinary in isolation. `manageServers` now also edits and removes connections, which widens
-that composition rather than narrowing it — hence the two rules on it: changing and removing always
-ask, and an approval is scoped to the one tool on the one server that was approved, so neither half
-of the composition can be assembled silently. **Approve once** covers the one change; the separate
+that composition rather than narrowing it — hence the two rules on it: while the group's Confirm
+risky actions switch is on, changing and removing ask even at ALLOW, and an approval is scoped to
+the one tool on the one server that was approved, so neither half of the composition can be
+assembled silently. **Approve once** covers the one change; the separate
 **Allow update_server on *server* for this session** answer also covers further changes to that same
 connection for the rest of that session. Neither covers a removal, another connection, or the next
-session. That composition is the reason for the three rules below, and none of
-them is a preference:
+session. That composition is the reason for the three rules below:
 
-- **Starting a VPN is always ASK**, on every group, including one a user has explicitly raised to
-  ALLOW (`evaluateVpnControl`, `policyEngine.ts`). There is no configuration in which a VPN comes
-  up silently at an agent's request. That includes a remembered approval: a start is per-call in `gate()`, so
-  answering one start "for this session" does not cover the next.
-- **Reverse proxies (frp) are refused outright**, in both directions, before the access group is
-  read (`isVpnKindRefusedForAi`). An frp proxy makes a port on the user's own machine reachable
-  from the frp server — from the internet — and an approval dialog is not a meaningful control
-  there, because "Start VPN office" reads nothing like "publish port 5432 to the internet" to the
-  person clicking it. If an frp profile is to run, the user starts it in OpsMaxx themselves.
+- **Starting a VPN asks, even at ALLOW, while the group's Confirm risky actions switch is on**
+  (`evaluateVpnControl`, `policyEngine.ts`), and a start that asks is per-call in `gate()`, so
+  answering one start "for this session" does not cover the next. This used to hold on every group
+  with no exception, and that is the one thing that changed: a VPN now comes up at an agent's
+  request without a prompt in exactly two configurations, and both are visible where they are set —
+  a group with Confirm risky actions switched off (Full Access ships that way) in Auto mode, and a
+  session the user has put in Bypass. A Protected workspace holds both at Ask first.
+- **Reverse proxies (frp) are refused to every access group**, in both directions, before the
+  group is read (`isVpnKindRefusedForAi`). An frp proxy makes a port on the user's own machine
+  reachable from the frp server — from the internet — and an approval dialog is not a meaningful
+  control there, because "Start VPN office" reads nothing like "publish port 5432 to the internet"
+  to the person clicking it. If an frp profile is to run, the user starts it in OpsMaxx
+  themselves — or puts the session in Bypass, which is the same decision made for every action at
+  once, on a workspace that is not Protected.
 - **There is no tool that creates or edits a VPN profile.** No `add_vpn`, no `edit_vpn`, and this
   is asserted by a test rather than left to reviewer memory. An agent can run a profile the user
   wrote; it can never author where one points.
@@ -371,10 +431,10 @@ had a control.
 
 Three things did not change:
 
-- **Reverse proxies (frp) are still refused outright**, in both directions, before the access
-  group is read (`isVpnKindRefusedForAi`).
-- **Defining a tunnel always asks**, on every group including ALLOW (`evaluateTunnelDefine`), and
-  one approval defines one tunnel.
+- **Reverse proxies (frp) are still refused to every access group**, in both directions, before
+  the group is read (`isVpnKindRefusedForAi`); only Bypass reaches past it.
+- **Defining a tunnel asks even at ALLOW while Confirm risky actions is on** (`evaluateTunnelDefine`),
+  and one approval defines one tunnel.
 - **A `remote` forward listens on the server.** A non-loopback listen address there publishes the
   port to that server's whole network, which is the one fact a person clicking "define a tunnel"
   would never infer. It is graded higher and the prompt says it in those words.
@@ -385,10 +445,14 @@ forwarding straight into the internal subnet — which bypasses the jump authent
 exists to enforce, leaves no record in OpsMaxx, and is subject to no approval at all. Prefer
 `jumpHosts` on the server itself to either; the server instructions say so.
 
-None of the built-in groups grants `vpnControl` outright: **Read Only** denies it, and **Read &
-Write**, **Sudo Access** and **Full Access** all set it to ASK. A group saved before this version
-existed backfills to DENY if it is custom, and to the fresh-install value if it is built in
-(`backfillCapabilities`, `policyStore.ts`) — an upgrade never silently widens what a group permits.
+**Read Only** and **Commands, no writes** deny `vpnControl`; **Read & Write** and **Sudo Access**
+set it to ASK; **Full Access** sets it to ALLOW with Confirm risky actions off, so a Full Access
+session in Auto mode starts a VPN without asking. A group saved before `vpnControl` existed
+backfills to DENY if it is custom, and to the fresh-install value if it is built in
+(`backfillCapabilities`, `policyStore.ts`). The one upgrade that does widen a group is the move to
+policy version 3, and only for a Full Access group nobody edited: its `vpnControl` moves from ASK
+to ALLOW along with four other keys, and any value you changed yourself is left alone
+(`migrateToV3`; the full list is in [AI-MCP.md](AI-MCP.md#access-groups)).
 
 What this does *not* do is make a granted `vpnControl` safe. If you approve a start prompt without
 reading it, you have moved your traffic, and the audit entry — `Start VPN "office" (wireguard,
@@ -396,9 +460,11 @@ userspace, 2 listeners)` — will record that you meant to.
 
 ## `ciRead` and `ciTrigger`: the kill switch does not reach a build
 
-Read this before setting either to anything other than `deny`. They are seeded `deny` on every
-built-in group, including Full Access, and a group saved before this version backfills to `deny`
-— an upgrade grants neither.
+Read this before setting either to anything other than `deny`, and before handing out Full Access.
+They are seeded `deny` on every built-in group except **Full Access, which allows both** — with
+Confirm risky actions off, so a Full Access session in Auto mode starts, cancels and re-runs
+pipelines without asking. A custom group saved before they existed backfills to `deny`, and an
+unedited Full Access moves from `deny` to `allow` on the upgrade to policy version 3.
 
 **`ciRead` returns text a stranger wrote.** Container logs are written by software the user chose
 to deploy. A CI job log is written by whoever opened the pull request: anyone who can push a branch
@@ -415,12 +481,15 @@ instructions" survives any character filter, which is why OpsMaxx marks authorsh
 claiming to sanitise. `redactOutput` runs over the body and is pattern-based and not exhaustive —
 assume a build log may still contain a credential.
 
-**`ciTrigger` is always ASK, and one approval never covers the next call.** Two rules, and neither
-is a preference:
+**`ciTrigger` asks while Confirm risky actions is on, and one approval never covers the next
+call.** Two rules:
 
-- `evaluateCiTrigger` (`policyEngine.ts`) upgrades `allow` to `ask` unconditionally, exactly as
-  `evaluateVpnControl` does for VPNs. There is no configuration — no access group, not Full Access
-  — in which a build starts silently at an agent's request.
+- `evaluateCiTrigger` (`policyEngine.ts`) upgrades `allow` to `ask` whenever the group's Confirm
+  risky actions switch is on, exactly as `evaluateVpnControl` does for VPNs. It used to do so
+  unconditionally, and this document used to say there was no configuration in which a build starts
+  silently at an agent's request. There now are two, and both are an explicit, visible choice: a
+  group with the switch off (Full Access as shipped) in Auto mode, and a session in Bypass. A
+  Protected workspace holds both at Ask first.
 - `ciTrigger` is excluded from `sessionElevations` in both directions: it never reads an elevation
   and never writes one. For `container_action`, carrying one approval across a session costs one
   more service on a host the user administers. For a build it is an unbounded remote-execution
@@ -467,8 +536,8 @@ would be a destructive, unapproved action taken on your behalf, and a pipeline s
 done some of its work and not the rest.
 
 **Composition.** `ciRead` + `ciTrigger` is a closed loop — log text shapes the next tool call, and
-the next tool call produces more log text — and that pair is the reason per-call approval is not
-negotiable. `ciTrigger` plus any file-write capability on an estate host is a deployment path; a
+the next tool call produces more log text — and that pair is the reason a trigger that asks is
+always per-call, and the reason to think twice before running it with nothing asking at all. `ciTrigger` plus any file-write capability on an estate host is a deployment path; a
 job could always deploy, but the agent now holds both halves.
 
 **No tool creates, edits or deletes a CI connection.** No `add_ci_connection`, no
@@ -484,7 +553,11 @@ README:
 
 - **Not "unhackable," "zero risk," or "fully secure."** Access groups and approvals reduce the
   blast radius of a mistake or a malicious prompt; they do not make one impossible. A group you
-  configure as `Full Access` genuinely grants full access.
+  configure as `Full Access` genuinely grants full access, and as shipped it asks only for sudo.
+- **Bypass is not a safer Full Access.** It removes every prompt and every refusal short of scope,
+  Protected and revocation. A prompt-injected agent in Bypass does whatever the injection says, as
+  far as its workspaces reach. Use it for work you would be comfortable watching run unattended,
+  and mark what must not be touched Protected.
 - **Approval quality depends on the human approving.** If you reflexively click Approve without
   reading what an ASK request is actually asking to do, the approval gate provides no protection.
   It only helps if the decision is actually considered.

@@ -28,7 +28,7 @@ bounds that, and how to opt out of it, is in
 - SSH private keys or passphrases
 - Database passwords or connection-string credentials
 - Vault secrets — there is no MCP tool that can read the Vault at all
-- Sudo or root access — unrestricted shells (`sudo -i`, `su`, ...) are refused outright, for every access group, with no setting that turns it back on
+- Sudo or root access — unrestricted shells (`sudo -i`, `su`, ...) are refused for every access group; the only thing that lifts that is a session you have put in Bypass mode (see [Permission modes](AI-MCP.md#permission-modes))
 
 It only ever gets a friendly server name, whatever a capability's ALLOW/ASK/DENY setting permits,
 and redacted text output. See [AI-SECURITY.md](AI-SECURITY.md) for the full threat model —
@@ -50,6 +50,15 @@ read/write setting:
 <img src="images/ai-access-groups.png" alt="Access group capabilities: each one ALLOW/ASK/DENY" width="49%" />
 <img src="images/ai-access-groups-assignment.png" alt="File path rules and per-server/workspace assignment" width="49%" />
 </p>
+
+On top of the group, each session runs in a **mode** that only you can set, in the OpsMaxx window:
+**Read only** (look, never change), **Ask first** (approve every change), **Auto** (the default —
+the group exactly, plus its **Confirm risky actions** switch, which keeps destructive commands,
+database writes, tunnels, server changes, VPN starts and CI runs asking even when the group says
+allow) or **Bypass permissions** (nothing asks and nothing is refused, audited as such). Mark a
+workspace or server **Protected** and every session acting on it is held at Ask first, Bypass
+included. [Permission modes](AI-MCP.md#permission-modes) has the details, including exactly what
+Bypass does not lift.
 
 ### A worked example
 
@@ -113,8 +122,8 @@ Not every client has a one-command launcher yet:
 
 ![Creating an AI agent session under AI & MCP → AI Agents](images/ai-agents.png)
 
-1. **AI & MCP → AI Agents → New AI agent session** — pick a workspace and an access-group
-   ceiling, then **Create session**.
+1. **AI & MCP → AI Agents → New AI agent session** — pick a workspace and an access group,
+   then **Create session**.
 2. The token is shown **once**, next to a ready-made JSON block — click **Copy JSON config**, or
    copy the raw token if you'd rather write the entry yourself.
 3. Paste it into the client's own MCP config file, under `mcpServers`.

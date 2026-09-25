@@ -106,7 +106,9 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     id: 'terminal',
     label: 'Execute terminal commands',
     detail:
-      'Runs shell commands over SSH. Unrestricted privilege-escalation shells (sudo -i, su, sudo bash) are refused whatever this is set to.'
+      'Runs shell commands over SSH. Unrestricted privilege-escalation shells (sudo -i, su, sudo bash) are refused ' +
+      'whatever this is set to, in every mode but Bypass. While the group\'s Confirm risky actions is on, a ' +
+      'destructive, elevated or run-time-computed command still asks even when this is allow.'
   },
   {
     id: 'readFiles',
@@ -140,8 +142,9 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     detail:
       'Lists tunnels, defines and removes them, and opens or closes a forward. A local forward ' +
       'and a SOCKS proxy listen on this machine; a remote forward listens on the SERVER, where a ' +
-      'non-loopback address publishes the port to that server’s network. Defining, removing and ' +
-      'opening all ask; defining one does not start it.'
+      'non-loopback address publishes the port to that server’s network. Defining one does not ' +
+      'start it. While the group\'s Confirm risky actions is on, defining, removing and opening ' +
+      'all ask even when this is allow.'
   },
   {
     id: 'databaseAccess',
@@ -220,7 +223,8 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     // moment update_server and remove_server joined it: an administrator
     // reading it would have believed they had granted strictly less than they
     // had. Deleting is called out separately because it is the one that
-    // destroys something, and because it always asks whatever this is set to.
+    // destroys something, and because while the group's Confirm risky actions is
+    // on it asks even when this is set to allow.
     //
     // The scope of a change approval is spelled out rather than left as "one
     // approval is one change", which stopped being true when repeat edits to a
@@ -230,11 +234,12 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     detail:
       'Adds a server to the workspace, changes a saved one — including where it points, which ' +
       'account it uses and which other saved server it jumps through — and removes one. It does ' +
-      'not grant any access to the servers it manages. Adding is the only part this setting can ' +
-      'make silent: changing and removing an existing connection always ask. Approving a change ' +
-      'covers further changes to that same server for the rest of that agent session and nothing ' +
-      'else; each removal is asked for on its own. Setting this to allow is not a standing ' +
-      'permission to repoint or delete what is already saved.'
+      'not grant any access to the servers it manages. While the group\'s Confirm risky actions ' +
+      'is on, adding is the only part allow makes silent: changing and removing an existing ' +
+      'connection still ask. When a change asks, approving it covers further changes to that same ' +
+      'server for the rest of that agent session and nothing else; each removal is asked for on ' +
+      'its own. With Confirm risky actions off, allow is a standing permission to repoint or ' +
+      'delete what is already saved.'
   },
   {
     id: 'vpnControl',
@@ -242,13 +247,15 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     // Says what it grants and what it does not. It used to say "and starts
     // or stops them", which promised something no value of this setting
     // delivers: an frp reverse proxy makes a port on the user's own machine
-    // reachable from the internet, so set_vpn refuses one outright and no
-    // access group can permit it. A permission UI that offers a power the
+    // reachable from the internet, so set_vpn refuses one and no access group
+    // can permit it -- only a session the human has put in Bypass mode. A permission UI that offers a power the
     // code refuses is how an operator ends up believing they granted less
     // than they did, or more.
     detail:
-      'Lists VPN profiles and reverse proxies, and starts or stops the VPNs. Reverse proxies ' +
-      'are never started or stopped by an agent, at any setting.'
+      'Lists VPN profiles and reverse proxies, and starts or stops the VPNs. While the group\'s ' +
+      'Confirm risky actions is on, starting a VPN, or stopping one live sessions depend on, asks ' +
+      'even when this is allow. Reverse proxies are refused to an agent whatever this is set to; ' +
+      'only a session you have put in Bypass mode can start or stop one.'
   },
   {
     id: 'containers',
@@ -288,7 +295,7 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     id: 'ciTrigger',
     label: 'CI/CD: start, cancel and re-run pipelines',
     detail:
-      'Starts a pipeline run on the CI server, cancels one, or re-runs it. What that run then does is defined on the provider and not here: OpsMaxx cannot read the pipeline definition before it starts, and cannot see what it deploys or where. Stopping AI access takes away the agent\'s cancel along with everything else, so a run already accepted is then yours to stop — from the Stop button on that run in CI/CD, or in the provider. Starting a run is always asked for, on every group, including one raised to allow.'
+      'Starts a pipeline run on the CI server, cancels one, or re-runs it. What that run then does is defined on the provider and not here: OpsMaxx cannot read the pipeline definition before it starts, and cannot see what it deploys or where. Stopping AI access takes away the agent\'s cancel along with everything else, so a run already accepted is then yours to stop — from the Stop button on that run in CI/CD, or in the provider. While the group\'s Confirm risky actions is on, starting, cancelling and re-running ask even when this is allow, and one approval never covers the next call; with it off, or in a Bypass session, a build starts unasked.'
   }
 ]
 

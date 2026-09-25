@@ -32,7 +32,7 @@
   <rect x="230" y="312" width="400" height="88" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1.5"/>
   <text x="430" y="342" text-anchor="middle" fill="#e6edf3" font-size="18" font-weight="600">Access Group Policy</text>
   <text x="430" y="364" text-anchor="middle" fill="#8b98a5" font-size="13">Per capability: ALLOW · ASK · DENY</text>
-  <text x="430" y="384" text-anchor="middle" fill="#8b98a5" font-size="13">sudo -i / su / unrestricted shells: always denied</text>
+  <text x="430" y="384" text-anchor="middle" fill="#8b98a5" font-size="13">sudo -i / su / unrestricted shells: denied outside Bypass</text>
 
   <line x1="430" y1="400" x2="430" y2="436" stroke="#8b98a5" stroke-width="1.5" marker-end="url(#arrow)"/>
   <text x="446" y="422" fill="#8b98a5" font-size="12">decision = ASK</text>

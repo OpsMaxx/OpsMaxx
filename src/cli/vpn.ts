@@ -57,11 +57,14 @@ Usage:
 Profiles are created in the OpsMaxx app, not here — this command can only run
 one you have already defined, and it cannot change where a profile points.
 
-Starting a VPN always asks for approval in the app, even when the access group
-allows it, because it changes which network your other sessions traverse.
-Reverse-proxy (frp) profiles cannot be started from here at all: they make a
-local port reachable from a remote server, and that has to be a decision someone
-makes in front of the app.`)
+Starting a VPN changes which network your other sessions traverse, so it asks
+for approval in the app, unless the session is in Auto mode and its access
+group allows VPN control with Confirm risky actions off, or you have put the
+session in Bypass mode. On a Protected workspace it never starts unasked.
+Reverse-proxy (frp) profiles cannot be started from here unless you have put
+the session in Bypass mode on a workspace that is not Protected: they make a
+local port reachable from a remote server, and that has to be a decision
+someone makes in front of the app.`)
 }
 
 export async function runVpnCommand(
