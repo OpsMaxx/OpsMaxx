@@ -567,6 +567,18 @@ export function listRecentApprovals(): ApprovalRequest[] {
 
 // Used by the global "STOP ALL AI ACCESS" kill switch: every outstanding
 // question is answered "denied" immediately rather than left to time out.
+/**
+ * Deny everything one session is waiting on. For the human switching that
+ * session to Read only: its queued requests are all changes, which Read only
+ * refuses -- leaving them answerable would make "never change anything" false
+ * for exactly as long as they sat in the queue.
+ */
+export function denyPendingForSession(sessionId: string): number {
+  const ids = [...pending.entries()].filter(([, e]) => e.request.sessionId === sessionId).map(([id]) => id)
+  for (const id of ids) finish(id, 'denied')
+  return ids.length
+}
+
 export function denyAllPending(): number {
   const ids = [...pending.keys()]
   for (const id of ids) finish(id, 'denied')

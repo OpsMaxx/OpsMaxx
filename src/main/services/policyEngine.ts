@@ -1933,7 +1933,20 @@ export function applyMode(
   o: { mode: SessionMode; protectedTarget: boolean; mutating: boolean }
 ): Decision {
   if (d.outOfScope) return d
-  const mode: SessionMode = o.protectedTarget && (o.mode === 'auto' || o.mode === 'bypass') ? 'ask' : o.mode
+  // "Held at Ask first" only means something for a mode that is looser than it.
+  const capped = o.protectedTarget && (o.mode === 'auto' || o.mode === 'bypass')
+  const out = applyEffectiveMode(d, capped ? 'ask' : o.mode, { protectedTarget: capped, mutating: o.mutating })
+  // Named on anything that asks while the cap is in force -- including an ask
+  // the group produced on its own -- so the approval card can say the target
+  // is Protected, and a user reaching for Bypass learns it will not stop this.
+  return capped && out.decision === 'ask' && !out.protectedTarget ? { ...out, protectedTarget: true } : out
+}
+
+function applyEffectiveMode(
+  d: Decision,
+  mode: SessionMode,
+  o: { protectedTarget: boolean; mutating: boolean }
+): Decision {
   switch (mode) {
     case 'bypass':
       return d.decision === 'allow' ? d : { decision: 'allow', reason: `Bypass mode: ${d.reason}`, bypassed: true }
@@ -1946,7 +1959,7 @@ export function applyMode(
         ? o.protectedTarget
           ? {
               decision: 'ask',
-              reason: 'This target is Protected: every change is approved first, whatever the session mode.',
+              reason: 'This target is Protected: Auto and Bypass are held at Ask first here, so every change is approved first.',
               protectedTarget: true
             }
           : { decision: 'ask', reason: 'Ask-first mode: every change is approved first.' }

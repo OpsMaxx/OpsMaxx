@@ -173,9 +173,13 @@ describe('applyMode, every mode against every answer', () => {
             expect(out.decision).toBe(want)
             // Bypass says so, and only when it actually changed the answer.
             expect(out.bypassed === true).toBe(mode === 'bypass' && !prot && decision !== 'allow')
-            // A Protected target says so when it is what asked.
+            // A Protected target is named on anything that asks while it holds a
+            // looser mode (Auto, Bypass) at Ask first -- including an ask the
+            // group produced itself, so the card tells a user reaching for
+            // Bypass that it will not stop this one. A session the user put in
+            // Ask first or Read only is not "held" by anything.
             expect(out.protectedTarget === true).toBe(
-              prot && mode !== 'readOnly' && decision === 'allow' && mutating
+              prot && (mode === 'auto' || mode === 'bypass') && want === 'ask'
             )
             // Idempotent: a caller unsure whether it has been applied may apply it again.
             expect(applyMode(out, { mode, protectedTarget: prot, mutating })).toEqual(out)

@@ -485,6 +485,7 @@ import {
   extendApproval,
   onApprovalEvent,
   denyAllPending,
+  denyPendingForSession,
   armApproval,
   armAllPendingApprovals
 } from './services/approvals'
@@ -5843,7 +5844,13 @@ ipcMain.handle('aiMcp:setSessionGroup', (_e, id: string, groupId: string | null,
   setSessionGroup(id, groupId, groupName)
 )
 // The human's switch, and the only one: no MCP tool reaches setSessionMode.
-ipcMain.handle('aiMcp:setSessionMode', (_e, id: string, mode: SessionMode) => setSessionMode(id, mode))
+// Read only takes effect on what is already queued too, not only on later
+// calls: every pending request is a change, and Read only refuses changes.
+ipcMain.handle('aiMcp:setSessionMode', (_e, id: string, mode: SessionMode) => {
+  const session = setSessionMode(id, mode)
+  if (session && mode === 'readOnly') denyPendingForSession(id)
+  return session
+})
 ipcMain.handle('aiMcp:explainAccess', (_e, sessionId: string, serverId: string | null) =>
   explainSessionAccess(sessionId, serverId)
 )
