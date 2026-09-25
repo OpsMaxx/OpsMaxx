@@ -92,8 +92,13 @@ export function AiSecurity(): React.JSX.Element {
   useEffect(load, [])
 
   const update = async (patch: Partial<McpGlobalConfig>): Promise<void> => {
-    const result = await window.opsmaxx?.aiMcp.setConfig(patch)
-    if (!result) return
+    const result = await window.opsmaxx?.aiMcp.setConfig(patch).catch(() => null)
+    if (!result) {
+      // The control already shows the new value; say that nothing changed.
+      toast('That setting was not saved — OpsMaxx did not accept the change.', 'error')
+      load()
+      return
+    }
     setConfig(result.config)
     if (result.error) {
       // Keyed, so a second failed attempt (every keystroke in the port field
@@ -244,6 +249,7 @@ export function AiSecurity(): React.JSX.Element {
         <ModePicker
           value={config.defaultSessionMode ?? DEFAULT_SESSION_MODE}
           onChange={(defaultSessionMode) => update({ defaultSessionMode })}
+          defaultScope
         />
       </div>
 

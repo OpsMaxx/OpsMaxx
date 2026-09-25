@@ -233,6 +233,9 @@ interface NavState {
    *  sent the user there. Cleared as soon as it has been honoured, so coming
    *  back later does not silently re-select a group the user has moved on from. */
   aiGroupId: string | null
+  /** An agent session the Active Sessions page should scroll to. Cleared once
+   *  honoured, like `aiGroupId`. */
+  aiSessionId: string | null
   settingsSection: SettingsSection
   /**
    * Held here rather than in FleetMonitor's own useState, for exactly the
@@ -260,12 +263,14 @@ interface NavState {
   setMonitorTab: (t: MonitorTab) => void
   setOperationsTab: (t: OperationsTab) => void
   clearAiGroup: () => void
+  clearAiSession: () => void
   clearTunnelIntent: () => void
 }
 
 export const useNav = create<NavState>((set) => ({
   aiSection: 'overview',
   aiGroupId: null,
+  aiSessionId: null,
   settingsSection: 'appearance',
   monitorTab: 'overview',
   // Broadcast rather than patch, because it is the cheaper thing to land on:
@@ -282,12 +287,19 @@ export const useNav = create<NavState>((set) => ({
   setMonitorTab: (t) => set({ monitorTab: t }),
   setOperationsTab: (t) => set({ operationsTab: t }),
   clearAiGroup: () => set({ aiGroupId: null }),
+  clearAiSession: () => set({ aiSessionId: null }),
   clearTunnelIntent: () => set({ tunnelIntent: null })
 }))
 
 /** Open a page of AI & MCP, optionally on a particular access group. */
 export function openAi(section: AiSection, groupId?: string | null): void {
   useNav.setState({ aiSection: section, aiGroupId: groupId ?? null })
+  useApp.getState().setActivity('ai')
+}
+
+/** Open Active Sessions on one agent session: its group and mode live there. */
+export function openAiSession(sessionId: string): void {
+  useNav.setState({ aiSection: 'sessions', aiGroupId: null, aiSessionId: sessionId })
   useApp.getState().setActivity('ai')
 }
 

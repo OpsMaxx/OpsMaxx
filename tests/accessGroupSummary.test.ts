@@ -199,7 +199,13 @@ describe('summariseAccessGroup — edge cases', () => {
       'Can do everything without asking — including using sudo, adding, changing and removing servers in the workspace, starting and stopping VPNs, and listing reverse proxies, and starting and cancelling CI pipelines. ' +
         RISKY_CLAUSE
     )
-    expect(s.elevated).toEqual(ELEVATED_CAPABILITIES)
+    // Confirm risky actions (on by default) still asks before a VPN start, a
+    // pipeline run and changing or removing a server; sudo and adding a
+    // server are what go through with no prompt.
+    expect(s.elevated).toEqual(['sudo', 'manageServers'])
+    expect(summariseAccessGroup({ ...group(everything('allow')), confirmRisky: false }).elevated).toEqual(
+      ELEVATED_CAPABILITIES
+    )
   })
 
   it('says risky actions are confirmed unless the group turns that off', () => {
@@ -235,7 +241,7 @@ describe('summariseAccessGroup — edge cases', () => {
     expect(
       s.clauses[0].startsWith('Can use sudo, add, change and remove servers in the workspace, start and stop VPNs, and list reverse proxies,')
     ).toBe(true)
-    expect(s.elevated).toEqual(ELEVATED_CAPABILITIES)
+    expect(s.elevated).toEqual(['sudo', 'manageServers'])
   })
 
   it('describes a single allowed capability without a stray conjunction', () => {
@@ -443,7 +449,7 @@ describe('summariseAccessGroup — path rules outrank the capability', () => {
     expect(s.clauses[0]).toBe(
       'Can do everything without asking except the file paths below — including using sudo, adding, changing and removing servers in the workspace, starting and stopping VPNs, and listing reverse proxies, and starting and cancelling CI pipelines.'
     )
-    expect(s.elevated).toEqual(ELEVATED_CAPABILITIES)
+    expect(s.elevated).toEqual(['sudo', 'manageServers'])
   })
 })
 

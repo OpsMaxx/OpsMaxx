@@ -13,6 +13,7 @@ import { clsx, duration } from '../../lib/format'
 import { toast } from '../../store/toast'
 import { ToastSlot } from '../common/Toasts'
 import { ModePicker } from './ModePicker'
+import { openAi, openAiSession } from '../../store/nav'
 import { useArming } from '../../hooks/useArming'
 import {
   KILL_SWITCH_FAILED,
@@ -288,9 +289,28 @@ export function ApprovalDialog({
       toast(`${request.agentName}’s mode was not changed — it is still ${sessionModeLabel(mode)}.`, 'error')
       return
     }
+    // Read only is the one change that answers: main denies every request this
+    // session has waiting, this one included, and the dialog goes with it.
+    if (next === 'readOnly') {
+      toast(`${request.agentName} is now in Read only. Its waiting requests, this one included, were denied.`, 'ok')
+      return
+    }
     setMode(next)
     toast(`${request.agentName} is now in ${sessionModeLabel(next)} for later calls. This request still needs your answer.`, 'ok')
   }
+
+  // Leaving to change something is not an answer: the request is deferred, so
+  // it stays waiting in the status bar with its fuse still burning.
+  const openSession = (): void => {
+    deferApproval(request.id)
+    openAiSession(request.sessionId)
+  }
+  const openGroup = async (): Promise<void> => {
+    const all = await window.opsmaxx?.aiMcp?.listSessions?.().catch(() => undefined)
+    deferApproval(request.id)
+    openAi('groups', all?.find((x) => x.id === request.sessionId)?.groupId ?? null)
+  }
+  const LEAVES = 'Keeps this request waiting in the status bar while you look.'
   // The dialog is keyed on the request, so this re-arms for every new one.
   const { armed, allow, noteKey } = useArming(request.id)
 
@@ -325,7 +345,7 @@ export function ApprovalDialog({
                     data-testid="approval-mode"
                     title="The session’s mode when it asked"
                   >
-                    Mode: {sessionModeLabel(request.sessionMode)}
+                    Asked under: {sessionModeLabel(request.sessionMode)}
                   </span>
                 )}
                 {request.protectedTarget && (
@@ -423,6 +443,16 @@ export function ApprovalDialog({
                 }}
               >
                 Rule: {request.policyReason}
+                <div className="row" style={{ gap: 12, marginTop: 4 }}>
+                  <button className="linklike" title={LEAVES} onClick={openSession}>
+                    Change this agent’s group or mode
+                  </button>
+                  {/confirm risky actions/i.test(request.policyReason) && (
+                    <button className="linklike" title={LEAVES} onClick={() => void openGroup()}>
+                      Change Confirm risky actions{prov.groupName ? ` on ${prov.groupName}` : ''}
+                    </button>
+                  )}
+                </div>
               </div>
             )}
           </div>
@@ -471,7 +501,16 @@ export function ApprovalDialog({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <Row label="Agent">
               {request.agentName}
-              {prov.groupName ? ` · access group ${prov.groupName}` : ''}
+              {prov.groupName ? ` · access group ${prov.groupName} ` : ''}
+              {prov.groupName && (
+                <button
+                  className="linklike"
+                  title={`Open ${request.agentName} under Active Sessions. ${LEAVES}`}
+                  onClick={openSession}
+                >
+                  (change)
+                </button>
+              )}
               {request.toolName ? (
                 <span className="mono" style={{ color: 'var(--text-faint)' }}> · called {request.toolName}</span>
               ) : (
@@ -568,7 +607,7 @@ export function ApprovalDialog({
             onChange={changeMode}
             protectedCount={request.protectedTarget ? 1 : 0}
             size="sm"
-            title="Applies to this agent’s later calls. This request still needs an answer."
+            title="Applies to this agent’s later calls; this request still needs an answer. Read only is the exception: it also denies this request and any other this agent has waiting."
           />
         </div>
         {stopFailed && (

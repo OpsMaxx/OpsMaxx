@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { Plus, Copy, Eye, EyeOff, Ban, Octagon, Trash2, TriangleAlert } from 'lucide-react'
 import { toast } from '../../store/toast'
 import { useApp } from '../../store/app'
-import { openAi } from '../../store/nav'
+import { openAi, useNav } from '../../store/nav'
 import { SessionAccess } from './SessionAccess'
-import type { McpAgentSession, AccessGroup, SessionMode } from '../../../../shared/mcp'
+import type { McpAgentSession, AccessGroup, McpGlobalConfig, SessionMode } from '../../../../shared/mcp'
 import { DEFAULT_SESSION_MODE, resolveDefaultSessionGroup, sessionModeLabel } from '../../../../shared/mcp'
 import { ModePicker } from './ModePicker'
 import { maskToken } from '../../../../shared/tokenDisplay'
@@ -78,9 +78,13 @@ function CreateSessionForm({
   // now a legitimate resolved answer and has to stop the effect below from
   // asking again on every 5-second poll of `groups`.
   const [groupId, setGroupId] = useState<string | null>(null)
-  // `null` until the configured default is read; the same "prev ??" rule as
-  // groupId, so a slow getConfig cannot overwrite a mode the user picked.
+  // `null` means "nobody picked one": main then applies the configured default
+  // itself. Same "prev ??" rule as groupId, so a slow getConfig cannot
+  // overwrite a mode the user picked.
   const [mode, setMode] = useState<SessionMode | null>(null)
+  // Read once on mount, whether or not any group exists yet. `undefined` while
+  // in flight, `null` when it could not be read.
+  const [cfg, setCfg] = useState<McpGlobalConfig | null | undefined>(undefined)
   const [ttl, setTtl] = useState(60)
   const [issued, setIssued] = useState<{ token: string; port: number | null } | null>(null)
   // Re-hidden whenever a new session is issued, so revealing one token does not
@@ -113,19 +117,23 @@ function CreateSessionForm({
   // configured default or to No AI Access. Create then mints the session on a
   // grant nobody chose. Settling in the `.catch` too is what ends the loop: a
   // rejected getConfig used to leave `groupId` null forever, so every poll fired
-  // a fresh IPC call and a fresh unhandled rejection for the life of the page.
-  // No AI Access is the right thing to settle on when the config cannot be read
-  // — it fails closed, and the picker next to it says so.
+  // a fresh IPC call and a fresh unhandled rejection for the life of the page;
+  // the config is now read exactly once. No AI Access is the right thing to
+  // settle on when it cannot be read — it fails closed, and the picker next to
+  // it says so.
   useEffect(() => {
-    if (groupId !== null || groups.length === 0) return
-    void window.opsmaxx?.aiMcp
-      .getConfig?.()
-      .then((cfg) => {
-        setGroupId((prev) => prev ?? (resolveDefaultSessionGroup(cfg, groups).id ?? ''))
-        setMode((prev) => prev ?? cfg?.defaultSessionMode ?? DEFAULT_SESSION_MODE)
-      })
-      .catch(() => setGroupId((prev) => prev ?? ''))
-  }, [groups, groupId])
+    const read = window.opsmaxx?.aiMcp.getConfig?.()
+    if (!read) return setCfg(null)
+    read.then((c) => setCfg(c ?? null)).catch(() => setCfg(null))
+  }, [])
+  useEffect(() => {
+    if (cfg === undefined) return
+    setMode((prev) => prev ?? cfg?.defaultSessionMode ?? null)
+  }, [cfg])
+  useEffect(() => {
+    if (groupId !== null || groups.length === 0 || cfg === undefined) return
+    setGroupId((prev) => prev ?? (cfg ? (resolveDefaultSessionGroup(cfg, groups).id ?? '') : ''))
+  }, [groups, groupId, cfg])
 
   const toggleWorkspace = (id: string): void => {
     setWorkspaceIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
@@ -154,7 +162,7 @@ function CreateSessionForm({
         groupId: group?.id ?? null,
         groupName: group?.name ?? 'No AI Access',
         ttlMinutes: ttl === 0 ? null : ttl,
-        mode: mode ?? DEFAULT_SESSION_MODE
+        mode: mode ?? undefined
       })
       if (!result) throw new Error('OpsMaxx returned no session')
       const status = await window.opsmaxx?.aiMcp.status()
@@ -374,6 +382,15 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
   const [sessions, setSessions] = useState<McpAgentSession[]>([])
   const [workspaces, setWorkspaces] = useState<WorkspaceOpt[]>([])
   const [groups, setGroups] = useState<AccessGroup[]>([])
+  const focusSessionId = useNav((s) => s.aiSessionId)
+
+  // Sent here to look at one session (from the approval dialog): scroll to it
+  // once the list has it, then forget the request.
+  useEffect(() => {
+    if (!focusSessionId || !sessions.some((s) => s.id === focusSessionId)) return
+    document.getElementById(`ai-session-${focusSessionId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    useNav.getState().clearAiSession()
+  }, [focusSessionId, sessions])
 
   const load = (): void => {
     void window.opsmaxx?.aiMcp.listSessions().then((s) => setSessions(s ?? []))
@@ -441,17 +458,19 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
         // should render as empty, not crash the whole panel.
         const ws = Array.isArray(s.workspaces) ? s.workspaces : []
         return (
-          <div className="list-row" key={s.id} style={{ flexWrap: 'wrap' }}>
+          <div className="list-row" key={s.id} id={`ai-session-${s.id}`} style={{ flexWrap: 'wrap' }}>
             <div>
               <div className="r-title">
-                {s.agentName}{' '}
-                <span
-                  className={`chip${s.mode === 'bypass' ? ' danger' : ''}`}
-                  data-testid="session-mode-chip"
-                  title="Mode"
-                >
-                  {sessionModeLabel(s.mode)}
-                </span>
+                {s.agentName}
+                {/* A live session shows its picker below instead. */}
+                {!isLive(s) && (
+                  <>
+                    {' '}
+                    <span className="chip" data-testid="session-mode-chip" title="Mode">
+                      {sessionModeLabel(s.mode)}
+                    </span>
+                  </>
+                )}
               </div>
               <div className="r-sub">
                 Workspace{ws.length > 1 ? 's' : ''}: {ws.map((w) => w.name).join(', ') || '—'} · Started{' '}

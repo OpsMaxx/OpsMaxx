@@ -15,15 +15,20 @@ import { ModePicker } from './ModePicker'
 
 const VERDICT: Record<PermissionValue, string> = { allow: 'ALLOW', ask: 'ASK', deny: 'DENY' }
 
-/** Protected scopes that fall inside this session's workspaces. */
+/** Protected targets inside this session's workspaces: each protected
+ *  workspace once, plus each protected server whose workspace is not. */
 async function protectedCountFor(session: McpAgentSession): Promise<number> {
   const api = window.opsmaxx?.aiPolicy
   const [scopes, servers] = await Promise.all([api?.listProtected?.(), api?.listServers?.()])
   const mine = new Set(session.workspaces.map((w) => w.id))
   const workspaceOf = new Map((servers ?? []).map((s) => [s.id, s.workspaceId]))
-  return (scopes ?? []).filter((s) =>
-    mine.has(s.level === 'workspace' ? s.workspaceId : (workspaceOf.get(s.serverId) ?? ''))
-  ).length
+  const list = scopes ?? []
+  const shieldedWs = new Set(list.flatMap((s) => (s.level === 'workspace' ? [s.workspaceId] : [])))
+  return list.filter((s) => {
+    if (s.level === 'workspace') return mine.has(s.workspaceId)
+    const ws = workspaceOf.get(s.serverId) ?? ''
+    return mine.has(ws) && !shieldedWs.has(ws)
+  }).length
 }
 
 // Answers the question the permission model actually raises — "what can this
@@ -53,9 +58,13 @@ export function SessionAccess({
   // exclusively to someone who had already guessed there was something to look
   // at. It is a local call against data already in memory, so there is nothing
   // to save by waiting.
-  useEffect(() => {
-    void window.opsmaxx?.aiMcp.explainAccess?.(session.id, null).then((r) => setRows(r ?? []))
-  }, [session.id, session.groupId, mode])
+  const refetch = (): void => {
+    void window.opsmaxx?.aiMcp
+      .explainAccess?.(session.id, null)
+      .then((r) => setRows(r ?? []))
+      .catch(() => setRows([]))
+  }
+  useEffect(refetch, [session.id, session.groupId, mode])
 
   useEffect(() => {
     protectedCountFor(session)
@@ -113,20 +122,25 @@ export function SessionAccess({
   }
 
   const changeMode = async (next: SessionMode): Promise<void> => {
-    const updated = await window.opsmaxx?.aiMcp.setSessionMode?.(session.id, next)
-    setRows(null)
-    onChanged()
+    const updated = await window.opsmaxx?.aiMcp.setSessionMode?.(session.id, next).catch(() => null)
     if (!updated) {
+      // The table keeps showing what is still in force.
       toast(`${session.agentName} was not changed — it is still in ${sessionModeLabel(mode)}.`, 'error', {
         label: 'Try again',
         run: () => void changeMode(next)
       })
       return
     }
+    setRows(null)
+    refetch()
+    onChanged()
     toast(`${session.agentName} is now in ${sessionModeLabel(next)}.`, 'ok')
   }
 
-  const shielded = rows?.some((r) => r.protectedTarget) ?? false
+  // Protected only changes anything for Auto and Bypass: Ask first already
+  // asks, and Read only stays read only.
+  const capped = mode === 'auto' || mode === 'bypass'
+  const shielded = capped && (rows?.some((r) => r.protectedTarget) ?? false)
   const partly = rows?.some((r) => r.partlyAsks) ?? false
 
   return (
@@ -185,6 +199,13 @@ export function SessionAccess({
               </>
             )}
           </div>
+          {capped && protectedCount > 0 && (
+            <div className="s-desc" style={{ marginBottom: 6 }}>
+              This table covers all of the session’s workspaces at once, so Protected is shown per workspace,
+              worst case: if any of them is Protected, every row reads as held at Ask first. A server marked
+              Protected on its own is held there too, which this table does not show.
+            </div>
+          )}
           {rows === null && <div className="s-desc">Working it out…</div>}
           {rows?.length === 0 && <div className="s-desc">This session is scoped to no workspace.</div>}
           {rows && rows.length > 0 && (

@@ -243,8 +243,9 @@ function GroupEditor({ group, summary, onChange, onSave, onDelete }: {
         <div className="s-info">
           <div className="s-title">Confirm risky actions</div>
           <div className="s-desc">
-            On: the actions below still ask even where a capability says Allow. Off: Allow means allow. Only
-            applies in Auto mode — Ask first asks for every change anyway, and Bypass never asks.
+            On: the actions below still ask even where a capability says Allow. Off: Allow means allow (a
+            command whose program is computed at run time still asks unless Sudo is Allow). Only applies in
+            Auto mode — Ask first asks for every change anyway, and Bypass skips it.
           </div>
           <details className="disclosure" style={{ marginTop: 6 }}>
             <summary className="disclosure-head">
@@ -486,8 +487,8 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
         inherits its workspace's assignment.
       </div>
       <div className="sub">
-        <b>Protected</b> is the other optional restriction: agents are held at Ask first there, whatever their
-        mode — for production. A session in Read only stays read-only.
+        <b>Protected from agents</b> is the other optional restriction, for production: agents in Auto or
+        Bypass are held at Ask first there; Read only stays read only.
       </div>
 
       <div className="setting-row">
@@ -531,17 +532,17 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
       <div className="setting-row">
         <div className="s-info">
           <div className="s-title">
-            Protected workspace {isProtected(workspaceScope) && protectedBadge}
+            Protected from agents {isProtected(workspaceScope) && protectedBadge}
           </div>
           <div className="s-desc">
-            Agents are held at Ask first here, whatever their mode — for production.
+            Agents in Auto or Bypass are held at Ask first here; Read only stays read only.
           </div>
         </div>
         <Switch
           checked={isProtected(workspaceScope)}
           disabled={!activeWorkspaceId}
           onChange={(on) => void setProtected(workspaceScope, on)}
-          label="Protected workspace"
+          label={`Protected from agents: ${workspaces.find((w) => w.id === activeWorkspaceId)?.name ?? 'workspace'}`}
         />
       </div>
 
@@ -561,8 +562,12 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
               )}
             </div>
             <label className="row" style={{ gap: 6, alignItems: 'center' }}>
-              <span className="s-desc">Protected</span>
-              <Switch checked={isProtected(scope)} onChange={(on) => void setProtected(scope, on)} />
+              <span className="s-desc">Protected from agents</span>
+              <Switch
+                checked={isProtected(scope)}
+                onChange={(on) => void setProtected(scope, on)}
+                label={`Protected from agents: ${s.name}`}
+              />
             </label>
             <select
               className="input"

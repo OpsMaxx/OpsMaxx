@@ -92,6 +92,11 @@ const PHRASING: Record<AiCapability, Phrasing> = {
 // bury "can use sudo" behind six mundane capabilities.
 export const ELEVATED_CAPABILITIES: AiCapability[] = ['sudo', 'manageServers', 'vpnControl', 'ciTrigger']
 
+// With Confirm risky actions on, starting a VPN or a pipeline and changing or
+// removing a server still ask at Allow. What is left with no prompt: sudo, and
+// ADDING a server.
+const ELEVATED_WHEN_CONFIRMING: AiCapability[] = ['sudo', 'manageServers']
+
 // The two capabilities a path rule can override. `evaluateFilePath` maps
 // mode -> capability exactly this way.
 const FILE_CAPABILITIES: { id: AiCapability; mode: 'read' | 'write' }[] = [
@@ -274,7 +279,8 @@ export interface AccessGroupSummary {
   sentence: string
   /** The same text split by decision, so the UI can style each clause. */
   clauses: string[]
-  /** Elevated capabilities granted with no prompt — worth a visible warning. */
+  /** Elevated capabilities granted with no prompt — worth a visible warning.
+   *  With Confirm risky actions on, only those it does not cover. */
   elevated: AiCapability[]
   /** Capabilities whose stored value is not a permission, and so are allowed. */
   unrecognised: AiCapability[]
@@ -327,8 +333,9 @@ export function summariseAccessGroup(group: AccessGroup): AccessGroupSummary {
   const asked = idsBy('ask')
   const denied = idsBy('deny')
 
+  const unprompted = group.confirmRisky === false ? ELEVATED_CAPABILITIES : ELEVATED_WHEN_CONFIRMING
   const elevated = decisions
-    .filter((d) => d.value === 'allow' && ELEVATED_CAPABILITIES.includes(d.id))
+    .filter((d) => d.value === 'allow' && unprompted.includes(d.id))
     .map((d) => d.id)
   const unrecognised = decisions.filter((d) => d.unrecognised !== undefined)
 

@@ -87,7 +87,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         // does not reach Read & Write either: resolveDefaultSessionGroup()
         // consults the fallback only when nothing is configured at all.
         setGroupId((prev) => prev ?? resolveDefaultSessionGroup(cfg, list, 'grp-read-write').id ?? '')
-        setMode((prev) => prev ?? cfg?.defaultSessionMode ?? DEFAULT_SESSION_MODE)
+        setMode((prev) => prev ?? cfg?.defaultSessionMode ?? null)
       }
     )
   }, [])
@@ -144,7 +144,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         // would just stop working silently. Revoke under Active Sessions
         // instead, which is visible and deliberate.
         ttlMinutes: null,
-        mode: mode ?? DEFAULT_SESSION_MODE
+        mode: mode ?? undefined
       })
       if (!created) {
         throw new StepError('OpsMaxx could not issue a session for this agent.', {

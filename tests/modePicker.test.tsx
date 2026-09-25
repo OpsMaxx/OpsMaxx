@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { ModePicker } from '../src/renderer/src/components/ai/ModePicker'
+import { useToasts } from '../src/renderer/src/store/toast'
 
 // The one control that sets how much a human is in the loop. Bypass is the
 // setting that lifts every refusal, so it must never be one click away.
@@ -60,6 +61,32 @@ describe('ModePicker', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     expect(onChange).not.toHaveBeenCalled()
     expect(screen.queryByTestId('bypass-confirm')).toBeNull()
+    // Back on the picker, not lost on the body: the menu item that opened the
+    // confirm no longer exists.
+    expect(document.activeElement).toBe(screen.getByTestId('mode-picker'))
+  })
+
+  it('as the default, says every new session starts in Bypass, including ones with no picker', async () => {
+    const onChange = vi.fn()
+    render(<ModePicker value="auto" onChange={onChange} defaultScope />)
+    await open()
+    await userEvent.keyboard('4')
+    expect(screen.getByTestId('bypass-confirm').textContent).toMatch(/Every new agent session will start in Bypass/)
+    expect(screen.getByTestId('bypass-confirm').textContent).toMatch(/CLI-paired and OAuth/)
+    await userEvent.click(screen.getByRole('button', { name: 'Make Bypass the default' }))
+    expect(onChange).toHaveBeenCalledWith('bypass')
+  })
+
+  it('says so when the change fails, rather than dropping the rejection', async () => {
+    const onChange = vi.fn(async () => {
+      throw new Error('bridge gone')
+    })
+    render(<ModePicker value="auto" onChange={onChange} />)
+    await open()
+    await userEvent.keyboard('2')
+    await vi.waitFor(() =>
+      expect(useToasts.getState().toasts.map((t) => t.message)).toContain('The mode was not changed: bridge gone')
+    )
   })
 
   it('enables Bypass only through the confirm', async () => {
@@ -79,7 +106,7 @@ describe('ModePicker', () => {
   it('says when protected targets cap the mode', async () => {
     render(<ModePicker value="auto" onChange={() => {}} protectedCount={2} />)
     await open()
-    expect(screen.getByRole('menu').textContent).toContain('Capped at Ask first on 2 protected targets')
+    expect(screen.getByRole('menu').textContent).toContain('Auto and Bypass are capped at Ask first on 2 protected targets.')
   })
 
   it('works from inside the approval dialog, which paints above every menu', async () => {

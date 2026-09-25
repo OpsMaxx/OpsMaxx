@@ -1,3 +1,4 @@
+import { sessionModeLabel } from '../../../../shared/mcp'
 import type { AuditEntry } from '../../../../shared/mcp'
 
 // One OUTCOME per row, instead of two columns that print the same word twice.
@@ -25,7 +26,15 @@ export interface AuditOutcome {
   detail: string
 }
 
-export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCode' | 'error'>): AuditOutcome {
+type OutcomeFields = Pick<AuditEntry, 'approval' | 'result' | 'exitCode' | 'error' | 'mode'>
+
+/** The outcome, with the session's mode named when the row recorded one. */
+export function auditOutcome(e: OutcomeFields): AuditOutcome {
+  const o = outcome(e)
+  return e.mode ? { ...o, detail: `${o.detail} Session mode: ${sessionModeLabel(e.mode)}.` } : o
+}
+
+function outcome(e: OutcomeFields): AuditOutcome {
   const code = e.exitCode !== undefined ? ` (exit ${e.exitCode})` : ''
 
   // Timeout first: it is a denial, and it is the one the operator did NOT make.
@@ -79,6 +88,16 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
   // rule, a server on No AI Access. The rule that refused it is the row's
   // `error`, and the sentence names it.
   if (e.result === 'denied' && (e.approval === 'not-required' || e.approval === undefined)) {
+    // Read only refuses every change whatever the group says, so crediting the
+    // group with it would send somebody to edit the wrong thing.
+    if (e.mode === 'readOnly' || e.error?.startsWith('Read-only mode')) {
+      return {
+        label: 'Blocked by policy',
+        decidedBy: 'policy',
+        tone: 'danger',
+        detail: e.error ? `Refused: ${e.error} Nothing was asked.` : 'Refused in Read only mode. Nothing was asked.'
+      }
+    }
     return {
       label: 'Blocked by policy',
       decidedBy: 'policy',
@@ -121,7 +140,7 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
           : e.approval === 'bypassed'
             ? // Kept apart from "allowed outright": the policy would have asked
               // or refused, and only the session's mode let it through.
-              'Ran without asking: session in Bypass mode. Its access group would otherwise have asked or refused.'
+              'Ran without asking: session in Bypass mode. The policy would otherwise have asked or refused.'
             : 'The access group allowed this outright, so nothing was asked.'
 
   if (e.result === 'denied') {
@@ -132,7 +151,10 @@ export function auditOutcome(e: Pick<AuditEntry, 'approval' | 'result' | 'exitCo
       label: `${prefix}, then blocked`,
       decidedBy: who,
       tone: 'danger',
-      detail: `${because} It was then refused by a path rule or a capability the group does not grant.`
+      detail:
+        e.approval === 'bypassed'
+          ? `${because} It was then refused anyway, by something Bypass does not lift.`
+          : `${because} It was then refused by a path rule or a capability the group does not grant.`
     }
   }
   if (e.result === 'error') {

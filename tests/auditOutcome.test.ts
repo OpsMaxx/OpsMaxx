@@ -184,3 +184,34 @@ describe('a request whose agent disconnected', () => {
     expect(o.detail).not.toMatch(/You refused|timeout|clock/)
   })
 })
+
+describe('modes in the audit row', () => {
+  it('does not credit the access group with a Read only refusal', () => {
+    const o = auditOutcome(
+      e({
+        approval: 'not-required',
+        result: 'denied',
+        mode: 'readOnly',
+        error: 'Read-only mode: this session can look but not change anything.'
+      })
+    )
+    expect(o.detail).toMatch(/^Refused: Read-only mode/)
+    expect(o.detail).not.toMatch(/access group refused/i)
+  })
+
+  it('marks a bypassed row as ran without asking, and never as allowed by the group', () => {
+    const o = auditOutcome(e({ approval: 'bypassed', result: 'success', mode: 'bypass' }))
+    expect(o.label).toBe('Bypassed, ran')
+    expect(o.tone).toBe('warn')
+    expect(o.detail).toContain('Ran without asking: session in Bypass mode.')
+    expect(o.detail).not.toMatch(/allowed this outright/)
+    expect(auditOutcome(e({ approval: 'bypassed', result: 'denied' })).detail).not.toMatch(/path rule/)
+  })
+
+  it('names the session mode when the row recorded one', () => {
+    expect(auditOutcome(e({ approval: 'approved', result: 'success', mode: 'ask' })).detail).toMatch(
+      /Session mode: Ask first\.$/
+    )
+    expect(auditOutcome(e({ approval: 'approved', result: 'success' })).detail).not.toMatch(/Session mode/)
+  })
+})

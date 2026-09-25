@@ -79,7 +79,8 @@
 
 /* ---- ModePicker (components/ai/ModePicker.tsx) ---- */
 /* Bypass lifts every refusal, so the control that shows it is never quiet. */
-.hc-mode-picker.is-bypass {
+.hc-mode-picker.is-bypass,
+.hc-mode-picker.is-bypass:hover {
   color: var(--danger);
   background: var(--danger-soft);
   border-color: var(--danger);

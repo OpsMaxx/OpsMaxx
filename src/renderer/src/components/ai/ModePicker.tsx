@@ -7,6 +7,7 @@ import { ContextMenu } from '../connections/ContextMenu'
 import type { MenuEntry } from '../connections/ContextMenu'
 import { Modal } from '../common/Modal'
 import { clsx } from '../../lib/format'
+import { toast } from '../../store/toast'
 
 // The approval dialog paints above every Modal and menu; opened from inside it,
 // both have to be mounted in its layer or they appear underneath it.
@@ -23,7 +24,8 @@ export function ModePicker({
   protectedCount = 0,
   disabled,
   size,
-  title
+  title,
+  defaultScope
 }: {
   value: SessionMode
   onChange: (mode: SessionMode) => void | Promise<void>
@@ -31,18 +33,39 @@ export function ModePicker({
   disabled?: boolean
   size?: 'sm'
   title?: string
+  /** This picks the DEFAULT for new sessions, not one session's mode, and the
+   *  Bypass confirm says what that reaches. */
+  defaultScope?: boolean
 }): React.JSX.Element {
   const [menu, setMenu] = useState<DOMRect | null>(null)
   const [confirming, setConfirming] = useState(false)
   const layer = useRef<Element | undefined>(undefined)
+  const button = useRef<HTMLButtonElement>(null)
   // A press on the button while the menu is open closes it through the
   // outside-click handler before the click lands; without this it reopens.
   const wasOpen = useRef(false)
 
+  // Awaited, so a rejected change is said rather than left as an unhandled
+  // rejection behind a button that already shows the old value.
+  const change = async (mode: SessionMode): Promise<void> => {
+    try {
+      await onChange(mode)
+    } catch (err) {
+      toast(`The mode was not changed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+    }
+  }
+
   const pick = (mode: SessionMode): void => {
     if (mode === value) return
     if (mode === 'bypass') setConfirming(true)
-    else void onChange(mode)
+    else void change(mode)
+  }
+
+  // The Modal would hand focus back to what opened it, and that was a menu
+  // item that no longer exists; the picker is where the user was.
+  const closeConfirm = (): void => {
+    setConfirming(false)
+    button.current?.focus()
   }
 
   const entries: MenuEntry[] = SESSION_MODES.map((m, i) => ({
@@ -58,19 +81,28 @@ export function ModePicker({
 
   const confirm = confirming && (
     <Modal
-      title="Bypass all permissions?"
-      onClose={() => setConfirming(false)}
+      title={defaultScope ? 'Make Bypass the default for new sessions?' : 'Bypass all permissions?'}
+      onClose={closeConfirm}
       confirm={{
-        label: 'Enable Bypass',
+        label: defaultScope ? 'Make Bypass the default' : 'Enable Bypass',
         destructive: true,
         onClick: () => {
-          setConfirming(false)
-          void onChange('bypass')
+          closeConfirm()
+          void change('bypass')
         }
       }}
     >
       <div data-testid="bypass-confirm" className="s-desc" style={{ lineHeight: 1.6 }}>
-        <p style={{ margin: 0 }}>The agent runs everything it asks for, with no prompt and no refusal. This lifts:</p>
+        {defaultScope && (
+          <p style={{ margin: '0 0 8px', color: 'var(--danger)' }}>
+            Every new agent session will start in Bypass — including CLI-paired and OAuth sessions, which
+            connect without showing anyone a mode picker. Sessions that already exist keep their mode.
+          </p>
+        )}
+        <p style={{ margin: 0 }}>
+          {defaultScope ? 'A session in Bypass' : 'The agent'} runs everything it asks for, with no prompt and no
+          refusal. This lifts:
+        </p>
         <ul style={{ margin: '4px 0 10px' }}>
           <li>the access group’s Deny</li>
           <li>access-group restrictions on workspaces and servers</li>
@@ -93,6 +125,7 @@ export function ModePicker({
   return (
     <>
       <button
+        ref={button}
         type="button"
         data-testid="mode-picker"
         className={clsx('btn', size === 'sm' && 'sm', 'hc-mode-picker', value === 'bypass' && 'is-bypass')}
@@ -119,9 +152,10 @@ export function ModePicker({
           anchor={menu}
           entries={entries}
           container={layer.current}
+          ariaLabel="Session mode"
           footer={
             protectedCount > 0
-              ? `Capped at Ask first on ${protectedCount} protected target${protectedCount === 1 ? '' : 's'}`
+              ? `Auto and Bypass are capped at Ask first on ${protectedCount} protected target${protectedCount === 1 ? '' : 's'}.`
               : undefined
           }
           onClose={() => setMenu(null)}

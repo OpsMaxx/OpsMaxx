@@ -35,9 +35,20 @@ interface ContextMenuProps {
   container?: Element
   /** A muted closing line under the entries: a fact about all of them. */
   footer?: string
+  /** The menu's accessible name. */
+  ariaLabel?: string
 }
 
-export function ContextMenu({ x, y, entries, onClose, anchor, container, footer }: ContextMenuProps): React.JSX.Element {
+export function ContextMenu({
+  x,
+  y,
+  entries,
+  onClose,
+  anchor,
+  container,
+  footer,
+  ariaLabel
+}: ContextMenuProps): React.JSX.Element {
   const ref = useRef<HTMLDivElement>(null)
   const uid = useId()
   useClickOutside(ref, onClose)
@@ -75,6 +86,8 @@ export function ContextMenu({ x, y, entries, onClose, anchor, container, footer 
     <div
       className="menu"
       role="menu"
+      aria-label={ariaLabel}
+      aria-describedby={footer ? `${uid}-foot` : undefined}
       style={{ top: py, left: px }}
       ref={ref}
       onKeyDown={(e) => {
@@ -165,7 +178,7 @@ export function ContextMenu({ x, y, entries, onClose, anchor, container, footer 
         </Fragment>
       ))}
       {footer && (
-        <div className="hc-menu-foot" role="presentation">
+        <div className="hc-menu-foot" id={`${uid}-foot`} role="presentation">
           {footer}
         </div>
       )}
