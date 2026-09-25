@@ -401,6 +401,13 @@ While it is on, `allow` still asks for the actions that are hard to take back:
 - starting a VPN, or stopping one other sessions depend on;
 - starting, cancelling or re-running CI/CD pipelines.
 
+Turning the switch off never lets one capability walk past another the group set below `allow`.
+Three command upgrades therefore stay whatever the switch says: a computed command word unless
+`sudo` is `allow` (above); a destructive command that names no file for the path rules to catch
+(`find / -delete`, `mkfs /dev/sdb`, `systemctl stop db`) unless `writeFiles` is `allow`; and a
+container's lifecycle (`docker stop`, `docker restart`, `kubectl delete`, …) unless
+`containerControl` is `allow` — granting `sudo` does not answer that one.
+
 That list is `RISKY_ACTIONS` in `shared/mcp.ts`, and every allow-to-ask upgrade in
 `policyEngine.ts` is conditional on `confirmsRisky(group)` and on nothing else. These upgrades used
 to be unconditional, which meant a group set to allow everything still asked, for reasons no screen

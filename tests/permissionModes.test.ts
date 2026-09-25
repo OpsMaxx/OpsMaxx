@@ -104,7 +104,8 @@ const {
   evaluateTunnelDefine,
   evaluateTunnelOpen,
   evaluateVpnControl,
-  extractPathAccesses
+  extractPathAccesses,
+  classifyStatement
 } = await import('../src/main/services/policyEngine')
 type Decision = import('../src/main/services/policyEngine').Decision
 const {
@@ -290,6 +291,54 @@ describe('Confirm risky actions', () => {
   })
 })
 
+describe('a write dressed as a read is still a write', () => {
+  // Read-only mode trusts this classifier with "nothing changes", so a DML
+  // that leads with a reading verb is the leak that matters most.
+  it.each([
+    'WITH d AS (DELETE FROM users RETURNING *) SELECT * FROM d',
+    'with x as (insert into t values (1) returning 1) select 1',
+    "db.users.aggregate([{ $match: {} }, { $out: 'users' }])",
+    "db.users.aggregate([{ $merge: { into: 'x' } }])",
+    "select dblink_exec('dbname=x','drop table t')",
+    'select lo_unlink(1)',
+    "select setval('s', 1)"
+  ])('%s is not a read', (q) => {
+    expect(classifyStatement(q)).not.toBe('read')
+  })
+
+  it.each(['WITH a AS (SELECT 1) SELECT * FROM a', 'select * from users', 'db.users.aggregate([{ $match: {} }])'])(
+    '%s is still a read',
+    (q) => {
+      expect(classifyStatement(q)).toBe('read')
+    }
+  )
+})
+
+describe('switching risky confirmations off does not walk past another capability', () => {
+  const base = (caps: Partial<AccessGroup['capabilities']>): AccessGroup => {
+    const full = listGroups().find((g) => g.id === 'grp-full')!
+    return { ...full, confirmRisky: false, capabilities: { ...full.capabilities, sudo: 'allow', ...caps } }
+  }
+
+  it('a destructive command that names no file still asks when writes are not allowed', () => {
+    const noWrites = base({ writeFiles: 'deny' })
+    for (const cmd of ['find / -delete', 'mkfs.ext4 /dev/sdb', 'systemctl stop postgresql']) {
+      expect(evaluateCommand(noWrites, cmd).decision, cmd).not.toBe('allow')
+    }
+    // ...and runs when the group does allow writes: the switch really is off.
+    expect(evaluateCommand(base({}), 'systemctl stop postgresql').decision).toBe('allow')
+  })
+
+  it('a container lifecycle command asks when containerControl is not allowed, sudo or not', () => {
+    const noContainers = base({ containerControl: 'deny' })
+    for (const cmd of ['docker stop web', 'sudo docker restart web', 'kubectl delete pod x']) {
+      expect(evaluateCommand(noContainers, cmd).decision, cmd).not.toBe('allow')
+    }
+    // Building an image is not stopping a container.
+    expect(evaluateCommand(noContainers, 'sudo docker build -t app .').decision).toBe('allow')
+  })
+})
+
 describe('the kernel\'s stream devices are not files', () => {
   it('does not count 2>/dev/null as a write', () => {
     expect(extractPathAccesses('ls 2>/dev/null').filter((a) => a.mode === 'write')).toEqual([])
@@ -457,7 +506,9 @@ describe('modes on the live bridge', () => {
         { id: 's3', workspaceId: 'wsShut', name: 'Closed', host: '10.0.0.3', port: 22, username: 'root', auth: 'key', os: 'Linux', route: [] }
       ],
       databases: [
-        { id: 'db1', workspaceId: 'wsShut', name: 'Orders', kind: 'postgres', host: '10.0.0.5', port: 5432, username: 'app', database: 'orders', ssl: false, uri: false, sshServerId: null }
+        { id: 'db1', workspaceId: 'wsShut', name: 'Orders', kind: 'postgres', host: '10.0.0.5', port: 5432, username: 'app', database: 'orders', ssl: false, uri: false, sshServerId: null },
+        // Reached through Vault (s2), which is Protected; its workspace is not.
+        { id: 'db2', workspaceId: 'ws', name: 'Ledger', kind: 'postgres', host: '10.0.0.7', port: 5432, username: 'app', database: 'ledger', ssl: false, uri: false, sshServerId: 's2' }
       ],
       tunnels: [
         { id: 't1', workspaceId: 'ws', name: 'DB Forward', kind: 'local', serverId: 's1', listen: '127.0.0.1:15432', target: '10.0.0.5:5432' },
@@ -621,6 +672,39 @@ describe('modes on the live bridge', () => {
     const { c } = await agent('bypass')
     await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: true })
     expect(asked).toEqual([])
+  })
+
+  it("a Protected server's ask is one call at a time, never remembered for the session", async () => {
+    const { c } = await agent('bypass')
+    await call(c, 'execute_command', { serverName: 'Vault', command: 'uptime' })
+    expect(asked).toHaveLength(1)
+    expect(asked[0].sessionGrant).toBeUndefined()
+  })
+
+  it('a database reached through a Protected server is capped too', async () => {
+    const { c } = await agent('bypass')
+    const out = await call(c, 'query_database', { databaseName: 'Ledger', statement: 'DROP TABLE t' })
+    expect(asked).toHaveLength(1)
+    expect(asked[0].protectedTarget).toBe(true)
+    expect(out).toContain('Denied')
+    expect(queries).toEqual([])
+  })
+
+  it('no mode lets an agent save a connection to the OpsMaxx machine itself', async () => {
+    const { c } = await agent('bypass')
+    for (const host of ['127.0.0.1', 'localhost', '::1']) {
+      const out = await call(c, 'add_server', { name: `Local ${host}`, host, workspaceName: 'Prod' })
+      expect(out, host).toMatch(/^Denied: .*machine OpsMaxx itself runs on/)
+    }
+    expect(asked).toEqual([])
+  })
+
+  it('a second entry for a Protected machine is as Protected as the first', async () => {
+    const { c } = await agent('bypass')
+    const out = await call(c, 'add_server', { name: 'Vault again', host: '10.0.0.2', workspaceName: 'Prod' })
+    expect(asked).toHaveLength(1)
+    expect(asked[0].protectedTarget).toBe(true)
+    expect(out).toContain('Denied')
   })
 
   it('an explicit No AI Access still denies under Bypass, and asks nobody', async () => {
