@@ -58,30 +58,38 @@ describe('upgrading a policy file written before a capability existed', () => {
   })
 
   it('gives a built-in group what a fresh install would have given it', () => {
-    // Not 'allow' — Full Access seeds manageServers at ASK, so every add still
-    // raises an approval prompt.
-    expect(getGroup('grp-full')?.capabilities.manageServers).toBe('ask')
+    // Full Access seeds manageServers at ALLOW since version 3, and ships with
+    // Confirm risky actions off, so on that group allow means allow.
+    expect(getGroup('grp-full')?.capabilities.manageServers).toBe('allow')
     expect(getGroup('grp-read-only')?.capabilities.manageServers).toBe('deny')
   })
 
   it('backfills vpnControl the same way, on a file that predates it', () => {
     // The on-disk fixture has no vpnControl key at all. Full Access seeds it at
-    // ASK and Read Only at DENY, so an upgraded install matches a fresh one.
-    expect(getGroup('grp-full')?.capabilities.vpnControl).toBe('ask')
+    // ALLOW and Read Only at DENY, so an upgraded install matches a fresh one.
+    expect(getGroup('grp-full')?.capabilities.vpnControl).toBe('allow')
     expect(getGroup('grp-read-only')?.capabilities.vpnControl).toBe('deny')
   })
 
-  it('backfills hostFacts to DENY on every group, built-in ones included', () => {
-    // Roadmap item C, and the one capability of which this is true. It returns
-    // how many unpatched security updates a host is carrying and against which
-    // distribution, which is a vulnerability report rather than a health check
-    // — so unlike manageServers and vpnControl, no seeded group opts in at
-    // 'ask' either. An upgraded install gets it off, and turning it on is a
-    // deliberate act.
-    for (const g of listGroups()) {
+  it('sets the Confirm risky actions switch the way a fresh install would', () => {
+    // Off on Full Access, on everywhere else -- including the custom group,
+    // which keeps every upgrade it had when the upgrades were hard-coded.
+    expect(getGroup('grp-full')?.confirmRisky).toBe(false)
+    expect(getGroup('grp-read-only')?.confirmRisky).toBe(true)
+    expect(getGroup('grp-custom')?.confirmRisky).toBe(true)
+  })
+
+  it('backfills hostFacts to DENY on every group but Full Access', () => {
+    // Roadmap item C. It returns how many unpatched security updates a host is
+    // carrying and against which distribution, which is a vulnerability report
+    // rather than a health check — so no narrower seeded group opts in, not
+    // even at 'ask'. Full Access does, since version 3, because "Full Access"
+    // has to mean full; an upgraded install matches a fresh one in that.
+    for (const g of listGroups().filter((g) => g.id !== 'grp-full')) {
       expect(g.capabilities.hostFacts, g.name).toBe('deny')
     }
-    expect(evaluateCapability(getGroup('grp-full'), 'hostFacts').decision).toBe('deny')
+    expect(evaluateCapability(getGroup('grp-custom'), 'hostFacts').decision).toBe('deny')
+    expect(evaluateCapability(getGroup('grp-full'), 'hostFacts').decision).toBe('allow')
   })
 
   it('backfills firewallRules to DENY on every group, built-in ones included', () => {
@@ -116,16 +124,16 @@ describe('upgrading a policy file written before a capability existed', () => {
   it('makes the backfilled capability actually usable', () => {
     // Before the backfill this evaluated to deny via the undefined guard, and
     // no amount of changing other settings could shift it.
-    expect(evaluateCapability(getGroup('grp-full'), 'manageServers').decision).toBe('ask')
-    expect(evaluateCapability(getGroup('grp-full'), 'vpnControl').decision).toBe('ask')
+    expect(evaluateCapability(getGroup('grp-full'), 'manageServers').decision).toBe('allow')
+    expect(evaluateCapability(getGroup('grp-full'), 'vpnControl').decision).toBe('allow')
   })
 
   it('reaches the VPN rule, not just the capability lookup', () => {
     // evaluateVpnControl reads the capability through the same undefined guard,
     // so a missed backfill would surface here as a permanent deny on a group
-    // the user believes is set to ask.
-    expect(evaluateVpnControl(getGroup('grp-full'), 'start', false).decision).toBe('ask')
-    expect(evaluateVpnControl(getGroup('grp-full'), 'stop', false).decision).toBe('ask')
+    // the user believes is set to allow.
+    expect(evaluateVpnControl(getGroup('grp-full'), 'start', false).decision).toBe('allow')
+    expect(evaluateVpnControl(getGroup('grp-full'), 'stop', false).decision).toBe('allow')
     expect(evaluateVpnControl(getGroup('grp-custom'), 'stop', false).decision).toBe('deny')
   })
 })

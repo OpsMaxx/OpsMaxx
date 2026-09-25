@@ -11,6 +11,13 @@ let readOnly: AccessGroup
 let readWrite: AccessGroup
 let full: AccessGroup
 
+// A group saved before Confirm risky actions existed. Absent is ON.
+const withoutSwitch = (g: AccessGroup): AccessGroup => {
+  const copy = { ...g }
+  delete copy.confirmRisky
+  return copy
+}
+
 beforeEach(() => {
   resetPolicyCacheForTests()
   readOnly = listGroups().find((g) => g.id === 'grp-read-only')!
@@ -122,12 +129,20 @@ describe('database statements against a group', () => {
     expect(evaluateDatabaseStatement(readOnly, 'DROP TABLE t').decision).toBe('deny')
   })
 
-  it('never lets a write through silently, even on Full Access', () => {
-    // databaseAccess and writeFiles are both ALLOW on Full Access, so without
-    // the clamp this would be a silent DROP TABLE.
-    expect(evaluateDatabaseStatement(full, 'SELECT 1').decision).toBe('allow')
-    expect(evaluateDatabaseStatement(full, 'UPDATE t SET a=1').decision).toBe('ask')
-    expect(evaluateDatabaseStatement(full, 'DROP TABLE t').decision).toBe('ask')
+  it('never lets a write through silently while Confirm risky actions is on', () => {
+    // databaseAccess and writeFiles are both ALLOW here, so without the clamp
+    // this would be a silent DROP TABLE.
+    for (const g of [{ ...full, confirmRisky: true }, withoutSwitch(full)]) {
+      expect(evaluateDatabaseStatement(g, 'SELECT 1').decision).toBe('allow')
+      expect(evaluateDatabaseStatement(g, 'UPDATE t SET a=1').decision).toBe('ask')
+      expect(evaluateDatabaseStatement(g, 'DROP TABLE t').decision).toBe('ask')
+    }
+  })
+
+  it('gives Full Access, whose switch is off, exactly what its capabilities say', () => {
+    expect(full.confirmRisky).toBe(false)
+    expect(evaluateDatabaseStatement(full, 'UPDATE t SET a=1').decision).toBe('allow')
+    expect(evaluateDatabaseStatement(full, 'DROP TABLE t').decision).toBe('allow')
   })
 
   it('keeps asking on Read & Write, which already asks for writes', () => {
@@ -149,8 +164,13 @@ describe('opening a tunnel', () => {
     expect(evaluateTunnelOpen(readOnly).decision).toBe('deny')
   })
 
-  it('always asks, never silently binds a port', () => {
+  it('asks, never silently binds a port, while Confirm risky actions is on', () => {
     expect(evaluateTunnelOpen(readWrite).decision).toBe('ask')
-    expect(evaluateTunnelOpen(full).decision).toBe('ask')
+    expect(evaluateTunnelOpen({ ...full, confirmRisky: true }).decision).toBe('ask')
+    expect(evaluateTunnelOpen(withoutSwitch(full)).decision).toBe('ask')
+  })
+
+  it('binds without asking on a group that allows it with the switch off', () => {
+    expect(evaluateTunnelOpen(full).decision).toBe('allow')
   })
 })

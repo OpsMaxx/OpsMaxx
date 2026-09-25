@@ -76,38 +76,52 @@ beforeAll(async () => {
 
 afterAll(async () => await stopMcpServer())
 
+// An administrator who raised manageServers to ALLOW on a group with Confirm
+// risky actions ON -- every group but the seeded Full Access. On it an add runs
+// unasked ("add servers without asking me"), while changing or removing a
+// saved one still asks. The seeded Full Access has the switch off, and there
+// all three are the literal allow.
+const ALLOW_GROUP = 'grp-manage-allow'
+// manageServers at ASK, so every add is asked for.
+const ASK_GROUP = 'grp-manage-ask'
+
 beforeEach(() => {
   created = []
   written = []
   testResult = { ok: true }
   tested.length = 0
   setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
-})
-
-// An administrator who raised manageServers to ALLOW by hand. No built-in group
-// is shaped this way -- they all seed it at ASK -- so the only way to exercise
-// the rule that an allow is still not silent is to build one.
-const ALLOW_GROUP = 'grp-manage-allow'
-
-function useAllowGroup(): void {
   const full = getGroup('grp-full')!
   saveGroup({
     ...full,
     id: ALLOW_GROUP,
     name: 'Manage Allow',
     builtIn: false,
-    capabilities: { ...full.capabilities, manageServers: 'allow' }
+    capabilities: { ...full.capabilities, manageServers: 'allow' },
+    confirmRisky: true
   })
+  saveGroup({
+    ...full,
+    id: ASK_GROUP,
+    name: 'Manage Ask',
+    builtIn: false,
+    capabilities: { ...full.capabilities, manageServers: 'ask' },
+    confirmRisky: true
+  })
+})
+
+function useAllowGroup(): void {
   setAssignment({ level: 'workspace', workspaceId: 'ws' }, ALLOW_GROUP)
 }
 
-async function clientFor(groupId: string): Promise<Client> {
+async function clientFor(groupId: string, mode?: 'bypass'): Promise<Client> {
   const { token } = createSession({
-    agentName: 'Test Agent',
+    agentName: mode ? `Test Agent (${mode})` : 'Test Agent',
     workspaces: [{ id: 'ws', name: 'Personal' }],
     groupId,
     groupName: groupId,
-    ttlMinutes: null
+    ttlMinutes: null,
+    mode
   })
   const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } }
@@ -300,7 +314,7 @@ describe('one approval writes one server', () => {
     // still covers one add: a per-call tool is offered no session grant, and
     // main reads a session answer sent for one anyway as once.
     const a = autoRespond('approved', 'session')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ASK_GROUP)
     try {
       await call(c, 'add_server', { name: 'First', host: '10.0.0.21' })
       await call(c, 'add_server', { name: 'Second', host: '10.0.0.22' })
@@ -333,10 +347,9 @@ describe('update_server', () => {
     }
   })
 
-  it('asks even when manageServers is raised to ALLOW', async () => {
+  it('asks with manageServers raised to ALLOW while Confirm risky actions is on', async () => {
     // The gap this closes, and it is only visible on a group an administrator
-    // raised by hand: every built-in that grants manageServers seeds it at ASK,
-    // so Full Access already prompted and proved nothing.
+    // raised by hand with the switch on.
     //
     // `allow` meant "add servers without asking me", and update_server read it
     // as consent to rewrite the ones already saved -- silently. Repointing is
@@ -373,13 +386,32 @@ describe('update_server', () => {
     }
   })
 
-  it('asks even on Full Access, which seeds manageServers at ask', async () => {
+  it('changes without asking on Full Access, whose switch is off', async () => {
     setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
-    const a = autoRespond('approved')
+    const a = autoRespond('denied')
     const c = await clientFor('grp-full')
     try {
-      await call(c, 'update_server', { serverName: 'Scanner01', host: '10.99.99.99' })
-      expect(a.count()).toBe(1)
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2291 })
+      expect(a.count()).toBe(0)
+      expect(written).toHaveLength(1)
+      expect(listAudit().find((e) => e.action === 'Change server "Scanner01" (port to 2291)')?.approval).toBe('not-required')
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('changes without asking in a Bypass session on a group that asks, audited as bypassed', async () => {
+    useAllowGroup()
+    const a = autoRespond('denied')
+    const c = await clientFor(ALLOW_GROUP, 'bypass')
+    try {
+      await call(c, 'update_server', { serverName: 'Scanner01', port: 2292 })
+      expect(a.count()).toBe(0)
+      expect(written).toHaveLength(1)
+      const row = listAudit().find((e) => e.action === 'Change server "Scanner01" (port to 2292)')
+      expect(row?.approval).toBe('bypassed')
+      expect(row?.mode).toBe('bypass')
     } finally {
       a.stop()
       await c.close()
@@ -396,7 +428,7 @@ describe('update_server', () => {
   // narrower grant: same server yes, other server no, other tool no.
   it('does not ask again for a second change to the same server in one session', async () => {
     const a = autoRespond('approved', 'session')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ALLOW_GROUP)
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2202 })
@@ -427,7 +459,7 @@ describe('update_server', () => {
   // "Approve once" used to mean the rest of the session. It now means once.
   it('asks again after an "Approve once"', async () => {
     const a = autoRespond('approved', 'once')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ALLOW_GROUP)
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2211 })
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2212 })
@@ -448,7 +480,7 @@ describe('update_server', () => {
     ['an unrecognised scope', 'forever']
   ])('treats an approval with %s as once', async (_label, scope) => {
     const a = autoRespond('approved', scope)
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ALLOW_GROUP)
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2221 })
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2222 })
@@ -461,7 +493,7 @@ describe('update_server', () => {
 
   it('asks again for a change to a different server', async () => {
     const a = autoRespond('approved', 'session')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ALLOW_GROUP)
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
       await call(c, 'update_server', { serverName: 'Scanner01-dup', port: 2202 })
@@ -476,7 +508,7 @@ describe('update_server', () => {
     // Both are `manageServers`. Keying the memory on the capability alone would
     // have made a yes about repointing a connection into a silent delete of it.
     const a = autoRespond('approved', 'session')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ALLOW_GROUP)
     try {
       await call(c, 'update_server', { serverName: 'Scanner01', port: 2201 })
       await call(c, 'remove_server', { serverName: 'Scanner01' })
@@ -489,7 +521,7 @@ describe('update_server', () => {
 
   it('does not change anything when the user declines', async () => {
     const a = autoRespond('denied')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ALLOW_GROUP)
     try {
       const out = await call(c, 'update_server', { serverName: 'Scanner01', host: '10.99.99.99' })
       expect(out).toContain('Denied')
@@ -566,12 +598,12 @@ describe('update_server', () => {
 })
 
 describe('remove_server', () => {
-  it('asks even on Full Access, which grants manageServers outright', async () => {
-    // An `allow` on manageServers meant "add servers without asking me". It
-    // cannot be read as consent to delete them.
-    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
+  it('asks with manageServers at ALLOW while Confirm risky actions is on', async () => {
+    // An `allow` on manageServers meant "add servers without asking me". On a
+    // group that confirms risky actions it is not read as consent to delete them.
+    useAllowGroup()
     const a = autoRespond('approved')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ALLOW_GROUP)
     try {
       await call(c, 'remove_server', { serverName: 'Scanner01-dup' })
       expect(a.count()).toBe(1)
@@ -583,9 +615,37 @@ describe('remove_server', () => {
     }
   })
 
+  it('removes without asking on Full Access, whose switch is off', async () => {
+    const a = autoRespond('denied')
+    const c = await clientFor('grp-full')
+    try {
+      expect(await call(c, 'remove_server', { serverName: 'Scanner01-dup' })).not.toContain('Denied')
+      expect(a.count()).toBe(0)
+      expect(written).toEqual([expect.objectContaining({ kind: 'server.remove', serverId: 's2' })])
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('removes without asking in a Bypass session on a group that asks, audited as bypassed', async () => {
+    const a = autoRespond('denied')
+    const c = await clientFor(ALLOW_GROUP, 'bypass')
+    try {
+      await call(c, 'remove_server', { serverName: 'Scanner01-dup' })
+      expect(a.count()).toBe(0)
+      expect(written).toHaveLength(1)
+      const row = listAudit().find((e) => e.action.startsWith('Remove server') && e.mode === 'bypass')
+      expect(row?.approval).toBe('bypassed')
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
   it('asks again for a second removal in the same session', async () => {
     const a = autoRespond('approved')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ALLOW_GROUP)
     try {
       await call(c, 'remove_server', { serverName: 'Scanner01-dup' })
       await call(c, 'remove_server', { serverName: 'Bastion' })
@@ -604,7 +664,7 @@ describe('remove_server', () => {
         respondToApproval(e.request.id, 'denied')
       }
     })
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ALLOW_GROUP)
     try {
       await call(c, 'remove_server', { serverName: 'Bastion' })
       expect(because).toContain('Scanner01')
@@ -617,7 +677,7 @@ describe('remove_server', () => {
 
   it('does not delete when the user declines', async () => {
     const a = autoRespond('denied')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(ALLOW_GROUP)
     try {
       const out = await call(c, 'remove_server', { serverName: 'Scanner01' })
       expect(out).toContain('Denied')

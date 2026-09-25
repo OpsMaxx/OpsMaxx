@@ -1,6 +1,9 @@
 // The guards that stand between an agent and the approval dialog, and the one
 // capability for which `allow` is not a state the policy can be in.
 //
+// (That capability is ciTrigger, and "not a state" now holds only while the
+// group's Confirm risky actions switch is on -- see the last describe.)
+//
 // Everything here is phase 0 of the CI/CD module (docs/plans/cicd-module.md
 // section 4). None of it is CI-specific in the code -- the volume guard and the
 // field sanitisation apply to every capability -- but CI is what forced them: a
@@ -35,8 +38,9 @@ const req = (o: Record<string, unknown> = {}): Promise<string> =>
     ...o
   } as never)
 
-const group = (ciTrigger: PermissionValue): AccessGroup =>
-  ({ id: 'g', name: 'Full Access', capabilities: { ciTrigger } } as unknown as AccessGroup)
+// No confirmRisky: a group saved before the switch existed, for which absent is ON.
+const group = (ciTrigger: PermissionValue, confirmRisky?: boolean): AccessGroup =>
+  ({ id: 'g', name: 'Full Access', capabilities: { ciTrigger }, confirmRisky } as unknown as AccessGroup)
 
 const fresh = (): void => {
   resetMcpAuthForTests()
@@ -163,20 +167,28 @@ describe('what the operator reads is not written by the remote side', () => {
   })
 })
 
-// docs/AI-SECURITY.md states the VPN rule as "there is no configuration in
-// which a VPN comes up silently at an agent's request". This is that rule for
-// builds, and it is the FIRST line of defence: an `allow` never reaches gate()'s
-// `ask` branch, so the per-call exclusion there would be dead code without it.
-describe('allow is unrepresentable for ciTrigger', () => {
-  it('upgrades an allow to ask, on any group', () => {
-    const d = evaluateCiTrigger(group('allow'))
-    expect(d.decision).toBe('ask')
-    expect(d.reason).toMatch(/always requires approval/)
+// A build does not start silently at an agent's request while Confirm risky
+// actions is on. This is the FIRST line of defence: an `allow` never reaches
+// gate()'s `ask` branch, so the per-call exclusion there would be dead code
+// without it. Turning the switch off is the operator saying in so many words
+// that builds may start unasked.
+describe('ciTrigger allow becomes ask while Confirm risky actions is on', () => {
+  it('upgrades an allow to ask with the switch on or absent, and names the switch', () => {
+    for (const d of [evaluateCiTrigger(group('allow', true)), evaluateCiTrigger(group('allow'))]) {
+      expect(d.decision).toBe('ask')
+      expect(d.reason).toMatch(/requires approval \(Confirm risky actions is on for Full Access\)/)
+    }
   })
 
-  it('leaves ask alone and keeps deny a deny', () => {
-    expect(evaluateCiTrigger(group('ask')).decision).toBe('ask')
-    expect(evaluateCiTrigger(group('deny')).decision).toBe('deny')
+  it('gives the literal allow with the switch off', () => {
+    expect(evaluateCiTrigger(group('allow', false)).decision).toBe('allow')
+  })
+
+  it('leaves ask alone and keeps deny a deny, whatever the switch says', () => {
+    for (const risky of [true, false, undefined]) {
+      expect(evaluateCiTrigger(group('ask', risky)).decision).toBe('ask')
+      expect(evaluateCiTrigger(group('deny', risky)).decision).toBe('deny')
+    }
     expect(evaluateCiTrigger(null).decision).toBe('deny')
   })
 })

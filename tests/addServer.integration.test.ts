@@ -274,9 +274,10 @@ describe('making the model legible', () => {
 
     const rows = explainSessionAccess(session.id, null)!
     const manage = rows.find((r) => r.capability === 'manageServers')!
-    // Full Access at the workspace, Read Only on the session: the session is
-    // the narrower side, so it is what decided.
-    expect(manage.fromScope).toBe('ask')
+    // Full Access at the workspace (manageServers allow since version 3), Read
+    // Only on the session: the session is the narrower side, so it is what
+    // decided.
+    expect(manage.fromScope).toBe('allow')
     expect(manage.fromSession).toBe('deny')
     expect(manage.decision).toBe('deny')
     expect(manage.decidedBy).toBe('session')

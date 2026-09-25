@@ -13,6 +13,7 @@ import { setMcpConfig, createSession, resetMcpAuthForTests } from '../src/main/s
 import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
 import { registerVpnManager, resetVpnManagerForTests } from '../src/main/services/vpn/managerApi'
 import { onApprovalEvent, respondToApproval } from '../src/main/services/approvals'
+import { listAudit } from '../src/main/services/auditLog'
 import type { AccessGroup, PermissionValue } from '../src/shared/mcp'
 import type { VpnKind } from '../src/shared/vpn'
 
@@ -34,12 +35,21 @@ const withVpnControl = (g: AccessGroup, value: PermissionValue): AccessGroup => 
   capabilities: { ...g.capabilities, vpnControl: value }
 })
 
+// Confirm risky actions ON, with vpnControl raised to ALLOW: what a user gets
+// when they allow VPNs on any group but Full Access.
+const riskyAllow = (): AccessGroup => ({ ...withVpnControl(sudo, 'allow'), confirmRisky: true })
+
 describe('vpnControl on the seeded groups', () => {
-  it('denies Read Only and asks on the other three — no group allows outright', () => {
+  it('denies Read Only, asks on Read & Write and Sudo, and allows on Full Access', () => {
     expect(readOnly.capabilities.vpnControl).toBe('deny')
     expect(readWrite.capabilities.vpnControl).toBe('ask')
     expect(sudo.capabilities.vpnControl).toBe('ask')
-    expect(full.capabilities.vpnControl).toBe('ask')
+    expect(full.capabilities.vpnControl).toBe('allow')
+  })
+
+  it('ships Confirm risky actions on everywhere but Full Access', () => {
+    expect([readOnly, readWrite, sudo].map((g) => g.confirmRisky)).toEqual([true, true, true])
+    expect(full.confirmRisky).toBe(false)
   })
 })
 
@@ -70,17 +80,23 @@ describe('every group, action and dependent state', () => {
     { label: 'Sudo Access', group: () => sudo, action: 'stop', live: false, expect: 'ask' },
     { label: 'Sudo Access', group: () => sudo, action: 'stop', live: true, expect: 'ask' },
 
-    { label: 'Full Access', group: () => full, action: 'start', live: false, expect: 'ask' },
-    { label: 'Full Access', group: () => full, action: 'start', live: true, expect: 'ask' },
-    { label: 'Full Access', group: () => full, action: 'stop', live: false, expect: 'ask' },
-    { label: 'Full Access', group: () => full, action: 'stop', live: true, expect: 'ask' },
+    // Full Access: vpnControl allow, Confirm risky actions off. Allow means allow.
+    { label: 'Full Access', group: () => full, action: 'start', live: false, expect: 'allow' },
+    { label: 'Full Access', group: () => full, action: 'start', live: true, expect: 'allow' },
+    { label: 'Full Access', group: () => full, action: 'stop', live: false, expect: 'allow' },
+    { label: 'Full Access', group: () => full, action: 'stop', live: true, expect: 'allow' },
 
-    // A group the user has explicitly raised to ALLOW. Starting is still ASK;
+    // Raised to ALLOW with Confirm risky actions on. Starting is still ASK;
     // only a stop with nothing live behind it runs silently.
-    { label: 'raised to ALLOW', group: () => withVpnControl(full, 'allow'), action: 'start', live: false, expect: 'ask' },
-    { label: 'raised to ALLOW', group: () => withVpnControl(full, 'allow'), action: 'start', live: true, expect: 'ask' },
-    { label: 'raised to ALLOW', group: () => withVpnControl(full, 'allow'), action: 'stop', live: false, expect: 'allow' },
-    { label: 'raised to ALLOW', group: () => withVpnControl(full, 'allow'), action: 'stop', live: true, expect: 'ask' },
+    { label: 'ALLOW + Confirm risky', group: riskyAllow, action: 'start', live: false, expect: 'ask' },
+    { label: 'ALLOW + Confirm risky', group: riskyAllow, action: 'start', live: true, expect: 'ask' },
+    { label: 'ALLOW + Confirm risky', group: riskyAllow, action: 'stop', live: false, expect: 'allow' },
+    { label: 'ALLOW + Confirm risky', group: riskyAllow, action: 'stop', live: true, expect: 'ask' },
+
+    // A group saved before the switch existed has no confirmRisky at all, and
+    // absent is ON: it keeps every upgrade it always had.
+    { label: 'ALLOW + switch absent', group: () => { const g = riskyAllow(); delete g.confirmRisky; return g }, action: 'start', live: false, expect: 'ask' },
+    { label: 'ALLOW + switch absent', group: () => { const g = riskyAllow(); delete g.confirmRisky; return g }, action: 'stop', live: true, expect: 'ask' },
 
     // An explicit DENY beats everything else the group says.
     { label: 'lowered to DENY', group: () => withVpnControl(full, 'deny'), action: 'start', live: false, expect: 'deny' },
@@ -103,9 +119,9 @@ describe('every group, action and dependent state', () => {
   })
 })
 
-describe('starting a VPN is never silent', () => {
+describe('starting a VPN is not silent while Confirm risky actions is on', () => {
   it('upgrades ALLOW to ASK on start, because a VPN moves the user\'s traffic', () => {
-    const allowed = withVpnControl(full, 'allow')
+    const allowed = riskyAllow()
     const start = evaluateVpnControl(allowed, 'start', false)
     expect(start.decision).toBe('ask')
     expect(start.reason).toMatch(/where your traffic goes/i)
@@ -116,9 +132,15 @@ describe('starting a VPN is never silent', () => {
   })
 
   it('says why a stop with live dependents needs approval', () => {
-    const stop = evaluateVpnControl(withVpnControl(full, 'allow'), 'stop', true)
+    const stop = evaluateVpnControl(riskyAllow(), 'stop', true)
     expect(stop.decision).toBe('ask')
     expect(stop.reason).toMatch(/close sessions that depend on it/i)
+  })
+
+  it('gives the literal ALLOW with the switch off, for start and a live stop alike', () => {
+    const off = { ...riskyAllow(), confirmRisky: false }
+    expect(evaluateVpnControl(off, 'start', false).decision).toBe('allow')
+    expect(evaluateVpnControl(off, 'stop', true).decision).toBe('allow')
   })
 })
 
@@ -157,20 +179,26 @@ describe('set_vpn against a live bridge', () => {
   // "this token is not recognized" -- a message about the wrong thing entirely.
   const PORT = 18743
   let client: Client
+  let bypassClient: Client
   const started: string[] = []
   const stopped: string[] = []
 
-  // The most permissive configuration anyone could build: Full Access with
-  // vpnControl deliberately raised to ALLOW, which is not a value any seed
-  // ships. If frp were a permission, this is what would unlock it. Re-applied
-  // per test because the file-level beforeEach wipes the policy store.
-  const permit = (): void => {
+  // The most permissive configuration any group can express: vpnControl on
+  // ALLOW and Confirm risky actions off. If frp were a permission, this is what
+  // would unlock it. Re-applied per test because the file-level beforeEach
+  // wipes the policy store.
+  const permit = (overrides: Partial<AccessGroup> = {}): void => {
     const permissive = listGroups().find((g) => g.id === 'grp-full')!
-    saveGroup({ ...permissive, capabilities: { ...permissive.capabilities, vpnControl: 'allow' } })
+    saveGroup({
+      ...permissive,
+      capabilities: { ...permissive.capabilities, vpnControl: 'allow' },
+      confirmRisky: false,
+      ...overrides
+    })
     setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
   }
 
-  beforeEach(permit)
+  beforeEach(() => permit())
 
   beforeAll(async () => {
     resetPolicyCacheForTests()
@@ -226,16 +254,32 @@ describe('set_vpn against a live bridge', () => {
     })
     client = new Client({ name: 'vpn-test', version: '1.0.0' })
     await client.connect(transport)
+
+    const bypass = createSession({
+      agentName: 'VPN Bypass',
+      workspaces: [{ id: 'ws', name: 'W' }],
+      groupId: 'grp-full',
+      groupName: 'Full Access',
+      ttlMinutes: null,
+      mode: 'bypass'
+    })
+    bypassClient = new Client({ name: 'vpn-bypass', version: '1.0.0' })
+    await bypassClient.connect(
+      new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`), {
+        requestInit: { headers: { Authorization: `Bearer ${bypass.token}` } }
+      })
+    )
   })
 
   afterAll(async () => {
     await client?.close()
+    await bypassClient?.close()
     await stopMcpServer()
     resetVpnManagerForTests()
   })
 
-  const call = async (args: { vpnName: string; running: boolean }): Promise<string> => {
-    const r = (await client.callTool({ name: 'set_vpn', arguments: args })) as {
+  const call = async (args: { vpnName: string; running: boolean }, via: Client = client): Promise<string> => {
+    const r = (await via.callTool({ name: 'set_vpn', arguments: args })) as {
       content: { text: string }[]
     }
     return r.content.map((c) => c.text).join('\n')
@@ -265,7 +309,8 @@ describe('set_vpn against a live bridge', () => {
   // A start answered "for this session" used to be remembered, and the next
   // start was waved through as approved-earlier -- a VPN coming up with no
   // prompt at all.
-  it('asks for every start, even after one was allowed for the session', async () => {
+  it('asks for every start while Confirm risky actions is on, even after one was allowed for the session', async () => {
+    permit({ confirmRisky: true })
     let asked = 0
     const off = onApprovalEvent((e) => {
       if (e.type === 'created') {
@@ -277,6 +322,40 @@ describe('set_vpn against a live bridge', () => {
       await call({ vpnName: 'office', running: true })
       await call({ vpnName: 'office', running: true })
       expect(asked).toBe(2)
+    } finally {
+      off()
+    }
+  })
+
+  it('starts without asking when the group allows it and Confirm risky actions is off', async () => {
+    let asked = 0
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') asked += 1
+    })
+    try {
+      started.length = 0
+      expect(await call({ vpnName: 'office', running: true })).toContain('Started "office"')
+      expect(started).toEqual(['vpn-wg'])
+      expect(asked).toBe(0)
+    } finally {
+      off()
+    }
+  })
+
+  it('starts without asking in a Bypass session even where the group asks, and audits it as bypassed', async () => {
+    permit({ capabilities: { ...full.capabilities, vpnControl: 'ask' }, confirmRisky: true })
+    let asked = 0
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') asked += 1
+    })
+    try {
+      started.length = 0
+      expect(await call({ vpnName: 'office', running: true }, bypassClient)).toContain('Started "office"')
+      expect(started).toEqual(['vpn-wg'])
+      expect(asked).toBe(0)
+      const row = listAudit().find((a) => a.action.startsWith('Start VPN "office"') && a.agentName === 'VPN Bypass')
+      expect(row?.approval).toBe('bypassed')
+      expect(row?.mode).toBe('bypass')
     } finally {
       off()
     }

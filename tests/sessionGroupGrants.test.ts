@@ -134,7 +134,18 @@ describe('an explicit No AI Access', () => {
       ),
       'utf8'
     )
-    // Checked before the grant is even consulted, in every resolver.
-    expect(src.match(/if \(shut\) return NO_AI_ACCESS/g)?.length).toBeGreaterThanOrEqual(3)
+    // Every permission answer goes through serverCheck or workspaceCheck, and
+    // both check No AI Access before the grant is even consulted. The only other
+    // place the mode is applied is the Effective access table
+    // (explainSessionAccess), which describes and enforces nothing.
+    expect(src.match(/\bapplyMode\(/g)?.length).toBe(3)
+    const body = (name: string): string => src.slice(src.indexOf(`function ${name}(`), src.indexOf('return applyMode(', src.indexOf(`function ${name}(`)))
+    const server = body('serverCheck')
+    const workspace = body('workspaceCheck')
+    expect(server.indexOf('if (shut) return NO_AI_ACCESS')).toBeGreaterThan(-1)
+    expect(server.indexOf('if (shut) return NO_AI_ACCESS')).toBeLessThan(server.indexOf('evaluate(grant)') >>> 0)
+    expect(workspace).toMatch(/if \(found\.kind === 'no-ai-access'\) return NO_AI_ACCESS/)
+    // And that refusal is scope, not a permission: no mode lifts it.
+    expect(src).toMatch(/const NO_AI_ACCESS: Decision = \{[^}]*outOfScope: true/)
   })
 })

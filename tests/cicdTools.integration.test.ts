@@ -80,6 +80,7 @@ const { saveGroup, resetPolicyCacheForTests, getGroup } = await import(
 const { setMcpConfig, createSession, resetMcpAuthForTests } = await import('../src/main/services/mcpAuth')
 const { startMcpServer, stopMcpServer } = await import('../src/main/services/mcpServer')
 const { onApprovalEvent, respondToApproval } = await import('../src/main/services/approvals')
+const { listAudit } = await import('../src/main/services/auditLog')
 
 const PORT = 18751
 
@@ -94,13 +95,28 @@ const CONNECTION = {
   enabled: true
 }
 
-function makeGroup(id: string, ciRead: 'allow' | 'ask' | 'deny', ciTrigger: 'allow' | 'ask' | 'deny'): string {
+// Confirm risky actions is ON unless asked otherwise: that is every group but
+// the seeded Full Access, and the one on which ciTrigger allow still asks.
+function makeGroup(
+  id: string,
+  ciRead: 'allow' | 'ask' | 'deny',
+  ciTrigger: 'allow' | 'ask' | 'deny',
+  confirmRisky = true
+): string {
   const base = getGroup('grp-full')
   if (!base) throw new Error('grp-full missing')
-  saveGroup({ ...base, id, name: id, builtIn: false, capabilities: { ...base.capabilities, ciRead, ciTrigger } })
+  saveGroup({
+    ...base,
+    id,
+    name: id,
+    builtIn: false,
+    capabilities: { ...base.capabilities, ciRead, ciTrigger },
+    confirmRisky
+  })
   return id
 }
 
+let GROUP_LITERAL = ''
 let GROUP_ALLOW = ''
 let GROUP_ASK = ''
 let GROUP_DENY = ''
@@ -116,6 +132,7 @@ beforeAll(async () => {
     ]
   })
   GROUP_ALLOW = makeGroup('grp-ci-allow', 'allow', 'allow')
+  GROUP_LITERAL = makeGroup('grp-ci-literal', 'allow', 'allow', false)
   GROUP_ASK = makeGroup('grp-ci-ask', 'ask', 'ask')
   GROUP_DENY = makeGroup('grp-ci-deny', 'deny', 'deny')
   // No workspace assignment on purpose: the session's own group is the grant,
@@ -159,13 +176,14 @@ beforeEach(() => {
   wiringWorkspaceId = 'ws'
 })
 
-async function clientFor(groupId: string): Promise<Client> {
+async function clientFor(groupId: string, mode?: 'bypass'): Promise<Client> {
   const { token } = createSession({
-    agentName: 'CI Test',
+    agentName: mode ? `CI Test (${mode})` : 'CI Test',
     workspaces: [{ id: 'ws', name: 'Prod' }],
     groupId,
     groupName: groupId,
-    ttlMinutes: null
+    ttlMinutes: null,
+    mode
   })
   const t = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } }
@@ -199,18 +217,20 @@ function watchApprovals(scope: 'once' | 'session' = 'session'): { count: () => n
 // The one that has to hold
 // ---------------------------------------------------------------------------
 
-describe('ciTrigger cannot be configured to be silent', () => {
+describe('ciTrigger is not silent while Confirm risky actions is on', () => {
   // gate() handles `deny`, then opens `if (check.decision === 'ask')`. An
   // `allow` falls past BOTH and reaches `return { ok: true }` — no approval, no
-  // prompt, no elevation key. So an operator who raises ciTrigger to allow, or
-  // runs a Full Access session, would get an agent that starts production
-  // builds in a loop in silence, and gate()'s own per-call exclusion would sit
-  // in a branch that never executes.
+  // prompt, no elevation key. So an operator who raises ciTrigger to allow
+  // would get an agent that starts production builds in a loop in silence,
+  // and gate()'s own per-call exclusion would sit in a branch that never
+  // executes.
   //
   // evaluateCiTrigger (policyEngine.ts) upgrades allow -> ask before gate() is
-  // called. It existed with no call site. These tests are what fails if that
-  // call site is removed again.
-  it('asks even when the access group says allow', async () => {
+  // called, while the group's Confirm risky actions switch is on. It existed
+  // with no call site. These tests are what fails if that call site is removed
+  // again. Turning the switch off, or running the session in Bypass, is the
+  // operator choosing unasked builds out loud -- the last tests here.
+  it('asks when the access group says allow and Confirm risky actions is on', async () => {
     const c = await clientFor(GROUP_ALLOW)
     const w = watchApprovals()
     try {
@@ -282,6 +302,58 @@ describe('ciTrigger cannot be configured to be silent', () => {
       expect(w.count()).toBe(2)
     } finally {
       w.stop()
+      await c.close()
+    }
+  })
+
+  it('starts, cancels and re-runs without asking on a group with the switch off', async () => {
+    const c = await clientFor(GROUP_LITERAL)
+    const w = watchApprovals()
+    try {
+      const out = await call(c, 'trigger_run', {
+        connectionName: 'platform-gitlab',
+        pipelineRef: 'group/subgroup/app',
+        ref: 'main'
+      })
+      expect(out).toContain('GitLab created pipeline')
+      await call(c, 'cancel_run', { connectionName: 'platform-gitlab', pipelineRef: 'group/subgroup/app', runId: '4821' })
+      await call(c, 'rerun_run', { connectionName: 'platform-gitlab', pipelineRef: 'group/subgroup/app', runId: '4821' })
+      expect(w.count()).toBe(0)
+      expect(provider.map((p) => p.op)).toEqual(['trigger', 'cancel', 'rerun'])
+    } finally {
+      w.stop()
+      await c.close()
+    }
+  })
+
+  it('starts without asking in a Bypass session on a group that asks, audited as bypassed', async () => {
+    const c = await clientFor(GROUP_ASK, 'bypass')
+    const w = watchApprovals()
+    try {
+      const out = await call(c, 'trigger_run', {
+        connectionName: 'platform-gitlab',
+        pipelineRef: 'group/subgroup/app',
+        ref: 'bypass-branch'
+      })
+      expect(out).toContain('GitLab created pipeline')
+      expect(w.count()).toBe(0)
+      const row = listAudit().find((a) => a.agentName === 'CI Test (bypass)' && a.action.startsWith('Start pipeline'))
+      expect(row?.approval).toBe('bypassed')
+      expect(row?.mode).toBe('bypass')
+    } finally {
+      w.stop()
+      await c.close()
+    }
+  })
+
+  it('lifts a denied ciTrigger too in a Bypass session', async () => {
+    // Bypass means every permission, deny included. Only No AI Access and a
+    // Protected target stand in its way (tests/permissionModes.test.ts).
+    const c = await clientFor(GROUP_DENY, 'bypass')
+    try {
+      await call(c, 'trigger_run', { connectionName: 'platform-gitlab', pipelineRef: 'group/subgroup/app', ref: 'main' })
+      expect(provider.map((p) => p.op)).toEqual(['trigger'])
+    } finally {
       await c.close()
     }
   })
