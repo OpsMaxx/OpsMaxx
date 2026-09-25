@@ -1556,6 +1556,18 @@ button.switch {
   font-size: var(--type-note-size);
   text-align: right;
 }
+/* The inline mode picker: a band like the notes, right-aligned over the
+   answers it does not replace. */
+.approval-mode {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-5);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: var(--type-note-size);
+}
 .approval-stop-failed {
   display: flex;
   align-items: center;

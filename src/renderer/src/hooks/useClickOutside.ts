@@ -29,12 +29,15 @@ export function useClickOutside<T extends HTMLElement>(
 ): void {
   useEffect(() => {
     if (!active) return
+    // A popover that itself lives in that layer (a menu opened from the
+    // approval dialog) is part of it, and a press elsewhere in it is outside.
+    const inside = (): boolean => inLayerAbove(ref.current)
     const handler = (e: MouseEvent): void => {
-      if (inLayerAbove(e.target)) return
+      if (inLayerAbove(e.target) && !inside()) return
       if (ref.current && !ref.current.contains(e.target as Node)) onOutside()
     }
     const key = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape' && !approvalShowing()) onOutside()
+      if (e.key === 'Escape' && (!approvalShowing() || inside())) onOutside()
     }
     document.addEventListener('mousedown', handler)
     document.addEventListener('keydown', key)

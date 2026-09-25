@@ -265,6 +265,10 @@ function unrecognisedClause(items: CapabilityDecision[]): string {
     : `${join(named, 'and')} are set to values OpsMaxx does not recognise, so the policy engine allows them. Set them again below.`
 }
 
+/** The card's word for RISKY_ACTIONS, qualifying every "without asking" above it. */
+export const RISKY_CLAUSE =
+  'Still confirms risky actions it allows — destructive commands, database writes, tunnels, server changes, VPNs and CI runs.'
+
 export interface AccessGroupSummary {
   /** The whole thing, ready to render or assert on. */
   sentence: string
@@ -367,6 +371,10 @@ export function summariseAccessGroup(group: AccessGroup): AccessGroupSummary {
   }
 
   for (const o of overridden) clauses.push(fileCapabilityClause(o.id, o.value, o.exceptions))
+
+  // Absent reads as ON, as it does to the policy engine (confirmsRisky). Only
+  // said when something is allowed: it qualifies an Allow and nothing else.
+  if (group.confirmRisky !== false && counts.allow > 0) clauses.push(RISKY_CLAUSE)
 
   return {
     sentence: clauses.join(' '),

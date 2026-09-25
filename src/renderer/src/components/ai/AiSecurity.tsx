@@ -4,7 +4,9 @@ import { clsx } from '../../lib/format'
 import { dismissToast, toast } from '../../store/toast'
 import { openAi } from '../../store/nav'
 import type { McpGlobalConfig } from '../../../../shared/mcp'
+import { DEFAULT_SESSION_MODE } from '../../../../shared/mcp'
 import { Switch } from '../common/Switch'
+import { ModePicker } from './ModePicker'
 
 
 /**
@@ -229,6 +231,20 @@ export function AiSecurity(): React.JSX.Element {
           <option value={300}>5 minutes</option>
           <option value={600}>10 minutes</option>
         </select>
+      </div>
+
+      <div className="setting-row">
+        <div className="s-info">
+          <div className="s-title">Default mode for new agent sessions</div>
+          <div className="s-desc">
+            The mode a session starts in when nobody picks one — CLI-paired and OAuth sessions always start
+            in it. Each session’s mode can be changed under Active Sessions.
+          </div>
+        </div>
+        <ModePicker
+          value={config.defaultSessionMode ?? DEFAULT_SESSION_MODE}
+          onChange={(defaultSessionMode) => update({ defaultSessionMode })}
+        />
       </div>
 
       <div className="setting-row">

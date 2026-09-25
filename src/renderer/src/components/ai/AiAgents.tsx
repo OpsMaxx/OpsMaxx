@@ -4,8 +4,9 @@ import { toast } from '../../store/toast'
 import { useApp } from '../../store/app'
 import { openAi } from '../../store/nav'
 import { SessionAccess } from './SessionAccess'
-import type { McpAgentSession, AccessGroup } from '../../../../shared/mcp'
-import { resolveDefaultSessionGroup } from '../../../../shared/mcp'
+import type { McpAgentSession, AccessGroup, SessionMode } from '../../../../shared/mcp'
+import { DEFAULT_SESSION_MODE, resolveDefaultSessionGroup, sessionModeLabel } from '../../../../shared/mcp'
+import { ModePicker } from './ModePicker'
 import { maskToken } from '../../../../shared/tokenDisplay'
 import { Switch } from '../common/Switch'
 
@@ -77,6 +78,9 @@ function CreateSessionForm({
   // now a legitimate resolved answer and has to stop the effect below from
   // asking again on every 5-second poll of `groups`.
   const [groupId, setGroupId] = useState<string | null>(null)
+  // `null` until the configured default is read; the same "prev ??" rule as
+  // groupId, so a slow getConfig cannot overwrite a mode the user picked.
+  const [mode, setMode] = useState<SessionMode | null>(null)
   const [ttl, setTtl] = useState(60)
   const [issued, setIssued] = useState<{ token: string; port: number | null } | null>(null)
   // Re-hidden whenever a new session is issued, so revealing one token does not
@@ -116,7 +120,10 @@ function CreateSessionForm({
     if (groupId !== null || groups.length === 0) return
     void window.opsmaxx?.aiMcp
       .getConfig?.()
-      .then((cfg) => setGroupId((prev) => prev ?? (resolveDefaultSessionGroup(cfg, groups).id ?? '')))
+      .then((cfg) => {
+        setGroupId((prev) => prev ?? (resolveDefaultSessionGroup(cfg, groups).id ?? ''))
+        setMode((prev) => prev ?? cfg?.defaultSessionMode ?? DEFAULT_SESSION_MODE)
+      })
       .catch(() => setGroupId((prev) => prev ?? ''))
   }, [groups, groupId])
 
@@ -146,7 +153,8 @@ function CreateSessionForm({
         workspaces: selected.map((w) => ({ id: w.id, name: w.name })),
         groupId: group?.id ?? null,
         groupName: group?.name ?? 'No AI Access',
-        ttlMinutes: ttl === 0 ? null : ttl
+        ttlMinutes: ttl === 0 ? null : ttl,
+        mode: mode ?? DEFAULT_SESSION_MODE
       })
       if (!result) throw new Error('OpsMaxx returned no session')
       const status = await window.opsmaxx?.aiMcp.status()
@@ -299,6 +307,16 @@ function CreateSessionForm({
       </div>
       <div className="setting-row">
         <div className="s-info">
+          <div className="s-title">Mode</div>
+          <div className="s-desc">
+            How much you stay in the loop. Auto follows the access group below exactly; you can change the
+            mode of a running session at any time.
+          </div>
+        </div>
+        <ModePicker value={mode ?? DEFAULT_SESSION_MODE} onChange={setMode} />
+      </div>
+      <div className="setting-row">
+        <div className="s-info">
           <div className="s-title">Access group</div>
           <div className="s-desc">
             What this agent may do on the servers in those workspaces. This is the grant. A workspace
@@ -425,7 +443,16 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
         return (
           <div className="list-row" key={s.id} style={{ flexWrap: 'wrap' }}>
             <div>
-              <div className="r-title">{s.agentName}</div>
+              <div className="r-title">
+                {s.agentName}{' '}
+                <span
+                  className={`chip${s.mode === 'bypass' ? ' danger' : ''}`}
+                  data-testid="session-mode-chip"
+                  title="Mode"
+                >
+                  {sessionModeLabel(s.mode)}
+                </span>
+              </div>
               <div className="r-sub">
                 Workspace{ws.length > 1 ? 's' : ''}: {ws.map((w) => w.name).join(', ') || '—'} · Started{' '}
                 {fmtTime(s.createdAt)}

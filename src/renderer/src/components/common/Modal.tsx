@@ -1,6 +1,6 @@
 import { ReactNode, RefObject, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
-import { approvalShowing, useClickOutside } from '../../hooks/useClickOutside'
+import { approvalShowing, inLayerAbove, useClickOutside } from '../../hooks/useClickOutside'
 import { clsx } from '../../lib/format'
 
 /**
@@ -213,7 +213,7 @@ function useDialogFocus(ref: RefObject<HTMLDivElement | null>, top: boolean): vo
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const dialog = ref.current
-      if (e.key !== 'Tab' || !dialog || !topRef.current || approvalShowing()) return
+      if (e.key !== 'Tab' || !dialog || !topRef.current || (approvalShowing() && !inLayerAbove(dialog))) return
       const items = focusables(dialog)
       if (items.length === 0) {
         e.preventDefault()

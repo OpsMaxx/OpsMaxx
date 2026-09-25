@@ -4,8 +4,9 @@ import { toast } from '../../store/toast'
 import type { ToastAction } from '../../store/toast'
 import { useApp } from '../../store/app'
 import { openAi, openSettings } from '../../store/nav'
-import type { AccessGroup } from '../../../../shared/mcp'
-import { resolveDefaultSessionGroup } from '../../../../shared/mcp'
+import type { AccessGroup, SessionMode } from '../../../../shared/mcp'
+import { DEFAULT_SESSION_MODE, resolveDefaultSessionGroup } from '../../../../shared/mcp'
+import { ModePicker } from './ModePicker'
 import { containsBearerToken, maskBearerTokens } from '../../../../shared/tokenDisplay'
 
 type Target = 'claude-code' | 'claude-desktop' | 'codex'
@@ -48,18 +49,16 @@ const TARGETS: { id: Target; label: string; agentName: string; icon: React.JSX.E
   { id: 'codex', label: 'Connect Codex', agentName: 'Codex', icon: <SquareTerminal size={13} /> }
 ]
 
-// Everything under "How it works" — enable the bridge, give the workspaces an
-// access group, mint a session, hand the token to the client — collapsed into
-// one button per client. Done by hand it spans three tabs, and skipping the
-// assignment step leaves an agent that connects successfully and is then denied
-// on every single call, which reads as a broken integration rather than an
-// empty policy.
+// Everything under "How it works" — enable the bridge, pick an access group
+// and a mode, mint a session, hand the token to the client — collapsed into one
+// button per client. Done by hand it spans three tabs.
 export function ConnectAgent({ onConnected }: { onConnected?: () => void }): React.JSX.Element {
   const [groups, setGroups] = useState<AccessGroup[]>([])
   // `null` until resolved, `''` once resolved to No AI Access — see the same
   // distinction in AiAgents.tsx. Without it a resolved No AI Access is
   // indistinguishable from "still loading" and gets overwritten.
   const [groupId, setGroupId] = useState<string | null>(null)
+  const [mode, setMode] = useState<SessionMode | null>(null)
   const [busy, setBusy] = useState<Target | null>(null)
   const [ready, setReady] = useState<Ready | null>(null)
   const [error, setError] = useState<{ text: string; action?: ToastAction } | null>(null)
@@ -75,14 +74,12 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         // A configured `defaultSessionGroupId` wins, because it is the setting
         // that exists for this exact decision and the user set it deliberately.
         // Read & Write is this flow's own considered default for when nothing is
-        // configured, and it stays: a session's group is fixed for its whole
-        // life and Read Only cannot add a server however the workspace is later
-        // configured — so the one-click path could never use add_server, and the
-        // only symptom was a denial that pointed at settings which do not affect
-        // an existing connection. Nothing here is granted silently: every
-        // mutating capability in Read & Write is ASK, so writes, uploads,
-        // tunnels and adding a server each still raise an approval prompt. The
-        // picker is right there for anyone who wants narrower.
+        // configured, and it stays: Read Only cannot add a server, so the
+        // one-click path could never use add_server. Nothing here is granted
+        // silently: every mutating capability in Read & Write is ASK, so writes,
+        // uploads, tunnels and adding a server each still raise an approval
+        // prompt in Auto mode. The picker is right there for anyone who wants
+        // narrower, and a live session's group can be changed later.
         //
         // `list[0]` is gone. It was the one fallback nobody chose — not this
         // flow and not the user — and it resolved to whichever group sat first
@@ -90,6 +87,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         // does not reach Read & Write either: resolveDefaultSessionGroup()
         // consults the fallback only when nothing is configured at all.
         setGroupId((prev) => prev ?? resolveDefaultSessionGroup(cfg, list, 'grp-read-write').id ?? '')
+        setMode((prev) => prev ?? cfg?.defaultSessionMode ?? DEFAULT_SESSION_MODE)
       }
     )
   }, [])
@@ -131,10 +129,10 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
 
       const group = groups.find((g) => g.id === groupId) ?? null
 
-      // Without an assignment resolveGroupId() returns null and every tool call
-      // is denied with "No AI access is assigned to this server", so a
-      // connection that looks fine does nothing. Only ever fills gaps — a
-      // workspace the user has already assigned (to No AI Access included) is
+      // Pins every unassigned workspace to this group. No longer needed for
+      // access (with no assignment the session's own group applies), and it
+      // holds later sessions there to at most this group. Only ever fills gaps —
+      // a workspace the user has already assigned (to No AI Access included) is
       // left exactly as they set it.
       const assignments = (await api.aiPolicy.listAssignments()) ?? []
       const assigned = new Set(
@@ -154,7 +152,8 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         // A config-file client has no way to re-pair when a token lapses — it
         // would just stop working silently. Revoke under Active Sessions
         // instead, which is visible and deliberate.
-        ttlMinutes: null
+        ttlMinutes: null,
+        mode: mode ?? DEFAULT_SESSION_MODE
       })
       if (!created) {
         throw new StepError('OpsMaxx could not issue a session for this agent.', {
@@ -208,12 +207,9 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         <div className="s-info">
           <div className="s-title">Access group</div>
           <div className="s-desc">
-            The ceiling for what the agent can do. Applied to any workspace that has no group yet;
-            workspaces you have already assigned are left alone.
-            <br />
-            <b>Fixed for the life of the session.</b> Changing access groups later does not affect a
-            connection that already exists — you would revoke it under Active Sessions and connect
-            again.
+            What the agent may do — the grant. It is also assigned to any workspace that has no group
+            yet, which holds sessions there to at most this group; workspaces you have already assigned
+            are left alone. You can change a live session’s group under Active Sessions.
           </div>
         </div>
         <select
@@ -232,6 +228,17 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
             </option>
           ))}
         </select>
+      </div>
+
+      <div className="setting-row">
+        <div className="s-info">
+          <div className="s-title">Mode</div>
+          <div className="s-desc">
+            How much you stay in the loop. Auto follows the access group exactly; change it any time under
+            Active Sessions.
+          </div>
+        </div>
+        <ModePicker value={mode ?? DEFAULT_SESSION_MODE} onChange={setMode} />
       </div>
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
