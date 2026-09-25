@@ -392,7 +392,9 @@ Each group also carries one switch, **Confirm risky actions** (`confirmRisky`; a
 While it is on, `allow` still asks for the actions that are hard to take back:
 
 - destructive or elevated commands (`rm -rf`, `mkfs`, `reboot`, package installs, service
-  restarts), commands whose program is computed at run time, and `unshare -r`;
+  restarts), commands whose program is computed at run time, and `unshare -r`. A computed command
+  word also asks with the switch off unless the group allows `sudo` outright, because it may be
+  sudo;
 - database writes and schema changes;
 - opening, defining or deleting SSH tunnels;
 - changing or removing saved servers;
@@ -525,8 +527,8 @@ in the policy file, written only over IPC by the human). A session acting on a P
 held at **Ask first** whatever its mode — Auto and Bypass both become Ask first there, and Read only
 stays Read only. The approval request gives Protected as its reason, so an unexpected prompt
 explains itself. A server is Protected if it or its workspace is marked. Tunnel, database, VPN and
-CI calls are checked against their workspace; defining or deleting a tunnel is also capped when the
-server carrying it is marked.
+CI calls are checked against their workspace; starting, stopping, defining and deleting a tunnel is
+also capped when the server carrying it is marked.
 
 ### What Bypass lifts, and what it does not
 
