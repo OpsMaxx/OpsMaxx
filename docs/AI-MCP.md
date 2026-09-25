@@ -562,6 +562,11 @@ asked for) **or assign it No AI Access** (unreachable). Assigning it a narrower 
 - **The audit log.** Every row records the session's mode, and a call that ran only because of
   Bypass — one the group would have asked about or refused — is audited as `bypassed`, never as
   `not-required`. After the fact, the log alone says which actions only happened because of Bypass.
+- **Saving a connection to a fenced machine.** `add_server` and `update_server` refuse an address
+  that is the OpsMaxx machine itself (loopback, its hostname, its own interface addresses) and one
+  that matches a No AI Access entry by host and port, in every mode; one matching a Protected entry
+  is held at Ask first. Protected and No AI Access are set per entry, and this is what stops a
+  second entry for the same machine from escaping them.
 - **What is absent from the bridge.** Bypass cannot reach a tool that does not exist: there is
   still no local shell, no vault read, no job runner, no backup run or restore, no tool that reads
   firewall rules or sudoers, and no tool that creates a VPN profile or CI connection.
