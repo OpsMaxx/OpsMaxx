@@ -57,7 +57,8 @@ the group exactly, plus its **Confirm risky actions** switch, which keeps destru
 database writes, tunnels, server changes, VPN starts and CI runs asking even when the group says
 allow) or **Bypass permissions** (nothing asks and nothing is refused, audited as such). Mark a
 workspace or server **Protected** and every session acting on it is held at Ask first, Bypass
-included. [Permission modes](AI-MCP.md#permission-modes) has the details, including exactly what
+included — that, or assigning it No AI Access, is how to hold a production box against a Bypass
+session; assigning it a narrower access group is not, because Bypass lifts that too. [Permission modes](AI-MCP.md#permission-modes) has the details, including exactly what
 Bypass does not lift.
 
 ### A worked example

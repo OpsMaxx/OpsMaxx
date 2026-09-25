@@ -535,7 +535,8 @@ interrupted. It lifts every `ask` and every `deny` that comes from a **permissio
 
 - the group's `deny` and `ask` on any capability, and Confirm risky actions;
 - file path rules, including the seeded denies on `/etc/shadow` and SSH keys;
-- a restriction group assigned to the server or workspace;
+- a narrower access group assigned to the server or workspace — an assignment to a group is a
+  permission restriction, so Bypass lifts its `deny` and `ask` like the session group's own;
 - unrestricted privilege-escalation shells (`sudo -i`, `su`, `sudo bash`, ...);
 - the refusal of reverse-proxy (frp) profiles.
 
@@ -545,6 +546,9 @@ It does **not** lift:
   mode (`outOfScope` on the decision), and a server outside the session's workspaces is never in
   the list a tool resolves against at all.
 - **Protected.** A Protected target holds a Bypass session at Ask first.
+
+So to hold a production server even against a Bypass session, **mark it Protected** (changes are
+asked for) **or assign it No AI Access** (unreachable). Assigning it a narrower group does not.
 - **Stop all AI access, Revoke and expiry.** They end the session; its mode goes with it.
 - **The audit log.** Every row records the session's mode, and a call that ran only because of
   Bypass — one the group would have asked about or refused — is audited as `bypassed`, never as

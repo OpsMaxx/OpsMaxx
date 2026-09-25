@@ -366,8 +366,10 @@ What bounds it:
   workspace the session was not granted stay out of reach in every mode. Bypass lifts
   permissions, not scope.
 - **Protected caps it.** A workspace or server marked Protected holds every session acting on it at
-  Ask first, Bypass included. That is the setting for the box an agent must never touch unasked;
-  a restriction group is not, because Bypass lifts a restriction group like any other permission.
+  Ask first, Bypass included. So to hold a production box even against a Bypass session, mark it
+  Protected, or assign it No AI Access to take it out of reach entirely. Assigning it a narrower
+  access group does not: that assignment is a permission restriction, and Bypass lifts its Deny
+  and Ask like any other permission.
 - **Revocation still works.** Stop all AI access, Revoke and expiry end the session whatever its
   mode.
 - **It is audited as itself.** Every audit row carries the session's mode, and a call that ran only
