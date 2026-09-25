@@ -311,6 +311,19 @@ export function ApprovalDialog({
     openAi('groups', all?.find((x) => x.id === request.sessionId)?.groupId ?? null)
   }
   const LEAVES = 'Keeps this request waiting in the status bar while you look.'
+  // `request.sessionMode` is the mode it was ASKED under; the mode may have
+  // been changed elsewhere since. Picking the stale value would be a no-op, so
+  // the live one is read on open and again whenever the picker opens.
+  const readMode = (): void => {
+    void window.opsmaxx?.aiMcp
+      ?.listSessions?.()
+      .then((all: McpAgentSession[] | undefined) => {
+        const live = all?.find((x) => x.id === request.sessionId)
+        if (live) setMode(live.mode ?? DEFAULT_SESSION_MODE)
+      })
+      .catch(() => {})
+  }
+  useEffect(readMode, [request.id, request.sessionId])
   // The dialog is keyed on the request, so this re-arms for every new one.
   const { armed, allow, noteKey } = useArming(request.id)
 
@@ -606,6 +619,7 @@ export function ApprovalDialog({
             value={mode}
             onChange={changeMode}
             protectedCount={request.protectedTarget ? 1 : 0}
+            onOpen={readMode}
             size="sm"
             title="Applies to this agent’s later calls; this request still needs an answer. Read only is the exception: it also denies this request and any other this agent has waiting."
           />

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Modal } from '../common/Modal'
 import type { CliPairingRequest } from '../../../../shared/mcp'
 import { bridgeOn } from '../../lib/bridge'
+import { StartsInMode } from './ModePicker'
 
 // Mounted once at the app root, like ApprovalWatcher: the `opsmaxx
 // claude|codex|run` CLI launcher can pair from any tab the user happens to
@@ -42,6 +43,7 @@ export function CliPairingBanner(): React.JSX.Element | null {
         <div className="s-info">
           <div className="s-title">Agent</div>
           <div className="s-desc">{request.agentName}</div>
+          <StartsInMode />
         </div>
       </div>
       <div className="setting-row">

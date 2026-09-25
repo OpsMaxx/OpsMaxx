@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, X } from 'lucide-react'
 import type { AccessGroup } from '../../../../shared/mcp'
 import { Switch } from '../common/Switch'
+import { StartsInMode } from './ModePicker'
 
 interface PendingAuthorization {
   id: string
@@ -195,6 +196,9 @@ export function AiAuthorizations(): React.JSX.Element {
                   </option>
                 ))}
               </select>
+              <div style={{ marginTop: 8 }}>
+                <StartsInMode />
+              </div>
             </div>
 
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

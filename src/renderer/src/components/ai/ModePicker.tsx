@@ -1,7 +1,7 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
-import { SESSION_MODES, sessionModeLabel } from '../../../../shared/mcp'
+import { DEFAULT_SESSION_MODE, SESSION_MODES, sessionModeLabel } from '../../../../shared/mcp'
 import type { SessionMode } from '../../../../shared/mcp'
 import { ContextMenu } from '../connections/ContextMenu'
 import type { MenuEntry } from '../connections/ContextMenu'
@@ -25,7 +25,8 @@ export function ModePicker({
   disabled,
   size,
   title,
-  defaultScope
+  defaultScope,
+  onOpen
 }: {
   value: SessionMode
   onChange: (mode: SessionMode) => void | Promise<void>
@@ -36,6 +37,9 @@ export function ModePicker({
   /** This picks the DEFAULT for new sessions, not one session's mode, and the
    *  Bypass confirm says what that reaches. */
   defaultScope?: boolean
+  /** Called as the menu opens, so a caller whose `value` may be stale can
+   *  re-read it before anything is picked against it. */
+  onOpen?: () => void
 }): React.JSX.Element {
   const [menu, setMenu] = useState<DOMRect | null>(null)
   const [confirming, setConfirming] = useState(false)
@@ -139,6 +143,7 @@ export function ModePicker({
           const reopen = !wasOpen.current && menu === null
           wasOpen.current = false
           layer.current = e.currentTarget.closest(LAYER) ?? undefined
+          if (reopen) onOpen?.()
           setMenu(reopen ? e.currentTarget.getBoundingClientRect() : null)
         }}
       >
@@ -163,5 +168,44 @@ export function ModePicker({
       )}
       {confirm && (layer.current ? createPortal(confirm, layer.current) : confirm)}
     </>
+  )
+}
+
+/**
+ * The mode a session created without a picker will start in -- OAuth consent
+ * and CLI pairing -- said at the moment of consent, so a Bypass default is
+ * never applied without the human seeing it.
+ */
+export function StartsInMode(): React.JSX.Element {
+  // undefined while reading, null when it could not be read.
+  const [mode, setMode] = useState<SessionMode | null | undefined>(undefined)
+  useEffect(() => {
+    let live = true
+    const read = window.opsmaxx?.aiMcp?.getConfig?.()
+    if (!read) {
+      setMode(null)
+      return
+    }
+    read
+      .then((c) => live && setMode(c?.defaultSessionMode ?? DEFAULT_SESSION_MODE))
+      .catch(() => live && setMode(null))
+    return () => {
+      live = false
+    }
+  }, [])
+  if (mode === undefined) return <div className="s-desc">Starts in: reading your default mode…</div>
+  if (mode === null) {
+    return (
+      <div className="s-desc warn">
+        Starts in your default mode, which could not be read — check it under AI &amp; MCP → Security.
+      </div>
+    )
+  }
+  return (
+    <div className="s-desc" data-testid="starts-in-mode">
+      Starts in:{' '}
+      <span className={clsx('chip', mode === 'bypass' && 'danger')}>{sessionModeLabel(mode)}</span> (your
+      default — change under AI &amp; MCP → Security)
+    </div>
   )
 }
