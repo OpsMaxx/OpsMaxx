@@ -124,11 +124,11 @@ Regardless of which access group a session holds:
   directory is let through: `$HOME/bin/tool`, `${HOME}/bin/tool` and `~/bin/tool` are judged by
   their literal basename, so `~/bin/sudo` is still sudo.
 
-  **This upgrade is part of Confirm risky actions.** A group with that switch off gets what its
-  `terminal` value says for a command it cannot name. On Full Access as shipped — `terminal` ALLOW,
-  `sudo` ASK, switch off — that means `$(which sudo) reboot` runs without asking where
-  `sudo reboot` would ask: the sudo prompt covers the escalations the walk can name, not the ones it
-  cannot. If sudo asking is the property you want, keep Confirm risky actions on.
+  **Switching Confirm risky actions off does not waive this while sudo is not granted.** A command
+  word the walk cannot name may *be* sudo, so it asks whenever the group has not set `sudo` to
+  ALLOW, whatever the switch says. On Full Access as shipped — `terminal` ALLOW, `sudo` ASK, switch
+  off — `$(which sudo) reboot` therefore asks, as `sudo reboot` does. Only a group that allows sudo
+  outright *and* has the switch off runs such a command without asking.
 
   The quoting is tested with a generated matrix rather than hand-picked cases
   (`tests/escalationQuotingMatrix.test.ts`): every nest of `eval '…'`, `sh -c '…'`, `sh -c "…"`,
