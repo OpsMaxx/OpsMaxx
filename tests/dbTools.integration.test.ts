@@ -62,13 +62,23 @@ beforeEach(() => {
   queryResult = { ok: true, columns: ['id'], rows: [[1]], rowCount: 1 }
 })
 
-async function clientFor(groupId: string): Promise<Client> {
+// Full Access's capabilities with Confirm risky actions ON. The seeded Full
+// Access ships with the switch off, so on it a write or a tunnel start is the
+// literal allow; this is the group on which they still ask.
+const CONFIRMING = 'grp-confirming'
+const useConfirming = (): void => {
+  saveGroup({ ...getGroup('grp-full')!, id: CONFIRMING, name: 'Full, confirming', builtIn: false, confirmRisky: true })
+  setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
+}
+
+async function clientFor(groupId: string, mode?: 'bypass'): Promise<Client> {
   const { token } = createSession({
     agentName: 'DB Test',
     workspaces: [{ id: 'ws', name: 'Prod' }],
     groupId,
     groupName: groupId,
-    ttlMinutes: null
+    ttlMinutes: null,
+    mode
   })
   const t = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } }
@@ -123,18 +133,56 @@ describe('database tools', () => {
     }
   })
 
-  it('never lets a DROP through silently, even on Full Access', async () => {
+  it('never lets a DROP through silently while Confirm risky actions is on', async () => {
     // databaseAccess and writeFiles are both ALLOW there, so without the
     // clamp this would run with no prompt at all.
-    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
+    useConfirming()
     const stop = autoApprove()
-    const c = await clientFor('grp-full')
+    const c = await clientFor(CONFIRMING)
     try {
       await call(c, 'query_database', { databaseName: 'Orders', statement: 'DROP TABLE orders' })
       const approvals = listAudit().filter((a) => a.action === 'DROP TABLE orders')
       expect(approvals.some((a) => a.approval === 'approved')).toBe(true)
     } finally {
       stop()
+      await c.close()
+    }
+  })
+
+  it('runs a DROP on Full Access, whose switch is off, without asking', async () => {
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
+    let asked = 0
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') asked += 1
+    })
+    const c = await clientFor('grp-full')
+    try {
+      await call(c, 'query_database', { databaseName: 'Orders', statement: 'DROP TABLE literal' })
+      expect(asked).toBe(0)
+      expect(queries).toEqual([{ statement: 'DROP TABLE literal' }])
+      expect(listAudit().find((a) => a.action === 'DROP TABLE literal')?.approval).toBe('not-required')
+    } finally {
+      off()
+      await c.close()
+    }
+  })
+
+  it('runs a DROP in a Bypass session on a group that asks, audited as bypassed', async () => {
+    useConfirming()
+    let asked = 0
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') asked += 1
+    })
+    const c = await clientFor(CONFIRMING, 'bypass')
+    try {
+      await call(c, 'query_database', { databaseName: 'Orders', statement: 'DROP TABLE bypassed' })
+      expect(asked).toBe(0)
+      expect(queries).toEqual([{ statement: 'DROP TABLE bypassed' }])
+      const row = listAudit().find((a) => a.action === 'DROP TABLE bypassed')
+      expect(row?.approval).toBe('bypassed')
+      expect(row?.mode).toBe('bypass')
+    } finally {
+      off()
       await c.close()
     }
   })
@@ -203,11 +251,11 @@ describe('tunnel tools', () => {
     }
   })
 
-  it('always asks before binding a port, even on Full Access', async () => {
-    // Opening a listener on the user's own machine is never silent.
-    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
+  it('asks before binding a port while Confirm risky actions is on', async () => {
+    // Opening a listener on the user's own machine is not silent on such a group.
+    useConfirming()
     const stop = autoApprove()
-    const c = await clientFor('grp-full')
+    const c = await clientFor(CONFIRMING)
     try {
       const out = await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: true })
       expect(out).toContain('Started')
@@ -215,6 +263,23 @@ describe('tunnel tools', () => {
       expect(entry?.approval).toBe('approved')
     } finally {
       stop()
+      await c.close()
+    }
+  })
+
+  it('binds without asking on Full Access, whose switch is off', async () => {
+    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
+    let asked = 0
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') asked += 1
+    })
+    const c = await clientFor('grp-full')
+    try {
+      expect(await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: true })).toContain('Started')
+      expect(asked).toBe(0)
+      expect(tunnelCalls).toEqual([{ id: 'tn1', started: true }])
+    } finally {
+      off()
       await c.close()
     }
   })
@@ -321,9 +386,9 @@ describe('what a session grant cannot buy', () => {
   })
 
   it('a session grant on one tunnel start does not cover the next start', async () => {
-    setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
+    useConfirming()
     const a = answerForSession()
-    const c = await clientFor('grp-full')
+    const c = await clientFor(CONFIRMING)
     try {
       await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: true })
       await call(c, 'set_tunnel', { tunnelName: 'DB Forward', running: true })

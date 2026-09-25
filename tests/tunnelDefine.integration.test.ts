@@ -21,7 +21,9 @@ vi.mock('../src/main/services/ssh', () => ({
 }))
 
 const { refreshMcpDataCache } = await import('../src/main/services/mcpDataCache')
-const { setAssignment, resetPolicyCacheForTests } = await import('../src/main/services/policyStore')
+const { setAssignment, resetPolicyCacheForTests, listGroups, saveGroup } = await import('../src/main/services/policyStore')
+const { listAudit } = await import('../src/main/services/auditLog')
+type SessionMode = import('../src/shared/mcp').SessionMode
 const { setMcpConfig, createSession, resetMcpAuthForTests } = await import('../src/main/services/mcpAuth')
 const { startMcpServer, stopMcpServer } = await import('../src/main/services/mcpServer')
 const { onApprovalEvent, respondToApproval } = await import('../src/main/services/approvals')
@@ -54,18 +56,26 @@ beforeAll(async () => {
 
 afterAll(async () => await stopMcpServer())
 
+// Full Access's capabilities with Confirm risky actions ON: the group a user
+// gets when they allow tunnels anywhere but on the seeded Full Access. The
+// seeded one ships with the switch off, and on it allow means allow.
+const CONFIRMING = 'grp-confirming'
+
 beforeEach(() => {
   written = []
   setAssignment({ level: 'workspace', workspaceId: 'ws' }, 'grp-full')
+  const full = listGroups().find((g) => g.id === 'grp-full')!
+  saveGroup({ ...full, id: CONFIRMING, name: 'Full, confirming', builtIn: false, confirmRisky: true })
 })
 
-async function clientFor(groupId: string): Promise<Client> {
+async function clientFor(groupId: string, mode?: SessionMode): Promise<Client> {
   const { token } = createSession({
-    agentName: 'Test Agent',
+    agentName: mode ? `Test Agent (${mode})` : 'Test Agent',
     workspaces: [{ id: 'ws', name: 'Personal' }],
     groupId,
     groupName: groupId,
-    ttlMinutes: null
+    ttlMinutes: null,
+    mode
   })
   const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } }
@@ -116,12 +126,42 @@ describe('create_tunnel', () => {
     }
   })
 
-  it('always asks, even on Full Access', async () => {
+  it('asks while Confirm risky actions is on, even with sshTunnel at ALLOW', async () => {
     const a = watch('approved')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(CONFIRMING)
     try {
       await call(c, 'create_tunnel', { kind: 'socks', name: 'Proxy', serverName: 'Bastion' })
       expect(a.count()).toBe(1)
+      expect(written).toHaveLength(1)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('defines without asking on Full Access, whose switch is off', async () => {
+    const a = watch('denied')
+    const c = await clientFor('grp-full')
+    try {
+      expect(await call(c, 'create_tunnel', { kind: 'socks', name: 'Proxy', serverName: 'Bastion' })).toContain('NOT running')
+      expect(a.count()).toBe(0)
+      expect(written).toHaveLength(1)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('defines without asking in a Bypass session on a group that asks, and audits it as bypassed', async () => {
+    const a = watch('denied')
+    const c = await clientFor(CONFIRMING, 'bypass')
+    try {
+      expect(await call(c, 'create_tunnel', { kind: 'socks', name: 'Bypassed', serverName: 'Bastion' })).toContain('NOT running')
+      expect(a.count()).toBe(0)
+      expect(written).toHaveLength(1)
+      const row = listAudit().find((e) => e.action.startsWith('Define tunnel "Bypassed"'))
+      expect(row?.approval).toBe('bypassed')
+      expect(row?.mode).toBe('bypass')
     } finally {
       a.stop()
       await c.close()
@@ -130,7 +170,7 @@ describe('create_tunnel', () => {
 
   it('asks again for a second tunnel in the same session', async () => {
     const a = watch('approved')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(CONFIRMING)
     try {
       await call(c, 'create_tunnel', { kind: 'socks', name: 'Proxy A', serverName: 'Bastion' })
       await call(c, 'create_tunnel', { kind: 'socks', name: 'Proxy B', serverName: 'Bastion' })
@@ -161,7 +201,7 @@ describe('create_tunnel', () => {
     // server's whole network, and that is the fact the approving person most
     // needs and would never infer from "define a tunnel".
     const a = watch('denied')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(CONFIRMING)
     try {
       await call(c, 'create_tunnel', {
         kind: 'remote',
@@ -180,7 +220,7 @@ describe('create_tunnel', () => {
 
   it('does not say that about a loopback remote forward', async () => {
     const a = watch('denied')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(CONFIRMING)
     try {
       await call(c, 'create_tunnel', {
         kind: 'remote',
@@ -189,6 +229,8 @@ describe('create_tunnel', () => {
         listen: '127.0.0.1:8080',
         target: '127.0.0.1:3000'
       })
+      // It did ask; the question just does not claim a publication.
+      expect(a.count()).toBe(1)
       expect(a.last()).not.toContain('publishes')
     } finally {
       a.stop()
@@ -259,9 +301,9 @@ describe('create_tunnel', () => {
 })
 
 describe('delete_tunnel', () => {
-  it('always asks, and removes on approval', async () => {
+  it('asks while Confirm risky actions is on, and removes on approval', async () => {
     const a = watch('approved')
-    const c = await clientFor('grp-full')
+    const c = await clientFor(CONFIRMING)
     try {
       const out = await call(c, 'delete_tunnel', { tunnelName: 'DB Forward' })
       expect(out).toContain('Removed')
@@ -273,9 +315,35 @@ describe('delete_tunnel', () => {
     }
   })
 
-  it('does not remove when the user declines', async () => {
+  it('removes without asking on Full Access, whose switch is off', async () => {
     const a = watch('denied')
     const c = await clientFor('grp-full')
+    try {
+      expect(await call(c, 'delete_tunnel', { tunnelName: 'DB Forward' })).toContain('Removed')
+      expect(a.count()).toBe(0)
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('removes without asking in a Bypass session, audited as bypassed', async () => {
+    const a = watch('denied')
+    const c = await clientFor(CONFIRMING, 'bypass')
+    try {
+      expect(await call(c, 'delete_tunnel', { tunnelName: 'DB Forward' })).toContain('Removed')
+      expect(a.count()).toBe(0)
+      const row = listAudit().find((e) => e.action.startsWith('Remove tunnel') && e.mode === 'bypass')
+      expect(row?.approval).toBe('bypassed')
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
+  it('does not remove when the user declines', async () => {
+    const a = watch('denied')
+    const c = await clientFor(CONFIRMING)
     try {
       const out = await call(c, 'delete_tunnel', { tunnelName: 'DB Forward' })
       expect(out).toContain('Denied')

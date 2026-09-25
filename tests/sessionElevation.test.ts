@@ -8,7 +8,8 @@ const SRC = readFileSync(
 )
 
 /** The body of gate(), which is where every one of these rules has to hold. */
-const GATE = SRC.slice(SRC.indexOf('async function gate('), SRC.indexOf("return { ok: true, approval: 'not-required' }"))
+const END = "return { ok: true, approval: check.bypassed ? 'bypassed' : 'not-required' }"
+const GATE = SRC.slice(SRC.indexOf('async function gate('), SRC.indexOf(END))
 
 /**
  * An approval, remembered for the rest of the session.
@@ -24,7 +25,7 @@ describe('what one approval covers', () => {
   // A missing end marker makes GATE the rest of the file, and every
   // not.toMatch below would then be scanning code gate() never runs.
   it('reads gate() and only gate()', () => {
-    expect(SRC.indexOf("return { ok: true, approval: 'not-required' }")).toBeGreaterThan(SRC.indexOf('async function gate('))
+    expect(SRC.indexOf(END)).toBeGreaterThan(SRC.indexOf('async function gate('))
     expect(GATE).not.toMatch(/function auditSuccess/)
     // gate() is a couple of hundred lines; the whole file is thousands.
     expect(GATE.length).toBeGreaterThan(0)
@@ -81,13 +82,23 @@ describe('what one approval covers', () => {
   // it never reads an elevation and never writes one. Every run is its own ask.
   //
   // This is the second line of defence, not the first. policyEngine's
-  // evaluateCiTrigger upgrades `allow` to `ask` unconditionally, because an
-  // `allow` decision never reaches this code at all -- gate() returns before
-  // the ask branch. Removing either one silently re-opens the loop.
+  // evaluateCiTrigger upgrades `allow` to `ask` while the group's Confirm risky
+  // actions switch is on, because an `allow` decision never reaches this code
+  // at all -- gate() returns before the ask branch. Removing either one
+  // silently re-opens the loop. (Switching Confirm risky off, or running the
+  // session in Bypass, is the operator choosing unasked builds out loud.)
   it('never carries an approval for a capability whose effect leaves the app', () => {
     expect(GATE).toMatch(/const perCall = ctx\.capability === 'ciTrigger'/)
     expect(GATE).toMatch(/if \(!perCall && sessionElevations\.has\(key\)\)/)
     expect(GATE).toMatch(/if \(decision === 'approved-for-session' && !perCall\)/)
+  })
+
+  // Bypass is the only way an `allow` gets the 'bypassed' label, and it is
+  // read at the very end: after the deny branch and after every ask returned,
+  // so it can only relabel an allow, never answer a question.
+  it('labels a Bypass allow as bypassed, only after deny and ask have returned', () => {
+    expect(GATE).not.toMatch(/bypassed/)
+    expect(GATE.lastIndexOf("check.decision === 'ask'")).toBeGreaterThan(GATE.indexOf("check.decision === 'deny'"))
   })
 
   it('is consulted only for an ask, never to soften a deny', () => {

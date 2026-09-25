@@ -6,6 +6,7 @@ import { refreshMcpDataCache } from '../src/main/services/mcpDataCache'
 import { setAssignment, resetPolicyCacheForTests } from '../src/main/services/policyStore'
 import { setMcpConfig, createSession, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
 import { startMcpServer, stopMcpServer } from '../src/main/services/mcpServer'
+import { CONDITIONAL_ASK } from '../src/shared/mcp'
 
 // What an agent actually sees. Everything asserted here is metadata the model
 // reads before deciding which tool to call, so it is worth pinning: a tool that
@@ -176,8 +177,12 @@ describe('tool metadata', () => {
     expect(d).toMatch(/no access group can permit them|refused outright/i)
   })
 
-  it('tells set_vpn that starting always needs approval', () => {
-    expect(byName('set_vpn').description ?? '').toMatch(/always requires user approval/i)
+  // It used to say "always requires user approval", which stopped being true
+  // when Confirm risky actions became a switch. It now says what decides.
+  it('tells set_vpn what decides whether starting asks, and does not promise it always does', () => {
+    const d = byName('set_vpn').description ?? ''
+    expect(d).toContain(CONDITIONAL_ASK)
+    expect(d).not.toMatch(/always requires user approval/i)
   })
 
   it('says list_vpns will not disclose where a VPN points', () => {
