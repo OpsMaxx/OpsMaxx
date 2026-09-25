@@ -482,8 +482,8 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
       <div className="sub">
         Nothing here is needed to give an agent access — a session's own access group is the grant, and
         a workspace with no assignment leaves it exactly as written. What an assignment does is hold a
-        workspace <i>below</i> that grant, for servers that must stay locked down whatever an agent was
-        issued. A server with no override inherits its workspace's assignment.
+        workspace <i>below</i> that grant, whatever group an agent was issued. A server with no override
+        inherits its workspace's assignment.
       </div>
       <div className="sub">
         <b>Protected</b> is the other optional restriction: agents are held at Ask first there, whatever their
@@ -505,6 +505,10 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
       <div className="setting-row">
         <div className="s-info">
           <div className="s-title">Default access group for this workspace</div>
+          <div className="s-desc">
+            A restriction narrows Auto and Ask-first sessions. To hold this target even against Bypass, mark it
+            Protected. No AI Access holds in every mode.
+          </div>
         </div>
         <select
           className="input"

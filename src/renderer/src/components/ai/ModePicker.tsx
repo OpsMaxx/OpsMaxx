@@ -73,6 +73,7 @@ export function ModePicker({
         <p style={{ margin: 0 }}>The agent runs everything it asks for, with no prompt and no refusal. This lifts:</p>
         <ul style={{ margin: '4px 0 10px' }}>
           <li>the access group’s Deny</li>
+          <li>access-group restrictions on workspaces and servers</li>
           <li>path rules, such as those guarding /etc/shadow and ~/.ssh</li>
           <li>escalation shells such as sudo -i and su</li>
           <li>frp reverse proxies</li>
