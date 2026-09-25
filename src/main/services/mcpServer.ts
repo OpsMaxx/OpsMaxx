@@ -3237,8 +3237,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
               reason:
                 `"${vpn.name}" is a reverse proxy (frp). Each of its proxies makes a port on the user's ` +
                 'own machine reachable from the frp server, so OpsMaxx does not let an AI agent open or ' +
-                'close one unless the user has put this session in Bypass mode. No access group can ' +
-                'permit it — ask the user to do it in OpsMaxx themselves.'
+                'close one unless the user has put this session in Bypass mode. This is not a permission ' +
+                'that can be raised — ask the user to do it in OpsMaxx themselves.'
             }),
             true
           )
