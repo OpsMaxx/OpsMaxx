@@ -4,6 +4,7 @@ import {
   respondToApproval,
   listPendingApprovals,
   denyAllPending,
+  denyPendingForSession,
   extendApproval,
   onApprovalEvent,
   EXTENSION_CEILING_SECONDS,
@@ -44,6 +45,19 @@ describe('human approval', () => {
     resetApprovalVolumeForTests()
     resetMcpAuthForTests()
     setMcpConfig({ approvalTimeoutSeconds: 60 })
+  })
+
+  it('switching a session to Read only denies what it already has queued, and nobody else\'s', async () => {
+    // Read only refuses changes, and every queued request is one: leaving them
+    // answerable made "never change anything" false for as long as they sat.
+    const mine = req()
+    const theirs = req({ sessionId: 'sess-2', serverId: 'srv-2' })
+    expect(denyPendingForSession('sess-1')).toBe(1)
+    expect(await mine).toBe('denied')
+    const left = listPendingApprovals()
+    expect(left.map((a) => a.sessionId)).toEqual(['sess-2'])
+    respondToApproval(left[0].id, 'approved')
+    expect(await theirs).toBe('approved')
   })
 
   it('a pending request shows up for the UI to act on', async () => {

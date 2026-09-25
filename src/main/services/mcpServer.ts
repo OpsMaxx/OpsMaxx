@@ -512,7 +512,7 @@ function modeHeader(session: McpAgentSession, serverId: string | null, workspace
   const group = sessionGroupFor(session)
   return [
     `Session mode: ${sessionModeLabel(mode?.id)} — ${mode?.detail ?? ''}. Set by the user in OpsMaxx; an agent cannot change it.`,
-    `Protected target: ${isProtected(serverId, workspaceId) ? 'yes — every change here is asked for, whatever the mode' : 'no'}`,
+    `Protected target: ${isProtected(serverId, workspaceId) ? 'yes — Auto and Bypass are held at Ask first here, so every change is asked for; Read only stays read only' : 'no'}`,
     `Confirm risky actions: ${group ? `${confirmsRisky(group) ? 'on' : 'off'} (${group.name})` : 'n/a — no access group'}`
   ].join('\n')
 }

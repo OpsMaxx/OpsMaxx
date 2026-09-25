@@ -30,7 +30,7 @@ export const SESSION_MODES: { id: SessionMode; label: string; detail: string; sh
   { id: 'readOnly', label: 'Read only', detail: 'Look around, never change anything', shortcut: '1' },
   { id: 'ask', label: 'Ask first', detail: 'Approve every change before it runs', shortcut: '2' },
   { id: 'auto', label: 'Auto', detail: 'Follow the access group exactly', shortcut: '3' },
-  { id: 'bypass', label: 'Bypass permissions', detail: 'Runs everything. No prompts, no blocks', shortcut: '4' }
+  { id: 'bypass', label: 'Bypass permissions', detail: 'No prompts or blocks, except on Protected targets', shortcut: '4' }
 ]
 
 export const DEFAULT_SESSION_MODE: SessionMode = 'auto'
@@ -50,7 +50,7 @@ export function sessionModeLabel(mode: SessionMode | undefined): string {
  */
 export const RISKY_ACTIONS: string[] = [
   'destructive or elevated commands (rm -rf, mkfs, reboot, package installs, service restarts)',
-  'commands whose program is computed at run time, and unshare -r',
+  'commands whose program is computed at run time (these also ask with the switch off, unless Sudo is Allow), and unshare -r',
   'database writes and schema changes',
   'opening, defining or deleting SSH tunnels',
   'changing or removing saved servers',
@@ -295,7 +295,7 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     id: 'ciTrigger',
     label: 'CI/CD: start, cancel and re-run pipelines',
     detail:
-      'Starts a pipeline run on the CI server, cancels one, or re-runs it. What that run then does is defined on the provider and not here: OpsMaxx cannot read the pipeline definition before it starts, and cannot see what it deploys or where. Stopping AI access takes away the agent\'s cancel along with everything else, so a run already accepted is then yours to stop — from the Stop button on that run in CI/CD, or in the provider. While the group\'s Confirm risky actions is on, starting, cancelling and re-running ask even when this is allow, and one approval never covers the next call; with it off, or in a Bypass session, a build starts unasked.'
+      'Starts a pipeline run on the CI server, cancels one, or re-runs it. What that run then does is defined on the provider and not here: OpsMaxx cannot read the pipeline definition before it starts, and cannot see what it deploys or where. Stopping AI access takes away the agent\'s cancel along with everything else, so a run already accepted is then yours to stop — from the Stop button on that run in CI/CD, or in the provider. While the group\'s Confirm risky actions is on, starting, cancelling and re-running ask even when this is allow, and one approval never covers the next call; with it off in Auto mode, or in a Bypass session, a build starts unasked — except on a Protected workspace, and Ask first always asks.'
   }
 ]
 
