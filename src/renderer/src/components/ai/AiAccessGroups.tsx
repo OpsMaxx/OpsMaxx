@@ -506,7 +506,7 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
         <div className="s-info">
           <div className="s-title">Default access group for this workspace</div>
           <div className="s-desc">
-            A restriction narrows Auto and Ask-first sessions. To hold this target even against Bypass, mark it
+            A restriction narrows every mode except Bypass. To hold this target even against Bypass, mark it
             Protected. No AI Access holds in every mode.
           </div>
         </div>
