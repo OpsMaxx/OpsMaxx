@@ -719,6 +719,10 @@ export interface CapabilityExplanation {
   /** Reads ALLOW, but some calls under it will still ask: a risky command, a
    *  database write, changing or removing a server. */
   partlyAsks: boolean
+  /** What the group (and any restriction) said before the mode was applied. */
+  beforeMode: PermissionValue
+  /** Allowed only because the session is in Bypass. */
+  bypassed: boolean
 }
 
 /**

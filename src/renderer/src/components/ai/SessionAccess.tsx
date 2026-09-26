@@ -1,9 +1,8 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, ShieldCheck } from 'lucide-react'
+import { ChevronDown, ChevronRight, ShieldCheck, X } from 'lucide-react'
 import { toast } from '../../store/toast'
 import { openAi, openSettings } from '../../store/nav'
-import { clsx } from '../../lib/format'
-import { DEFAULT_SESSION_MODE, SESSION_MODES, sessionModeLabel } from '../../../../shared/mcp'
+import { DEFAULT_SESSION_MODE, sessionModeLabel } from '../../../../shared/mcp'
 import type {
   AccessGroup,
   CapabilityExplanation,
@@ -13,7 +12,7 @@ import type {
 } from '../../../../shared/mcp'
 import { ModePicker } from './ModePicker'
 
-const VERDICT: Record<PermissionValue, string> = { allow: 'ALLOW', ask: 'ASK', deny: 'DENY' }
+const VERDICT: Record<PermissionValue, string> = { allow: 'Allow', ask: 'Ask', deny: 'Deny' }
 
 /** Protected targets inside this session's workspaces: each protected
  *  workspace once, plus each protected server whose workspace is not. */
@@ -31,11 +30,96 @@ async function protectedCountFor(session: McpAgentSession): Promise<number> {
   }).length
 }
 
+/** A workspace or server in this session's reach that carries an assignment. */
+interface Restriction {
+  id: string
+  where: string
+  groupId: string | null
+  groupName: string
+}
+
+/**
+ * Every assignment inside the session's workspaces, as the thing it is: a
+ * restriction someone set on a target, separately from any agent. Listed on
+ * its own rather than inferred from which rows it happened to narrow, so one
+ * that narrows nothing today -- or that Bypass is lifting -- is still visible
+ * and removable. Older versions of Connect an agent wrote these on their own.
+ */
+async function restrictionsFor(session: McpAgentSession, groups: AccessGroup[]): Promise<Restriction[]> {
+  const api = window.opsmaxx?.aiPolicy
+  const [assignments, servers] = await Promise.all([api?.listAssignments?.(), api?.listServers?.()])
+  const mine = new Map(session.workspaces.map((w) => [w.id, w.name]))
+  const serverById = new Map((servers ?? []).map((s) => [s.id, s]))
+  const out: Restriction[] = []
+  for (const a of assignments ?? []) {
+    let where: string | null = null
+    if (a.scope.level === 'workspace') {
+      const name = mine.get(a.scope.workspaceId)
+      if (name !== undefined) where = `the ${name} workspace`
+    } else {
+      const server = serverById.get(a.scope.serverId)
+      if (server && mine.has(server.workspaceId)) where = server.name
+    }
+    if (!where) continue
+    const group = groups.find((g) => g.id === a.groupId)
+    out.push({ id: a.id, where, groupId: a.groupId, groupName: group?.name ?? 'No AI Access' })
+  }
+  return out
+}
+
+/** The outcome buckets, in the order a person reads them. */
+const BUCKETS: { key: string; title: string; tone: string; test: (r: CapabilityExplanation) => boolean }[] = [
+  { key: 'allow', title: 'Runs without asking', tone: 'ok', test: (r) => r.decision === 'allow' && !r.partlyAsks },
+  {
+    key: 'partly',
+    title: 'Runs — but risky actions ask',
+    tone: 'info',
+    test: (r) => r.decision === 'allow' && r.partlyAsks
+  },
+  { key: 'ask', title: 'Asks you first', tone: 'warn', test: (r) => r.decision === 'ask' },
+  { key: 'deny', title: 'Blocked', tone: 'danger', test: (r) => r.decision === 'deny' }
+]
+
+/** What the whole mode means for this session, in one sentence. */
+function modeSummary(mode: SessionMode, groupName: string): string {
+  switch (mode) {
+    case 'bypass':
+      return 'Bypass: everything runs without asking, whatever the access group or any restriction says. Only Protected targets and No AI Access still hold.'
+    case 'readOnly':
+      return `Read only: it can look wherever ${groupName} lets it, and every change is refused.`
+    case 'ask':
+      return `Ask first: every change ${groupName} allows is asked for before it runs.`
+    default:
+      return `Auto: exactly what ${groupName} says, narrowed by any restriction below.`
+  }
+}
+
+/**
+ * Why one capability came out the way it did, in a few words. Built from the
+ * structured fields rather than the policy engine's sentence, which is written
+ * for an approval card and an audit row and reads as a paragraph in a table.
+ */
+function why(r: CapabilityExplanation, groupName: string): string {
+  if (r.bypassed) {
+    const source =
+      r.decidedBy === 'scope' ? `${r.scopeWorkspaceName ?? 'the target'}’s restriction` : groupName
+    return `${source} says ${VERDICT[r.beforeMode]} — Bypass lifts it`
+  }
+  if (r.protectedTarget && r.decision === 'ask') return 'Protected target — held at Ask first'
+  if (r.decision !== r.beforeMode) return `${sessionModeLabel(r.mode)} mode`
+  if (r.decidedBy === 'scope') {
+    return r.scopeGroupName
+      ? `Restricted: ${r.scopeWorkspaceName ?? 'this target'} is limited to ${r.scopeGroupName}`
+      : 'Target is set to No AI Access'
+  }
+  if (r.partlyAsks) return `${groupName} allows it; risky actions still ask`
+  return `${groupName}: ${VERDICT[r.decision]}`
+}
+
 // Answers the question the permission model actually raises — "what can this
-// agent do, and which layer decided that" — in the place the user
-// is already looking. Until now nothing in the app could answer it: the only
-// thing that computed effective permissions was the get_server_details MCP
-// tool, so the agent could see the answer and the person could not.
+// agent do, and which layer decided that" — in the place the user is already
+// looking: grouped by outcome, restrictions named as the separate thing they
+// are, and the per-capability reasons one click further down.
 export function SessionAccess({
   session,
   groups,
@@ -46,18 +130,13 @@ export function SessionAccess({
   onChanged: () => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const [detail, setDetail] = useState(false)
   const [rows, setRows] = useState<CapabilityExplanation[] | null>(null)
   const [protectedCount, setProtectedCount] = useState(0)
+  const [restrictions, setRestrictions] = useState<Restriction[]>([])
   const mode: SessionMode = session.mode ?? DEFAULT_SESSION_MODE
+  const groupName = session.groupName
 
-  // Fetched whether or not the table is open.
-  //
-  // It used to load only on expand, which meant the one fact that explains the
-  // whole permission model -- that the session's group is the GRANT and a
-  // workspace or server assignment can only hold it lower -- was available
-  // exclusively to someone who had already guessed there was something to look
-  // at. It is a local call against data already in memory, so there is nothing
-  // to save by waiting.
   const refetch = (): void => {
     void window.opsmaxx?.aiMcp
       .explainAccess?.(session.id, null)
@@ -66,34 +145,20 @@ export function SessionAccess({
   }
   useEffect(refetch, [session.id, session.groupId, mode])
 
+  const loadRestrictions = (): void => {
+    restrictionsFor(session, groups)
+      .then(setRestrictions)
+      .catch(() => setRestrictions([]))
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(loadRestrictions, [session.id, groups])
+
   useEffect(() => {
     protectedCountFor(session)
       .then(setProtectedCount)
       .catch(() => setProtectedCount(0))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
-
-  /**
-   * Capabilities an assignment holds BELOW the session's group.
-   *
-   * `decidedBy: 'scope'` is precisely "the workspace's or server's own access
-   * group was the narrower of the two", which the group picker cannot express
-   * and the user cannot otherwise see.
-   */
-  const narrowed = (rows ?? []).filter(
-    (r) => r.decidedBy === 'scope' && r.decision !== 'allow' && r.fromSession !== r.decision
-  )
-
-  /**
-   * The assignment that actually decided, so the button can open IT.
-   *
-   * It used to deep-link `session.groupId` — the session's own group, the one
-   * the user had already set to allow everything. They landed on a page of
-   * ALLOW rows, changed nothing that mattered, and came back to the same
-   * denial. Every narrowed row shares a source in the common case; the first
-   * is the one named.
-   */
-  const heldBy = narrowed.find((r) => r.scopeGroupName !== null) ?? null
 
   const changeGroup = async (groupId: string): Promise<void> => {
     const group = groups.find((g) => g.id === groupId) ?? null
@@ -118,7 +183,7 @@ export function SessionAccess({
       })
       return
     }
-    toast(`${session.agentName} can now do at most what ${name} allows.`, 'ok')
+    toast(`${session.agentName} now uses ${name}.`, 'ok')
   }
 
   const changeMode = async (next: SessionMode): Promise<void> => {
@@ -137,15 +202,28 @@ export function SessionAccess({
     toast(`${session.agentName} is now in ${sessionModeLabel(next)}.`, 'ok')
   }
 
-  // Protected only changes anything for Auto and Bypass: Ask first already
-  // asks, and Read only stays read only.
-  const capped = mode === 'auto' || mode === 'bypass'
-  const shielded = capped && (rows?.some((r) => r.protectedTarget) ?? false)
-  const partly = rows?.some((r) => r.partlyAsks) ?? false
+  const removeRestriction = async (r: Restriction): Promise<void> => {
+    try {
+      await window.opsmaxx?.aiPolicy.removeAssignment?.(r.id)
+    } catch {
+      toast(`The restriction on ${r.where} was not removed.`, 'error')
+      return
+    }
+    loadRestrictions()
+    setRows(null)
+    refetch()
+    onChanged()
+    toast(`${r.where} is no longer restricted.`, 'ok')
+  }
+
+  // Restrictions that are actually holding this session lower right now. In
+  // Bypass only No AI Access holds; everything else is listed but lifted.
+  const holding = restrictions.filter((r) => mode !== 'bypass' || r.groupId === null)
+  const shielded = (mode === 'auto' || mode === 'bypass') && protectedCount > 0
 
   return (
     <div style={{ width: '100%' }}>
-      <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6 }}>
+      <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
         <span className="s-desc">Access group</span>
         <select
           className="input"
@@ -161,104 +239,142 @@ export function SessionAccess({
         </select>
         <span className="s-desc">Mode</span>
         <ModePicker value={mode} onChange={changeMode} protectedCount={protectedCount} size="sm" />
-        <button className="btn sm" onClick={() => setOpen((v) => !v)}>
+        <button className="btn sm" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Effective access
         </button>
       </div>
 
-      {/* The sentence that answers "but I granted Full Access".
-          Widening the session's group cannot lift an assignment, and until
-          this line existed the screen showed only the half the user had just
-          changed.
-          SHOWN WHETHER OR NOT THE TABLE IS OPEN. It used to be `!open &&`, so
-          expanding Effective access — the one action somebody takes when they
-          are trying to work out why a grant did nothing — replaced the
-          explanation with the bare DENY column that prompted the question. */}
-      {narrowed.length > 0 && (
-        <div className="s-desc warn" style={{ marginTop: 6, lineHeight: 1.5 }}>
-          Held below this group:{' '}
-          {narrowed.map((r) => `${r.label} = ${VERDICT[r.decision]}`).join(', ')}.{' '}
-          {heldBy
-            ? `${heldBy.scopeWorkspaceName ?? 'That workspace'} is assigned ${heldBy.scopeGroupName}, an optional restriction set separately from this session — it is what decided, not the group above.`
-            : 'That is set by the access group assigned to that target, which is an optional restriction set separately from this session.'}{' '}
-          <button className="linklike" onClick={() => openAi('groups', heldBy?.scopeGroupId ?? null)}>
-            {heldBy?.scopeGroupName ? `Change ${heldBy.scopeGroupName}` : 'Change the assignment'}
+      {/* Shown whether or not the panel is open: a restriction is the one thing
+          that makes "I picked Full Access and it still asks" true, and it is
+          set somewhere else entirely. */}
+      {holding.length > 0 && (
+        <div className="s-desc warn" style={{ marginTop: 6, lineHeight: 1.5 }} data-testid="restriction-note">
+          {holding.length === 1
+            ? `${cap(holding[0].where)} is restricted to ${holding[0].groupName}, so this agent gets at most that there.`
+            : `${holding.length} targets are restricted below this agent’s group.`}{' '}
+          <button className="linklike" onClick={() => setOpen(true)}>
+            Review
           </button>
         </div>
       )}
 
       {open && (
-        <div style={{ marginTop: 8 }}>
-          <div className="s-desc" style={{ marginBottom: 6 }}>
-            Mode: <b>{sessionModeLabel(mode)}</b> — {SESSION_MODES.find((m) => m.id === mode)?.detail}.
+        <div style={{ marginTop: 10, display: 'grid', gap: 10 }}>
+          <div className="s-desc" style={{ lineHeight: 1.5 }}>
+            {modeSummary(mode, groupName)}
             {shielded && (
               <>
                 {' '}
-                <span className="chip warn">Protected</span> A protected target holds this session at Ask first
-                there.
+                <span className="chip warn">Protected</span> {protectedCount} protected target
+                {protectedCount === 1 ? '' : 's'} in its workspaces {protectedCount === 1 ? 'holds' : 'hold'} it at
+                Ask first there.
               </>
             )}
           </div>
-          {capped && protectedCount > 0 && (
-            <div className="s-desc" style={{ marginBottom: 6 }}>
-              This table covers all of the session’s workspaces at once, so Protected is shown per workspace,
-              worst case: if any of them is Protected, every row reads as held at Ask first. A server marked
-              Protected on its own is held there too, which this table does not show.
-            </div>
-          )}
+
           {rows === null && <div className="s-desc">Working it out…</div>}
           {rows?.length === 0 && <div className="s-desc">This session is scoped to no workspace.</div>}
+
           {rows && rows.length > 0 && (
-            <table className="mini-table" style={{ width: '100%' }}>
-              <thead>
-                <tr>
-                  <th>Capability</th>
-                  <th>Workspace</th>
-                  <th>This session</th>
-                  <th>Result · why</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.capability}>
-                    <td>{r.label}</td>
-                    <td className={clsx('mono', r.decidedBy === 'scope' && 'strong')}>{VERDICT[r.fromScope]}</td>
-                    <td className={clsx('mono', r.decidedBy === 'session' && 'strong')}>
-                      {r.fromSession ? VERDICT[r.fromSession] : '—'}
-                    </td>
-                    <td>
-                      <span className="mono strong">
-                        {VERDICT[r.decision]}
-                        {r.partlyAsks && '*'}
-                      </span>
-                      <div className="s-desc">{r.reason}</div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          {partly && (
-            <div className="s-desc" style={{ marginTop: 6 }}>
-              * Some calls under this still ask — risky commands, database writes, changing or removing
-              servers — because Confirm risky actions is on (or the mode is Ask first).
+            <div style={{ display: 'grid', gap: 8 }}>
+              {BUCKETS.map((b) => {
+                const inBucket = rows.filter(b.test)
+                if (inBucket.length === 0) return null
+                return (
+                  <div key={b.key} data-testid={`bucket-${b.key}`}>
+                    <div className="s-title" style={{ fontSize: 'var(--fs-sm)', marginBottom: 4 }}>
+                      {b.title} <span className="s-desc">({inBucket.length})</span>
+                    </div>
+                    <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
+                      {inBucket.map((r) => (
+                        <span key={r.capability} className={`chip ${b.tone}`} title={why(r, groupName)}>
+                          {r.label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           )}
-          <div className="s-desc" style={{ marginTop: 6 }}>
-            <b>This session</b> is the access group picked above, the grant. <b>Workspace</b> is an optional
-            assignment under Access Groups, which can only hold it lower. The bolded column is the one that
-            decided, and the mode is applied last.
+
+          {restrictions.length > 0 && (
+            <div data-testid="restrictions">
+              <div className="s-title" style={{ fontSize: 'var(--fs-sm)', marginBottom: 4 }}>
+                Restrictions on targets
+              </div>
+              {restrictions.map((r) => {
+                const lifted = mode === 'bypass' && r.groupId !== null
+                return (
+                  <div key={r.id} className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <span className="s-desc">
+                      {cap(r.where)} → <b>{r.groupName}</b>
+                      {lifted
+                        ? ' — lifted while this agent is in Bypass.'
+                        : r.groupId === null
+                          ? ' — no agent can reach it, in any mode.'
+                          : ' — agents there get at most this, whatever their own group.'}
+                    </span>
+                    {r.groupId && (
+                      <button className="linklike" onClick={() => openAi('groups', r.groupId)}>
+                        Edit {r.groupName}
+                      </button>
+                    )}
+                    <button className="btn sm" onClick={() => void removeRestriction(r)}>
+                      <X size={12} /> Remove restriction
+                    </button>
+                  </div>
+                )
+              })}
+              <div className="s-desc" style={{ marginTop: 4 }}>
+                A restriction belongs to the workspace or server, not to this agent. Earlier versions of Connect an
+                agent added them on their own; removing one lets each agent’s own group decide there.
+              </div>
+            </div>
+          )}
+
+          {rows && rows.length > 0 && (
+            <div>
+              <button className="linklike" onClick={() => setDetail((v) => !v)} aria-expanded={detail}>
+                {detail ? 'Hide' : 'Show'} why, per capability
+              </button>
+              {detail && (
+                <table className="mini-table" style={{ width: '100%', marginTop: 6 }}>
+                  <thead>
+                    <tr>
+                      <th>Capability</th>
+                      <th>Result</th>
+                      <th>Why</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.capability}>
+                        <td>{r.label}</td>
+                        <td className="mono strong">
+                          {VERDICT[r.decision]}
+                          {r.partlyAsks && '*'}
+                        </td>
+                        <td className="s-desc" title={r.reason}>
+                          {why(r, groupName)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
+
+          <div>
+            <button className="btn sm" onClick={() => openAi('groups', session.groupId)}>
+              <ShieldCheck size={13} /> Edit {groupName}
+            </button>
           </div>
-          <button
-            className="btn sm"
-            style={{ marginTop: 8 }}
-            onClick={() => openAi('groups', heldBy?.scopeGroupId ?? session.groupId)}
-            title={heldBy ? `Open ${heldBy.scopeGroupName}, the assignment that decided` : 'Open this session\'s access group'}
-          >
-            <ShieldCheck size={13} /> Edit access groups
-          </button>
         </div>
       )}
     </div>
   )
 }
+
+const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1)

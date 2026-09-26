@@ -79,3 +79,76 @@ describe('changing a session’s mode', () => {
     expect(onChanged).toHaveBeenCalled()
   })
 })
+
+describe('the Effective access panel', () => {
+  const rows = [
+    { ...row },
+    {
+      ...row,
+      capability: 'writeFiles',
+      label: 'Write files',
+      decision: 'allow',
+      beforeMode: 'ask',
+      bypassed: true,
+      decidedBy: 'scope',
+      scopeGroupId: 'grp-rw',
+      scopeGroupName: 'Read & Write',
+      scopeWorkspaceId: 'ws',
+      scopeWorkspaceName: 'Prod',
+      mode: 'bypass'
+    },
+    { ...row, capability: 'sudo', label: 'Sudo / privilege escalation', decision: 'ask', beforeMode: 'ask' },
+    { ...row, capability: 'hostFacts', label: 'Host inventory', decision: 'deny', beforeMode: 'deny' }
+  ] as CapabilityExplanation[]
+
+  function withRestriction(removeAssignment = vi.fn(async () => undefined)): ReturnType<typeof vi.fn> {
+    stubBridge({
+      aiMcp: { explainAccess: vi.fn(async () => rows), setSessionMode: vi.fn() },
+      aiPolicy: {
+        listProtected: vi.fn(async () => []),
+        listServers: vi.fn(async () => []),
+        listAssignments: vi.fn(async () => [
+          { id: 'asn-1', scope: { level: 'workspace', workspaceId: 'ws' }, groupId: 'grp-rw' }
+        ]),
+        removeAssignment
+      }
+    })
+    return removeAssignment
+  }
+
+  const withRw = [...groups, { id: 'grp-rw', name: 'Read & Write' }] as AccessGroup[]
+
+  it('groups capabilities by outcome instead of one row per verdict', async () => {
+    withRestriction()
+    render(<SessionAccess session={session} groups={withRw} onChanged={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: /Effective access/ }))
+    expect((await screen.findByTestId('bucket-allow')).textContent).toContain('Write files')
+    expect(screen.getByTestId('bucket-ask').textContent).toContain('Sudo')
+    expect(screen.getByTestId('bucket-deny').textContent).toContain('Host inventory')
+    // The engine's paragraph is not the table's text any more.
+    expect(screen.queryByText(/held below what this AI session/)).toBeNull()
+  })
+
+  it('names a restriction on its own, says it is holding the agent, and removes it in one click', async () => {
+    const removeAssignment = withRestriction()
+    const onChanged = vi.fn()
+    render(<SessionAccess session={session} groups={withRw} onChanged={onChanged} />)
+    expect((await screen.findByTestId('restriction-note')).textContent).toMatch(
+      /Prod workspace is restricted to Read & Write/
+    )
+    await userEvent.click(screen.getByRole('button', { name: /Effective access/ }))
+    await userEvent.click(await screen.findByRole('button', { name: /Remove restriction/ }))
+    await waitFor(() => expect(removeAssignment).toHaveBeenCalledWith('asn-1'))
+    expect(onChanged).toHaveBeenCalled()
+  })
+
+  it('in Bypass, a restriction is listed as lifted and does not warn', async () => {
+    withRestriction()
+    render(<SessionAccess session={{ ...session, mode: 'bypass' }} groups={withRw} onChanged={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: /Effective access/ }))
+    expect((await screen.findByTestId('restrictions')).textContent).toMatch(/lifted while this agent is in Bypass/)
+    expect(screen.queryByTestId('restriction-note')).toBeNull()
+    await userEvent.click(screen.getByRole('button', { name: /why, per capability/ }))
+    expect(screen.getByText(/Prod’s restriction says Ask — Bypass lifts it/)).toBeTruthy()
+  })
+})

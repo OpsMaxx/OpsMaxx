@@ -6167,6 +6167,8 @@ export function explainSessionAccess(sessionId: string, serverId: string | null)
       mode,
       protectedTarget,
       partlyAsks,
+      beforeMode: combined.decision,
+      bypassed: final.bypassed === true,
       fromScope: scope ? scope.decision : sess.decision,
       fromSession: sess.decision,
       decidedBy,
