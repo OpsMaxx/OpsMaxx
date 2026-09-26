@@ -283,6 +283,8 @@ export function ApprovalDialog({
   // The session's mode from here on. Changing it answers nothing: this request
   // was raised under the old mode and still waits on the buttons below.
   const [mode, setMode] = useState<SessionMode>(sessionModeOf({ mode: request.sessionMode }))
+  // Was this asked under the Custom profile, i.e. does an access group decide?
+  const askedCustom = sessionModeOf({ mode: request.sessionMode }) === 'custom'
   const changeMode = async (next: SessionMode): Promise<void> => {
     // Custom with no group would refuse everything; give it the widest one,
     // which Active Sessions then shows and can change.
@@ -466,9 +468,11 @@ export function ApprovalDialog({
                 Rule: {request.policyReason}
                 <div className="row" style={{ gap: 12, marginTop: 4 }}>
                   <button className="linklike" title={LEAVES} onClick={openSession}>
-                    Change this agent’s group or mode
+                    Change this agent’s profile
                   </button>
-                  {/confirm risky actions/i.test(request.policyReason) && (
+                  {/* Only a Custom group's switch can be changed; a predefined
+                      profile's is part of what the profile means. */}
+                  {askedCustom && /confirm risky actions/i.test(request.policyReason) && (
                     <button className="linklike" title={LEAVES} onClick={() => void openGroup()}>
                       Change Confirm risky actions{prov.groupName ? ` on ${prov.groupName}` : ''}
                     </button>
@@ -522,8 +526,12 @@ export function ApprovalDialog({
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <Row label="Agent">
               {request.agentName}
-              {prov.groupName ? ` · access group ${prov.groupName} ` : ''}
-              {prov.groupName && (
+              {askedCustom
+                ? prov.groupName
+                  ? ` · access group ${prov.groupName} `
+                  : ''
+                : ` · profile ${sessionModeLabel(sessionModeOf({ mode: request.sessionMode }))} `}
+              {(prov.groupName || !askedCustom) && (
                 <button
                   className="linklike"
                   title={`Open ${request.agentName} under Active Sessions. ${LEAVES}`}
