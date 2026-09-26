@@ -184,21 +184,22 @@ distribution. Building from source needs Node.js 20 or later.
 Yes — see [AI Agent Access](ai-agents.md). OpsMaxx runs a local
 [MCP](https://modelcontextprotocol.io) server that Claude Code, Claude Desktop, Codex, Gemini CLI
 and other MCP-compatible clients can connect to, each session scoped to the workspace(s) and
-access group chosen for it. The agent never sees a password, private key, database credential or
-Vault secret — it only ever gets a friendly server name and whatever that session's access group
+permission profile chosen for it. The agent never sees a password, private key, database credential or
+Vault secret — it only ever gets a friendly server name and whatever that session's profile
 allows.
 
 ### Is it safe to let an AI agent run commands on my servers?
 
-It's as safe as the access group and mode you give it, and that's a real limitation, not a
+It's as safe as the profile you give it, and that's a real limitation, not a
 slogan — see [docs/AI-SECURITY.md](AI-SECURITY.md) for what this design does and does not protect
 against. What OpsMaxx does provide: the bridge only listens on `127.0.0.1`, every capability (run
 commands, read/write files, SFTP, tunnels, database access, sudo, metrics) is independently
-ALLOW/ASK/DENY, unrestricted root shells (`sudo -i`, `su`, ...) are refused whatever the group
-says, and anything that asks stops and waits for you to approve or deny it in OpsMaxx — an agent
-can never approve its own request. Each session also has a mode only you can set: Read only, Ask
-first, Auto, or Bypass permissions, which runs everything without asking, root shells included.
-Mark a server Protected and no mode runs a change there unasked. Every action is logged in the
+ALLOW/ASK/DENY, unrestricted root shells (`sudo -i`, `su`, ...) are refused on every profile but Bypass,
+and anything that asks stops and waits for you to approve or deny it in OpsMaxx — an agent
+can never approve its own request. Each session has one profile only you can set: Read only, Ask
+first, Auto, Bypass permissions — which runs everything without asking, root shells included — or
+Custom, which applies an access group you pick. Mark a server Protected and no profile runs a change
+there unasked. Every action is logged in the
 Audit Log with secrets redacted, including which ones only ran because of Bypass.
 
 ### How do I move my setup to another machine?

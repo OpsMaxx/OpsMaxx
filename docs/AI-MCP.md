@@ -13,7 +13,7 @@ another MCP client. For the short pitch and the security summary, see the
 - [Sessions](#sessions)
 - [Workspaces](#workspaces)
 - [Access Groups](#access-groups)
-- [Permission modes](#permission-modes)
+- [Permission profiles](#permission-profiles)
 - [Approvals](#approvals)
 - [Audit Log](#audit-log)
 - [Credential isolation](#credential-isolation)
@@ -36,11 +36,13 @@ another MCP client. For the short pitch and the security summary, see the
 3. Every tool call authenticates the bearer token against a session (`mcpAuth.ts`), then resolves
    the target server **by friendly name** (`serverResolver.ts`) — never by hostname, IP or username,
    because the tool call never carries one.
-4. The session's **access group** is evaluated for the specific capability the tool needs
-   (`policyEngine.ts`), together with any restriction assigned to that server or workspace,
-   producing `allow`, `ask` or `deny`. The session's **mode** and whether the target is
+4. The session's **profile** picks the group that answers: a predefined profile's own fixed
+   baseline, or — for **Custom** only — the access group chosen for the session
+   (`sessionGroupFor`, `mcpServer.ts`). That group is evaluated for the specific capability the
+   tool needs (`policyEngine.ts`), together with any restriction assigned to that server or
+   workspace, producing `allow`, `ask` or `deny`. The profile and whether the target is
    **Protected** are then applied to that answer (`applyMode`) — see
-   [Permission modes](#permission-modes).
+   [Permission profiles](#permission-profiles).
 5. `ask` blocks on a human decision (`approvals.ts`) before anything happens. `deny` returns an
    error immediately. `allow` proceeds.
 6. Only at this point does OpsMaxx resolve the server's actual SSH/database credential
@@ -59,7 +61,7 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 |---|---|---|
 | `list_workspaces` | — | The workspace(s) this session is scoped to |
 | `list_servers` | `viewServer` | Friendly names only, filtered to what the session can see |
-| `get_server_details` | `viewServer` | Name, OS, access group, effective ALLOW/ASK/DENY per capability — **never hostname/IP/username** |
+| `get_server_details` | `viewServer` | Name, OS, session profile, access group, effective ALLOW/ASK/DENY per capability — **never hostname/IP/username** |
 | `execute_command` | `terminal` (+ `sudo` if the command is sudo/doas, + file path rules for any absolute path it names); a destructive, elevated or run-time-computed command is **risky** | stdout/stderr/exit code, redacted |
 | `read_file` | `readFiles` + `sftpDownload` (+ file path rules) | File contents, redacted |
 | `write_file` | `writeFiles` + `sftpUpload` (+ file path rules) | Bytes written |
@@ -99,10 +101,11 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `cancel_run` | `ciTrigger`, **risky**, **never cached** | That the provider accepted the request, not that the run stopped |
 | `rerun_run` | `ciTrigger`, **risky**, **never cached** | A new attempt of the same run — **GitHub only**; Jenkins and GitLab refuse and say to start a new run |
 
-**Risky** means an ALLOW on that capability still asks while the access group's **Confirm risky
-actions** switch is on — the default on every group but Full Access. **Never cached** means that when
-the call asks, one approval covers that call and no later one. Every row is also subject to the
-session's mode and to a Protected target — see [Permission modes](#permission-modes).
+**Risky** means an ALLOW on that capability still asks under the **Auto** profile, and under
+**Custom** while the access group's **Confirm risky actions** switch is on — the default on every
+group but Full Access. **Never cached** means that when the call asks, one approval covers that call
+and no later one. Every row is also subject to the session's profile and to a Protected target — see
+[Permission profiles](#permission-profiles).
 
 Each tool carries a `title`, an MCP annotation set (`readOnlyHint`, `destructiveHint`,
 `openWorldHint`) and a description of every parameter, and the server sends `instructions` on
@@ -144,7 +147,7 @@ forms and can only ever narrow a decision, never widen one; a file that must sta
 a row either — and, while the group's Confirm risky actions switch is on, never resolves better
 than ASK. That clamp exists because `databaseAccess` is ALLOW in every built-in group that grants it
 at all, so honouring it plainly hands an agent a silent `DROP TABLE`. Full Access ships with the
-switch off, so a Full Access session in Auto mode does run a write without asking: on that group,
+switch off, so a Custom session on Full Access does run a write without asking: on that group,
 ALLOW means allow.
 
 A read cannot smuggle a write behind a semicolon, comments cannot hide the verb, and an
@@ -186,8 +189,8 @@ clicking it, from consent to publish a port. So it is not a permission an admini
 on a group: the refusal is hard-coded (`AI_REFUSED_VPN_KINDS`, `policyEngine.ts`), the same
 treatment as unrestricted root shells, and it applies to stopping as well as starting. It is
 expressed as a refusal *decision* rather than an early return, so the one thing that reaches past
-it is the same one that reaches past a root shell: a session the human has put in **Bypass** mode,
-on a workspace that is not Protected.
+it is the same one that reaches past a root shell: a session the human has put on the **Bypass**
+profile, on a workspace that is not Protected.
 
 `list_vpns` reports which profiles exist, which engine carries each one, whether it is up, and
 frp's per-proxy status table. It never reports an endpoint, a key, or a listener's bind address —
@@ -215,8 +218,8 @@ at, and could then ask the user to paste a token into it.
 **`trigger_run`, `cancel_run` and `rerun_run` are risky and never cached.** While the group's
 Confirm risky actions switch is on, `evaluateCiTrigger` (`policyEngine.ts`) upgrades `allow` to
 `ask` before `gate()` runs, and `gate()` excludes `ciTrigger` from `sessionElevations` in both
-directions, so every run that asks is its own approval. With the switch off (Full Access as
-shipped) or in Bypass mode, a run starts without asking. One pipeline per call, so a mistake costs
+directions, so every run that asks is its own approval. On a Custom group with the switch
+off (Full Access as shipped), or on the Bypass profile, a run starts without asking. One pipeline per call, so a mistake costs
 one pipeline rather than a fleet.
 
 `trigger_run`, `cancel_run` and `rerun_run` call `cicd/wiring` — the same functions the panel's
@@ -294,10 +297,13 @@ and is worse for privacy than the non-secret metadata it was avoiding.
 
 ### `add_server`
 
-An agent can add an SSH connection, including its credential, when the session's access group
-grants `manageServers`. Of the built-in groups, **Read & Write** and **Sudo Access** set it to ASK,
-so every add surfaces an approval dialog naming the connection, the user and the server; **Full
-Access** sets it to ALLOW, so there an add in Auto mode does not ask. The credential itself never appears in that dialog or in the audit log — only the fact
+An agent can add an SSH connection, including its credential, when the session's group grants
+`manageServers`. Every predefined profile's baseline allows it, so Read only refuses the add (it is a
+change), Ask first asks, and Auto adds without asking — adding is not one of the risky actions;
+changing or removing a saved server is. On the Custom profile the group decides: of the built-in
+groups, **Read & Write** and **Sudo Access** set it to ASK, so every add surfaces an approval dialog
+naming the connection, the user and the server; **Full Access** sets it to ALLOW, so there an add
+does not ask. The credential itself never appears in that dialog or in the audit log — only the fact
 that one was supplied. It goes straight to the OS keychain and cannot be read back through the
 bridge.
 
@@ -341,9 +347,10 @@ CLI pairing. Each one has:
 
 - an **agent name** (a label, e.g. "Claude Code")
 - **one or more workspaces**, chosen explicitly — never "all workspaces including future ones"
-- exactly **one access group**, which is the grant — see [Access Groups](#access-groups)
-- a **mode** — Read only, Ask first, Auto or Bypass permissions — which only the human sets, in the
-  OpsMaxx window; see [Permission modes](#permission-modes)
+- a **profile** — Read only, Ask first, Auto, Bypass permissions or Custom — which only the human
+  sets, in the OpsMaxx window; see [Permission profiles](#permission-profiles)
+- for the **Custom** profile only, exactly **one access group**, which is the grant — see
+  [Access Groups](#access-groups). The predefined profiles use none
 - an **expiry**: 15 minutes, 1 hour, 8 hours, 7 days, or never (CLI pairing always issues 8 hours —
   `TTL_MINUTES = 480` in `cliPairing.ts`)
 - a bearer token, shown **once** at creation
@@ -381,6 +388,11 @@ has to be created by hand under **AI & MCP → AI Agents**.
 
 ![Access Groups: the five built-in groups, each described from its own settings, and every capability set to ALLOW, ASK or DENY](images/ai-access-groups.png)
 
+An access group matters in two places: it is the grant for a session on the **Custom** profile,
+and, assigned to a workspace or server, it is a **restriction** that narrows every profile but
+Bypass. The four predefined profiles do not read a group at all — see
+[Permission profiles](#permission-profiles).
+
 An access group (`AccessGroup`, `shared/mcp.ts`) is a policy across **21 capabilities**
 (`AI_CAPABILITIES`): view server, execute terminal commands, read files, write files, SFTP
 download, SFTP upload, SSH tunnels, database access, sudo/privilege escalation, server metrics,
@@ -412,8 +424,9 @@ That list is `RISKY_ACTIONS` in `shared/mcp.ts`, and every allow-to-ask upgrade 
 `policyEngine.ts` is conditional on `confirmsRisky(group)` and on nothing else. These upgrades used
 to be unconditional, which meant a group set to allow everything still asked, for reasons no screen
 showed; the switch makes the same behaviour visible and lets a group turn it off. With it off,
-`allow` means allow. It only matters in Auto mode: Ask first asks for every change anyway, and
-Bypass asks for nothing. Each group's switch governs its own answer, so a restriction group with the
+`allow` means allow. The session's own group consults it only on the Custom profile: Auto's fixed
+baseline has it on, Ask first asks for every change anyway, Read only refuses them, and Bypass asks
+for nothing. Each group's switch governs its own answer, so a restriction group with the
 switch on still asks for a risky action on the target it is assigned to. It does not touch file path
 rules — a rule saying `ask` or `deny` for a path still does so.
 
@@ -464,8 +477,8 @@ assignment referencing one never dangles), but there is no hard-coded five-tier 
 create as many custom groups as you want.
 
 **What no access group can grant.** Two refusals do not depend on any capability value, and no
-setting on any group reaches past them. Only a session the human has put in **Bypass** mode does —
-see [Permission modes](#permission-modes).
+setting on any group reaches past them. Only a session the human has put on the **Bypass** profile
+does — see [Permission profiles](#permission-profiles).
 
 - **Reverse proxies.** `set_vpn` refuses any profile whose kind is `frp` before the access group is
   consulted (`isVpnKindRefusedForAi`, `policyEngine.ts`).
@@ -474,13 +487,13 @@ see [Permission modes](#permission-modes).
   — and returns `deny` whatever the group's `terminal` and `sudo` values are. There is no ALLOW
   that reaches past this branch.
 
-**The session's group is the grant; an assignment is an optional restriction.** The group chosen
-when the session was created decides what it may do. A group assigned to a server or workspace
+**The session's group is the grant; an assignment is an optional restriction.** The session's
+group — its profile's baseline, or the Custom group chosen for it — decides what it may do. A group assigned to a server or workspace
 under **Server & workspace assignment** can only narrow that: `serverCheck`/`workspaceCheck`
 (`mcpServer.ts`) evaluate both and take whichever is stricter (`mostRestrictive`,
 `policyEngine.ts`). Assigning **No AI Access** takes the target out of every session's reach.
 A restriction group's answer is a permission like any other, so Bypass lifts it; No AI Access is
-scope, not a permission, and no mode lifts it. To hold a server below Bypass, mark it Protected or
+scope, not a permission, and no profile lifts it. To hold a server below Bypass, mark it Protected or
 set it to No AI Access.
 
 **File path rules** override the blanket `readFiles`/`writeFiles` capability for specific paths.
@@ -490,82 +503,124 @@ one rule matches a path, **the longest pattern string wins** (`evaluateFilePath`
 matching no rule falls back to the blanket capability.
 
 **Server & workspace assignment** is optional. With nothing assigned, the session's own group
-applies as written. Assign a group to a workspace, or override one server, to hold that target
+applies as written. The **Effective access** panel on a session lists every restriction in its
+reach, with a **Remove** button on each, and groups the capabilities by what they resolve to. Assign a group to a workspace, or override one server, to hold that target
 below what a session's group allows; a server with no override inherits its workspace's
 assignment (`resolveRestriction`, `policyEngine.ts`). Assign **No AI Access** to shut a target
 entirely.
 
 ![File path rules and per-server/workspace assignment](images/ai-access-groups-assignment.png)
 
-## Permission modes
+<a id="permission-modes"></a>
 
-The access group says **what** an agent may do. The session's **mode** says how much the human
-wants to be in the loop while it does it (`SessionMode`, `shared/mcp.ts`). There are four, and each
-means exactly its sentence:
+## Permission profiles
 
-| Mode | What it does |
+Each session has one permission choice: a **profile** (`SessionMode` in `shared/mcp.ts` — still
+called `mode` in the data, for continuity with 0.53.0). It is picked the way a Claude Code mode is,
+and each means exactly its sentence:
+
+| Profile | What it does |
 |---|---|
-| **Read only** | Reads follow the group. Every change is refused, whatever the group says |
-| **Ask first** | Reads follow the group. Every change the group permits is asked for first; what the group denies stays denied |
-| **Auto** (default) | The group's `allow`/`ask`/`deny`, literally, plus that group's Confirm risky actions switch |
-| **Bypass permissions** | Nothing asks and nothing is refused |
+| **Read only** | Every read is allowed. Every change is refused |
+| **Ask first** | Every read is allowed. Every change is asked for |
+| **Auto** | Routine work runs without asking; sudo and the risky actions below ask |
+| **Bypass permissions** | No prompts and no refusals, except on Protected targets |
+| **Custom** | An access group, exactly as written, including its Confirm risky actions switch |
+
+The first four need no access group. Each stands on a fixed baseline (`profileGroup`,
+`policyStore.ts`) that is not stored and cannot be edited, so a profile's sentence cannot change
+because someone edited a group:
+
+- every capability an agent tool uses is `allow` — Auto alone sets `sudo` to `ask` and turns
+  Confirm risky actions on;
+- `firewallRules` and `sudoersRead` stay `deny`: no agent tool uses them, and they are consent for
+  OpsMaxx's own background collection;
+- the seeded sensitive-path `deny` rules come along — `/etc/shadow`, SSH keys, shell history — so no
+  predefined profile short of Bypass reads them. The seeded write-`ask` rules do not, because asking
+  is the profile's job;
+- Bypass stands on Auto's baseline, so everything Auto would have asked about is lifted and audited
+  as `bypassed` rather than silently allowed by a baseline that never asked.
+
+The risky actions Auto asks for are `RISKY_ACTIONS` in `shared/mcp.ts`, the same list as a group's
+Confirm risky actions switch (see [Access Groups](#access-groups)): destructive or elevated commands,
+commands whose program is computed at run time, database writes and schema changes, opening,
+defining or deleting tunnels, changing or removing saved servers, starting a VPN or stopping one
+other sessions depend on, and starting, cancelling or re-running CI pipelines.
+
+**Custom** is the only profile that uses an access group, and the only place a group's own
+`allow`/`ask`/`deny` values and its Confirm risky actions switch decide anything for the session.
+Pick it for a policy the four predefined profiles do not express.
 
 A "change" is any call on a capability that changes something (`MUTATING_CAPABILITIES`,
 `policyEngine.ts`: terminal, sudo, file writes and SFTP upload, tunnels, managing servers, VPN
 control, container control and CI triggers), plus a database statement that is not classified as a
 read. **Every `execute_command` counts as a change**, because OpsMaxx cannot tell from a command
-line that it only reads: in Read only mode every command is refused, and in Ask first every command
-asks. Use `read_file`, `list_files` and the other read tools in those modes.
+line that it only reads: on Read only every command is refused, and on Ask first every command
+asks. Use `read_file`, `list_files` and the other read tools there.
 
-The mode is applied in one place, `applyMode` (`policyEngine.ts`), after the session's group and any
-restriction on the target have produced their answer. `serverCheck` and `workspaceCheck`
-(`mcpServer.ts`) route every tool through it, and the Effective access table and
+The profile is applied in one place, `applyMode` (`policyEngine.ts`), after the session's group and
+any restriction on the target have produced their answer. `serverCheck` and `workspaceCheck`
+(`mcpServer.ts`) route every tool through it, and the Effective access panel and
 `describe_capabilities` read the same function, so what a screen shows is what a tool enforces.
+A restriction assigned to the server or workspace narrows every profile except Bypass.
 
-**Who sets it.** Only the human, in the OpsMaxx window. A new session starts in the default mode
-configured for the bridge (`defaultSessionMode`; Auto if none is set), or in the mode chosen when it
-was created, and a change to a live session applies from its next tool call (`setSessionMode`,
-`mcpAuth.ts`). No MCP tool can change it: `get_server_details` and `describe_capabilities` tell
-the agent which mode it is in and that it cannot change it, and the server instructions tell it
-not to suggest Bypass as a way around a refusal.
+**Who sets it.** Only the human, in the OpsMaxx window. A new session starts on the profile chosen
+when it was created; a session created with no picker in front of it takes the default configured
+for the bridge (`defaultSessionMode`), and with none configured, **Custom** on the default access
+group (`initialMode`, `mcpAuth.ts`). That fallback is deliberate: CLI pairing has no
+picker, and Custom with no default group fails closed — no access at all — rather than handing out
+a profile nobody chose. An OAuth consent card grants a predefined profile, or Custom with a group,
+but never Bypass (`approveConsent`, `mcpOAuth.ts`); Bypass is confirmed where it is set. A change
+to a live session applies from its next tool call (`setSessionMode`, `mcpAuth.ts`). No MCP tool can
+change it: `get_server_details` and `describe_capabilities` open with `Session profile: …` and say
+the agent cannot change it, and the server instructions tell it not to suggest Bypass as a way
+around a refusal.
+
+**Upgrading from 0.53.0.** 0.53.0 had two pickers, an access group and a mode, and its **Auto** mode
+meant "the access group, literally" — which is Custom now. So on first load a session saved with mode
+Auto, or with no mode at all, becomes **Custom** on the same group and behaves exactly as before,
+and a bridge default of Auto becomes a default of Custom (`migrateSession`, `loadConfig`,
+`mcpAuth.ts`). Read only, Ask first and Bypass keep their names, and now stand on their
+profile's fixed baseline instead of the session's group.
 
 **Protected targets.** A workspace or server can be marked **Protected** (`protectedScopes`, stored
 in the policy file, written only over IPC by the human). A session acting on a Protected target is
-held at **Ask first** whatever its mode — Auto and Bypass both become Ask first there, and Read only
-stays Read only. The approval request gives Protected as its reason, so an unexpected prompt
-explains itself. A server is Protected if it or its workspace is marked. Tunnel, database, VPN and
-CI calls are checked against their workspace; starting, stopping, defining and deleting a tunnel is
-also capped when the server carrying it is marked.
+held at **Ask first** whatever its profile — Auto, Custom and Bypass all become Ask first there, and
+Read only stays Read only. The approval request gives Protected as its reason, so an unexpected
+prompt explains itself. A server is Protected if it or its workspace is marked. Tunnel, database,
+VPN and CI calls are checked against their workspace; starting, stopping, defining and deleting a
+tunnel is also capped when the server carrying it is marked.
 
 ### What Bypass lifts, and what it does not
 
-Bypass is the mode for a person who has decided to let an agent run and does not want to be
+Bypass is the profile for a person who has decided to let an agent run and does not want to be
 interrupted. It lifts every `ask` and every `deny` that comes from a **permission**:
 
-- the group's `deny` and `ask` on any capability, and Confirm risky actions;
-- file path rules, including the seeded denies on `/etc/shadow` and SSH keys;
+- everything Auto's baseline asks about — `sudo` and the risky actions;
+- file path rules, including the seeded denies on `/etc/shadow`, SSH keys and shell history;
 - a narrower access group assigned to the server or workspace — an assignment to a group is a
-  permission restriction, so Bypass lifts its `deny` and `ask` like the session group's own;
+  permission restriction, so Bypass lifts its `deny` and `ask`;
 - unrestricted privilege-escalation shells (`sudo -i`, `su`, `sudo bash`, ...);
 - the refusal of reverse-proxy (frp) profiles.
 
 It does **not** lift:
 
-- **Scope.** A target set to No AI Access and a session with no access group are refused in every
-  mode (`outOfScope` on the decision), and a server outside the session's workspaces is never in
-  the list a tool resolves against at all.
+- **Scope.** A target set to No AI Access, and a Custom session with no access group, are refused
+  on every profile (`outOfScope` on the decision), and a server outside the session's workspaces is never in the list a tool resolves
+  against at all.
 - **Protected.** A Protected target holds a Bypass session at Ask first.
 
 So to hold a production server even against a Bypass session, **mark it Protected** (changes are
 asked for) **or assign it No AI Access** (unreachable). Assigning it a narrower group does not.
-- **Stop all AI access, Revoke and expiry.** They end the session; its mode goes with it.
-- **The audit log.** Every row records the session's mode, and a call that ran only because of
-  Bypass — one the group would have asked about or refused — is audited as `bypassed`, never as
-  `not-required`. After the fact, the log alone says which actions only happened because of Bypass.
+- **Stop all AI access, Revoke and expiry.** They end the session; its profile goes with it.
+- **The audit log.** Every row records the session's profile, and a call that ran only because of
+  Bypass — one Auto's baseline or a restriction would have asked about or refused — is audited as
+  `bypassed`, never as `not-required`. After the fact, the log alone says which actions only
+  happened because of Bypass.
 - **Saving a connection to a fenced machine.** `add_server` and `update_server` refuse an address
   that is the OpsMaxx machine itself (loopback, its hostname, its own interface addresses) and one
-  that matches a No AI Access entry by host and port, in every mode; one matching a Protected entry
-  is held at Ask first. Protected and No AI Access are set per entry, and this is what stops a
+  that matches a No AI Access entry by host and port, on every profile; one matching a Protected
+  entry is held at Ask first. Protected and No AI Access are set per entry, and this is what stops a
   second entry for the same machine from escaping them.
 - **What is absent from the bridge.** Bypass cannot reach a tool that does not exist: there is
   still no local shell, no vault read, no job runner, no backup run or restore, no tool that reads
@@ -573,7 +628,7 @@ asked for) **or assign it No AI Access** (unreachable). Assigning it a narrower 
 
 ## Approvals
 
-Any call whose final answer — the session's group, any restriction on the target, then the mode
+Any call whose final answer — the session's group, any restriction on the target, then the profile
 and Protected — is `ask` calls `requestApproval` (`approvals.ts`), which blocks the MCP tool call on an in-memory pending request — nothing is written to disk until it resolves. The
 request only clears when:
 
@@ -654,7 +709,7 @@ named no server, so Ask on these three permissions behaved exactly like Deny and
 
 The second button is only offered where `gate()` would honour it. These are per-call — whenever
 one of them asks, it asks on every call, shows **Approve once** alone, and never reads a remembered
-grant. Whether they ask at all is the group's, the mode's and Protected's to decide, as for any
+grant. Whether they ask at all is the group's, the profile's and Protected's to decide, as for any
 other call:
 
 - `add_server`, `remove_server`, `create_tunnel`, `delete_tunnel`, and the `ciTrigger` tools
@@ -710,8 +765,8 @@ as allowed. A request OpsMaxx declined to put to anyone,
 because the session already had too many open or the same action was just denied, is shown as
 **Denied — not asked**, never as a refusal by you, and one whose agent disconnected while it waited
 as **Cancelled — agent disconnected**. A call that ran without asking only because the session was
-in Bypass mode — one the policy would otherwise have asked about or refused — is recorded as
-`bypassed`, not `not-required`, and every row carries the mode its session was in (`mode` on
+on the Bypass profile — one the policy would otherwise have asked about or refused — is recorded as
+`bypassed`, not `not-required`, and every row carries the profile its session was on (`mode` on
 `AuditEntry`). Rows are written one per line, **append-only** (a crash
 mid-write can corrupt at most the last line). Every free-text field (`action`, `error`) is passed
 through the same redaction (`secretRedaction.ts`) used for tool output before it's written, so the
@@ -756,8 +811,9 @@ authenticated, audited, policy-gated path an HTTP client talking to OpsMaxx dire
 3. You read the code off your screen and type it into the terminal running the CLI.
 4. The CLI `POST`s `/pair/confirm` with the code. **5 wrong attempts** (`MAX_ATTEMPTS`) expires the
    pairing outright; the same code cannot be replayed once accepted.
-5. On success, OpsMaxx mints a real session (8-hour TTL) in the first workspace with the first
-   access group, and hands back the token — which the CLI then caches
+5. On success, OpsMaxx mints a real session (8-hour TTL) in every workspace that exists, on the
+   bridge's default profile — or, with none configured, Custom on the default access group — and
+   hands back the token — which the CLI then caches
    (`~/.config/opsmaxx/cli/sessions.json` on Linux, `%APPDATA%\OpsMaxx\cli\sessions.json` on
    Windows, `~/Library/Application Support/OpsMaxx/cli` on macOS) so it doesn't re-pair on
    every launch.
@@ -882,20 +938,22 @@ launch.
 deleted, revoked (individually or via Stop all AI access), or its expiry passed. Create a new
 session, or re-run `opsmaxx claude`/`codex` to re-pair.
 
-**"This AI session has no access group."** — The session was created without one, or the group it
-named has since been deleted. Give it a group under **AI & MCP → AI Agents**.
+**"This AI session has no access group."** — The session is on the Custom profile and was created
+without a group, or the group it named has since been deleted. This is also what a CLI-paired session
+gets when no default profile or default group is configured. Give it a group, or
+switch it to a predefined profile, under **AI & MCP → AI Agents**.
 
 **"This target is set to No AI Access."** — Someone assigned No AI Access to that server or its
-workspace under **AI & MCP → Access Groups → Server & workspace assignment**. No mode reaches past
+workspace under **AI & MCP → Access Groups → Server & workspace assignment**. No profile reaches past
 it; remove the assignment to lift it.
 
-**"Read-only mode: …" or every command asks.** — The session is in Read only or Ask first mode, or
-the target is Protected. Both treat every `execute_command` as a change. See
-[Permission modes](#permission-modes).
+**"Read-only mode: …" or every command asks.** — The session is on the Read only or Ask first
+profile, or the target is Protected. Both treat every `execute_command` as a change. See
+[Permission profiles](#permission-profiles).
 
 **A `sudo` command is denied even though the access group allows sudo.** — Check whether it
 matches an unrestricted-shell pattern (`sudo -i`, `sudo su`, `sudo bash`, plain `su`, ...) — those
-are denied whatever the group's `sudo` capability says, in every mode but Bypass.
+are denied whatever the group's `sudo` capability says, on every profile but Bypass.
 
 **Connecting from inside WSL to a OpsMaxx instance running on Windows.** — The bridge only
 binds to `127.0.0.1`, so WSL2 needs to actually reach the Windows loopback address. If a request

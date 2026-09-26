@@ -14,8 +14,8 @@ check metrics through OpsMaxx. The agent asks for a server by its friendly name;
 resolves the real connection, enforces per-capability policy, and can stop and ask you before
 anything sensitive runs.
 
-Cloud servers — Google Cloud, AWS and Azure — are addressable the same way, under the same access
-groups. They are the one kind of server where serving an agent means running a program on *your*
+Cloud servers — Google Cloud, AWS and Azure — are addressable the same way, under the same
+permissions. They are the one kind of server where serving an agent means running a program on *your*
 computer rather than only on a remote host, because that is what reaching them requires. What
 bounds that, and how to opt out of it, is in
 [AI-SECURITY.md](AI-SECURITY.md#cloud-servers-where-an-agents-input-does-reach-an-argv).
@@ -28,7 +28,7 @@ bounds that, and how to opt out of it, is in
 - SSH private keys or passphrases
 - Database passwords or connection-string credentials
 - Vault secrets — there is no MCP tool that can read the Vault at all
-- Sudo or root access — unrestricted shells (`sudo -i`, `su`, ...) are refused for every access group; the only thing that lifts that is a session you have put in Bypass mode (see [Permission modes](AI-MCP.md#permission-modes))
+- Sudo or root access — unrestricted shells (`sudo -i`, `su`, ...) are refused on every profile but one: a session you have put on Bypass (see [Permission profiles](AI-MCP.md#permission-profiles))
 
 It only ever gets a friendly server name, whatever a capability's ALLOW/ASK/DENY setting permits,
 and redacted text output. See [AI-SECURITY.md](AI-SECURITY.md) for the full threat model —
@@ -36,41 +36,55 @@ including what this design does **not** claim.
 
 ![OpsMaxx's AI & MCP overview screen](images/ai-mcp-overview.png)
 
-The **never receives** list above is enforced by an **access group** — a per-capability
-ALLOW/ASK/DENY policy, not a single yes/no switch. Five built-in groups ship with OpsMaxx, in this
-order: **Read Only** (view, read files, metrics — nothing else), **Commands, no writes**,
-**Read & Write**, **Sudo Access** and **Full Access**. The second one used to be the one called
-*Read Only*, while it left `terminal` at ALLOW — so the most conservative-sounding option, and the
-first card a cautious person picks, granted unattended arbitrary shell. It was renamed to say what
-it does and a genuinely read-only tier was added above it; the rename moved nobody's permissions.
-Create as many custom groups as you want, and override individual file paths on top of the blanket
-read/write setting:
+### One choice: the profile
+
+Each session gets one **profile**, and only you can set it, in the OpsMaxx window:
+
+| Profile | What the agent can do |
+|---|---|
+| **Read only** | Look around, never change anything |
+| **Ask first** | Every read runs; you approve every change before it runs |
+| **Auto** | Routine work runs; sudo and risky actions — destructive commands, database writes, tunnels, server changes, VPN starts, CI runs — ask |
+| **Bypass permissions** | Nothing asks and nothing is refused, except on Protected targets. Audited as such |
+| **Custom** | An access group you pick, exactly as written |
+
+The first four need no setup. None of them short of Bypass reads `/etc/shadow`, SSH keys or shell
+history. Every `execute_command` counts as a change, so on Read only the agent uses `read_file`,
+`list_files` and the other read tools instead.
+
+**Custom** is for a policy the four do not express. An **access group** is a per-capability
+ALLOW/ASK/DENY policy with file-path rules on top. Five ship with OpsMaxx: **Read Only**,
+**Commands, no writes**, **Read & Write**, **Sudo Access** and **Full Access**, and you can create
+your own:
 
 <p align="center">
 <img src="images/ai-access-groups.png" alt="Access group capabilities: each one ALLOW/ASK/DENY" width="49%" />
 <img src="images/ai-access-groups-assignment.png" alt="File path rules and per-server/workspace assignment" width="49%" />
 </p>
 
-On top of the group, each session runs in a **mode** that only you can set, in the OpsMaxx window:
-**Read only** (look, never change), **Ask first** (approve every change), **Auto** (the default —
-the group exactly, plus its **Confirm risky actions** switch, which keeps destructive commands,
-database writes, tunnels, server changes, VPN starts and CI runs asking even when the group says
-allow) or **Bypass permissions** (nothing asks and nothing is refused, audited as such). Mark a
-workspace or server **Protected** and every session acting on it is held at Ask first, Bypass
-included — that, or assigning it No AI Access, is how to hold a production box against a Bypass
-session; assigning it a narrower access group is not, because Bypass lifts that too. [Permission modes](AI-MCP.md#permission-modes) has the details, including exactly what
-Bypass does not lift.
+Two settings hold whatever the profile:
+
+- **Protected.** Mark a workspace or server Protected and every change there is asked for — Auto,
+  Custom and Bypass included.
+- **Restrictions.** Assign an access group to a workspace or server to hold it below what any
+  session would otherwise get, or assign **No AI Access** to take it out of reach. A restriction
+  narrows every profile except Bypass; No AI Access holds even there. A session's
+  **Effective access** panel lists the restrictions in its reach, with a Remove button on each.
+
+So to hold a production box against a Bypass session, mark it Protected or set it to No AI Access.
+[Permission profiles](AI-MCP.md#permission-profiles) has the details, including exactly what Bypass
+does not lift.
 
 ### A worked example
 
 **You ask Claude Code:** *"Check my production Nginx server."*
 
 1. Claude Code calls OpsMaxx's `list_servers` tool. It gets back friendly names for whatever
-   the session's workspace(s) and access group can see — say, `Nginx Server Prod` — never a hostname,
+   the session's workspace(s) and profile can see — say, `Nginx Server Prod` — never a hostname,
    IP or username.
 2. It calls `get_server_metrics` (or `execute_command` with something like `systemctl status
    nginx`) naming that server. OpsMaxx resolves `"Nginx Server Prod"` to the real server record,
-   checks the access group governing it, and — if that capability is ALLOW — looks up the actual
+   checks the session's profile and any restriction on that server, and — if the answer is ALLOW — looks up the actual
    SSH credential from your OS keychain and connects. If it's ASK, the request sits in
    **Approvals** until you decide.
 3. The command runs over a normal SSH connection, the same one an interactive terminal session
@@ -86,8 +100,8 @@ Bypass does not lift.
 ### Connecting an agent
 
 The quickest route is **AI & MCP → Overview → Connect an agent**. One click turns on the bridge,
-creates a session with the access group and mode you picked, and hands it to the client. It writes
-no workspace assignment, so it never holds a later session below this one's group:
+creates a session on the profile you picked, and hands it to the client. It writes no workspace
+assignment, so it never holds a later session below this one:
 
 | Button | What it does |
 |---|---|
@@ -124,8 +138,8 @@ Not every client has a one-command launcher yet:
 
 ![Creating an AI agent session under AI & MCP → AI Agents](images/ai-agents.png)
 
-1. **AI & MCP → AI Agents → New AI agent session** — pick a workspace and an access group,
-   then **Create session**.
+1. **AI & MCP → AI Agents → New AI agent session** — pick a workspace and a profile (and, for
+   Custom, an access group), then **Create session**.
 2. The token is shown **once**, next to a ready-made JSON block — click **Copy JSON config**, or
    copy the raw token if you'd rather write the entry yourself.
 3. Paste it into the client's own MCP config file, under `mcpServers`.

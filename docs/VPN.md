@@ -342,20 +342,22 @@ itself instead.
 
 ## AI agents and VPN control
 
-Granting an AI access group the **VPN & reverse proxies** capability lets an
-agent start and stop VPN profiles you have already defined. That changes which
-network your subsequent SSH and database sessions traverse, so:
+The **VPN & reverse proxies** capability lets an agent start and stop VPN
+profiles you have already defined. That changes which network your subsequent
+SSH and database sessions traverse, so:
 
-- The capability is **denied** on Read Only and Commands, no writes, **ask** on
-  Read & Write and Sudo Access, and **allow** on Full Access.
-- **Starting a VPN asks for approval** even for a group where the capability is
-  set to allow, as long as that group's **Confirm risky actions** switch is on.
-  Full Access ships with it off, so a Full Access session in Auto mode starts a
-  VPN without asking; so does any session you put in Bypass mode.
+- On the predefined profiles, **Read only** refuses it, and **Ask first** and
+  **Auto** ask before every start.
+- On the **Custom** profile the access group decides: the capability is
+  **denied** on Read Only and Commands, no writes, **ask** on Read & Write and
+  Sudo Access, and **allow** on Full Access. Starting a VPN still asks at allow
+  while that group's **Confirm risky actions** switch is on. Full Access ships
+  with it off, so a Custom session on Full Access starts a VPN without asking;
+  so does any session you put on the Bypass profile.
 - **No access group lets an agent start an frp profile.** That refusal is
   hard-coded, not a policy setting, because an frp proxy makes one of your local
   ports reachable from a remote server. The only thing that reaches past it is a
-  session you have put in Bypass mode, on a workspace that is not Protected.
+  session you have put on the Bypass profile, on a workspace that is not Protected.
 - There is no tool to create or edit a VPN profile. An agent can only run one
   you wrote.
 
