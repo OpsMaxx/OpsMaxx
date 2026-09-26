@@ -11,7 +11,7 @@ import { useToasts } from '../src/renderer/src/store/toast'
 const open = async (): Promise<void> => userEvent.click(screen.getByTestId('mode-picker'))
 
 describe('ModePicker', () => {
-  it('shows the current mode and lists all four, the current one checked', async () => {
+  it('shows the current profile and lists all five, the current one checked', async () => {
     render(<ModePicker value="auto" onChange={() => {}} />)
     expect(screen.getByTestId('mode-picker').textContent).toContain('Auto')
     await open()
@@ -20,7 +20,8 @@ describe('ModePicker', () => {
       expect.stringContaining('Read only'),
       expect.stringContaining('Ask first'),
       expect.stringContaining('Auto'),
-      expect.stringContaining('Bypass permissions')
+      expect.stringContaining('Bypass permissions'),
+      expect.stringContaining('Custom')
     ])
     expect(screen.getByRole('menuitemradio', { name: /Auto/ }).getAttribute('aria-checked')).toBe('true')
   })
@@ -85,7 +86,7 @@ describe('ModePicker', () => {
     await open()
     await userEvent.keyboard('2')
     await vi.waitFor(() =>
-      expect(useToasts.getState().toasts.map((t) => t.message)).toContain('The mode was not changed: bridge gone')
+      expect(useToasts.getState().toasts.map((t) => t.message)).toContain('The profile was not changed: bridge gone')
     )
   })
 
@@ -106,7 +107,7 @@ describe('ModePicker', () => {
   it('says when protected targets cap the mode', async () => {
     render(<ModePicker value="auto" onChange={() => {}} protectedCount={2} />)
     await open()
-    expect(screen.getByRole('menu').textContent).toContain('Auto and Bypass are capped at Ask first on 2 protected targets.')
+    expect(screen.getByRole('menu').textContent).toContain('Every profile but Read only is held at Ask first on 2 protected targets.')
   })
 
   it('works from inside the approval dialog, which paints above every menu', async () => {

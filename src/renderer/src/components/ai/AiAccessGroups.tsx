@@ -244,8 +244,8 @@ function GroupEditor({ group, summary, onChange, onSave, onDelete }: {
           <div className="s-title">Confirm risky actions</div>
           <div className="s-desc">
             On: the actions below still ask even where a capability says Allow. Off: Allow means allow (a
-            command whose program is computed at run time still asks unless Sudo is Allow). Only applies in
-            Auto mode — Ask first asks for every change anyway, and Bypass skips it.
+            command whose program is computed at run time still asks unless Sudo is Allow). Applies to agents
+            on the Custom profile using this group; the predefined profiles carry their own.
           </div>
           <details className="disclosure" style={{ marginTop: 6 }}>
             <summary className="disclosure-head">
@@ -308,7 +308,7 @@ function GroupEditor({ group, summary, onChange, onSave, onDelete }: {
         <div className="disclosure-body" style={{ gap: 0 }}>
           <div className="s-desc">
             The most specific matching pattern wins; anything unmatched falls back to Read/Write Files above.
-            Sudo -i/su/bash-style unrestricted shells are blocked in every mode except Bypass, and are not
+            Sudo -i/su/bash-style unrestricted shells are blocked on every profile except Bypass, and are not
             configurable here.
           </div>
           {group.filePolicies.map((rule) => (
@@ -487,8 +487,8 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
         inherits its workspace's assignment.
       </div>
       <div className="sub">
-        <b>Protected from agents</b> is the other optional restriction, for production: agents in Auto or
-        Bypass are held at Ask first there; Read only stays read only.
+        <b>Protected from agents</b> is the other optional restriction, for production: every agent is held
+        at Ask first there, whatever its profile; Read only stays read only.
       </div>
 
       <div className="setting-row">
@@ -507,8 +507,8 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
         <div className="s-info">
           <div className="s-title">Default access group for this workspace</div>
           <div className="s-desc">
-            A restriction narrows every mode except Bypass. To hold this target even against Bypass, mark it
-            Protected. No AI Access holds in every mode.
+            A restriction narrows every profile except Bypass. To hold this target even against Bypass, mark it
+            Protected. No AI Access holds for every profile.
           </div>
         </div>
         <select
@@ -535,7 +535,7 @@ function ServerAssignment({ groups }: { groups: AccessGroup[] }): React.JSX.Elem
             Protected from agents {isProtected(workspaceScope) && protectedBadge}
           </div>
           <div className="s-desc">
-            Agents in Auto or Bypass are held at Ask first here; Read only stays read only.
+            Every agent is held at Ask first here, whatever its profile; Read only stays read only.
           </div>
         </div>
         <Switch
@@ -759,9 +759,10 @@ export function AiAccessGroups(): React.JSX.Element {
     <div className="settings-section">
       <h2>Access Groups</h2>
       <div className="sub">
-        Define what AI is allowed to do — per capability, not just a single yes/no. Each card describes
-        itself from its own settings, so it stays accurate after you edit it. Pick one to change what it
-        permits, or create your own (Logs Only, Production Read Only, ...).
+        Access groups are for when the predefined profiles do not fit: an agent on the <b>Custom</b> profile does
+        exactly what its group says, per capability, and a group assigned to a workspace or server restricts
+        every agent there. Each card describes itself from its own settings. Pick one to change it, or create
+        your own (Logs Only, Production Read Only, ...).
       </div>
 
       <div className="ag-grid">

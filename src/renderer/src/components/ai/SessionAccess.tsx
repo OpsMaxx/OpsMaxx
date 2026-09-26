@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, ShieldCheck, X } from 'lucide-react'
 import { toast } from '../../store/toast'
 import { openAi, openSettings } from '../../store/nav'
-import { DEFAULT_SESSION_MODE, sessionModeLabel } from '../../../../shared/mcp'
+import { sessionModeLabel, sessionModeOf } from '../../../../shared/mcp'
 import type {
   AccessGroup,
   CapabilityExplanation,
@@ -80,17 +80,19 @@ const BUCKETS: { key: string; title: string; tone: string; test: (r: CapabilityE
   { key: 'deny', title: 'Blocked', tone: 'danger', test: (r) => r.decision === 'deny' }
 ]
 
-/** What the whole mode means for this session, in one sentence. */
+/** What the whole profile means for this session, in one sentence. */
 function modeSummary(mode: SessionMode, groupName: string): string {
   switch (mode) {
     case 'bypass':
-      return 'Bypass: everything runs without asking, whatever the access group or any restriction says. Only Protected targets and No AI Access still hold.'
+      return 'Bypass: everything runs without asking, whatever any restriction says. Only Protected targets and No AI Access still hold.'
     case 'readOnly':
-      return `Read only: it can look wherever ${groupName} lets it, and every change is refused.`
+      return 'Read only: it can look at everything, and every change is refused.'
     case 'ask':
-      return `Ask first: every change ${groupName} allows is asked for before it runs.`
+      return 'Ask first: it can look at everything, and every change is asked for before it runs.'
+    case 'auto':
+      return 'Auto: routine work runs without asking; sudo and risky actions — destructive commands, database writes, tunnels, VPNs, server changes, CI runs — ask first.'
     default:
-      return `Auto: exactly what ${groupName} says, narrowed by any restriction below.`
+      return `Custom: exactly what the ${groupName} access group says.`
   }
 }
 
@@ -134,8 +136,11 @@ export function SessionAccess({
   const [rows, setRows] = useState<CapabilityExplanation[] | null>(null)
   const [protectedCount, setProtectedCount] = useState(0)
   const [restrictions, setRestrictions] = useState<Restriction[]>([])
-  const mode: SessionMode = session.mode ?? DEFAULT_SESSION_MODE
+  const mode: SessionMode = sessionModeOf(session)
   const groupName = session.groupName
+  // What the "why" column names as the source: the group for Custom, else the
+  // profile itself, which stands on no group the user picked.
+  const baseName = mode === 'custom' ? groupName : sessionModeLabel(mode)
 
   const refetch = (): void => {
     void window.opsmaxx?.aiMcp
@@ -160,7 +165,7 @@ export function SessionAccess({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session.id])
 
-  const changeGroup = async (groupId: string): Promise<void> => {
+  const changeGroup = async (groupId: string, quiet = false): Promise<void> => {
     const group = groups.find((g) => g.id === groupId) ?? null
     const name = group?.name ?? 'No AI Access'
     const api = window.opsmaxx?.aiMcp
@@ -183,14 +188,21 @@ export function SessionAccess({
       })
       return
     }
-    toast(`${session.agentName} now uses ${name}.`, 'ok')
+    if (!quiet) toast(`${session.agentName} now uses ${name}.`, 'ok')
   }
 
   const changeMode = async (next: SessionMode): Promise<void> => {
+    // Custom needs a group, and a session started on a predefined profile may
+    // have none: give it the widest one, which the select beside the picker
+    // then shows and can change.
+    if (next === 'custom' && !groups.some((g) => g.id === session.groupId)) {
+      const first = groups.find((g) => g.id === 'grp-full') ?? groups[0]
+      if (first) await changeGroup(first.id, true)
+    }
     const updated = await window.opsmaxx?.aiMcp.setSessionMode?.(session.id, next).catch(() => null)
     if (!updated) {
       // The table keeps showing what is still in force.
-      toast(`${session.agentName} was not changed — it is still in ${sessionModeLabel(mode)}.`, 'error', {
+      toast(`${session.agentName} was not changed — it is still on ${sessionModeLabel(mode)}.`, 'error', {
         label: 'Try again',
         run: () => void changeMode(next)
       })
@@ -199,7 +211,7 @@ export function SessionAccess({
     setRows(null)
     refetch()
     onChanged()
-    toast(`${session.agentName} is now in ${sessionModeLabel(next)}.`, 'ok')
+    toast(`${session.agentName} is now on ${sessionModeLabel(next)}.`, 'ok')
   }
 
   const removeRestriction = async (r: Restriction): Promise<void> => {
@@ -219,26 +231,21 @@ export function SessionAccess({
   // Restrictions that are actually holding this session lower right now. In
   // Bypass only No AI Access holds; everything else is listed but lifted.
   const holding = restrictions.filter((r) => mode !== 'bypass' || r.groupId === null)
-  const shielded = (mode === 'auto' || mode === 'bypass') && protectedCount > 0
+  const shielded = mode !== 'readOnly' && mode !== 'ask' && protectedCount > 0
 
   return (
     <div style={{ width: '100%' }}>
       <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
-        <span className="s-desc">Access group</span>
-        <select
-          className="input"
-          style={{ maxWidth: 180 }}
-          value={session.groupId ?? ''}
-          onChange={(e) => void changeGroup(e.target.value)}
-        >
-          {groups.map((g) => (
-            <option key={g.id} value={g.id}>
-              {g.name}
-            </option>
-          ))}
-        </select>
-        <span className="s-desc">Mode</span>
-        <ModePicker value={mode} onChange={changeMode} protectedCount={protectedCount} size="sm" />
+        <span className="s-desc">Profile</span>
+        <ModePicker
+          value={mode}
+          onChange={changeMode}
+          groups={groups}
+          groupId={session.groupId}
+          onGroupChange={(id) => changeGroup(id)}
+          protectedCount={protectedCount}
+          size="sm"
+        />
         <button className="btn sm" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Effective access
         </button>
@@ -251,7 +258,7 @@ export function SessionAccess({
         <div className="s-desc warn" style={{ marginTop: 6, lineHeight: 1.5 }} data-testid="restriction-note">
           {holding.length === 1
             ? `${cap(holding[0].where)} is restricted to ${holding[0].groupName}, so this agent gets at most that there.`
-            : `${holding.length} targets are restricted below this agent’s group.`}{' '}
+            : `${holding.length} targets are restricted, so this agent gets at most their group there.`}{' '}
           <button className="linklike" onClick={() => setOpen(true)}>
             Review
           </button>
@@ -287,7 +294,7 @@ export function SessionAccess({
                     </div>
                     <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
                       {inBucket.map((r) => (
-                        <span key={r.capability} className={`chip ${b.tone}`} title={why(r, groupName)}>
+                        <span key={r.capability} className={`chip ${b.tone}`} title={why(r, baseName)}>
                           {r.label}
                         </span>
                       ))}
@@ -356,7 +363,7 @@ export function SessionAccess({
                           {r.partlyAsks && '*'}
                         </td>
                         <td className="s-desc" title={r.reason}>
-                          {why(r, groupName)}
+                          {why(r, baseName)}
                         </td>
                       </tr>
                     ))}
@@ -366,11 +373,13 @@ export function SessionAccess({
             </div>
           )}
 
-          <div>
-            <button className="btn sm" onClick={() => openAi('groups', session.groupId)}>
-              <ShieldCheck size={13} /> Edit {groupName}
-            </button>
-          </div>
+          {mode === 'custom' && (
+            <div>
+              <button className="btn sm" onClick={() => openAi('groups', session.groupId)}>
+                <ShieldCheck size={13} /> Edit {groupName}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>

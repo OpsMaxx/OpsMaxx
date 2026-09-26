@@ -118,7 +118,7 @@ const {
   setProtected
 } = await import('../src/main/services/policyStore')
 const { refreshMcpDataCache } = await import('../src/main/services/mcpDataCache')
-const { setMcpConfig, createSession, resetMcpAuthForTests, setSessionMode } = await import(
+const { setMcpConfig, createSession, resetMcpAuthForTests, setSessionMode, migrateSessionForTests } = await import(
   '../src/main/services/mcpAuth'
 )
 const { startMcpServer, stopMcpServer } = await import('../src/main/services/mcpServer')
@@ -137,7 +137,7 @@ const MCP_SERVER_SRC = readFileSync(`${ROOT}src/main/services/mcpServer.ts`, 'ut
 // ---------------------------------------------------------------------------
 
 describe('applyMode, every mode against every answer', () => {
-  const MODES: SessionMode[] = ['readOnly', 'ask', 'auto', 'bypass']
+  const MODES: SessionMode[] = ['readOnly', 'ask', 'auto', 'bypass', 'custom']
   const DECISIONS: PermissionValue[] = ['allow', 'ask', 'deny']
 
   // Written out rather than derived, so a change to any cell has to be made
@@ -157,6 +157,7 @@ describe('applyMode, every mode against every answer', () => {
   }
   const EXPECTED: Record<SessionMode, { open: Row; protected: Row }> = {
     auto: { open: IDENTITY, protected: ASKS_CHANGES },
+    custom: { open: IDENTITY, protected: ASKS_CHANGES },
     bypass: { open: EVERYTHING, protected: ASKS_CHANGES },
     ask: { open: ASKS_CHANGES, protected: ASKS_CHANGES },
     readOnly: { open: READ_ONLY, protected: READ_ONLY }
@@ -180,7 +181,7 @@ describe('applyMode, every mode against every answer', () => {
             // Bypass that it will not stop this one. A session the user put in
             // Ask first or Read only is not "held" by anything.
             expect(out.protectedTarget === true).toBe(
-              prot && (mode === 'auto' || mode === 'bypass') && want === 'ask'
+              prot && (mode === 'auto' || mode === 'custom' || mode === 'bypass') && want === 'ask'
             )
             // Idempotent: a caller unsure whether it has been applied may apply it again.
             expect(applyMode(out, { mode, protectedTarget: prot, mutating })).toEqual(out)
@@ -459,6 +460,33 @@ function inputSchemaKeys(src: string): Set<string> {
   return keys
 }
 
+describe('sessions saved before profiles', () => {
+  const base = { id: 's', agentName: 'a', workspaces: [], groupId: 'grp-full', groupName: 'Full Access' }
+
+  it("reads 0.53.0's mode 'auto' -- the access group, literally -- as Custom", () => {
+    expect(migrateSessionForTests({ ...base, mode: 'auto' }).mode).toBe('custom')
+  })
+
+  it('reads a session with no mode at all as Custom, which is what it always did', () => {
+    expect(migrateSessionForTests({ ...base }).mode).toBe('custom')
+  })
+
+  it('keeps every other mode, and migrates only once', () => {
+    for (const mode of ['readOnly', 'ask', 'bypass'] as const) {
+      expect(migrateSessionForTests({ ...base, mode }).mode).toBe(mode)
+    }
+    // Already migrated: 'auto' now means the Auto profile and stays.
+    expect(migrateSessionForTests({ ...base, mode: 'auto', modeSchema: 2 }).mode).toBe('auto')
+  })
+
+  it('starts a session nobody picked a profile for on Custom, so no group fails closed', () => {
+    resetMcpAuthForTests()
+    expect(createSession({ agentName: 'x', workspaces: [], groupId: null, groupName: '', ttlMinutes: null }).session.mode).toBe(
+      'custom'
+    )
+  })
+})
+
 describe('an agent has no path to its own mode or to Protected', () => {
   it('mcpServer.ts never references the functions that set them', () => {
     expect(MCP_SERVER_SRC).not.toMatch(/\bsetSessionMode\b/)
@@ -609,7 +637,7 @@ describe('modes on the live bridge', () => {
     expect(row?.mode).toBe('bypass')
   })
 
-  it('the same build asks in Auto, so the Bypass result above is the mode and not the group', async () => {
+  it('the same build asks in Auto, so the Bypass result above is the profile lifting it', async () => {
     const { c } = await agent('auto', ASKS)
     const out = await call(c, 'trigger_run', { connectionName: 'platform-gitlab', pipelineRef: 'group/app', ref: 'main' })
     expect(asked).toHaveLength(1)
@@ -764,9 +792,34 @@ describe('modes on the live bridge', () => {
   it('tells the agent its mode, and who sets it', async () => {
     const { c } = await agent('readOnly')
     const out = await call(c, 'get_server_details', { serverName: 'Vault' })
-    expect(out).toContain('Session mode: Read only')
+    expect(out).toContain('Session profile: Read only')
     expect(out).toContain('an agent cannot change it')
     expect(out).toMatch(/Protected target: yes/)
+  })
+
+  it('the predefined profiles ignore the session\'s access group entirely', async () => {
+    // grp-observer denies the terminal outright. On Auto it is not consulted.
+    const { c } = await agent('auto', 'grp-observer')
+    expect(await call(c, 'execute_command', { serverName: 'Box', command: 'uptime' })).toContain('ran')
+    expect(asked).toEqual([])
+  })
+
+  it('Custom is the access group, exactly as written', async () => {
+    const { c } = await agent('custom', 'grp-observer')
+    expect(await call(c, 'execute_command', { serverName: 'Box', command: 'uptime' })).toMatch(/^Denied: Terminal/)
+    const { c: full } = await agent('custom', 'grp-full')
+    // Full Access has Confirm risky actions off: a CI run the Auto profile asks about just starts.
+    await call(full, 'trigger_run', { connectionName: 'platform-gitlab', pipelineRef: 'group/app', ref: 'main' })
+    expect(asked).toEqual([])
+    expect(provider).toEqual(['trigger'])
+  })
+
+  it('Auto asks for sudo, and a predefined profile never reads the sensitive paths', async () => {
+    const { c } = await agent('auto')
+    await call(c, 'execute_command', { serverName: 'Box', command: 'sudo systemctl status nginx' })
+    expect(asked).toHaveLength(1)
+    const { c: ask } = await agent('readOnly')
+    expect(await call(ask, 'read_file', { serverName: 'Box', path: '/etc/shadow' })).toMatch(/^Denied: Path rule/)
   })
 
   it('offers no tool a mode or protected argument, as the client actually sees them', async () => {

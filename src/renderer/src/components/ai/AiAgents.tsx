@@ -5,7 +5,7 @@ import { useApp } from '../../store/app'
 import { openAi, useNav } from '../../store/nav'
 import { SessionAccess } from './SessionAccess'
 import type { McpAgentSession, AccessGroup, McpGlobalConfig, SessionMode } from '../../../../shared/mcp'
-import { DEFAULT_SESSION_MODE, resolveDefaultSessionGroup, sessionModeLabel } from '../../../../shared/mcp'
+import { DEFAULT_SESSION_MODE, resolveDefaultSessionGroup, sessionModeLabel, sessionModeOf } from '../../../../shared/mcp'
 import { ModePicker } from './ModePicker'
 import { maskToken } from '../../../../shared/tokenDisplay'
 import { Switch } from '../common/Switch'
@@ -139,6 +139,9 @@ function CreateSessionForm({
     setWorkspaceIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
   }
 
+  const chosen = mode ?? DEFAULT_SESSION_MODE
+  const custom = chosen === 'custom'
+
   const create = async (): Promise<void> => {
     const selected = workspaces.filter((w) => workspaceIds.includes(w.id))
     const group = groups.find((g) => g.id === groupId)
@@ -159,10 +162,11 @@ function CreateSessionForm({
       const result = await window.opsmaxx?.aiMcp.createSession({
         agentName: agentName.trim() || 'Unnamed agent',
         workspaces: selected.map((w) => ({ id: w.id, name: w.name })),
-        groupId: group?.id ?? null,
-        groupName: group?.name ?? 'No AI Access',
+        // A predefined profile uses no group; only Custom is given one.
+        groupId: custom ? (group?.id ?? null) : null,
+        groupName: custom ? (group?.name ?? 'No AI Access') : sessionModeLabel(chosen),
         ttlMinutes: ttl === 0 ? null : ttl,
-        mode: mode ?? undefined
+        mode: chosen
       })
       if (!result) throw new Error('OpsMaxx returned no session')
       const status = await window.opsmaxx?.aiMcp.status()
@@ -315,21 +319,20 @@ function CreateSessionForm({
       </div>
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Mode</div>
+          <div className="s-title">Profile</div>
           <div className="s-desc">
-            How much you stay in the loop. Auto follows the access group below exactly; you can change the
-            mode of a running session at any time.
+            What this agent may do, and how much it asks first. Custom uses an access group instead. You can
+            change a running session’s profile at any time.
           </div>
         </div>
-        <ModePicker value={mode ?? DEFAULT_SESSION_MODE} onChange={setMode} />
+        <ModePicker value={chosen} onChange={setMode} />
       </div>
+      {custom && (
       <div className="setting-row">
         <div className="s-info">
           <div className="s-title">Access group</div>
           <div className="s-desc">
-            What this agent may do on the servers in those workspaces. This is the grant. A workspace
-            or a single server can be held below it by an assignment under Access Groups — the
-            session says so when one is, and names it.
+            The Custom profile does exactly what this group says, on the servers in those workspaces.
           </div>
         </div>
         <select
@@ -358,6 +361,7 @@ function CreateSessionForm({
           ))}
         </select>
       </div>
+      )}
       <div className="setting-row">
         <div className="s-info">
           <div className="s-title">Expires after</div>
@@ -466,8 +470,8 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
                 {!isLive(s) && (
                   <>
                     {' '}
-                    <span className="chip" data-testid="session-mode-chip" title="Mode">
-                      {sessionModeLabel(s.mode)}
+                    <span className="chip" data-testid="session-mode-chip" title="Profile">
+                      {sessionModeLabel(sessionModeOf(s), s.groupName)}
                     </span>
                   </>
                 )}

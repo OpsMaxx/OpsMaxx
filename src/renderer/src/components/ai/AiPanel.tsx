@@ -74,9 +74,8 @@ function Overview(): React.JSX.Element {
 
       <h3 style={{ marginTop: 24 }}>How it works</h3>
       <ol className="s-desc" style={{ lineHeight: 1.8 }}>
-        <li>Pick an access group (or use a built-in one) — it is the grant: what the agent may do.</li>
-        <li>Pick a mode — how much you stay in the loop: Read only, Ask first, Auto (follow the group) or Bypass.</li>
-        <li>Create an AI Agent session scoped to one or more workspaces with that group and mode, and copy its token.</li>
+        <li>Pick a profile — Read only, Ask first, Auto (routine work runs, risky actions ask) or Bypass; or Custom, to use an access group instead.</li>
+        <li>Create an AI Agent session scoped to one or more workspaces with that profile, and copy its token.</li>
         <li>Point Claude Code, Codex or another MCP client at OpsMaxx's local MCP server with that token.</li>
         <li>Approve or deny actions as they come up — the AI waits for your answer.</li>
       </ol>

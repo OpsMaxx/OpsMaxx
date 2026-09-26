@@ -208,6 +208,28 @@ describe('MCP OAuth', () => {
       expect(consentRedirectUrl(id)).toBeNull()
     })
 
+    it('grants a predefined profile with no access group, and records the profile', () => {
+      const id = begin()
+      const before = new Set(listSessions().map((x) => x.id))
+      expect(approveConsent(id, { ...GRANT, groupId: null, groupName: 'Auto', mode: 'auto' })).toEqual({ ok: true })
+      const made = listSessions().find((x) => !before.has(x.id))
+      expect(made?.mode).toBe('auto')
+      expect(made?.groupId).toBeNull()
+    })
+
+    it('will not grant Bypass from a consent card, which has no confirm step', () => {
+      const id = begin()
+      expect(approveConsent(id, { ...GRANT, mode: 'bypass' })).toMatchObject({ ok: false })
+      expect(consentRedirectUrl(id)).toBeNull()
+    })
+
+    it('reads a group with no profile as Custom, the group exactly', () => {
+      const id = begin()
+      const before = new Set(listSessions().map((x) => x.id))
+      approveConsent(id, GRANT)
+      expect(listSessions().find((x) => !before.has(x.id))?.mode).toBe('custom')
+    })
+
     it('will not grant without a workspace', () => {
       const id = begin()
       expect(approveConsent(id, { ...GRANT, workspaces: [] })).toMatchObject({ ok: false })

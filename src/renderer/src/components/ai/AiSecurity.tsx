@@ -3,8 +3,8 @@ import { Copy, Octagon, Plus } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { dismissToast, toast } from '../../store/toast'
 import { openAi } from '../../store/nav'
-import type { McpGlobalConfig } from '../../../../shared/mcp'
-import { DEFAULT_SESSION_MODE } from '../../../../shared/mcp'
+import type { AccessGroup, McpGlobalConfig } from '../../../../shared/mcp'
+import { PICKERLESS_MODE } from '../../../../shared/mcp'
 import { Switch } from '../common/Switch'
 import { ModePicker } from './ModePicker'
 
@@ -54,6 +54,14 @@ function copy(text: string): void {
 
 export function AiSecurity(): React.JSX.Element {
   const [config, setConfig] = useState<McpGlobalConfig | null>(null)
+  // For the Custom default profile's group.
+  const [groups, setGroups] = useState<AccessGroup[]>([])
+  useEffect(() => {
+    window.opsmaxx?.aiPolicy
+      ?.listGroups?.()
+      .then((g) => setGroups(g ?? []))
+      .catch(() => setGroups([]))
+  }, [])
   const [status, setStatus] = useState<{ running: boolean; port: number | null }>({ running: false, port: null })
   const [liveCount, setLiveCount] = useState<{ sessions: number; pending: number } | null>(null)
   // "Pick a different port" is the fix for almost every start failure, so the
@@ -240,15 +248,19 @@ export function AiSecurity(): React.JSX.Element {
 
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Default mode for new agent sessions</div>
+          <div className="s-title">Default profile for new agent sessions</div>
           <div className="s-desc">
-            The mode a session starts in when nobody picks one — CLI-paired and OAuth sessions always start
-            in it. Each session’s mode can be changed under Active Sessions.
+            The profile a session starts in when nobody picks one — CLI-paired and OAuth sessions always start
+            in it. Until you set one they start on Custom with the default access group, which is no access at all
+            if there is none. Each session’s profile can be changed under Active Sessions.
           </div>
         </div>
         <ModePicker
-          value={config.defaultSessionMode ?? DEFAULT_SESSION_MODE}
+          value={config.defaultSessionMode ?? PICKERLESS_MODE}
           onChange={(defaultSessionMode) => update({ defaultSessionMode })}
+          groups={groups}
+          groupId={config.defaultSessionGroupId ?? null}
+          onGroupChange={(defaultSessionGroupId) => update({ defaultSessionGroupId })}
           defaultScope
         />
       </div>

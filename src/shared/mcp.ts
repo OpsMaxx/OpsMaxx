@@ -8,39 +8,66 @@
 export type PermissionValue = 'allow' | 'ask' | 'deny'
 
 /**
- * How an agent session treats the answers its access group gives.
+ * The one permission choice for an agent session: a PROFILE, picked the way a
+ * Claude Code mode is. Four are predefined and need no access group at all;
+ * the fifth, Custom, is the only one that uses one. Each means exactly its
+ * sentence below, with no hidden exceptions:
  *
- * The group says WHAT an agent may do; the mode says how much the human wants
- * to be in the loop while it does it. Each one means exactly its sentence below,
- * with no hidden exceptions, because a permission setting that does not mean
- * what it says is the thing this model was rebuilt to get rid of:
+ *   readOnly — every read is allowed, every change is refused.
+ *   ask      — every read is allowed, every change is asked for.
+ *   auto     — routine work runs; sudo and risky actions (RISKY_ACTIONS) ask.
+ *   bypass   — nothing asks and nothing is refused.
+ *   custom   — the session's access group, exactly as written, including its
+ *              Confirm risky actions switch.
  *
- *   readOnly — reads follow the group, anything that changes something is refused.
- *   ask      — reads follow the group, every change the group permits is asked for.
- *   auto     — the group's allow / ask / deny, literally, plus its own visible
- *              "Confirm risky actions" switch.
- *   bypass   — nothing asks and nothing is refused. Only the human can pick it.
+ * The four predefined profiles still never read the sensitive paths every
+ * seeded group denies (/etc/shadow, SSH keys, shell history) -- only Bypass
+ * and a Custom group that says so do.
  *
- * A target marked Protected caps auto and bypass at `ask`. Only the human sets
- * either: no MCP tool can change a session's mode or a target's protection.
+ * What holds whatever the profile: a restriction assigned to a workspace or
+ * server (except in Bypass), a target marked Protected (auto, custom and bypass
+ * are held at Ask first there), and No AI Access. Only the human sets any of
+ * it: no MCP tool can change a session's profile or a target's protection.
+ *
+ * Called `mode` in the data for continuity with 0.53.0, where the group and the
+ * mode were two separate pickers.
  */
-export type SessionMode = 'readOnly' | 'ask' | 'auto' | 'bypass'
+export type SessionMode = 'readOnly' | 'ask' | 'auto' | 'bypass' | 'custom'
 
 export const SESSION_MODES: { id: SessionMode; label: string; detail: string; shortcut: string }[] = [
   { id: 'readOnly', label: 'Read only', detail: 'Look around, never change anything', shortcut: '1' },
   { id: 'ask', label: 'Ask first', detail: 'Approve every change before it runs', shortcut: '2' },
-  { id: 'auto', label: 'Auto', detail: 'Follow the access group exactly', shortcut: '3' },
-  { id: 'bypass', label: 'Bypass permissions', detail: 'No prompts or blocks, except on Protected targets', shortcut: '4' }
+  { id: 'auto', label: 'Auto', detail: 'Routine work runs; sudo and risky actions ask', shortcut: '3' },
+  { id: 'bypass', label: 'Bypass permissions', detail: 'No prompts or blocks, except on Protected targets', shortcut: '4' },
+  { id: 'custom', label: 'Custom', detail: 'Use an access group, exactly as written', shortcut: '5' }
 ]
 
+/** The profile a picker offers first. */
 export const DEFAULT_SESSION_MODE: SessionMode = 'auto'
+
+/**
+ * The profile a session gets when it was created with no picker in front of
+ * anyone -- CLI pairing, OAuth -- and no default profile is configured: its
+ * access group, literally, which fails closed when there is none. See
+ * initialMode() in mcpAuth.ts.
+ */
+export const PICKERLESS_MODE: SessionMode = 'custom'
 
 export function isSessionMode(v: unknown): v is SessionMode {
   return SESSION_MODES.some((m) => m.id === v)
 }
 
-export function sessionModeLabel(mode: SessionMode | undefined): string {
-  return SESSION_MODES.find((m) => m.id === (mode ?? DEFAULT_SESSION_MODE))?.label ?? 'Auto'
+/**
+ * A session's profile. A session with none predates profiles, when its access
+ * group was the whole answer -- which is exactly what Custom is.
+ */
+export function sessionModeOf(session: { mode?: SessionMode } | null | undefined): SessionMode {
+  return session?.mode ?? 'custom'
+}
+
+export function sessionModeLabel(mode: SessionMode | undefined, groupName?: string | null): string {
+  const label = SESSION_MODES.find((m) => m.id === (mode ?? DEFAULT_SESSION_MODE))?.label ?? 'Auto'
+  return mode === 'custom' && groupName ? `${label} · ${groupName}` : label
 }
 
 /**
@@ -60,7 +87,7 @@ export const RISKY_ACTIONS: string[] = [
 
 /** The sentence every tool that can ask uses about when it asks. */
 export const CONDITIONAL_ASK =
-  "asks when the session's mode, a Protected target, or the access group's Confirm risky actions setting requires it"
+  "asks when the session's profile, a Protected target, or the Custom access group's Confirm risky actions setting requires it"
 
 export type AiCapability =
   | 'viewServer'
@@ -324,7 +351,7 @@ export interface AccessGroup {
    * "Confirm risky actions". When on, an `allow` still asks for the actions in
    * RISKY_ACTIONS; when off, `allow` means allow. Absent reads as ON, so a
    * group written before this existed keeps exactly the behaviour it had.
-   * Only consulted in `auto` mode -- ask asks anyway, bypass never asks.
+   * Only consulted by the Custom profile; the predefined ones carry their own.
    */
   confirmRisky?: boolean
 }
@@ -369,8 +396,10 @@ export interface McpGlobalConfig {
    * resolveDefaultSessionGroup() is how this field is read, everywhere.
    */
   defaultSessionGroupId?: string
-  /** The mode a new agent session starts in. Absent means `auto`. */
+  /** The profile a new agent session starts in. Absent: see initialMode() in mcpAuth.ts. */
   defaultSessionMode?: SessionMode
+  /** 2 once `defaultSessionMode` has been read under the profile meanings. */
+  modeSchema?: 2
 }
 
 /**
@@ -476,9 +505,16 @@ export interface McpAgentSession {
    *            can check rather than take a client's word for.
    */
   kind?: 'oauth' | 'relay'
-  /** See SessionMode. Absent reads as `auto`, which is how every session
-   *  created before modes existed behaved. Set only by the human, over IPC. */
+  /** The session's profile (SessionMode). Absent reads as `custom` -- the
+   *  access group alone -- which is how every session before profiles behaved.
+   *  Set only by the human, over IPC. Read it with sessionModeOf(). */
   mode?: SessionMode
+  /**
+   * 2 once `mode` means a profile. In 0.53.0 `mode: 'auto'` meant "the access
+   * group, literally", which is `custom` now; a record without this is
+   * migrated once on load (mcpAuth.ts).
+   */
+  modeSchema?: 2
 }
 
 // Everything below `status` is optional, and the optionality is not laziness —

@@ -31,7 +31,7 @@ type OutcomeFields = Pick<AuditEntry, 'approval' | 'result' | 'exitCode' | 'erro
 /** The outcome, with the session's mode named when the row recorded one. */
 export function auditOutcome(e: OutcomeFields): AuditOutcome {
   const o = outcome(e)
-  return e.mode ? { ...o, detail: `${o.detail} Session mode: ${sessionModeLabel(e.mode)}.` } : o
+  return e.mode ? { ...o, detail: `${o.detail} Session profile: ${sessionModeLabel(e.mode)}.` } : o
 }
 
 function outcome(e: OutcomeFields): AuditOutcome {

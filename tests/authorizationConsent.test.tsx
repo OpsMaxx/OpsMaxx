@@ -97,7 +97,9 @@ describe('approving a client', () => {
       groupId: 'grp-full',
       groupName: 'Full Access',
       // Only the one that was toggled on -- not every workspace on offer.
-      workspaces: [{ id: 'ws-dev', name: 'Development' }]
+      workspaces: [{ id: 'ws-dev', name: 'Development' }],
+      // An access group picked on the consent card is the Custom profile.
+      mode: 'custom'
     })
   })
 
@@ -124,5 +126,37 @@ describe('approving a client', () => {
 
     expect(await screen.findByText(/no longer open/)).toBeTruthy()
     expect(approve).not.toHaveBeenCalled()
+  })
+})
+
+describe('consent offers profiles as well as groups', () => {
+  it('grants a predefined profile with no group, and never offers Bypass', async () => {
+    const approve = vi.fn(async () => ({ ok: true as const }))
+    stubBridge({
+      aiMcp: {
+        listAuthorizations: vi.fn(async () => [
+          { id: 'consent-1', clientName: 'Claude Code', redirectUri: 'http://127.0.0.1:1/cb', createdAt: Date.now() }
+        ]),
+        approveAuthorization: approve,
+        denyAuthorization: vi.fn(async () => ({ ok: true }))
+      },
+      aiPolicy: {
+        listGroups: vi.fn(async () => [{ id: 'grp-full', name: 'Full Access' }]),
+        listWorkspaces: vi.fn(async () => [{ id: 'ws-dev', name: 'Development' }])
+      }
+    })
+    render(<AiAuthorizations />)
+    const select = (await screen.findByTestId('authorization-group')) as HTMLSelectElement
+    expect([...select.options].map((o) => o.value)).not.toContain('profile:bypass')
+    await userEvent.selectOptions(select, 'profile:auto')
+    await userEvent.click(screen.getByText('Development'))
+    await userEvent.click(screen.getByRole('button', { name: /Approve/ }))
+    await waitFor(() => expect(approve).toHaveBeenCalledTimes(1))
+    expect(approve).toHaveBeenCalledWith('consent-1', {
+      groupId: null,
+      groupName: 'Auto',
+      workspaces: [{ id: 'ws-dev', name: 'Development' }],
+      mode: 'auto'
+    })
   })
 })

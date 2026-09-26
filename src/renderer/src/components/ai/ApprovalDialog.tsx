@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Clock, Octagon, ShieldAlert, X } from 'lucide-react'
-import { AI_CAPABILITIES, DEFAULT_SESSION_MODE, sessionModeLabel } from '../../../../shared/mcp'
+import { AI_CAPABILITIES, sessionModeLabel, sessionModeOf } from '../../../../shared/mcp'
 import type { ApprovalRequest, AuditEntry, ContentPreview, McpAgentSession, SessionMode } from '../../../../shared/mcp'
 import {
   approvalTarget,
@@ -282,21 +282,29 @@ export function ApprovalDialog({
   const [stopFailed, setStopFailed] = useState(false)
   // The session's mode from here on. Changing it answers nothing: this request
   // was raised under the old mode and still waits on the buttons below.
-  const [mode, setMode] = useState<SessionMode>(request.sessionMode ?? DEFAULT_SESSION_MODE)
+  const [mode, setMode] = useState<SessionMode>(sessionModeOf({ mode: request.sessionMode }))
   const changeMode = async (next: SessionMode): Promise<void> => {
+    // Custom with no group would refuse everything; give it the widest one,
+    // which Active Sessions then shows and can change.
+    if (next === 'custom') {
+      const all = await window.opsmaxx?.aiMcp?.listSessions?.().catch(() => undefined)
+      if (!all?.find((x) => x.id === request.sessionId)?.groupId) {
+        await window.opsmaxx?.aiMcp?.setSessionGroup?.(request.sessionId, 'grp-full', 'Full Access').catch(() => null)
+      }
+    }
     const updated = await window.opsmaxx?.aiMcp?.setSessionMode?.(request.sessionId, next).catch(() => null)
     if (!updated) {
-      toast(`${request.agentName}’s mode was not changed — it is still ${sessionModeLabel(mode)}.`, 'error')
+      toast(`${request.agentName}’s profile was not changed — it is still ${sessionModeLabel(mode)}.`, 'error')
       return
     }
     // Read only is the one change that answers: main denies every request this
     // session has waiting, this one included, and the dialog goes with it.
     if (next === 'readOnly') {
-      toast(`${request.agentName} is now in Read only. Its waiting requests, this one included, were denied.`, 'ok')
+      toast(`${request.agentName} is now on Read only. Its waiting requests, this one included, were denied.`, 'ok')
       return
     }
     setMode(next)
-    toast(`${request.agentName} is now in ${sessionModeLabel(next)} for later calls. This request still needs your answer.`, 'ok')
+    toast(`${request.agentName} is now on ${sessionModeLabel(next)} for later calls. This request still needs your answer.`, 'ok')
   }
 
   // Leaving to change something is not an answer: the request is deferred, so
@@ -319,7 +327,7 @@ export function ApprovalDialog({
       ?.listSessions?.()
       .then((all: McpAgentSession[] | undefined) => {
         const live = all?.find((x) => x.id === request.sessionId)
-        if (live) setMode(live.mode ?? DEFAULT_SESSION_MODE)
+        if (live) setMode(sessionModeOf(live))
       })
       .catch(() => {})
   }
@@ -358,7 +366,7 @@ export function ApprovalDialog({
                     data-testid="approval-mode"
                     title="The session’s mode when it asked"
                   >
-                    Asked under: {sessionModeLabel(request.sessionMode)}
+                    Asked under: {sessionModeLabel(sessionModeOf({ mode: request.sessionMode }), request.sessionGroupName)}
                   </span>
                 )}
                 {request.protectedTarget && (
@@ -614,7 +622,7 @@ export function ApprovalDialog({
         )}
         {/* Future calls only, and said so: a mode change here is not an answer. */}
         <div className="approval-note approval-mode">
-          <span>Change mode for this agent</span>
+          <span>Change this agent’s profile</span>
           <ModePicker
             value={mode}
             onChange={changeMode}

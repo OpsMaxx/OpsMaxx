@@ -127,6 +127,14 @@ describe('resolveDefaultSessionGroup', () => {
 
 const WORKSPACES = [{ id: 'ws-prod', name: 'Production' }]
 
+// The group picker belongs to the Custom profile and only appears on it, so
+// every test about which GROUP is preselected picks Custom first -- the way a
+// person would.
+async function pickCustom(): Promise<void> {
+  await userEvent.click(await screen.findByTestId('mode-picker'))
+  await userEvent.keyboard('5')
+}
+
 function agentsBridge(
   config: { defaultSessionGroupId?: string },
   createSession = vi.fn(async () => ({ token: 'tok' }))
@@ -150,6 +158,7 @@ describe('the New AI agent session form preselects the configured default', () =
   it('preselects the configured group', async () => {
     agentsBridge({ defaultSessionGroupId: 'grp-read-only' })
     render(<AiAgents />)
+    await pickCustom()
     const picker = (await screen.findByTestId('new-session-group')) as HTMLSelectElement
     await waitFor(() => expect(picker.value).toBe('grp-read-only'))
   })
@@ -157,6 +166,7 @@ describe('the New AI agent session form preselects the configured default', () =
   it('preselects No AI Access when nothing is configured, not the first group', async () => {
     const createSession = agentsBridge({})
     render(<AiAgents />)
+    await pickCustom()
     const picker = (await screen.findByTestId('new-session-group')) as HTMLSelectElement
 
     // Visibly No AI Access rather than blank: a <select> whose value matches no
@@ -175,6 +185,7 @@ describe('the New AI agent session form preselects the configured default', () =
   it('mints the group the user picks, when they pick one', async () => {
     const createSession = agentsBridge({})
     render(<AiAgents />)
+    await pickCustom()
     const picker = (await screen.findByTestId('new-session-group')) as HTMLSelectElement
     await waitFor(() => expect(picker.selectedOptions[0]?.textContent).toBe('No AI Access'))
 
@@ -205,6 +216,7 @@ describe('the New AI agent session form preselects the configured default', () =
       }
     })
     render(<AiAgents />)
+    await pickCustom()
     const picker = (await screen.findByTestId('new-session-group')) as HTMLSelectElement
     await waitFor(() => expect(picker.options.length).toBe(GROUPS.length + 1))
 
@@ -249,6 +261,7 @@ describe('the New AI agent session form preselects the configured default', () =
     try {
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime })
       render(<AiAgents />)
+      await pickCustom()
       const picker = (await screen.findByTestId('new-session-group')) as HTMLSelectElement
       await waitFor(() => expect(picker.options.length).toBe(GROUPS.length + 1))
       await user.selectOptions(picker, 'grp-full')
@@ -295,6 +308,7 @@ describe('the New AI agent session form preselects the configured default', () =
       }
     })
     render(<AiAgents />)
+    await pickCustom()
     const picker = (await screen.findByTestId('new-session-group')) as HTMLSelectElement
     await waitFor(() => expect(picker.selectedOptions[0]?.textContent).toBe('No AI Access'))
     // Settled: the 5-second poll hands the effect a new array, and the resolved
@@ -313,6 +327,7 @@ describe('the Connect-an-agent picker', () => {
   it('preselects the configured default ahead of its own Read & Write choice', async () => {
     connectBridge({ defaultSessionGroupId: 'grp-observer' })
     render(<ConnectAgent />)
+    await pickCustom()
     const picker = (await screen.findByTestId('connect-group')) as HTMLSelectElement
     await waitFor(() => expect(picker.value).toBe('grp-observer'))
   })
@@ -322,6 +337,7 @@ describe('the Connect-an-agent picker', () => {
     // still add a server, and every mutating capability in it is ASK.
     connectBridge({})
     render(<ConnectAgent />)
+    await pickCustom()
     const picker = (await screen.findByTestId('connect-group')) as HTMLSelectElement
     await waitFor(() => expect(picker.value).toBe('grp-read-write'))
   })
@@ -330,6 +346,7 @@ describe('the Connect-an-agent picker', () => {
     const without = GROUPS.filter((g) => g.id !== 'grp-read-write')
     connectBridge({}, without)
     render(<ConnectAgent />)
+    await pickCustom()
     const picker = (await screen.findByTestId('connect-group')) as HTMLSelectElement
     await waitFor(() => expect(picker.selectedOptions[0]?.textContent).toBe('No AI Access'))
     expect(picker.value).not.toBe(without[0].id)
@@ -338,6 +355,7 @@ describe('the Connect-an-agent picker', () => {
   it('gives no access when the configured default has been deleted', async () => {
     connectBridge({ defaultSessionGroupId: 'grp-gone' })
     render(<ConnectAgent />)
+    await pickCustom()
     const picker = (await screen.findByTestId('connect-group')) as HTMLSelectElement
     await waitFor(() => expect(picker.selectedOptions[0]?.textContent).toBe('No AI Access'))
   })

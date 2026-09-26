@@ -1947,17 +1947,19 @@ export function evaluateAsEnforced(group: AccessGroup | null, capability: AiCapa
 }
 
 /**
- * The session's mode, applied to what the group (and any restriction on the
- * target) decided. The ONE place a mode changes an answer, so every tool, the
+ * The session's profile, applied to what its group -- the profile's own
+ * baseline, or the Custom access group -- and any restriction on the target
+ * decided. The ONE place a profile changes an answer, so every tool, the
  * Effective access table and describe_capabilities all agree.
  *
  *   outOfScope        unchanged. No AI Access / no group is scope, not a
- *                     permission, and no mode reaches past it.
- *   protectedTarget   auto and bypass are capped at ask; read-only stays.
+ *                     permission, and no profile reaches past it.
+ *   protectedTarget   auto, custom and bypass are held at ask; read-only stays.
  *   bypass            anything not allowed becomes allowed, and says so.
  *   readOnly          a change is refused; a read keeps the group's answer.
  *   ask               a change the group allows is asked for; deny stays deny.
- *   auto              unchanged: the group, literally.
+ *   auto, custom      unchanged: the group, literally (Auto's baseline already
+ *                     asks for sudo and confirms risky actions).
  *
  * Idempotent, so a caller that is unsure whether it has been applied may apply
  * it again.
@@ -1968,7 +1970,7 @@ export function applyMode(
 ): Decision {
   if (d.outOfScope) return d
   // "Held at Ask first" only means something for a mode that is looser than it.
-  const capped = o.protectedTarget && (o.mode === 'auto' || o.mode === 'bypass')
+  const capped = o.protectedTarget && (o.mode === 'auto' || o.mode === 'custom' || o.mode === 'bypass')
   const out = applyEffectiveMode(d, capped ? 'ask' : o.mode, { protectedTarget: capped, mutating: o.mutating })
   // Named on anything that asks while the cap is in force -- including an ask
   // the group produced on its own -- so the approval card can say the target
@@ -1993,7 +1995,7 @@ function applyEffectiveMode(
         ? o.protectedTarget
           ? {
               decision: 'ask',
-              reason: 'This target is Protected: Auto and Bypass are held at Ask first here, so every change is approved first.',
+              reason: 'This target is Protected: every change is approved first here, whatever the profile.',
               protectedTarget: true
             }
           : { decision: 'ask', reason: 'Ask-first mode: every change is approved first.' }

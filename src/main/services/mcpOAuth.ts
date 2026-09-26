@@ -19,7 +19,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto'
 import { atomicWriteFileSync } from './atomicWrite'
 import { getMcpConfig, createSession, rotateSessionToken, getSession, revokeSession } from './mcpAuth'
-import type { WorkspaceRef } from '../../shared/mcp'
+import type { SessionMode, WorkspaceRef } from '../../shared/mcp'
+import { isSessionMode } from '../../shared/mcp'
 
 const OAUTH_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-oauth.json')
 
@@ -283,20 +284,26 @@ export function listPendingConsents(): PendingConsent[] {
  */
 export function approveConsent(
   consentId: string,
-  grant: { groupId: string; groupName: string; workspaces: WorkspaceRef[] }
+  grant: { groupId: string | null; groupName: string; workspaces: WorkspaceRef[]; mode?: SessionMode }
 ): { ok: true } | { ok: false; error: string } {
   const consent = pendingConsents.get(consentId)
   if (!consent) return { ok: false, error: 'That authorization request is no longer open.' }
-  if (!grant.groupId) return { ok: false, error: 'An access group must be chosen.' }
+  // A profile, or Custom with a group -- either way something a person chose.
+  // Bypass is not offered here: it is confirmed where it is set, and a consent
+  // card has no such step. It can be picked afterwards under Active Sessions.
+  const mode: SessionMode = grant.mode && isSessionMode(grant.mode) ? grant.mode : 'custom'
+  if (mode === 'bypass') return { ok: false, error: 'Bypass cannot be granted from a consent request.' }
+  if (mode === 'custom' && !grant.groupId) return { ok: false, error: 'An access group must be chosen.' }
   if (grant.workspaces.length === 0) return { ok: false, error: 'At least one workspace must be chosen.' }
 
   const { session } = createSession({
     agentName: consent.clientName,
     workspaces: grant.workspaces,
-    groupId: grant.groupId,
+    groupId: mode === 'custom' ? grant.groupId : null,
     groupName: grant.groupName,
     ttlMinutes: ACCESS_TOKEN_MINUTES,
-    kind: 'oauth'
+    kind: 'oauth',
+    mode
   })
 
   const code = randomBytes(32).toString('hex')

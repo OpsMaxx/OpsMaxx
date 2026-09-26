@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { randomBytes, createHash, timingSafeEqual } from 'node:crypto'
 import type { McpAgentSession, McpGlobalConfig, SessionMode, WorkspaceRef } from '../../shared/mcp'
-import { DEFAULT_MCP_PORT, DEFAULT_SESSION_MODE, isSessionMode } from '../../shared/mcp'
+import { DEFAULT_MCP_PORT, PICKERLESS_MODE, isSessionMode } from '../../shared/mcp'
 import { atomicWriteFileSync } from './atomicWrite'
 
 const CONFIG_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-config.json')
@@ -25,6 +25,12 @@ function loadConfig(): McpGlobalConfig {
     if (existsSync(CONFIG_FILE)) {
       const parsed = JSON.parse(readFileSync(CONFIG_FILE, 'utf8')) as Partial<McpGlobalConfig>
       config = { ...defaultConfig(), ...parsed }
+      // 0.53.0's default mode 'auto' meant "the access group, literally", which
+      // is the Custom profile now. Read once under the old meaning.
+      if (config.modeSchema !== 2) {
+        if (config.defaultSessionMode === 'auto') config.defaultSessionMode = 'custom'
+        config.modeSchema = 2
+      }
       return config
     }
   } catch {
@@ -59,6 +65,13 @@ let sessions: McpAgentSession[] | null = null
 // crash the first time something reads `.workspaces`.
 function migrateSession(raw: unknown): McpAgentSession {
   const r = raw as McpAgentSession & { workspaceId?: string; workspaceName?: string }
+  // 0.53.0 wrote `mode: 'auto'` for "the access group, literally", which is
+  // the Custom profile now; before that there was no mode and the group was the
+  // whole answer, which is Custom too. Every other 0.53.0 mode means the same.
+  if (r.modeSchema !== 2) {
+    if (r.mode === 'auto' || r.mode === undefined) r.mode = 'custom'
+    r.modeSchema = 2
+  }
   if (Array.isArray(r.workspaces)) return r
   const workspaces: WorkspaceRef[] =
     typeof r.workspaceId === 'string' && typeof r.workspaceName === 'string'
@@ -75,8 +88,15 @@ function migrateSession(raw: unknown): McpAgentSession {
     createdAt: r.createdAt,
     expiresAt: r.expiresAt,
     lastActiveAt: r.lastActiveAt,
-    revoked: r.revoked
+    revoked: r.revoked,
+    mode: r.mode,
+    modeSchema: 2
   }
+}
+
+/** The on-load session migration, exposed so a test can drive it directly. */
+export function migrateSessionForTests(raw: unknown): McpAgentSession {
+  return migrateSession(raw)
 }
 
 function loadSessions(): McpAgentSession[] {
@@ -115,15 +135,24 @@ export interface CreateSessionInput {
   groupName: string
   ttlMinutes: number | null // null = no expiration
   kind?: 'oauth' | 'relay'
-  /** Absent: the configured default mode, else `auto`. */
+  /** Absent: see initialMode(). */
   mode?: SessionMode
 }
 
-/** The mode a new session gets: the one asked for, else the configured default, else auto. */
+/**
+ * The profile a new session starts in: the one asked for; else the configured
+ * default; else Custom -- the access group it was given, literally.
+ *
+ * Custom and not Auto, because the flows that pass no profile (CLI pairing,
+ * OAuth, tests) have no picker in front of them, and Custom on the resolved
+ * default group is exactly what they did before profiles: a configured group is
+ * honoured, and none -- including a default that was configured and has since
+ * been deleted -- is no access at all rather than a profile nobody chose.
+ */
 function initialMode(asked: unknown): SessionMode {
   if (isSessionMode(asked)) return asked
   const configured = loadConfig().defaultSessionMode
-  return isSessionMode(configured) ? configured : DEFAULT_SESSION_MODE
+  return isSessionMode(configured) ? configured : PICKERLESS_MODE
 }
 
 export function createSession(input: CreateSessionInput): { session: McpAgentSession; token: string } {
@@ -142,7 +171,8 @@ export function createSession(input: CreateSessionInput): { session: McpAgentSes
     lastActiveAt: now.toISOString(),
     revoked: false,
     kind: input.kind,
-    mode: initialMode(input.mode)
+    mode: initialMode(input.mode),
+    modeSchema: 2
   }
   const list = loadSessions()
   list.push(session)

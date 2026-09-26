@@ -9,7 +9,8 @@ import type {
   PolicyAssignment,
   PolicyScope,
   PolicyState,
-  ServerAiMeta
+  ServerAiMeta,
+  SessionMode
 } from '../../shared/mcp'
 import { atomicWriteFileSync } from './atomicWrite'
 
@@ -695,6 +696,56 @@ export function removeAssignment(id: string): void {
   const state = load()
   state.assignments = state.assignments.filter((a) => a.id !== id)
   write(state)
+}
+
+/**
+ * The access group each predefined profile stands on. Not stored and not
+ * editable: a profile means its one sentence, and that sentence must not change
+ * because someone edited a group. The profile's own behaviour (refuse changes,
+ * ask for changes, lift everything) is applied on top by applyMode; this is only
+ * the set of capabilities it reaches.
+ *
+ * Every capability an agent tool uses is allow. Two are not agent capabilities
+ * at all -- firewallRules and sudoersRead consent to OpsMaxx's own background
+ * collection -- and stay deny. The seeded sensitive-path DENY rules come along
+ * (/etc/shadow, SSH keys, shell history), so no predefined profile short of
+ * Bypass reads them; the seeded write-ASK rules do not, because asking is the
+ * profile's job. Auto additionally asks for sudo and confirms risky actions.
+ */
+const PROFILE_NAMES: Record<Exclude<SessionMode, 'custom'>, string> = {
+  readOnly: 'Read only',
+  ask: 'Ask first',
+  auto: 'Auto',
+  bypass: 'Bypass permissions'
+}
+const profileGroups = new Map<string, AccessGroup>()
+
+export function profileGroup(mode: Exclude<SessionMode, 'custom'>): AccessGroup {
+  // Bypass stands on Auto's baseline, so everything Auto would have asked
+  // about is lifted -- and audited as `bypassed` -- rather than silently
+  // allowed by a baseline that never asked.
+  if (mode === 'bypass') return profileGroup('auto')
+  let g = profileGroups.get(mode)
+  if (!g) {
+    const auto = mode === 'auto'
+    g = {
+      id: `profile-${mode}`,
+      name: PROFILE_NAMES[mode],
+      builtIn: true,
+      capabilities: allowAll({
+        hostFacts: 'allow',
+        manageServers: 'allow',
+        vpnControl: 'allow',
+        ciRead: 'allow',
+        ciTrigger: 'allow',
+        sudo: auto ? 'ask' : 'allow'
+      }),
+      filePolicies: defaultFilePolicies().filter((p) => p.read === 'deny' || p.write === 'deny'),
+      confirmRisky: auto
+    }
+    profileGroups.set(mode, g)
+  }
+  return g
 }
 
 /**

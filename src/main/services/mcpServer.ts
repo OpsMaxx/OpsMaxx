@@ -61,7 +61,7 @@ import {
   mostRestrictive,
   type Decision
 } from './policyEngine'
-import { getGroup, isProtected, listAssignments } from './policyStore'
+import { getGroup, isProtected, listAssignments, profileGroup } from './policyStore'
 import { refuseNonLoopback } from './loopbackGuard'
 import { fleetCached } from './fleetSampler'
 import type { CapacityReport } from '../../shared/capacity'
@@ -113,7 +113,7 @@ import { metricsSample } from './metrics'
 import { HostFactsReader } from './hostFacts'
 import type { FactSourceId, HostFacts } from '../../shared/hostFacts'
 import { FACT_STATUS_HELP, SECURITY_COUNT_SUPPORT, factSource } from '../../shared/hostFacts'
-import { AI_CAPABILITIES, CONDITIONAL_ASK, DEFAULT_SESSION_MODE, SESSION_MODES, sessionModeLabel } from '../../shared/mcp'
+import { AI_CAPABILITIES, CONDITIONAL_ASK, SESSION_MODES, sessionModeLabel, sessionModeOf } from '../../shared/mcp'
 import { VAULT_LOCKED } from '../../shared/vault'
 import type {
   AccessGroup,
@@ -530,7 +530,13 @@ async function probeServer(server: CachedServer): Promise<{ ok: boolean; reason:
   return { ok: false, reason: agentFaultSentence(result.error) }
 }
 
+/**
+ * The group a session's profile stands on: the profile's own fixed baseline,
+ * or -- for Custom, and only Custom -- the access group picked for it.
+ */
 function sessionGroupFor(session: McpAgentSession): AccessGroup | null {
+  const mode = modeOf(session)
+  if (mode !== 'custom') return profileGroup(mode)
   return session.groupId ? getGroup(session.groupId) : null
 }
 
@@ -567,9 +573,9 @@ const NO_GROUP: Decision = {
   outOfScope: true
 }
 
-/** A session's mode. Absent is how every session before modes behaved. */
+/** A session's profile. Absent is how every session before profiles behaved: Custom. */
 function modeOf(session: McpAgentSession | null | undefined): SessionMode {
-  return session?.mode ?? DEFAULT_SESSION_MODE
+  return sessionModeOf(session)
 }
 
 /**
@@ -592,9 +598,11 @@ function modeHeader(session: McpAgentSession, serverId: string | null, workspace
   const mode = SESSION_MODES.find((m) => m.id === modeOf(session))
   const group = sessionGroupFor(session)
   return [
-    `Session mode: ${sessionModeLabel(mode?.id)} — ${mode?.detail ?? ''}. Set by the user in OpsMaxx; an agent cannot change it.`,
-    `Protected target: ${isProtected(serverId, workspaceId) ? 'yes — Auto and Bypass are held at Ask first here, so every change is asked for; Read only stays read only' : 'no'}`,
-    `Confirm risky actions: ${group ? `${confirmsRisky(group) ? 'on' : 'off'} (${group.name})` : 'n/a — no access group'}`
+    `Session profile: ${sessionModeLabel(mode?.id)} — ${mode?.detail ?? ''}. Set by the user in OpsMaxx; an agent cannot change it.`,
+    `Protected target: ${isProtected(serverId, workspaceId) ? 'yes — every change here is asked for, whatever the profile; Read only stays read only' : 'no'}`,
+    mode?.id === 'custom'
+      ? `Access group: ${group ? `${group.name} (Confirm risky actions ${confirmsRisky(group) ? 'on' : 'off'})` : 'none — every call is refused'}`
+      : 'Access group: not used by this profile'
   ].join('\n')
 }
 
@@ -1503,12 +1511,14 @@ Permissions
   try to work around a path rule by expressing the same access as a shell command.
 - Some capabilities may be denied entirely for this session. get_server_details lists the
   effective permissions for a given server.
-- The user also chooses a MODE for this session, and it is part of the answer: Read only (look,
-  never change), Ask first (every change is approved), Auto (the access group, literally, plus
-  its Confirm risky actions setting) or Bypass (nothing asks and nothing is refused). A server or
-  workspace the user marked Protected is held at Ask first whatever the mode. describe_capabilities
-  and get_server_details state all three. Only the user can change them, in OpsMaxx; no tool here
-  can, and asking the user to switch to Bypass to get past a refusal is not a workaround to offer.
+- The user picks a PROFILE for this session, and it is the answer: Read only (look, never
+  change), Ask first (every change is approved), Auto (routine work runs; sudo and risky actions
+  ask), Bypass (nothing asks and nothing is refused) or Custom (an access group, exactly as
+  written). A server or workspace the user marked Protected is held at Ask first whatever the
+  profile, and one restricted to a narrower group is held to it except in Bypass.
+  describe_capabilities and get_server_details state all of it. Only the user can change it, in
+  OpsMaxx; no tool here can, and asking the user to switch to Bypass to get past a refusal is not
+  a workaround to offer.
 
 Not available
 - No file upload or download beyond read_file/write_file. Do not attempt a transfer through
@@ -2330,7 +2340,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           // The session's group is the grant; this line used to print the
           // server's ASSIGNMENT instead, and so read "No AI Access" for every
           // server nobody had restricted -- beside a list of ALLOW rows.
-          `Access group: ${grant?.name ?? 'none (this session has no access group)'}`,
+          `Profile: ${sessionModeLabel(modeOf(auth.session), grant?.name)}`,
           `Restriction on this server: ${shut ? 'No AI Access' : (restriction?.name ?? 'none')}`,
           modeHeader(auth.session, s.id, s.workspaceId),
           `Effective permissions for this session:\n${caps}`
@@ -6099,7 +6109,8 @@ export function explainSessionAccess(sessionId: string, serverId: string | null)
     ? isProtected(serverId, server?.workspaceId ?? null)
     : session.workspaces.some((w) => isProtected(null, w.id))
   // What the mode is in effect, once a Protected target has capped it.
-  const effective: SessionMode = protectedTarget && (mode === 'auto' || mode === 'bypass') ? 'ask' : mode
+  const effective: SessionMode =
+    protectedTarget && (mode === 'auto' || mode === 'custom' || mode === 'bypass') ? 'ask' : mode
 
   return AI_CAPABILITIES.map(({ id, label }) => {
     // `fromSession` is now the GRANT and `fromScope` the optional restriction,
@@ -6158,7 +6169,7 @@ export function explainSessionAccess(sessionId: string, serverId: string | null)
       PARTLY_ASKS.has(id) &&
       (effective === 'ask'
         ? id === 'databaseAccess'
-        : effective === 'auto' && sessionGroup !== null && confirmsRisky(sessionGroup))
+        : (effective === 'auto' || effective === 'custom') && sessionGroup !== null && confirmsRisky(sessionGroup))
     return {
       capability: id,
       label,

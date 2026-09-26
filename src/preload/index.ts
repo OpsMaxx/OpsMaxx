@@ -2186,7 +2186,7 @@ const api = {
     > => ipcRenderer.invoke('aiMcp:listAuthorizations'),
     approveAuthorization: (
       consentId: string,
-      grant: { groupId: string; groupName: string; workspaces: { id: string; name: string }[] }
+      grant: { groupId: string | null; groupName: string; workspaces: { id: string; name: string }[]; mode?: SessionMode }
     ): Promise<{ ok: true } | { ok: false; error: string }> =>
       ipcRenderer.invoke('aiMcp:approveAuthorization', consentId, grant),
     denyAuthorization: (consentId: string): Promise<{ ok: true }> =>

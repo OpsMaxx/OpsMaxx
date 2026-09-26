@@ -5869,7 +5869,7 @@ ipcMain.handle('aiMcp:killAllSessions', () => {
 ipcMain.handle('aiMcp:listAuthorizations', () => listPendingConsents())
 ipcMain.handle(
   'aiMcp:approveAuthorization',
-  (_e, consentId: string, grant: { groupId: string; groupName: string; workspaces: { id: string; name: string }[] }) =>
+  (_e, consentId: string, grant: { groupId: string | null; groupName: string; workspaces: { id: string; name: string }[]; mode?: SessionMode }) =>
     approveConsent(consentId, grant)
 )
 ipcMain.handle('aiMcp:denyAuthorization', (_e, consentId: string) => {

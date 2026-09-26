@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Check, X } from 'lucide-react'
-import type { AccessGroup } from '../../../../shared/mcp'
+import type { AccessGroup, SessionMode } from '../../../../shared/mcp'
+import { SESSION_MODES, sessionModeLabel } from '../../../../shared/mcp'
 import { Switch } from '../common/Switch'
-import { StartsInMode } from './ModePicker'
+
+/** Marks a predefined profile's value in the consent select, apart from group ids. */
+const PROFILE = 'profile:'
 
 interface PendingAuthorization {
   id: string
@@ -79,16 +82,20 @@ export function AiAuthorizations(): React.JSX.Element {
 
   const approve = async (id: string): Promise<void> => {
     const picked = current(id)
-    const group = groups.find((g) => g.id === picked.groupId)
+    // One select holds both: a predefined profile ("profile:auto") or, for
+    // the Custom profile, an access group's id.
+    const profile = picked.groupId.startsWith(PROFILE) ? (picked.groupId.slice(PROFILE.length) as SessionMode) : null
+    const group = profile ? null : groups.find((g) => g.id === picked.groupId)
     const chosen = workspaces.filter((w) => picked.workspaceIds.includes(w.id))
-    if (!group || chosen.length === 0) return
+    if ((!profile && !group) || chosen.length === 0) return
     setBusy(id)
     setError(null)
     try {
       const result = await window.opsmaxx?.aiMcp.approveAuthorization(id, {
-        groupId: group.id,
-        groupName: group.name,
-        workspaces: chosen.map((w) => ({ id: w.id, name: w.name }))
+        groupId: group?.id ?? null,
+        groupName: group?.name ?? sessionModeLabel(profile ?? 'custom'),
+        workspaces: chosen.map((w) => ({ id: w.id, name: w.name })),
+        mode: profile ?? 'custom'
       })
       // An expired or already-answered request comes back as a refusal rather
       // than a throw, and silently doing nothing would look like a dead button.
@@ -189,16 +196,22 @@ export function AiAuthorizations(): React.JSX.Element {
                 value={picked.groupId}
                 onChange={(e) => setFor(request.id, { groupId: e.target.value })}
               >
-                <option value="">Choose an access group…</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {g.name}
+                <option value="">Choose a profile…</option>
+                {/* Bypass is not offered: it is confirmed where it is set, and
+                    it can be picked afterwards under Active Sessions. */}
+                {SESSION_MODES.filter((m) => m.id !== 'custom' && m.id !== 'bypass').map((m) => (
+                  <option key={m.id} value={`${PROFILE}${m.id}`}>
+                    {m.label} — {m.detail}
                   </option>
                 ))}
+                <optgroup label="Custom — an access group, exactly as written">
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </optgroup>
               </select>
-              <div style={{ marginTop: 8 }}>
-                <StartsInMode />
-              </div>
             </div>
 
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -212,7 +225,7 @@ export function AiAuthorizations(): React.JSX.Element {
               <button
                 className="btn sm primary"
                 disabled={!ready || busy === request.id}
-                title={ready ? undefined : 'Choose a workspace and an access group first'}
+                title={ready ? undefined : 'Choose a workspace and a profile first'}
                 onClick={() => approve(request.id)}
               >
                 <Check size={13} /> Approve

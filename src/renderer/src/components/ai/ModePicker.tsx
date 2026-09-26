@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
-import { DEFAULT_SESSION_MODE, SESSION_MODES, sessionModeLabel } from '../../../../shared/mcp'
-import type { SessionMode } from '../../../../shared/mcp'
+import { PICKERLESS_MODE, SESSION_MODES, resolveDefaultSessionGroup, sessionModeLabel } from '../../../../shared/mcp'
+import type { AccessGroup, SessionMode } from '../../../../shared/mcp'
 import { ContextMenu } from '../connections/ContextMenu'
 import type { MenuEntry } from '../connections/ContextMenu'
 import { Modal } from '../common/Modal'
@@ -14,13 +14,18 @@ import { toast } from '../../store/toast'
 const LAYER = '.approval-scrim, .agent-approval-scrim'
 
 /**
- * How much the human wants to be in the loop: one of SESSION_MODES, picked
- * from a small menu (digits 1-4 pick directly). Bypass lifts every refusal, so
- * it is confirmed first and the button stays red while it is on.
+ * The session's one permission choice: a profile from SESSION_MODES, picked
+ * from a small menu the way a Claude Code mode is (digits 1-5 pick directly).
+ * Four are predefined; Custom is the only one that uses an access group, and
+ * the group select appears beside the button only then. Bypass lifts every
+ * refusal, so it is confirmed first and the button stays red while it is on.
  */
 export function ModePicker({
   value,
   onChange,
+  groups,
+  groupId,
+  onGroupChange,
   protectedCount = 0,
   disabled,
   size,
@@ -30,6 +35,10 @@ export function ModePicker({
 }: {
   value: SessionMode
   onChange: (mode: SessionMode) => void | Promise<void>
+  /** Offered when the profile is Custom. Omit to show no group select. */
+  groups?: AccessGroup[]
+  groupId?: string | null
+  onGroupChange?: (groupId: string) => void | Promise<void>
   protectedCount?: number
   disabled?: boolean
   size?: 'sm'
@@ -44,6 +53,7 @@ export function ModePicker({
   const [menu, setMenu] = useState<DOMRect | null>(null)
   const [confirming, setConfirming] = useState(false)
   const layer = useRef<Element | undefined>(undefined)
+  const groupName = groups?.find((g) => g.id === groupId)?.name ?? null
   const button = useRef<HTMLButtonElement>(null)
   // A press on the button while the menu is open closes it through the
   // outside-click handler before the click lands; without this it reopens.
@@ -55,7 +65,7 @@ export function ModePicker({
     try {
       await onChange(mode)
     } catch (err) {
-      toast(`The mode was not changed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      toast(`The profile was not changed: ${err instanceof Error ? err.message : String(err)}`, 'error')
     }
   }
 
@@ -73,11 +83,11 @@ export function ModePicker({
   }
 
   const entries: MenuEntry[] = SESSION_MODES.map((m, i) => ({
-    section: i === 0 ? 'Mode' : undefined,
+    section: i === 0 ? 'Profile' : m.id === 'custom' ? 'Advanced' : undefined,
     label: m.label,
     detail: m.detail,
     shortcut: m.shortcut,
-    radio: 'session-mode',
+    radio: 'session-profile',
     checked: m.id === value,
     danger: m.id === 'bypass',
     onClick: () => pick(m.id)
@@ -100,7 +110,7 @@ export function ModePicker({
         {defaultScope && (
           <p style={{ margin: '0 0 8px', color: 'var(--danger)' }}>
             Every new agent session will start in Bypass — including CLI-paired and OAuth sessions, which
-            connect without showing anyone a mode picker. Sessions that already exist keep their mode.
+            connect without showing anyone a profile picker. Sessions that already exist keep their profile.
           </p>
         )}
         <p style={{ margin: 0 }}>
@@ -108,9 +118,8 @@ export function ModePicker({
           refusal. This lifts:
         </p>
         <ul style={{ margin: '4px 0 10px' }}>
-          <li>the access group’s Deny</li>
           <li>access-group restrictions on workspaces and servers</li>
-          <li>path rules, such as those guarding /etc/shadow and ~/.ssh</li>
+          <li>the rules guarding sensitive files such as /etc/shadow and ~/.ssh</li>
           <li>escalation shells such as sudo -i and su</li>
           <li>frp reverse proxies</li>
           <li>every approval prompt</li>
@@ -135,7 +144,7 @@ export function ModePicker({
         className={clsx('btn', size === 'sm' && 'sm', 'hc-mode-picker', value === 'bypass' && 'is-bypass')}
         disabled={disabled}
         title={title}
-        aria-label={`Mode: ${sessionModeLabel(value)}${title ? `. ${title}` : ''}`}
+        aria-label={`Profile: ${sessionModeLabel(value, groupName)}${title ? `. ${title}` : ''}`}
         aria-haspopup="menu"
         aria-expanded={menu !== null}
         onPointerDown={() => (wasOpen.current = menu !== null)}
@@ -147,9 +156,27 @@ export function ModePicker({
           setMenu(reopen ? e.currentTarget.getBoundingClientRect() : null)
         }}
       >
-        {sessionModeLabel(value)}
+        {value === 'custom' && groups ? 'Custom' : sessionModeLabel(value, groupName)}
         <ChevronDown size={13} aria-hidden="true" />
       </button>
+      {value === 'custom' && groups && (
+        <select
+          className="input"
+          style={{ maxWidth: 180 }}
+          aria-label="Access group for the Custom profile"
+          data-testid="custom-group"
+          value={groupId ?? ''}
+          disabled={disabled}
+          onChange={(e) => void onGroupChange?.(e.target.value)}
+        >
+          {!groupId && <option value="">Pick an access group…</option>}
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.name}
+            </option>
+          ))}
+        </select>
+      )}
       {menu && (
         <ContextMenu
           x={menu.left}
@@ -157,10 +184,10 @@ export function ModePicker({
           anchor={menu}
           entries={entries}
           container={layer.current}
-          ariaLabel="Session mode"
+          ariaLabel="Session profile"
           footer={
             protectedCount > 0
-              ? `Auto and Bypass are capped at Ask first on ${protectedCount} protected target${protectedCount === 1 ? '' : 's'}.`
+              ? `Every profile but Read only is held at Ask first on ${protectedCount} protected target${protectedCount === 1 ? '' : 's'}.`
               : undefined
           }
           onClose={() => setMenu(null)}
@@ -172,39 +199,53 @@ export function ModePicker({
 }
 
 /**
- * The mode a session created without a picker will start in -- OAuth consent
- * and CLI pairing -- said at the moment of consent, so a Bypass default is
- * never applied without the human seeing it.
+ * The profile a session created without a picker will start in -- OAuth consent
+ * and CLI pairing -- said at the moment of consent, so a Bypass default is never
+ * applied without the human seeing it. With no default profile configured that
+ * is Custom on the default access group, and no access at all without one.
  */
 export function StartsInMode(): React.JSX.Element {
   // undefined while reading, null when it could not be read.
-  const [mode, setMode] = useState<SessionMode | null | undefined>(undefined)
+  const [label, setLabel] = useState<{ mode: SessionMode; text: string } | null | undefined>(undefined)
   useEffect(() => {
     let live = true
-    const read = window.opsmaxx?.aiMcp?.getConfig?.()
+    const api = window.opsmaxx
+    const read = api?.aiMcp?.getConfig?.()
     if (!read) {
-      setMode(null)
+      setLabel(null)
       return
     }
-    read
-      .then((c) => live && setMode(c?.defaultSessionMode ?? DEFAULT_SESSION_MODE))
-      .catch(() => live && setMode(null))
+    Promise.all([read, api?.aiPolicy?.listGroups?.() ?? Promise.resolve([])])
+      .then(([c, groups]) => {
+        if (!live) return
+        const mode = c?.defaultSessionMode ?? PICKERLESS_MODE
+        const group = resolveDefaultSessionGroup(c, groups ?? [])
+        setLabel({
+          mode,
+          text:
+            mode === 'custom'
+              ? group.id
+                ? sessionModeLabel(mode, group.name)
+                : 'Custom · no access group — nothing is allowed until you pick one'
+              : sessionModeLabel(mode)
+        })
+      })
+      .catch(() => live && setLabel(null))
     return () => {
       live = false
     }
   }, [])
-  if (mode === undefined) return <div className="s-desc">Starts in: reading your default mode…</div>
-  if (mode === null) {
+  if (label === undefined) return <div className="s-desc">Starts in: reading your default profile…</div>
+  if (label === null) {
     return (
       <div className="s-desc warn">
-        Starts in your default mode, which could not be read — check it under AI &amp; MCP → Security.
+        Starts in your default profile, which could not be read — check it under AI &amp; MCP → Security.
       </div>
     )
   }
   return (
     <div className="s-desc" data-testid="starts-in-mode">
-      Starts in:{' '}
-      <span className={clsx('chip', mode === 'bypass' && 'danger')}>{sessionModeLabel(mode)}</span> (your
+      Starts in: <span className={clsx('chip', label.mode === 'bypass' && 'danger')}>{label.text}</span> (your
       default — change under AI &amp; MCP → Security)
     </div>
   )

@@ -5,7 +5,7 @@ import type { ToastAction } from '../../store/toast'
 import { useApp } from '../../store/app'
 import { openAi, openSettings } from '../../store/nav'
 import type { AccessGroup, SessionMode } from '../../../../shared/mcp'
-import { DEFAULT_SESSION_MODE, resolveDefaultSessionGroup } from '../../../../shared/mcp'
+import { DEFAULT_SESSION_MODE, resolveDefaultSessionGroup, sessionModeLabel } from '../../../../shared/mcp'
 import { ModePicker } from './ModePicker'
 import { containsBearerToken, maskBearerTokens } from '../../../../shared/tokenDisplay'
 
@@ -92,6 +92,8 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
     )
   }, [])
 
+  const chosen = mode ?? DEFAULT_SESSION_MODE
+
   const connect = async (target: Target, agentName: string): Promise<void> => {
     const api = window.opsmaxx
     if (!api) return
@@ -138,13 +140,14 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
       const created = await api.aiMcp.createSession({
         agentName,
         workspaces: workspaces.map((w) => ({ id: w.id, name: w.name })),
-        groupId: group?.id ?? null,
-        groupName: group?.name ?? 'No AI Access',
+        // A predefined profile uses no group; only Custom is given one.
+        groupId: chosen === 'custom' ? (group?.id ?? null) : null,
+        groupName: chosen === 'custom' ? (group?.name ?? 'No AI Access') : sessionModeLabel(chosen),
         // A config-file client has no way to re-pair when a token lapses — it
         // would just stop working silently. Revoke under Active Sessions
         // instead, which is visible and deliberate.
         ttlMinutes: null,
-        mode: mode ?? undefined
+        mode: chosen
       })
       if (!created) {
         throw new StepError('OpsMaxx could not issue a session for this agent.', {
@@ -195,11 +198,19 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
 
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Access group</div>
+          <div className="s-title">Profile</div>
           <div className="s-desc">
-            What the agent may do — the grant. You can change a live session’s group, and its mode,
-            under Active Sessions.
+            What the agent may do, and how much it asks first. Change it any time under Active Sessions.
           </div>
+        </div>
+        <ModePicker value={chosen} onChange={setMode} />
+      </div>
+
+      {chosen === 'custom' && (
+      <div className="setting-row">
+        <div className="s-info">
+          <div className="s-title">Access group</div>
+          <div className="s-desc">The Custom profile does exactly what this group says.</div>
         </div>
         <select
           className="input"
@@ -218,17 +229,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
           ))}
         </select>
       </div>
-
-      <div className="setting-row">
-        <div className="s-info">
-          <div className="s-title">Mode</div>
-          <div className="s-desc">
-            How much you stay in the loop. Auto follows the access group exactly; change it any time under
-            Active Sessions.
-          </div>
-        </div>
-        <ModePicker value={mode ?? DEFAULT_SESSION_MODE} onChange={setMode} />
-      </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
         {TARGETS.map((t) => (

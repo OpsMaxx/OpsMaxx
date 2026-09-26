@@ -210,8 +210,8 @@ describe('modes in the audit row', () => {
 
   it('names the session mode when the row recorded one', () => {
     expect(auditOutcome(e({ approval: 'approved', result: 'success', mode: 'ask' })).detail).toMatch(
-      /Session mode: Ask first\.$/
+      /Session profile: Ask first\.$/
     )
-    expect(auditOutcome(e({ approval: 'approved', result: 'success' })).detail).not.toMatch(/Session mode/)
+    expect(auditOutcome(e({ approval: 'approved', result: 'success' })).detail).not.toMatch(/Session profile/)
   })
 })
