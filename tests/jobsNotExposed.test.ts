@@ -85,6 +85,12 @@ const ALLOWED_TOOLS = [
   'read_file',
   'write_file',
   'list_files',
+  // One SFTP request each, finished before the call returns: nothing is
+  // scheduled and nothing outlives the approval. delete_file removes one file
+  // or one empty directory, never a tree.
+  'rename_file',
+  'delete_file',
+  'make_directory',
   'get_server_metrics',
   // Item 47. A READ of history OpsMaxx already stores: it opens no
   // connection, reaches no shell, and answers about a server that is offline.

@@ -145,7 +145,10 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
   {
     id: 'writeFiles',
     label: 'Write files',
-    detail: 'Creates and overwrites files. The path rules below can widen or narrow this per path.'
+    // Rename, delete and mkdir ride on this too, so it says so: a grant that
+    // reads narrower than what it buys is the bug manageServers' label had.
+    detail:
+      'Creates, overwrites, renames and deletes files, and creates directories. The path rules below can widen or narrow this per path.'
   },
   {
     id: 'sftpDownload',

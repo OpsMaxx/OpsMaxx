@@ -208,8 +208,41 @@ describe('add_server', () => {
     try {
       expect(await call(c, { name: 'No Cred', host: '10.0.0.9', auth: 'password' })).toContain('requires a password')
       expect(await call(c, { name: 'No Cred', host: '10.0.0.9', auth: 'key' })).toContain('requires keyPath')
+      expect(await call(c, { name: 'No Cred', host: '10.0.0.9', auth: 'certificate' })).toContain('requires keyPath')
+      // A certificate path on a method that never reads one would be stored
+      // and silently ignored.
+      expect(
+        await call(c, { name: 'No Cred', host: '10.0.0.9', auth: 'key', keyPath: '/k', certificatePath: '/k-cert.pub' })
+      ).toContain('only applies to auth "certificate"')
       expect(received).toHaveLength(0)
     } finally {
+      await c.close()
+    }
+  })
+
+  // Release 0.54.0 put Certificate authentication in the Add Server dialog;
+  // until this the bridge could only describe a key, so an agent onboarding a
+  // CA-signed host had no way to say so.
+  it('carries certificate auth, and the certificate path, through to the renderer', async () => {
+    setAssignment({ level: 'workspace', workspaceId: 'ws-prod' }, 'grp-read-write')
+    const stop = autoRespond('approved')
+    const c = await clientFor('grp-read-write')
+    try {
+      const out = await call(c, {
+        name: 'Cert Box',
+        host: '10.0.0.6',
+        auth: 'certificate',
+        keyPath: '/home/me/.ssh/id_ed25519',
+        certificatePath: '/home/me/.ssh/ca/id_ed25519-cert.pub'
+      })
+      expect(out).toContain('Added "Cert Box"')
+      expect(received[0]).toMatchObject({
+        auth: 'certificate',
+        keyPath: '/home/me/.ssh/id_ed25519',
+        certificatePath: '/home/me/.ssh/ca/id_ed25519-cert.pub'
+      })
+    } finally {
+      stop()
       await c.close()
     }
   })

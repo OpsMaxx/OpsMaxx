@@ -82,7 +82,7 @@ describe('server instructions', () => {
 
   it('names the areas that genuinely have no tool, so the agent does not shell out to reach them', () => {
     const instructions = (client.getInstructions() ?? '').toLowerCase()
-    for (const missing of ['vault', 'restoring a backup', 'add_ci_connection']) {
+    for (const missing of ['vault', 'restoring a backup', 'add_ci_connection', 'add_workspace']) {
       expect(instructions).toContain(missing)
     }
   })
@@ -112,11 +112,13 @@ describe('tool metadata', () => {
   })
 
   it('marks the mutating tools as not read-only', () => {
-    for (const n of ['execute_command', 'write_file', 'add_server', 'set_vpn']) {
+    for (const n of ['execute_command', 'write_file', 'rename_file', 'delete_file', 'make_directory', 'add_server', 'set_vpn']) {
       expect(byName(n).annotations?.readOnlyHint, n).toBe(false)
     }
     expect(byName('execute_command').annotations?.destructiveHint).toBe(true)
     expect(byName('write_file').annotations?.destructiveHint).toBe(true)
+    expect(byName('rename_file').annotations?.destructiveHint).toBe(true)
+    expect(byName('delete_file').annotations?.destructiveHint).toBe(true)
   })
 
   it('claims an open world only for the tools that reach outside OpsMaxx', () => {

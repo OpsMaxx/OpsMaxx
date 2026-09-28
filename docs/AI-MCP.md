@@ -66,6 +66,9 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `read_file` | `readFiles` + `sftpDownload` (+ file path rules) | File contents, redacted |
 | `write_file` | `writeFiles` + `sftpUpload` (+ file path rules) | Bytes written |
 | `list_files` | `readFiles` + `sftpDownload` (+ file path rules) | Directory listing |
+| `rename_file` | `writeFiles` + `sftpUpload` (+ write path rules on **both** paths, and the read rules on the source); a session grant covers only further renames under the same rule | That it moved. **Files only** — a directory is refused, because the rules see the two paths named and not the subtree that would move with them. Whether an existing target is replaced is the SFTP server's call — OpenSSH refuses |
+| `delete_file` | `writeFiles` + `sftpUpload` (+ write path rules), **never cached** | That it is gone. One file, or with `directory: true` one **empty** directory — SFTP `rmdir` refuses a non-empty one, and nothing here recurses |
+| `make_directory` | `writeFiles` + `sftpUpload` (+ write path rules); a session grant covers only further mkdirs under the same rule | That it exists. No `-p`: the parent must exist |
 | `get_capacity_trends` | `serverMetrics` | Where CPU, memory, disk and inodes are heading, from history already stored — it opens no connection and answers for an offline server. Answers with a **sentence per metric**, not the samples behind them: a rate, a crossing date or the named rule that refused, and always the window it was drawn from plus how much of that window was actually sampled. Disk is measured in bytes, because the stored percentage is df's rounded integer and too coarse to forecast |
 | `get_server_metrics` | `serverMetrics` | CPU/memory/disk/uptime — and every failed systemd unit and listening port with its owning process, which is a service and port inventory as much as a capacity read |
 | `get_host_facts` | `hostFacts` | Distribution, architecture, CPU model, virtualisation, package manager, pending updates and how many are security updates, and whether a reboot is owed. Its own capability rather than a widening of metrics, because it is a patch-status report. It never refreshes a package cache. A count reported as NOT AVAILABLE is not zero |
@@ -81,7 +84,7 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `delete_tunnel` | `sshTunnel`, **risky**, **never cached** | That the tunnel is gone; it is stopped first if running |
 | `list_vpns` | `vpnControl`, resolved per **workspace** as a read | Names, engine, mode and state — **never an endpoint, key or listener address** |
 | `set_vpn` | `vpnControl`; starting, or stopping with live sessions depending on it, is **risky**; **frp refused outside Bypass** | Confirmation, with a listener count |
-| `add_server` | `manageServers`, resolved on the **workspace**, **never cached**; not risky, so ALLOW adds without asking | The name the new connection was saved under. `jumpHosts` names existing servers to reach it through, so a bastion-only host can be onboarded without disclosing one; `verify: true` dials it once and reports whether it came up rather than reporting a dead entry as added |
+| `add_server` | `manageServers`, resolved on the **workspace**, **never cached**; not risky, so ALLOW adds without asking | The name the new connection was saved under. `auth` takes `password`, `key`, `certificate` (a key plus the CA-signed `certificatePath`, `<keyPath>-cert.pub` when omitted) or `agent`. `jumpHosts` names existing servers to reach it through, so a bastion-only host can be onboarded without disclosing one; `verify: true` dials it once and reports whether it came up rather than reporting a dead entry as added |
 | `update_server` | `manageServers`, **risky**; a session grant covers only further changes to that one server | Which fields changed. Only what you pass is touched — a port change does not disturb the stored credential |
 | `remove_server` | `manageServers`, **risky**, **never cached** | That the connection and its stored credential are gone. The approval names what the removal takes with it when the server is another server's jump host |
 | `test_connection` | `viewServer` | Whether the connection came up, and the *category* of failure if not — never a hostname, port or username, and never the driver's own text, which contains the address |
@@ -333,7 +336,8 @@ Descriptions are written to route an agent to the narrowest tool that does the j
 - The server's `instructions` state that servers are addressed by friendly name, that
   `list_servers` must be called first, that credentials are never visible, and which capabilities
   do not exist at all (running jobs, defining rules, a shell on the OpsMaxx machine itself,
-  reading the vault, restoring a backup) so an agent does not shell out to reach them. Tunnels
+  reading the vault, restoring a backup, creating a workspace) so an agent does not shell out to
+  reach them. Tunnels
   and databases are NOT in that list — `list_tunnels`, `set_tunnel`, `list_databases` and
   `query_database` are all registered, and the instructions used to claim otherwise.
 - `execute_command` names its four alternatives; `read_file`, `list_files` and

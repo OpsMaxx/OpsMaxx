@@ -347,6 +347,33 @@ describe('update_server', () => {
     }
   })
 
+  it('switches to certificate auth, and refuses a certificate with no key to sit beside', async () => {
+    const a = autoRespond('approved')
+    const c = await clientFor('grp-full')
+    try {
+      // The renderer rewrites the key credential whole and cannot read the old
+      // key path back, so a certificate alone would be saved against no key.
+      expect(
+        await call(c, 'update_server', { serverName: 'Scanner01', auth: 'certificate', certificatePath: '/k-cert.pub' })
+      ).toContain('requires keyPath')
+      expect(await call(c, 'update_server', { serverName: 'Scanner01', certificatePath: '/k-cert.pub' })).toContain(
+        'needs keyPath'
+      )
+      expect(written).toHaveLength(0)
+      await call(c, 'update_server', {
+        serverName: 'Scanner01',
+        auth: 'certificate',
+        keyPath: '/k',
+        certificatePath: '/ca/k-cert.pub'
+      })
+      const req = written[0] as Extract<AgentConfigRequest, { kind: 'server.update' }>
+      expect(req.patch).toEqual({ auth: 'certificate', keyPath: '/k', certificatePath: '/ca/k-cert.pub' })
+    } finally {
+      a.stop()
+      await c.close()
+    }
+  })
+
   it('asks with manageServers raised to ALLOW while Confirm risky actions is on', async () => {
     // The gap this closes, and it is only visible on a group an administrator
     // raised by hand with the switch on.
