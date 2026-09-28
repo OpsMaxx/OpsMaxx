@@ -79,6 +79,14 @@ import {
 import { knownSecretValuesForServer, resolveChainSecrets, resolveDbSecrets } from './credentialResolver'
 import { DockerReader } from './docker'
 import { buildDockerActionCommand, buildDockerLogsCommand } from '../../shared/docker'
+import { buildUserUnitsCommand, parseUserUnits, summariseUserUnits } from '../../shared/userUnits'
+import { buildCronCollectCommand, parseCronCollection } from '../../shared/cron'
+import {
+  SERVICE_ACTIONS,
+  checkServiceStep,
+  serviceActionCommands,
+  type ServiceAction
+} from '../../shared/serviceAction'
 import type { DockerContainer } from '../../shared/docker'
 import { sshExec, sshTest } from './ssh'
 import { preparedSshTarget } from './vpn/transport'
@@ -1553,6 +1561,11 @@ Choosing a tool
   path rules apply precisely rather than being inferred from a command string, and they are
   less likely to need an approval prompt.
 - Use execute_command for work that genuinely needs a shell.
+- For services and schedules, prefer list_services over \`systemctl --user list-units\`,
+  service_action over \`sudo systemctl restart\`, and list_cron over \`crontab -l\` or reading
+  /etc/cron.d. service_action is checked as the exact sudo command it runs, so it is never a way
+  past a refusal execute_command would get; what it adds is a checked unit name, a refusal to
+  stop sshd, and a check afterwards that the unit really is in the state you asked for.
 - The CI tools are the ONLY route to a CI server. There is no path from execute_command to one:
   a shell on a host that happens to reach Jenkins or GitLab over the network is not an
   alternative, and curling a provider's API to get around a denied CI tool is the same thing as
@@ -1588,6 +1601,9 @@ Not available
 - Running jobs, defining rules, a shell on the OpsMaxx machine itself, reading the vault, and
   restoring a backup are not on this bridge at any permission setting. describe_capabilities
   says the same, and is the authority on what this session may actually do.
+- No tool edits a crontab or a systemd timer, and doing it through execute_command instead is
+  working around that. A scheduled command keeps running after this session ends, where the
+  stop-all-AI-access switch cannot reach it, so changing a schedule is left to the user in OpsMaxx.
 - No tool creates, edits or deletes a VPN profile. A VPN decides which network everything after
   it travels over, so you may start or stop one the user wrote and you can never author one.
   There is no add_vpn or edit_vpn to look for.
@@ -5366,9 +5382,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       title: 'Start, stop or restart a container',
       description:
         'Starts, stops or restarts ONE container. ' +
-        'This is the only tool on the bridge that changes the state of a running service, and it is ' +
-        'behind its own permission for that reason: an agent allowed to see what is running does not ' +
-        'thereby get to stop it. ' +
+        'It is behind its own permission rather than the container read\u2019s: an agent allowed to see ' +
+        'what is running does not thereby get to stop it. ' +
         'Stopping or restarting drops every connection the container is currently serving. Say what the ' +
         'container is for in `intent`, because that sentence is what the person approving this sees. ' +
         'One container per call, deliberately — there is no way to ask for several, so a mistake costs ' +
@@ -5469,6 +5484,347 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           error: message
         })
         return errorText(`Could not ${action} ${container} on ${s.name}: ${message}`)
+      }
+    }
+  )
+
+  // ---- Services and scheduled jobs ----
+  //
+  // Three tools over readers and builders the app already has, so an agent
+  // sees what the Services and Scheduled panels see and changes a unit with the
+  // same checks a typed job step applies. There is no crontab EDIT here, on
+  // purpose: a crontab line is a command that runs unattended, forever, on a
+  // host OpsMaxx does not supervise, and the stop-all-AI-access switch cannot
+  // reach it once it is written — the argument tests/jobsNotExposed.test.ts
+  // makes about jobs and rules, with the object moved onto the server. The
+  // human edit path also goes through the broadcast approval record, which
+  // nothing the bridge reaches may import.
+
+  // What each action does, for the approval card. Said per action rather than
+  // "interrupts it" for all of them: disable changes nothing until the next
+  // boot, and a card that overstates that is one people learn to skim.
+  const SERVICE_ACTION_EFFECT: Record<ServiceAction, string> = {
+    start: 'starts',
+    stop: 'stops, dropping whatever it is serving,',
+    restart: 'restarts, dropping whatever it is serving,',
+    reload: 'tells to reload its configuration:',
+    enable: 'sets to start at boot:',
+    disable: 'stops from starting at boot:'
+  }
+  // Every place the cron collector reads a file from. Checked as read paths so
+  // a rule on any of them is honoured; `*` stands for the files inside, which a
+  // `dir/**` rule matches.
+  const CRON_READ_PATHS = ['/etc/crontab', '/etc/cron.d/*', '/var/spool/cron/crontabs/*', '/var/spool/cron/*']
+
+  server.registerTool(
+    'list_services',
+    {
+      title: 'List user services',
+      description:
+        'The `systemd --user` services of the account OpsMaxx connects as on one server, with each ' +
+        'one’s load, active and sub state, and whether that account is LINGERING. Without linger ' +
+        'a user service stops when the last session ends, so "running" here is only half an answer ' +
+        'until the linger state is read with it. This is NOT the system unit list: failed system ' +
+        'units come from get_server_metrics. ' +
+        'Prefer this over `systemctl --user list-units` through execute_command: it tells "no ' +
+        'services" apart from "the user manager could not be reached", which the raw command does not.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        filter: z
+          .string()
+          .optional()
+          .describe('Optional case-insensitive substring; only units whose name contains it are returned.'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, filter, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const resolved = resolveServerOrError(auth.session, serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: s, workspace } = resolved.match
+      // serverMetrics, because this is the same kind of answer that tool
+      // already gives -- which services run here and which have failed -- read
+      // for the account's own manager instead of PID 1's.
+      const check = effectiveCapability(auth.session, s.id, 'serverMetrics')
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: 'list_services',
+        capability: 'serverMetrics'
+      }
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'list_services',
+          level: 'low',
+          because: 'it returns which services this account runs on the host and which have failed',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      try {
+        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const r = await sshExec(cfg, buildUserUnitsCommand(), 20_000, false)
+        if (!r.ok) {
+          auditError(ctx, gated.approval, r.error ?? 'the server could not be reached')
+          return errorText(`Could not read services on ${s.name}: ${r.error ?? 'the server could not be reached'}`)
+        }
+        auditSuccess(ctx, gated.approval)
+        const reading = parseUserUnits(r.stdout ?? '', r.code)
+        const needle = filter?.trim().toLowerCase()
+        const units = needle ? reading.units.filter((u) => u.name.toLowerCase().includes(needle)) : reading.units
+        const rows = units.map(
+          (u) => `${`${u.active}/${u.sub}`.padEnd(18)} ${remoteName(u.name)}  ${remoteText(u.description, 120)}`
+        )
+        return text(
+          [
+            `Status: ${reading.status}. Linger: ${reading.linger}.`,
+            '',
+            hostReportedBlock(
+              [
+                summariseUserUnits(reading).headline,
+                reading.detail ? `Server said: ${remoteText(reading.detail, 200)}` : '',
+                '',
+                rows.length > 0
+                  ? rows.join('\n')
+                  : needle
+                    ? `No unit matches "${remoteText(filter, 64)}".`
+                    : 'No user units.'
+              ].join('\n')
+            )
+          ].join('\n')
+        )
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        auditError(ctx, gated.approval, message)
+        return errorText(`Could not read services on ${s.name}: ${message}`)
+      }
+    }
+  )
+
+  server.registerTool(
+    'service_action',
+    {
+      title: 'Start, stop, restart, reload, enable or disable a system unit',
+      description:
+        'Runs `sudo -n systemctl <action> <unit>` for ONE system unit, then checks the unit reached ' +
+        'the state the action asks for and reports both. It is checked as exactly that sudo command, ' +
+        'so the same sudo setting and command rules apply as if it were sent through ' +
+        'execute_command, and when it asks, a yes covers that one call and never the next. It fails rather than prompting when ' +
+        'the account has no passwordless sudo. Unit names are restricted to the characters systemd ' +
+        'uses, and stopping, restarting, reloading or disabling ssh or sshd is refused at any ' +
+        'setting: that is the connection OpsMaxx needs to report what happened. Say what the service ' +
+        'is for in `intent`; that sentence is what the person approving this sees.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        unit: z
+          .string()
+          .describe('The unit name, e.g. "nginx" or "nginx.service". A bare name means NAME.service.'),
+        action: z.enum(SERVICE_ACTIONS).describe('What to do to it'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: false, idempotentHint: false, destructiveHint: true, openWorldHint: false }
+    },
+    async ({ serverName, unit, action, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const resolved = resolveServerOrError(auth.session, serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: s, workspace } = resolved.match
+      // The job step's own checks, so a unit a job refuses to touch is one an
+      // agent cannot touch either. A refusal is folded into the decision
+      // rather than returned early, so gate() writes the audit row for it.
+      const valid = checkServiceStep(action, unit)
+      const cmd = serviceActionCommands(action, unit, { sudo: true })
+      // Evaluated as the command that will actually run. That puts it under
+      // the sudo capability, the command rules and Confirm risky actions
+      // exactly as execute_command would, so this tool is a clearer way to ask
+      // for something the policy already decides -- never a way around it.
+      const check: Decision = valid.ok
+        ? effectiveCommand(auth.session, s.id, cmd.action)
+        : { decision: 'deny', reason: valid.reason }
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: cmd.action,
+        capability: 'sudo'
+      }
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'service_action',
+          level: 'high',
+          because: `it runs \`${cmd.action}\` as root, which ${SERVICE_ACTION_EFFECT[action]} ${cmd.unit}`,
+          intent,
+          // Every call, whatever the action: a yes to restarting one unit must
+          // not become a yes to stopping another, and they share the sudo
+          // capability and the same rule, so no session grant could tell them
+          // apart.
+          perCall: true
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      try {
+        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const secrets = knownSecretValuesForServer(s.id)
+        const said = (r: { stdout?: string; stderr?: string }): string =>
+          redactOutput(`${r.stdout ?? ''}${r.stderr ?? ''}`, secrets).trim()
+        const ran = await sshExec(cfg, cmd.action, 60_000, false)
+        if (!ran.ok || (ran.code ?? 0) !== 0) {
+          const why = ran.ok ? said(ran) || `exit code ${ran.code}` : (ran.error ?? 'the server could not be reached')
+          auditError(ctx, gated.approval, why)
+          return errorText(`Could not ${action} ${cmd.unit} on ${s.name}: ${why}`)
+        }
+        // systemctl exits 0 having ASKED. A unit that starts and dies at once
+        // -- the usual result of a bad config -- is only caught by looking.
+        const verified = cmd.verify ? await sshExec(cfg, cmd.verify, 30_000, false) : null
+        auditSuccess(ctx, gated.approval, { exitCode: verified?.code ?? ran.code ?? undefined })
+        const check2 = verified
+          ? verified.ok && (verified.code ?? 0) === 0
+            ? `Checked: ${said(verified) || 'ok'}.`
+            : `The check after it FAILED: ${verified.ok ? said(verified) || `exit code ${verified.code}` : (verified.error ?? 'no answer')}.`
+          : ''
+        return text(`Ran \`${cmd.action}\` on ${s.name}.${said(ran) ? `\n${said(ran)}` : ''}\n${check2}`)
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        auditError(ctx, gated.approval, message)
+        return errorText(`Could not ${action} ${cmd.unit} on ${s.name}: ${message}`)
+      }
+    }
+  )
+
+  server.registerTool(
+    'list_cron',
+    {
+      title: 'List scheduled jobs',
+      description:
+        'Everything scheduled on one server: this account’s crontab, /etc/crontab, /etc/cron.d, ' +
+        'other accounts’ crontabs from the spool, and systemd timers — each entry with its ' +
+        'schedule (in plain English where it is unambiguous), who it runs as, where it came from and the command. It also says ' +
+        'which of those sources could actually be read, because "nothing scheduled" and "not allowed ' +
+        'to look" otherwise read the same. Unreadable sources are retried with `sudo -n` unless this ' +
+        'session’s sudo setting is deny, and each source says when it was read as root. Commands ' +
+        'go through secret redaction. Read-only: there is no tool that edits a crontab.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        user: z
+          .string()
+          .optional()
+          .describe('Optional. Only entries that run as this account. Entries whose format names no user are left out.'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, user, intent }, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const resolved = resolveServerOrError(auth.session, serverName)
+      if ('error' in resolved) return resolved.error
+      const { server: s, workspace } = resolved.match
+      // What this reads IS file contents -- cron commands routinely carry a
+      // token or a password on the command line -- so it is readFiles, with the
+      // path rules for every place the collector looks. A rule denying
+      // /etc/cron.d must not be walked past by calling the listing something
+      // other than a read of /etc/cron.d.
+      const fileCheck = (path: string): Decision =>
+        serverCheck(auth.session, s.id, (g) => evaluateFilePath(g, path, 'read'), false)
+      const check = CRON_READ_PATHS.map(fileCheck).reduce(mostRestrictive)
+      const ctx: AuditContext = {
+        session: auth.session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: s.id,
+        serverName: s.name,
+        action: 'list_cron',
+        capability: 'readFiles'
+      }
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'list_cron',
+          level: 'medium',
+          because: 'it reads every crontab on the host, and cron commands often carry credentials',
+          intent
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      try {
+        // The collector's own `sudo -n` retry, which the other readers here
+        // use too and which cannot prompt. Dropped from the command entirely
+        // where the session's sudo is deny: that is a human saying "never as
+        // root", and a read is not an exception to it.
+        const sudo = effectiveCapability(auth.session, s.id, 'sudo', { mutating: false }).decision !== 'deny'
+        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const r = await sshExec(cfg, buildCronCollectCommand({ sudo }), 20_000, false)
+        if (!r.ok) {
+          auditError(ctx, gated.approval, r.error ?? 'the server could not be reached')
+          return errorText(`Could not read the schedule on ${s.name}: ${r.error ?? 'the server could not be reached'}`)
+        }
+        auditSuccess(ctx, gated.approval)
+        const parsed = parseCronCollection(r.stdout ?? '')
+        const secrets = knownSecretValuesForServer(s.id)
+        // The gate checked the directories. A rule on ONE file inside them
+        // (`/etc/cron.d/backup`) is only answerable once the file is named, so
+        // entries from a file a rule does not plainly allow are withheld here.
+        let withheld = 0
+        const entries = parsed.entries.filter((e) => {
+          if (user !== undefined && e.user !== user) return false
+          // Stricter than what the gate answered means withheld: mostRestrictive
+          // keeps its first argument on a tie, so only a narrower rule differs.
+          if (e.origin.startsWith('/') && mostRestrictive(check, fileCheck(e.origin)) !== check) {
+            withheld++
+            return false
+          }
+          return true
+        })
+        const shown = entries.slice(0, 200)
+        const sources = parsed.sources.map(
+          (src) =>
+            `${src.label}: ${src.status}${src.usedSudo ? ' (read as root)' : ''}` +
+            `${src.detail ? ` — ${remoteText(src.detail, 160)}` : ''}`
+        )
+        const rows = shown.map(
+          (e) =>
+            `${remoteText(e.schedule, 64)}${e.description ? ` (${e.description})` : ''}` +
+            `${e.user ? ` as ${remoteName(e.user)}` : ''} — ${remoteText(e.origin, 160)}` +
+            `${e.nextRun ? `, next ${remoteText(e.nextRun, 64)}` : ''}` +
+            `\n    ${remoteText(redactOutput(e.command, secrets), 500)}`
+        )
+        const notes = [
+          withheld > 0 ? `${withheld} entr${withheld === 1 ? 'y' : 'ies'} withheld: a path rule does not allow reading the file it came from.` : '',
+          entries.length > shown.length ? `${entries.length - shown.length} more not shown.` : '',
+          parsed.unparsed.length > 0 ? `${parsed.unparsed.length} line(s) looked like jobs but did not parse.` : ''
+        ].filter(Boolean)
+        return text(
+          [
+            `Sources on ${s.name}:`,
+            ...sources.map((line) => `  ${line}`),
+            ...notes,
+            '',
+            hostReportedBlock(rows.length > 0 ? rows.join('\n') : 'No scheduled entries.')
+          ].join('\n')
+        )
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e)
+        auditError(ctx, gated.approval, message)
+        return errorText(`Could not read the schedule on ${s.name}: ${message}`)
       }
     }
   )

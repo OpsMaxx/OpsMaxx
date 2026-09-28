@@ -142,11 +142,21 @@ const ALLOWED_TOOLS = [
   // deliberately not reachable, because one call that begins work on every
   // server is a fan-out with a different consent story.
   'fleet_inventory',
-  // The one tool on the bridge that changes a running service, behind its own
+  // Changes a running container, behind its own
   // `containerControl` capability and denied on every read-only tier. One
   // container per call: there is no shape in which a single approval acts on a
   // host's worth of them.
   'container_action',
+  // Services and schedules. list_services and list_cron are reads. Neither
+  // edits a crontab, and there is no tool that does: a crontab line is a
+  // command that runs unattended on the server, forever, with nothing pending
+  // for denyAllPending() to resolve -- this file's argument exactly, moved onto
+  // the host. service_action is one systemctl call on one unit, finished when
+  // it returns; it defines nothing new and is checked as the sudo command it
+  // runs, so it is execute_command's reach and not a wider one.
+  'list_services',
+  'service_action',
+  'list_cron',
   // Backup HEALTH, machine-wide: which destinations exist and whether they are
   // late. No run and no restore — the interface it reads through has neither,
   // so reaching one means widening that interface in a diff someone sees.

@@ -91,7 +91,10 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `list_containers` | `containers` | Containers on one server: image, state, the runtime's own status line, published ports and compose project. It says when it fell back to root, and distinguishes "not in a project" from "the runtime could not say" |
 | `container_logs` | `containers`, weighed higher at the prompt than the list | The last lines a container wrote. **It never follows** — a stream would outlive the approval that authorised it, and the stop-all-AI-access switch works by resolving requests still pending |
 | `fleet_inventory` | `fleetRead`, resolved on the **workspace** | One row per server from what the sampler already collected, each stamped with when. Drift is deliberately absent from it |
-| `container_action` | `containerControl`, graded **high** at the prompt | **The one tool on the bridge that changes the state of a running service.** Starts, stops or restarts exactly one container per call — there is no shape in which one approval acts on a host's worth of them. Starting is graded no lower than stopping: an agent starting a container begins serving traffic nobody asked for |
+| `container_action` | `containerControl`, graded **high** at the prompt | Starts, stops or restarts exactly one container per call — there is no shape in which one approval acts on a host's worth of them. Starting is graded no lower than stopping: an agent starting a container begins serving traffic nobody asked for |
+| `list_services` | `serverMetrics` | The `systemd --user` units of the account OpsMaxx connects as, with load/active/sub state and whether that account is **lingering** — without linger they stop when its last session ends. Not the system unit list; failed system units are in `get_server_metrics` |
+| `service_action` | Evaluated as the command it runs, `sudo -n systemctl <action> '<unit>'` — so `sudo`, the command rules and **risky** exactly as `execute_command`; graded **high**, **never cached** | One start, stop, restart, reload, enable or disable of one system unit, then a check that the unit reached that state. The unit name is checked with the same rules as the job step, and stopping, restarting, reloading or disabling ssh/sshd is refused at every setting |
+| `list_cron` | `readFiles`, with the path rules for `/etc/crontab`, `/etc/cron.d`, and the crontab spool; entries from a single file a stricter rule covers are withheld | Every crontab source and systemd timer, what each entry runs and as whom, and which sources could actually be read. Retries unreadable sources with `sudo -n` unless the session's `sudo` is deny. Commands are redacted. **There is no tool that edits a crontab**: a scheduled line outlives the session that wrote it, where the stop-all-AI-access switch cannot reach it |
 | `backup_status` | `backupRead`, resolved on the **workspace** | Every backup destination and how late each is against its own schedule. Destinations and kinds, never their credentials. It cannot run a backup or restore one at any setting |
 | `describe_capabilities` | — **the one tool that is not gated** | What this session may do on a server, with the sentence the user was shown when they granted it, plus what is absent by design. Gating "what am I allowed to do" is how an agent discovers the boundary by tripping over it |
 | `list_alerts` | `fleetRead`, resolved on the **workspace** | Alerts already raised, newest first. It says what *happened*; it does not rank hosts by exposure |
@@ -743,6 +746,7 @@ other call:
   `terminal`, which is what it is, and is only kept per-call. A false positive there only means
   being asked again;
 - `container_action` when stopping or restarting a container;
+- `service_action`, every call;
 - `query_database` for anything not classified as a read;
 - `set_tunnel` and `set_vpn` when starting.
 

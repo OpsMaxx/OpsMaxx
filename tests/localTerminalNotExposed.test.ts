@@ -116,11 +116,17 @@ const ALLOWED_TOOLS = [
   // deliberately not reachable, because one call that begins work on every
   // server is a fan-out with a different consent story.
   'fleet_inventory',
-  // The one tool on the bridge that changes a running service, behind its own
+  // Changes a running container, behind its own
   // `containerControl` capability and denied on every read-only tier. One
   // container per call: there is no shape in which a single approval acts on a
   // host's worth of them.
   'container_action',
+  // Services and schedules, over SSH on a configured server. list_services
+  // and list_cron read; service_action runs one `sudo -n systemctl` there and
+  // is checked as that exact command. None reaches a shell on this machine.
+  'list_services',
+  'service_action',
+  'list_cron',
   // Backup HEALTH, machine-wide: which destinations exist and whether they are
   // late. No run and no restore — the interface it reads through has neither,
   // so reaching one means widening that interface in a diff someone sees.
