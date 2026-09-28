@@ -23,7 +23,7 @@ interface RequestHop {
   host: string
   port: number
   username: string
-  auth: 'password' | 'key' | 'agent'
+  auth: 'password' | 'key' | 'certificate' | 'agent'
 }
 
 interface CreateRequest {
@@ -32,10 +32,11 @@ interface CreateRequest {
   host: string
   port: number
   username: string
-  auth: 'password' | 'key' | 'agent'
+  auth: 'password' | 'key' | 'certificate' | 'agent'
   password?: string
   keyPath?: string
   passphrase?: string
+  certificatePath?: string
   os?: string
   route?: RequestHop[]
   cloud?: CloudTarget
@@ -46,10 +47,11 @@ interface ServerPatch {
   host?: string
   port?: number
   username?: string
-  auth?: 'password' | 'key' | 'agent'
+  auth?: 'password' | 'key' | 'certificate' | 'agent'
   password?: string
   keyPath?: string
   passphrase?: string
+  certificatePath?: string
   os?: string
   route?: RequestHop[]
   cloud?: CloudTarget
@@ -175,14 +177,28 @@ export function AgentConfigWatcher(): null {
           // storage keyed by server id, never into the connection list itself.
           // A cloud server has no credential to store: the provider mints a
           // short-lived one per connection and OpsMaxx keeps none of it.
-          let secret: { password?: string; keyPath?: string; passphrase?: string; vaultEntryId?: string } | null =
-            req.cloud
-              ? null
-              : req.auth === 'password'
-                ? { password: req.password }
-                : req.auth === 'key'
-                  ? { keyPath: req.keyPath, passphrase: req.passphrase || undefined }
-                  : null
+          // Certificate auth is the key plus the certificate beside it, in the
+          // same blob AddServerModal writes; no certificatePath means OpenSSH's
+          // `-cert.pub` convention, applied when the connection is dialled.
+          let secret: {
+            password?: string
+            keyPath?: string
+            passphrase?: string
+            certificatePath?: string
+            vaultEntryId?: string
+          } | null = req.cloud
+            ? null
+            : req.auth === 'password'
+              ? { password: req.password }
+              : req.auth === 'key' || req.auth === 'certificate'
+                ? {
+                    keyPath: req.keyPath,
+                    passphrase: req.passphrase || undefined,
+                    ...(req.auth === 'certificate' && req.certificatePath
+                      ? { certificatePath: req.certificatePath }
+                      : {})
+                  }
+                : null
 
           /**
            * Into the vault when it is already open, and NEVER a prompt.
@@ -266,7 +282,7 @@ export function AgentConfigWatcher(): null {
             case 'server.update': {
               const before = useApp.getState().servers.find((s) => s.id === req.serverId)
               if (!before) throw new Error('That server no longer exists.')
-              const { password, keyPath, passphrase, route, ...rest } = req.patch
+              const { password, keyPath, passphrase, certificatePath, route, ...rest } = req.patch
               const hops = toHops(route)
               useApp.getState().updateServer(req.serverId, { ...rest, ...(hops ? { route: hops } : {}) })
 
@@ -277,7 +293,7 @@ export function AgentConfigWatcher(): null {
                 const secret =
                   (req.patch.auth ?? before.auth) === 'password'
                     ? { password }
-                    : { keyPath, passphrase: passphrase || undefined }
+                    : { keyPath, passphrase: passphrase || undefined, ...(certificatePath ? { certificatePath } : {}) }
                 const ok = await window.opsmaxx?.secrets.set(req.serverId, JSON.stringify(secret))
                 if (ok === false) {
                   // Unlike the add path there is nothing to roll back to --

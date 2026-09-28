@@ -19,6 +19,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 
 let sshOk = true
 let sftpOk = true
+let isDirectory = false
 
 vi.mock('../src/main/services/ssh', () => ({
   sshExec: () =>
@@ -33,6 +34,10 @@ vi.mock('../src/main/services/sftp', () => ({
   sftpRead: () => Promise.resolve({ ok: true, data: 'contents' }),
   sftpWrite: () => Promise.resolve({ ok: true }),
   sftpList: () => Promise.resolve({ ok: true, data: [] }),
+  sftpRename: () => Promise.resolve({ ok: true }),
+  sftpDelete: () => Promise.resolve({ ok: true }),
+  sftpMkdir: () => Promise.resolve({ ok: true }),
+  sftpIsDirectory: () => Promise.resolve({ ok: true, data: isDirectory }),
   sftpDisconnect: () => undefined
 }))
 
@@ -98,6 +103,7 @@ afterAll(async () => await stopMcpServer())
 beforeEach(() => {
   sshOk = true
   sftpOk = true
+  isDirectory = false
   resetApprovalVolumeForTests()
 })
 
@@ -138,7 +144,10 @@ const TOOLS: Case[] = [
   { tool: 'execute_command', args: { serverName: 'Box', command: 'uptime' }, connect: () => (sshOk = false) },
   { tool: 'read_file', args: { serverName: 'Box', path: '/tmp/x' }, connect: () => (sftpOk = false) },
   { tool: 'write_file', args: { serverName: 'Box', path: '/tmp/x', content: 'hi' }, connect: () => (sftpOk = false) },
-  { tool: 'list_files', args: { serverName: 'Box', path: '/tmp' }, connect: () => (sftpOk = false) }
+  { tool: 'list_files', args: { serverName: 'Box', path: '/tmp' }, connect: () => (sftpOk = false) },
+  { tool: 'rename_file', args: { serverName: 'Box', from: '/tmp/x', to: '/tmp/y' }, connect: () => (sftpOk = false) },
+  { tool: 'delete_file', args: { serverName: 'Box', path: '/tmp/x' }, connect: () => (sftpOk = false) },
+  { tool: 'make_directory', args: { serverName: 'Box', path: '/tmp/d' }, connect: () => (sftpOk = false) }
 ]
 
 describe('one audit row per gated call', () => {
@@ -161,6 +170,24 @@ describe('one audit row per gated call', () => {
       expect(rowsFor(id)).toHaveLength(3)
       expect(rowsFor(id)[0].result).toBe('error')
       expect(rowsFor(id)[0].approval).toBe('not-required')
+    } finally {
+      await c.close()
+    }
+  })
+})
+
+// A directory carries a subtree its two path checks never saw, so it is
+// refused after the gate -- and that refusal is an audited error, not a gap.
+describe('rename_file', () => {
+  it('refuses a directory and records why', async () => {
+    isDirectory = true
+    const { c, id } = await session()
+    try {
+      expect(await call(c, 'rename_file', { serverName: 'Box', from: '/home/alice', to: '/tmp/alice' })).toMatch(
+        /is a directory, and rename_file moves files only/
+      )
+      expect(rowsFor(id)).toHaveLength(1)
+      expect(rowsFor(id)[0].result).toBe('error')
     } finally {
       await c.close()
     }

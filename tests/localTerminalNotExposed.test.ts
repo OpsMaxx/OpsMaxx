@@ -54,6 +54,13 @@ const ALLOWED_TOOLS = [
   'read_file',
   'write_file',
   'list_files',
+  // What the SFTP browser already does, over the same SFTP session as
+  // write_file and checked against the same write path rules. They act on the
+  // configured server's filesystem, never this machine's, and delete_file
+  // removes one file or one empty directory, never a tree.
+  'rename_file',
+  'delete_file',
+  'make_directory',
   'get_server_metrics',
   // Item 47. A READ of history OpsMaxx already stores: it opens no
   // connection, reaches no shell, and answers about a server that is offline.

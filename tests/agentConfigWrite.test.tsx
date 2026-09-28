@@ -174,6 +174,24 @@ describe('updating a server', () => {
     expect(JSON.parse(setCalls[0].blob).password).toBe('hunter2')
   })
 
+  // Certificate auth is the key plus the certificate beside it, in one blob --
+  // the shape AddServerModal writes and credentialResolver reads.
+  it('stores the certificate path beside the key for certificate auth', async () => {
+    mount()
+    fire?.({
+      id: 'r1',
+      request: {
+        kind: 'server.update',
+        serverId: 's1',
+        patch: { auth: 'certificate', keyPath: '/k', passphrase: 'p', certificatePath: '/ca/k-cert.pub' }
+      }
+    })
+
+    await waitFor(() => expect(setCalls).toHaveLength(1))
+    expect(JSON.parse(setCalls[0].blob)).toEqual({ keyPath: '/k', passphrase: 'p', certificatePath: '/ca/k-cert.pub' })
+    expect(useApp.getState().servers[0].auth).toBe('certificate')
+  })
+
   it('applies a jump chain, giving each hop the id the store expects', async () => {
     mount()
     fire?.({

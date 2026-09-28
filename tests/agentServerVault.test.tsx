@@ -95,4 +95,23 @@ describe('a server an AI agent adds', () => {
     await waitFor(() => expect(stored).not.toBeNull())
     expect(JSON.parse(stored!.blob)).toEqual({ password: 'hunter2' })
   })
+
+  // Only a password is moved into the vault here. A key is a path to a file,
+  // and certificate auth names a second file beside it; both stay in the
+  // per-server blob, in the shape AddServerModal writes and the resolver reads.
+  it('stores certificate auth as the key and certificate paths, even with the vault open', async () => {
+    const createEntry = vi.fn(async () => 'v-new')
+    useVault.setState({ stage: 'open', unlocked: true, entries: [], createEntry } as never)
+    mount()
+
+    fire?.({
+      id: 'r1',
+      request: { ...REQUEST, auth: 'certificate', password: undefined, keyPath: '/k', certificatePath: '/ca/k-cert.pub' }
+    })
+
+    await waitFor(() => expect(stored).not.toBeNull())
+    expect(createEntry).not.toHaveBeenCalled()
+    expect(JSON.parse(stored!.blob)).toEqual({ keyPath: '/k', certificatePath: '/ca/k-cert.pub' })
+    expect(useApp.getState().servers[0].auth).toBe('certificate')
+  })
 })

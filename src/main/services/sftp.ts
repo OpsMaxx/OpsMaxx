@@ -628,6 +628,15 @@ export async function sftpRename(key: string, from: string, to: string): Promise
   return op(key, (sftp, done) => sftp.rename(from, to, done))
 }
 
+// lstat, not stat: a symlink is reported as a link, never as what it points at.
+export async function sftpIsDirectory(key: string, path: string): Promise<SftpResult<boolean>> {
+  const conn = conns.get(key)
+  if (!conn) return { ok: false, error: 'not connected' }
+  return new Promise((resolve) => {
+    conn.sftp.lstat(path, (err, st) => resolve(err ? { ok: false, error: err.message } : { ok: true, data: st.isDirectory() }))
+  })
+}
+
 export async function sftpDelete(key: string, path: string, dir: boolean): Promise<SftpResult> {
   return op(key, (sftp, done) => (dir ? sftp.rmdir(path, done) : sftp.unlink(path, done)))
 }

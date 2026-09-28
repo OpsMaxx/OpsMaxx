@@ -75,6 +75,9 @@ describe('sftp transport capabilities are enforced', () => {
     const c = await connect()
     try {
       expect(await call(c, 'write_file', { serverName: 'Box', path: '/tmp/x', content: 'hi' })).toContain('Denied')
+      expect(await call(c, 'rename_file', { serverName: 'Box', from: '/tmp/x', to: '/tmp/y' })).toContain('Denied')
+      expect(await call(c, 'delete_file', { serverName: 'Box', path: '/tmp/x' })).toContain('Denied')
+      expect(await call(c, 'make_directory', { serverName: 'Box', path: '/tmp/d' })).toContain('Denied')
     } finally {
       setCapability('sftpUpload', 'allow')
       await c.close()
@@ -96,6 +99,46 @@ describe('sftp transport capabilities are enforced', () => {
       expect(details).toContain('Read files: ALLOW')
     } finally {
       setCapability('sftpUpload', 'allow')
+      await c.close()
+    }
+  })
+
+  // Both ends of a rename are writes, and the source is also a read: moving a
+  // file out from under a deny rule is the read or write that rule refused.
+  it('rename_file is refused when EITHER path is denied', async () => {
+    const c = await connect()
+    try {
+      expect(await call(c, 'rename_file', { serverName: 'Box', from: '/tmp/x', to: '/root/.ssh/authorized_keys' })).toMatch(
+        /^Denied: Path rule "\/root\/\.ssh\/\*\*"/
+      )
+      expect(await call(c, 'rename_file', { serverName: 'Box', from: '/etc/shadow', to: '/tmp/shadow' })).toMatch(
+        /^Denied: Path rule "\/etc\/shadow"/
+      )
+    } finally {
+      await c.close()
+    }
+  })
+
+  it('rename_file cannot move a read-denied file somewhere readable', async () => {
+    const full = listGroups().find((g) => g.id === 'grp-full')!
+    saveGroup({ ...full, filePolicies: [...full.filePolicies, { id: 'fp-t', pattern: '/srv/secret/**', read: 'deny' }] })
+    const c = await connect()
+    try {
+      expect(await call(c, 'rename_file', { serverName: 'Box', from: '/srv/secret/k', to: '/tmp/k' })).toMatch(
+        /^Denied: Path rule "\/srv\/secret\/\*\*" \(read\)/
+      )
+    } finally {
+      saveGroup(full)
+      await c.close()
+    }
+  })
+
+  it('delete_file and make_directory follow the write path rules', async () => {
+    const c = await connect()
+    try {
+      expect(await call(c, 'delete_file', { serverName: 'Box', path: '/etc/shadow' })).toMatch(/^Denied: Path rule/)
+      expect(await call(c, 'make_directory', { serverName: 'Box', path: '/root/.ssh/x' })).toMatch(/^Denied: Path rule/)
+    } finally {
       await c.close()
     }
   })

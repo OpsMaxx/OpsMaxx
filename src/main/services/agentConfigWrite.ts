@@ -45,10 +45,12 @@ export interface AgentServerRequest {
   host: string
   port: number
   username: string
-  auth: 'password' | 'key' | 'agent'
+  auth: SshAuth
   password?: string
   keyPath?: string
   passphrase?: string
+  /** With auth 'certificate'. Absent means `<keyPath>-cert.pub`; see SshHop.certificatePath. */
+  certificatePath?: string
   os?: string
   /** The jump chain, first hop dialled first. Absent means connect directly. */
   route?: AgentHop[]
@@ -77,10 +79,11 @@ export interface AgentServerPatch {
   host?: string
   port?: number
   username?: string
-  auth?: 'password' | 'key' | 'agent'
+  auth?: SshAuth
   password?: string
   keyPath?: string
   passphrase?: string
+  certificatePath?: string
   os?: string
   route?: AgentHop[]
   cloud?: CloudTarget
