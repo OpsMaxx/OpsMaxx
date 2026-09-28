@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { formatDbCell } from '../../../../shared/dbCell'
 import { ClipboardPaste, Copy, Eraser, Loader2, TextSelect } from 'lucide-react'
 import { ContextMenu, type MenuEntry } from '../connections/ContextMenu'
 import { shellPrompt } from '../../../../shared/dbshell'
@@ -260,8 +261,7 @@ function Output({ result }: { result: DbShellResult }): React.JSX.Element | null
 
 // Align rows into fixed-width columns, psql style.
 function renderTable(columns: string[], rows: unknown[][]): string {
-  const cell = (v: unknown): string =>
-    v === null || v === undefined ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v)
+  const cell = formatDbCell
   const body = rows.map((r) => columns.map((_, i) => cell(r[i])))
   const widths = columns.map((c, i) =>
     Math.min(60, Math.max(c.length, ...body.map((r) => r[i].length), 0))

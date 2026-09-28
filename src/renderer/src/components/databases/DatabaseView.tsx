@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { formatDbCell } from '../../../../shared/dbCell'
 import {
   Play,
   Plug,
@@ -884,6 +885,11 @@ function DatabaseNode({
   )
 }
 
+// A JSON value is one unbroken run of text, so without this a single payload
+// column widens the table past the screen. Wrapped anywhere, kept whole, so
+// selecting a cell still copies the entire value.
+const CELL_STYLE: React.CSSProperties = { maxWidth: 480, overflowWrap: 'anywhere' }
+
 function Results({
   result,
   phase,
@@ -956,8 +962,8 @@ function Results({
             <tr key={i}>
               <td className="faint">{i + 1}</td>
               {r.map((v, j) => (
-                <td key={j} className="mono selectable">
-                  {v === null ? <span className="faint">NULL</span> : String(v)}
+                <td key={j} className="mono selectable" style={CELL_STYLE}>
+                  {v === null ? <span className="faint">NULL</span> : formatDbCell(v)}
                 </td>
               ))}
             </tr>
@@ -973,12 +979,7 @@ function Results({
   const j = result.json
   if (Array.isArray(j) && j.length > 0 && j.every((x) => x && typeof x === 'object' && !Array.isArray(x))) {
     const cols = Array.from(new Set(j.flatMap((o) => Object.keys(o as object)))).slice(0, 40)
-    const cell = (v: unknown): string =>
-      v === null || v === undefined
-        ? ''
-        : typeof v === 'object'
-          ? JSON.stringify(v)
-          : String(v)
+    const cell = formatDbCell
     return (
       <table className="table" style={{ fontSize: 12 }}>
         <thead>
@@ -994,7 +995,7 @@ function Results({
             <tr key={i}>
               <td className="faint">{i + 1}</td>
               {cols.map((c) => (
-                <td key={c} className="mono selectable">
+                <td key={c} className="mono selectable" style={CELL_STYLE}>
                   {c in o ? cell(o[c]) : <span className="faint">—</span>}
                 </td>
               ))}
