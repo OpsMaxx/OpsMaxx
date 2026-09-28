@@ -1290,7 +1290,12 @@ button {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  /* One line, always. The height is fixed, so a label allowed to wrap in a
+     narrow table cell ("Approved, ran (exit 0)" in the AI audit log) broke
+     onto a second line that spilled out of the pill. The column widens to fit
+     instead, and the free-text columns beside it are the ones that wrap. */
   height: 18px;
+  white-space: nowrap;
   padding: 0 7px;
   font-size: var(--fs-body);
   font-weight: 600;
