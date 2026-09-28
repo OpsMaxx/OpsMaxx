@@ -21,6 +21,8 @@ import {
   writeCodexConfigTo,
   codexConfigPath
 } from '../src/main/services/clientConfig'
+import { registerCodexMcp } from '../src/cli/agents'
+import { LEGACY_MCP_SERVER_KEYS } from '../src/shared/mcpClientKeys'
 
 let dir: string
 let file: string
@@ -264,4 +266,84 @@ describe('the backup copy', () => {
       expect(readFileSync(backupOf(f), 'utf8')).toBe(w.body)
     })
   }
+})
+
+// A client names every tool after its config key, not after the name the server
+// declares. An entry from before the rename kept working -- same port -- so
+// nothing ever signalled it was stale, and re-registering only removed the
+// CURRENT key, adding a second entry beside the old one. Agents went on listing
+// every tool under the retired name long after nothing in this repo carried it.
+describe('entries left from before the rename', () => {
+  it('are removed by the Claude Code one-liner, before the add', () => {
+    const cmd = claudeCodeCommand('tok', 5177)
+    for (const key of LEGACY_MCP_SERVER_KEYS) {
+      const remove = `claude mcp remove ${key} -s user 2>/dev/null;`
+      expect(cmd).toContain(remove)
+      expect(cmd.indexOf(remove)).toBeLessThan(cmd.indexOf('mcp add'))
+    }
+  })
+
+  it('are dropped from claude_desktop_config.json, and the user\'s other servers are not', () => {
+    const legacy = Object.fromEntries(LEGACY_MCP_SERVER_KEYS.map((k) => [k, { command: 'node', args: ['old'] }]))
+    writeFileSync(file, JSON.stringify({ mcpServers: { ...legacy, burp: { command: 'python' } } }))
+    expect(writeClaudeDesktopConfigTo(file, 'tok', 5177).ok).toBe(true)
+    expect(Object.keys(read().mcpServers).sort()).toEqual(['burp', 'opsmaxx'])
+  })
+
+  it('are dropped from the Codex config, sub-tables included, and nothing else is', () => {
+    const codex = join(dir, 'config.toml')
+    const legacy = LEGACY_MCP_SERVER_KEYS.map(
+      (k) => `[mcp_servers.${k}]\ncommand = "node"\n\n[mcp_servers.${k}.env]\nX = "1"\n`
+    ).join('\n')
+    writeFileSync(codex, `model = "gpt-5"\n\n${legacy}\n[mcp_servers.other]\ncommand = "python"\n`)
+    expect(writeCodexConfigTo(codex, 'tok', 5177).ok).toBe(true)
+    const toml = readFileSync(codex, 'utf8')
+    for (const k of LEGACY_MCP_SERVER_KEYS) expect(toml).not.toContain(`mcp_servers.${k}`)
+    expect(toml).toContain('model = "gpt-5"')
+    expect(toml).toContain('[mcp_servers.other]')
+    expect(toml.match(/\[mcp_servers\.opsmaxx\]/g)).toHaveLength(1)
+  })
+})
+
+// The app and the CLI both write a Codex block. They used to open it with
+// different marker sentences, so neither recognised the other's and running
+// both stacked two [mcp_servers.opsmaxx] tables in one file.
+describe('the CLI and the app writing the same Codex config', () => {
+  const skipOnWindows = process.platform === 'win32' ? it.skip : it
+  let home: string | undefined
+  beforeEach(() => {
+    home = process.env.HOME
+    process.env.HOME = dir
+  })
+  afterEach(() => {
+    process.env.HOME = home
+  })
+
+  skipOnWindows('replace one block rather than stacking two, in either order', () => {
+    const codex = join(dir, '.codex', 'config.toml')
+    registerCodexMcp('/bin/opsmaxx', '/cli.js', 'cli-token', 5177)
+    expect(writeCodexConfigTo(codex, 'app-token', 5177).ok).toBe(true)
+    registerCodexMcp('/bin/opsmaxx', '/cli.js', 'cli-token-2', 5177)
+    const toml = readFileSync(codex, 'utf8')
+    expect(toml.match(/\[mcp_servers\.opsmaxx\]/g)).toHaveLength(1)
+    expect(toml).toContain('cli-token-2')
+    expect(toml).not.toContain('app-token')
+  })
+
+  skipOnWindows('recognises a block an older CLI wrote under its old marker sentence', () => {
+    const codex = join(dir, '.codex', 'config.toml')
+    registerCodexMcp('/bin/opsmaxx', '/cli.js', 'x', 5177)
+    const old = readFileSync(codex, 'utf8').replace(
+      'written by OpsMaxx, safe to remove',
+      'edited by `opsmaxx codex`, safe to remove'
+    )
+    writeFileSync(codex, old)
+    expect(writeCodexConfigTo(codex, 'tok', 5177).ok).toBe(true)
+    expect(readFileSync(codex, 'utf8').match(/\[mcp_servers\.opsmaxx\]/g)).toHaveLength(1)
+  })
+
+  skipOnWindows('writes the token-bearing file 0600 from the CLI too', () => {
+    registerCodexMcp('/bin/opsmaxx', '/cli.js', 'tok', 5177)
+    expect(statSync(join(dir, '.codex', 'config.toml')).mode & 0o777).toBe(0o600)
+  })
 })

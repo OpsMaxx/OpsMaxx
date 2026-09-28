@@ -1,20 +1,31 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { atomicWriteFileSync } from '../main/services/atomicWrite.js'
+import {
+  CODEX_BLOCK_END,
+  CODEX_BLOCK_START,
+  LEGACY_MCP_SERVER_KEYS,
+  MCP_SERVER_KEY,
+  spliceCodexBlock
+} from '../shared/mcpClientKeys.js'
 
-function bridgeArgs(execPath: string, selfScript: string, token: string, port: number): string[] {
+function bridgeArgs(selfScript: string, token: string, port: number): string[] {
   return [selfScript, 'bridge', '--token', token, '--port', String(port)]
 }
 
 // Re-registers (remove, then add) so a fresh pairing always replaces a
 // stale/expired token instead of leaving Claude Code pointed at one that no
-// longer works.
+// longer works. The legacy keys go too — see shared/mcpClientKeys.ts for why an
+// entry from before the rename otherwise outlives every re-registration.
 export function registerClaudeMcp(execPath: string, selfScript: string, token: string, port: number): void {
-  spawnSync('claude', ['mcp', 'remove', 'opsmaxx'], { stdio: 'ignore', shell: process.platform === 'win32' })
+  for (const key of [MCP_SERVER_KEY, ...LEGACY_MCP_SERVER_KEYS]) {
+    spawnSync('claude', ['mcp', 'remove', key], { stdio: 'ignore', shell: process.platform === 'win32' })
+  }
   const res = spawnSync(
     'claude',
-    ['mcp', 'add', '--transport', 'stdio', 'opsmaxx', '--', execPath, ...bridgeArgs(execPath, selfScript, token, port)],
+    ['mcp', 'add', '--transport', 'stdio', MCP_SERVER_KEY, '--', execPath, ...bridgeArgs(selfScript, token, port)],
     { stdio: ['ignore', 'ignore', 'inherit'], shell: process.platform === 'win32' }
   )
   if (res.error || res.status !== 0) {
@@ -22,34 +33,26 @@ export function registerClaudeMcp(execPath: string, selfScript: string, token: s
   }
 }
 
-const TOML_START = '# >>> opsmaxx managed block — edited by `opsmaxx codex`, safe to remove >>>'
-const TOML_END = '# <<< opsmaxx managed block <<<'
-
-// Codex's MCP config is a TOML file, not JSON, and there is no existing TOML
-// dependency in this project — string-splice a marked block instead of
-// pulling one in for two key/value pairs. TOML basic-string escaping is a
-// subset of JSON's, so JSON.stringify is a safe way to quote each value.
+// Codex has no `mcp add` command, so edit ~/.codex/config.toml directly. The
+// block and its markers are the app's own (main/services/clientConfig.ts), so
+// running both writers replaces one block rather than stacking two.
 export function registerCodexMcp(execPath: string, selfScript: string, token: string, port: number): void {
   const dir = join(homedir(), '.codex')
   const file = join(dir, 'config.toml')
   mkdirSync(dir, { recursive: true })
   const existing = existsSync(file) ? readFileSync(file, 'utf8') : ''
 
-  const args = bridgeArgs(execPath, selfScript, token, port)
+  const args = bridgeArgs(selfScript, token, port)
   const block = [
-    TOML_START,
-    '[mcp_servers.opsmaxx]',
+    CODEX_BLOCK_START,
+    `[mcp_servers.${MCP_SERVER_KEY}]`,
     `command = ${JSON.stringify(execPath)}`,
     `args = [${args.map((a) => JSON.stringify(a)).join(', ')}]`,
-    TOML_END
+    CODEX_BLOCK_END
   ].join('\n')
 
-  const startIdx = existing.indexOf(TOML_START)
-  const endIdx = existing.indexOf(TOML_END)
-  const next =
-    startIdx !== -1 && endIdx !== -1
-      ? existing.slice(0, startIdx) + block + existing.slice(endIdx + TOML_END.length)
-      : existing.trimEnd() + (existing.trim() ? '\n\n' : '') + block + '\n'
-
-  writeFileSync(file, next, 'utf8')
+  // 0600 and atomic, as the app's writer is: the block carries a bearer token,
+  // and this file lives outside any directory OpsMaxx owns, so the umask was
+  // all that stood between the token and the rest of the machine.
+  atomicWriteFileSync(file, spliceCodexBlock(existing, block), 0o600, `${file}.opsmaxx-tmp`)
 }

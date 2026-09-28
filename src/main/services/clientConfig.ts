@@ -3,13 +3,20 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { atomicWriteFileSync } from './atomicWrite'
+import {
+  CODEX_BLOCK_END,
+  CODEX_BLOCK_START,
+  LEGACY_MCP_SERVER_KEYS,
+  MCP_SERVER_KEY,
+  spliceCodexBlock
+} from '../../shared/mcpClientKeys'
 
 // Writes MCP client configuration on the user's behalf, so connecting an agent
 // is a button rather than a hand-edited JSON file with a 130-character absolute
 // path in it. Nothing here grants access — the token it embeds was already
 // minted by mcpAuth with an explicit workspace/group scope.
 
-const SERVER_KEY = 'opsmaxx'
+const SERVER_KEY = MCP_SERVER_KEY
 
 // process.execPath is OpsMaxx's own Electron binary. With
 // ELECTRON_RUN_AS_NODE it runs plain JS, so the bridge needs no separate Node
@@ -52,6 +59,11 @@ export function httpUrl(port: number): string {
 // revoked one being replaced — so the plain add would have failed exactly when
 // it was needed most. `opsmaxx claude` has always done remove-then-add for
 // this reason (src/cli/agents.ts); this just matches it.
+//
+// The legacy keys are removed too. Removing only the current one left an entry
+// from before the rename in place beside the new one, and Claude Code names
+// every tool after its config key — so agents went on listing the retired name
+// long after nothing in this repo carried it. See shared/mcpClientKeys.ts.
 export function claudeCodeCommand(token: string, port: number): string {
   const add = [
     'claude mcp add -s user --transport http',
@@ -59,7 +71,10 @@ export function claudeCodeCommand(token: string, port: number): string {
     httpUrl(port),
     `--header "Authorization: Bearer ${token}"`
   ].join(' ')
-  return `claude mcp remove ${SERVER_KEY} -s user 2>/dev/null; ${add}`
+  const removes = [SERVER_KEY, ...LEGACY_MCP_SERVER_KEYS]
+    .map((key) => `claude mcp remove ${key} -s user 2>/dev/null;`)
+    .join(' ')
+  return `${removes} ${add}`
 }
 
 export function claudeDesktopConfigPath(): string {
@@ -143,6 +158,9 @@ export function writeClaudeDesktopConfigTo(file: string, token: string, port: nu
       ? { ...(existing.mcpServers as Record<string, unknown>) }
       : {}
 
+  // An entry left from before the rename points at the same bridge and would
+  // show every tool twice, once under the retired name.
+  for (const key of LEGACY_MCP_SERVER_KEYS) delete servers[key]
   const { command, args, env } = bridgeInvocation(token, port)
   servers[SERVER_KEY] = { command, args, env }
 
@@ -179,11 +197,10 @@ export function writeClaudeDesktopConfigTo(file: string, token: string, port: nu
 //
 // There is no TOML dependency in this project and adding one for three
 // key/value pairs is not worth it, so the entry is spliced in as a marked
-// block, the same approach `opsmaxx codex` already uses (src/cli/agents.ts).
-// TOML basic-string escaping is a subset of JSON's, which makes JSON.stringify
-// a safe way to quote each value.
-const TOML_START = '# >>> opsmaxx managed block — written by OpsMaxx, safe to remove >>>'
-const TOML_END = '# <<< opsmaxx managed block <<<'
+// block, the same approach `opsmaxx codex` already uses (src/cli/agents.ts),
+// with the same markers (shared/mcpClientKeys.ts). TOML basic-string escaping
+// is a subset of JSON's, which makes JSON.stringify a safe way to quote each
+// value.
 
 export function writeCodexConfig(token: string, port: number): WriteResult {
   return writeCodexConfigTo(codexConfigPath(), token, port)
@@ -192,14 +209,14 @@ export function writeCodexConfig(token: string, port: number): WriteResult {
 export function writeCodexConfigTo(file: string, token: string, port: number): WriteResult {
   const { command, args, env } = bridgeInvocation(token, port)
   const block = [
-    TOML_START,
-    '[mcp_servers.opsmaxx]',
+    CODEX_BLOCK_START,
+    `[mcp_servers.${SERVER_KEY}]`,
     `command = ${JSON.stringify(command)}`,
     `args = [${args.map((a) => JSON.stringify(a)).join(', ')}]`,
     `env = { ${Object.entries(env)
       .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
       .join(', ')} }`,
-    TOML_END
+    CODEX_BLOCK_END
   ].join('\n')
 
   let existing = ''
@@ -223,12 +240,7 @@ export function writeCodexConfigTo(file: string, token: string, port: number): W
 
   // Replacing between the markers keeps everything the user wrote around it,
   // and re-running replaces the previous block rather than stacking another.
-  const startIdx = existing.indexOf(TOML_START)
-  const endIdx = existing.indexOf(TOML_END)
-  const next =
-    startIdx !== -1 && endIdx !== -1 && endIdx > startIdx
-      ? existing.slice(0, startIdx) + block + existing.slice(endIdx + TOML_END.length)
-      : existing.trimEnd() + (existing.trim() ? '\n\n' : '') + block + '\n'
+  const next = spliceCodexBlock(existing, block)
 
   try {
     mkdirSync(dirname(file), { recursive: true })
