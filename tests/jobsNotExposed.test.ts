@@ -94,6 +94,12 @@ const ALLOWED_TOOLS = [
   'get_host_facts',
   'list_databases',
   'query_database',
+  // Saved database connections, edited like saved servers. OpsMaxx records
+  // only: none of them starts, schedules or queues anything.
+  'add_database',
+  'update_database',
+  'remove_database',
+  'test_database',
   'list_tunnels',
   'set_tunnel',
   // Defining and deleting a tunnel record. Both write to OpsMaxx's own

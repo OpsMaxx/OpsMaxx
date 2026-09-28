@@ -243,7 +243,7 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
   },
   {
     id: 'manageServers',
-    label: 'Add, change and remove servers in the workspace',
+    label: 'Add, change and remove servers and databases in the workspace',
     // Says all three, because it grants all three. It used to say only "Adds a
     // new server", which was true when add_server was the whole of this
     // capability and became the most misleading sentence in this file the
@@ -257,7 +257,10 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     // approval is one change", which stopped being true when repeat edits to a
     // server the operator had just approved were folded into that first yes. A
     // sentence that understates what a yes buys is the same bug as a label that
-    // understates what a grant buys.
+    // understates what a grant buys. Databases joined it for the same reason
+    // the server tools share it: it is the permission to edit OpsMaxx's own
+    // connection list, and a second switch for the same act would be one an
+    // administrator could leave open while believing they had shut it.
     detail:
       'Adds a server to the workspace, changes a saved one — including where it points, which ' +
       'account it uses and which other saved server it jumps through — and removes one. It does ' +
@@ -266,7 +269,9 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
       'connection still ask. When a change asks, approving it covers further changes to that same ' +
       'server for the rest of that agent session and nothing else; each removal is asked for on ' +
       'its own. With Confirm risky actions off, allow is a standing permission to repoint or ' +
-      'delete what is already saved.'
+      'delete what is already saved. The same applies to saved database connections, including ' +
+      'which saved server a database is reached through; querying a database is Database access, ' +
+      'not this.'
   },
   {
     id: 'vpnControl',
@@ -432,7 +437,7 @@ export interface McpGlobalConfig {
  * AI & MCP → AI Agents having been told which group they are granting.
  *
  * Deliberately NOT "the most restrictive group that exists", which this
- * setting's own doc comment used to promise. Restrictiveness over 28
+ * setting's own doc comment used to promise. Restrictiveness over 21
  * capabilities plus per-path file rules is a partial order, not a ranking: a
  * group that allows reads and refuses the terminal and one that does the reverse
  * are incomparable, so any "narrowest group" has to break ties — and the only

@@ -12,8 +12,13 @@
 // removals and tunnels — which are all "call one store action and report back".
 // Collapsing them would have meant rewriting the add path's test to prove a
 // refactor, which is the wrong thing to spend a rewrite on.
+//
+// Databases came later still and went through the writer, credential and all:
+// a database add is one store call plus one secret, with no rollback subtler
+// than deleting the row, which is the writer's shape rather than the creator's.
 
 import type { CloudTarget } from '../../shared/cloud'
+import type { DbKind } from '../../shared/db'
 import type { SshAuth } from '../../shared/ssh'
 import type { TunnelKind } from '../../shared/tunnel'
 
@@ -81,6 +86,27 @@ export interface AgentServerPatch {
   cloud?: CloudTarget
 }
 
+/** A saved database connection as an agent may describe it.
+ *
+ *  `host` is only ever a display host: for a connection-string entry main has
+ *  already reduced the string to `displayHostFromUri`, because the string
+ *  itself usually carries a password and belongs in `AgentDatabaseSecret`, never
+ *  in the record. There is no VPN field: an agent does not choose which network
+ *  anything travels over (see the VPN rule in mcpServer INSTRUCTIONS). */
+export interface AgentDatabaseFields {
+  name: string
+  kind: DbKind
+  host: string
+  port: number
+  username: string
+  database: string
+  ssl: boolean
+  uri: boolean
+  sshServerId: string | null
+}
+
+export type AgentDatabaseSecret = { password: string } | { uri: string }
+
 export type AgentConfigRequest =
   | { kind: 'server.update'; serverId: string; patch: AgentServerPatch }
   | { kind: 'server.remove'; serverId: string }
@@ -94,6 +120,15 @@ export type AgentConfigRequest =
       target: string
     }
   | { kind: 'tunnel.remove'; tunnelId: string }
+  | { kind: 'database.add'; workspaceId: string; fields: AgentDatabaseFields; secret?: AgentDatabaseSecret }
+  | {
+      kind: 'database.update'
+      databaseId: string
+      patch: Partial<AgentDatabaseFields>
+      /** Absent means keep the stored credential. */
+      secret?: AgentDatabaseSecret
+    }
+  | { kind: 'database.remove'; databaseId: string }
 
 export interface AgentConfigResult {
   ok: boolean

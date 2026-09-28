@@ -5,6 +5,8 @@ import { useVault } from '../../store/vault'
 import { toast } from '../../store/toast'
 import { bridgeOn } from '../../lib/bridge'
 import { rdpSecretId } from '../../../../shared/rdp'
+import type { DbKind } from '../../../../shared/db'
+import { saveDatabaseEdit } from '../../store/dbEditor'
 import type { Hop, TunnelKind } from '../../types'
 
 /**
@@ -66,6 +68,58 @@ type ConfigRequest =
       target: string
     }
   | { kind: 'tunnel.remove'; tunnelId: string }
+  | { kind: 'database.add'; workspaceId: string; fields: DatabaseFields; secret?: DatabaseSecret }
+  | { kind: 'database.update'; databaseId: string; patch: Partial<DatabaseFields>; secret?: DatabaseSecret }
+  | { kind: 'database.remove'; databaseId: string }
+
+interface DatabaseFields {
+  name: string
+  kind: DbKind
+  host: string
+  port: number
+  username: string
+  database: string
+  ssl: boolean
+  uri: boolean
+  sshServerId: string | null
+}
+
+type DatabaseSecret = { password: string } | { uri: string }
+
+/**
+ * What to store under a database's id for a credential an agent sent.
+ *
+ * The same preference Add Database applies: into the vault, as a `login` for a
+ * password and a `key` for a connection string, because a vault entry travels
+ * in an encrypted backup and a keychain copy does not. And the same rule the
+ * agent's server add follows: only when the vault is already open. Nobody is at
+ * the keyboard for this, so it never raises a master-password prompt.
+ */
+async function databaseSecretFor(
+  name: string,
+  username: string,
+  secret: DatabaseSecret
+): Promise<{ stored: Record<string, string>; intoVault: boolean }> {
+  if (useVault.getState().stage === 'open') {
+    const isUri = 'uri' in secret
+    const entryId = isUri
+      ? await useVault.getState().createEntry('key', {
+          name,
+          password: secret.uri,
+          tags: ['database', 'connection-string', 'agent']
+        })
+      : await useVault.getState().createEntry('login', {
+          name: username ? `${name} (${username})` : name,
+          username,
+          password: secret.password,
+          tags: ['database', 'agent']
+        })
+    if (entryId) {
+      return { stored: isUri ? { vaultUriEntryId: entryId } : { vaultEntryId: entryId }, intoVault: true }
+    }
+  }
+  return { stored: { ...secret }, intoVault: false }
+}
 
 /**
  * Main's hops, given the ids the store expects.
@@ -268,7 +322,10 @@ export function AgentConfigWatcher(): null {
                 kind: req.tunnelKind,
                 serverId: req.serverId,
                 listen: req.listen,
-                target: req.target
+                target: req.target,
+                // The carrier's workspace, which main resolved. Without it the
+                // tunnel landed in whichever workspace was on screen.
+                workspaceId: req.workspaceId
               })
               // Says that it is defined and NOT running. The two are separate
               // approvals on the bridge and conflating them here would make the
@@ -289,6 +346,85 @@ export function AgentConfigWatcher(): null {
               useApp.getState().deleteTunnel(req.tunnelId)
               toast(`An AI agent removed the tunnel ${gone.name}.`, 'ok')
               api?.replyConfigWrite?.(id, { ok: true, id: req.tunnelId })
+              return
+            }
+            case 'database.add': {
+              const databaseId = useApp.getState().addDatabase({
+                ...req.fields,
+                folderId: null,
+                vpnProfileId: null,
+                workspaceId: req.workspaceId
+              })
+              let intoVault = false
+              if (req.secret) {
+                const put = await databaseSecretFor(req.fields.name, req.fields.username, req.secret)
+                intoVault = put.intoVault
+                const ok = await window.opsmaxx?.secrets.set(databaseId, JSON.stringify(put.stored))
+                if (ok === false) {
+                  // Same call as the server add: a connection saved without the
+                  // credential the agent supplied cannot authenticate, so it is
+                  // taken back out rather than reported as added.
+                  useApp.getState().deleteDatabase(databaseId)
+                  toast(
+                    `${req.fields.name} was not added — this computer's secure storage refused the credential.`,
+                    'error'
+                  )
+                  api?.replyConfigWrite?.(id, {
+                    ok: false,
+                    error: 'OS secure storage is unavailable, so the credential could not be saved.'
+                  })
+                  return
+                }
+              }
+              toast(
+                `An AI agent added the database ${req.fields.name}.` +
+                  (intoVault ? ' Its credential was saved in the vault.' : ''),
+                'ok',
+                { label: 'Show it', run: () => useApp.getState().setActivity('databases') }
+              )
+              api?.replyConfigWrite?.(id, { ok: true, id: databaseId })
+              return
+            }
+            case 'database.update': {
+              const before = useApp.getState().databases.find((d) => d.id === req.databaseId)
+              if (!before) throw new Error('That database no longer exists.')
+              // Through the dialog's own save path, which bumps the revision and
+              // closes the cached client -- so the next query reaches what the
+              // record now names rather than what it used to.
+              saveDatabaseEdit(req.databaseId, req.patch)
+              if (req.secret) {
+                const name = req.patch.name ?? before.name
+                const put = await databaseSecretFor(name, req.patch.username ?? before.username, req.secret)
+                const ok = await window.opsmaxx?.secrets.set(req.databaseId, JSON.stringify(put.stored))
+                if (ok === false) {
+                  toast(
+                    `${name} was changed, but this computer's secure storage refused the new credential.`,
+                    'error'
+                  )
+                  api?.replyConfigWrite?.(id, {
+                    ok: false,
+                    error: 'OS secure storage is unavailable, so the credential could not be saved.'
+                  })
+                  return
+                }
+              }
+              toast(`An AI agent changed the database ${req.patch.name ?? before.name}.`, 'ok', {
+                label: 'Show it',
+                run: () => useApp.getState().setActivity('databases')
+              })
+              api?.replyConfigWrite?.(id, { ok: true, id: req.databaseId })
+              return
+            }
+            case 'database.remove': {
+              const gone = useApp.getState().databases.find((d) => d.id === req.databaseId)
+              if (!gone) throw new Error('That database no longer exists.')
+              // Close before forgetting, as a tunnel is stopped first: a pooled
+              // client whose record is gone is a connection nothing can close.
+              await window.opsmaxx?.db?.close?.(req.databaseId)
+              useApp.getState().deleteDatabase(req.databaseId)
+              void window.opsmaxx?.secrets.delete(req.databaseId)
+              toast(`An AI agent removed the database ${gone.name}.`, 'ok')
+              api?.replyConfigWrite?.(id, { ok: true, id: req.databaseId })
               return
             }
           }

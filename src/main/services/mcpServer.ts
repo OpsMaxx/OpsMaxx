@@ -30,6 +30,7 @@ import {
   getCachedWorkspace,
   getCachedServer,
   listCachedDatabases,
+  getCachedDatabase,
   listCachedTunnels,
   listCachedVpns,
   listCachedCicdConnections,
@@ -82,7 +83,9 @@ import type { DockerContainer } from '../../shared/docker'
 import { sshExec, sshTest } from './ssh'
 import { preparedSshTarget } from './vpn/transport'
 import { classifyConnectionError, agentFaultSentence } from '../../shared/connectionError'
-import { dbQuery } from './db'
+import { dbQuery, dbTest } from './db'
+import { displayHostFromUri } from '../../shared/dbAddress'
+import type { DbKind } from '../../shared/db'
 import { tunnelStart, tunnelStop, tunnelList } from './tunnel'
 import { parseEndpoint, TUNNEL_DEFAULT_LISTEN } from '../../shared/tunnel'
 import {
@@ -105,6 +108,7 @@ import type { CicdAdapter, CicdConnection, CicdOutcome, CicdRun, CicdTriggerResu
 import {
   createServerForAgent,
   writeConfigForAgent,
+  type AgentDatabaseFields,
   type AgentHop,
   type AgentServerPatch
 } from './agentConfigWrite'
@@ -746,6 +750,33 @@ function effectiveWorkspaceCapability(
     (g) => evaluateAsEnforced(g, capability),
     opts.mutating ?? MUTATING_CAPABILITIES.has(capability)
   )
+}
+
+/**
+ * Which of the session's workspaces a LIST of workspace-level things may show.
+ *
+ * The list tools for databases and VPNs used to check nothing, so a workspace
+ * whose group denied databaseAccess still disclosed every database name in it
+ * -- while list_servers, list_tunnels and list_ci_connections each filtered on
+ * their own capability. Listing is a read, so it is evaluated as one: a
+ * read-only profile must not hide the VPNs it is only refusing to START.
+ */
+function workspacesThatMayList(session: McpAgentSession, capability: AiCapability): Set<string> {
+  return new Set(
+    session.workspaces
+      .map((w) => w.id)
+      .filter((id) => effectiveWorkspaceCapability(session, id, capability, { mutating: false }).decision !== 'deny')
+  )
+}
+
+// Default ports per engine, for an add that names none. The Add Database dialog
+// holds the same table (AddDatabaseModal KINDS); main cannot import the renderer.
+const DEFAULT_DB_PORT: Record<DbKind, number> = {
+  postgres: 5432,
+  mysql: 3306,
+  mssql: 1433,
+  mongodb: 27017,
+  redis: 6379
 }
 
 function effectiveCommand(session: McpAgentSession, serverId: string, command: string): Decision {
@@ -1477,7 +1508,9 @@ Addressing
 - You never see a CI connection's base URL, API token or username, and cannot ask for them.
   OpsMaxx resolves the name and authenticates against the provider on your behalf.
 - Saved databases are a THIRD name space, addressed by the friendly name list_databases
-  returns. You never see a host, port or credential for one.
+  returns. You never see a host, port or credential for one. add_database, update_database
+  and remove_database edit OpsMaxx's saved connections, not anything on the database server;
+  test_database connects and hangs up. None of them can choose a VPN.
 - A JUMP HOST is named the same way. add_server and update_server take jumpHosts as friendly
   names of servers that already exist, and each hop authenticates with that server's own stored
   credential. You cannot describe a bastion OpsMaxx has not been told about, and you do not
@@ -3016,7 +3049,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     async (extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
-      const dbs = listCachedDatabases(auth.session.workspaces.map((w) => w.id))
+      const visible = workspacesThatMayList(auth.session, 'databaseAccess')
+      const dbs = listCachedDatabases([...visible])
       if (dbs.length === 0) return text('No databases are available to this session.')
       return text(
         dbs
@@ -3122,6 +3156,488 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         recordAudit({ ...auditBase(ctx), approval, result: 'error', error: message })
         return errorText(message)
       }
+    }
+  )
+
+  // ------------------------------------------- saved database connections
+  //
+  // Databases were the one kind of saved connection an agent could use but not
+  // define: servers had add/update/remove/test, tunnels had create/delete, and
+  // a database the agent needed meant stopping to ask a person to type it into
+  // a dialog. Unlike VPN and CI connections, nothing ever said that was
+  // deliberate -- and it is not a network-path decision the way a VPN is, so
+  // the same reasoning does not apply.
+  //
+  // Governed by manageServers, the capability every group already sets for
+  // "may edit OpsMaxx's connection list", and gated exactly as the server tools
+  // are: adding is manageServers as written, while changing and removing go
+  // through evaluateServerWrite so an allow still asks under Confirm risky
+  // actions. A database reached through an SSH server rides on it, so that
+  // server being Protected caps these at ask, as it does query_database.
+  //
+  // The VPN a database is reached through is NOT settable here. Choosing which
+  // network something travels over is the decision the VPN rule keeps from
+  // agents; a person picks it in OpsMaxx.
+
+  const DB_KIND = z.enum(['postgres', 'mysql', 'mssql', 'mongodb', 'redis'])
+
+  /** A database by friendly name, among the session's workspaces. */
+  const resolveDatabase = (
+    session: McpAgentSession,
+    databaseName: string
+  ): { db: CachedDatabase } | { error: CallToolResult } => {
+    const wanted = databaseName.trim().toLowerCase()
+    const matches = listCachedDatabases(session.workspaces.map((w) => w.id)).filter(
+      (d) => d.name.toLowerCase() === wanted
+    )
+    if (matches.length === 0)
+      return { error: errorText(`No database named "${databaseName}" is available to this session.`) }
+    if (matches.length > 1)
+      return { error: errorText(`"${databaseName}" matches more than one database in this session's workspaces.`) }
+    return { db: matches[0] }
+  }
+
+  /**
+   * The SSH server a database is reached through, by friendly name. It must be
+   * in the database's own workspace: a database carried by a server the
+   * workspace's access group does not govern would escape that group.
+   */
+  const resolveCarrier = (
+    session: McpAgentSession,
+    sshServer: string,
+    workspaceId: string
+  ): { server: CachedServer } | { error: CallToolResult } => {
+    const resolved = resolveServerOrError(session, sshServer)
+    if ('error' in resolved) return resolved
+    const server = resolved.match.server
+    if (server.workspaceId !== workspaceId)
+      return { error: errorText(`"${server.name}" is in a different workspace from this database.`) }
+    return { server }
+  }
+
+  /** Connect and hang up. The driver's text often names the host, so it is
+   *  classified and discarded here, as probeServer does for SSH. */
+  const probeDatabase = async (db: CachedDatabase): Promise<{ ok: boolean; reason: string }> => {
+    try {
+      const result = await dbTest(resolveDbSecrets(databaseConfig(db)))
+      return result.ok ? { ok: true, reason: '' } : { ok: false, reason: agentFaultSentence(result.error) }
+    } catch (err) {
+      return { ok: false, reason: agentFaultSentence(err instanceof Error ? err.message : String(err)) }
+    }
+  }
+
+  const probeSaved = async (id: string, base: string, kept: string): Promise<CallToolResult> => {
+    const saved = getCachedDatabase(id)
+    if (!saved) return text(`${base}\n\nIt could not be verified: OpsMaxx has not finished saving it yet. Use test_database to check it.`)
+    const probe = await probeDatabase(saved)
+    return text(
+      probe.ok
+        ? `${base}\n\nVerified: the connection came up.`
+        : `${base}\n\nWarning: the connection did not come up — ${probe.reason}. ${kept}`
+    )
+  }
+
+  const DB_CREDENTIAL_NOTE =
+    'Pass password for a host/port connection, or uri for a full connection string (which usually ' +
+    'contains a password itself). Either is written to the vault when it is open, otherwise to the ' +
+    'operating system’s secure storage, and neither can be read back through this bridge.'
+
+  server.registerTool(
+    'add_database',
+    {
+      title: 'Add a database',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
+      description:
+        'Saves a new database connection in OpsMaxx, so query_database and later calls can address it ' +
+        'by name. It edits OpsMaxx’s own records and creates nothing on the database server. Use ' +
+        'only when the user asks for one to be added. Requires the manageServers capability, and ' +
+        `${CONDITIONAL_ASK}. ${DB_CREDENTIAL_NOTE} A VPN cannot be chosen here: a person sets that in OpsMaxx.`,
+      inputSchema: {
+        name: z.string().describe('Friendly name, e.g. "Orders DB (staging)". Must be unique in its workspace.'),
+        kind: DB_KIND.describe('Database engine'),
+        workspaceName: z
+          .string()
+          .optional()
+          .describe('Which workspace to add it to. Optional when the session covers exactly one.'),
+        host: z.string().optional().describe('Hostname or IP. Omit when passing uri.'),
+        port: z.number().int().min(1).max(65535).optional().describe('Port, default the engine’s standard one'),
+        username: z.string().optional().describe('Database user. Omit when passing uri.'),
+        password: z.string().optional().describe('Database password'),
+        uri: z.string().optional().describe('Full connection string, instead of host/port/username/password'),
+        database: z.string().optional().describe('Database (or MongoDB database / Redis index) to open'),
+        ssl: z.boolean().optional().describe('Require TLS, default false'),
+        sshServer: z
+          .string()
+          .optional()
+          .describe(
+            'Reach the database through this saved server, named exactly as list_servers returns it. ' +
+              'It must be in the same workspace. Use this when the database only listens on a private network.'
+          ),
+        verify: z
+          .boolean()
+          .optional()
+          .describe('Connect once after saving and report whether it worked. The entry is kept either way.'),
+        intent: INTENT_PARAM
+      }
+    },
+    async (args, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const { session } = auth
+
+      const scoped = session.workspaces.map((w) => ({ ...w, name: getCachedWorkspace(w.id)?.name ?? w.name }))
+      const workspace = args.workspaceName
+        ? scoped.find((w) => w.name.toLowerCase() === args.workspaceName!.trim().toLowerCase())
+        : scoped.length === 1
+          ? scoped[0]
+          : undefined
+      if (!workspace) {
+        return errorText(
+          args.workspaceName
+            ? `No workspace named "${args.workspaceName}" is available to this session.`
+            : `This session covers several workspaces — pass workspaceName. Available: ${scoped.map((w) => w.name).join(', ')}`
+        )
+      }
+
+      const name = args.name.trim()
+      if (!name) return errorText('A database name is required.')
+      // query_database addresses databases by name, so a duplicate would make
+      // one of the two unreachable through this bridge.
+      if (listCachedDatabases([workspace.id]).some((d) => d.name.toLowerCase() === name.toLowerCase()))
+        return errorText(`A database named "${name}" already exists in ${workspace.name}.`)
+
+      const uri = args.uri?.trim() ?? ''
+      const host = args.host?.trim() ?? ''
+      if (uri && (host || args.username || args.password))
+        return errorText('Pass either uri, or host/username/password — a connection string already carries those.')
+      if (!uri && !host) return errorText('A host is required, or a uri.')
+
+      let carrier: CachedServer | null = null
+      if (args.sshServer !== undefined) {
+        const c = resolveCarrier(session, args.sshServer, workspace.id)
+        if ('error' in c) return c.error
+        carrier = c.server
+      }
+
+      // Never the string itself: it usually has a password in it. The record
+      // keeps what the dialog keeps, a host parsed out of it or nothing.
+      const displayHost = uri ? displayHostFromUri(uri) : host
+      const port = args.port ?? DEFAULT_DB_PORT[args.kind]
+      const username = uri ? '' : (args.username?.trim() ?? '')
+
+      const ctx: AuditContext = {
+        session,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        serverId: 'pending-new-database',
+        serverName: name,
+        // Describes the credential without reproducing it: persisted and shown.
+        action:
+          `Add database "${name}" (${args.kind}, ` +
+          (uri ? `connection string${displayHost ? ` to ${displayHost}` : ''}` : `${username ? `${username}@` : ''}${host}:${port}`) +
+          (args.password || uri ? ', credential supplied by the agent' : '') +
+          (carrier ? `, through ${carrier.name}` : '') +
+          ')',
+        capability: 'manageServers'
+      }
+      const check = workspaceCheck(
+        session,
+        workspace.id,
+        (g) => evaluateAsEnforced(g, 'manageServers'),
+        true,
+        carrier?.id ?? null
+      )
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'add_database',
+          level: 'high',
+          because: 'it writes to OpsMaxx’s own connection list and stores a credential there',
+          intent: args.intent,
+          // One approval, one database -- the same reason add_server is per call.
+          perCall: true
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      const result = await writeConfigForAgent({
+        kind: 'database.add',
+        workspaceId: workspace.id,
+        fields: {
+          name,
+          kind: args.kind,
+          host: displayHost,
+          port,
+          username,
+          database: args.database?.trim() ?? '',
+          ssl: args.ssl ?? false,
+          uri: !!uri,
+          sshServerId: carrier?.id ?? null
+        },
+        secret: uri ? { uri } : args.password ? { password: args.password } : undefined
+      })
+      if (!result.ok) {
+        recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: result.error ?? 'unknown error' })
+        return errorText(`Could not add the database: ${result.error ?? 'unknown error'}`)
+      }
+      auditSuccess(ctx, gated.approval)
+      const base = `Added "${name}" to ${workspace.name}. Refer to it by that name in query_database.`
+      if (!args.verify || !result.id) return text(base)
+      return probeSaved(result.id, base, 'The entry was kept. Fix it with update_database, or check it again with test_database.')
+    }
+  )
+
+  server.registerTool(
+    'update_database',
+    {
+      title: 'Change a database',
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+      description:
+        'Changes a saved database connection: where it points, the account and credential it uses, ' +
+        'the SSH server it is reached through, or its name. Only the fields you pass change; the ' +
+        'stored credential is kept unless you send a new one. Edits OpsMaxx’s records, not the ' +
+        `database. Requires the manageServers capability. ${DB_CREDENTIAL_NOTE}`,
+      inputSchema: {
+        databaseName: z.string().describe('Friendly name exactly as returned by list_databases'),
+        name: z.string().optional().describe('A new friendly name'),
+        kind: DB_KIND.optional().describe('New engine'),
+        host: z.string().optional().describe('New hostname or IP'),
+        port: z.number().int().min(1).max(65535).optional().describe('New port'),
+        username: z.string().optional().describe('New database user'),
+        password: z.string().optional().describe('New password'),
+        uri: z.string().optional().describe('New full connection string; switches the entry to connection-string form'),
+        database: z.string().optional().describe('New database to open'),
+        ssl: z.boolean().optional().describe('Require TLS'),
+        sshServer: z
+          .string()
+          .optional()
+          .describe('Reach it through this saved server instead. Pass an empty string to connect directly.'),
+        verify: z.boolean().optional().describe('Connect after the change and report whether it worked.'),
+        intent: INTENT_PARAM
+      }
+    },
+    async (args, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const { session } = auth
+      const found = resolveDatabase(session, args.databaseName)
+      if ('error' in found) return found.error
+      const target = found.db
+      const workspace = getCachedWorkspace(target.workspaceId)
+
+      const changes: string[] = []
+      const patch: Partial<AgentDatabaseFields> = {}
+      if (args.name !== undefined) {
+        const next = args.name.trim()
+        if (!next) return errorText('A database name cannot be empty.')
+        if (
+          listCachedDatabases([target.workspaceId]).some(
+            (d) => d.id !== target.id && d.name.toLowerCase() === next.toLowerCase()
+          )
+        )
+          return errorText(`A database named "${next}" already exists in ${workspace?.name ?? 'this workspace'}.`)
+        patch.name = next
+        changes.push(`name to "${next}"`)
+      }
+      const uri = args.uri?.trim()
+      if (uri !== undefined && (args.host !== undefined || args.username !== undefined || args.password !== undefined))
+        return errorText('Pass either uri, or host/username/password — a connection string already carries those.')
+      if (args.kind !== undefined) (patch.kind = args.kind), changes.push(`engine to ${args.kind}`)
+      if (uri) {
+        patch.uri = true
+        patch.host = displayHostFromUri(uri)
+        patch.username = ''
+        changes.push('connection string')
+      }
+      if (args.host !== undefined) (patch.host = args.host.trim()), (patch.uri = false), changes.push('host')
+      if (args.port !== undefined) (patch.port = args.port), changes.push(`port to ${args.port}`)
+      if (args.username !== undefined) (patch.username = args.username.trim()), changes.push(`user to ${args.username.trim()}`)
+      if (args.database !== undefined) (patch.database = args.database.trim()), changes.push('database')
+      if (args.ssl !== undefined) (patch.ssl = args.ssl), changes.push(`TLS ${args.ssl ? 'on' : 'off'}`)
+      if (args.password !== undefined) changes.push('credential')
+
+      let carrierId = target.sshServerId ?? null
+      if (args.sshServer !== undefined) {
+        if (args.sshServer.trim() === '') {
+          patch.sshServerId = null
+          carrierId = null
+          changes.push('no longer through an SSH server')
+        } else {
+          const c = resolveCarrier(session, args.sshServer, target.workspaceId)
+          if ('error' in c) return c.error
+          patch.sshServerId = c.server.id
+          carrierId = c.server.id
+          changes.push(`through ${c.server.name}`)
+        }
+      }
+      if (changes.length === 0) return errorText('Nothing to change — pass at least one field to update.')
+
+      const ctx: AuditContext = {
+        session,
+        workspaceId: target.workspaceId,
+        workspaceName: workspace?.name ?? '',
+        serverId: target.id,
+        serverName: target.name,
+        action: `Change database "${target.name}" (${changes.join(', ')})`,
+        capability: 'manageServers'
+      }
+      // Either carrier, old or new, being Protected caps this: moving a
+      // database off a Protected bastion is a change to that bastion's traffic.
+      const protectedCarrier =
+        carrierId && isProtected(carrierId, target.workspaceId) ? carrierId : (target.sshServerId ?? carrierId)
+      const check = workspaceCheck(session, target.workspaceId, (g) => evaluateServerWrite(g, 'change'), true, protectedCarrier)
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'update_database',
+          level: 'high',
+          because: 'it rewrites a saved connection, and later queries that name it go wherever it now points',
+          intent: args.intent,
+          // Same grant rule as update_server: one yes covers further edits to
+          // this database for the session, and nothing else.
+          elevationScope: 'update_database'
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      const result = await writeConfigForAgent({
+        kind: 'database.update',
+        databaseId: target.id,
+        patch,
+        secret: uri ? { uri } : args.password !== undefined ? { password: args.password } : undefined
+      })
+      if (!result.ok) {
+        recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: result.error ?? 'unknown error' })
+        return errorText(`Could not change the database: ${result.error ?? 'unknown error'}`)
+      }
+      auditSuccess(ctx, gated.approval)
+      const base = `Changed "${target.name}": ${changes.join(', ')}.`
+      if (!args.verify) return text(base)
+      return probeSaved(target.id, base, `"${patch.name ?? target.name}" was still changed.`)
+    }
+  )
+
+  server.registerTool(
+    'remove_database',
+    {
+      title: 'Remove a database',
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
+      description:
+        'Deletes a saved database connection from OpsMaxx, along with the credential stored for it. ' +
+        'It does not touch the database itself. OpsMaxx keeps no copy, so this cannot be undone from ' +
+        'here — prefer update_database when an entry is wrong rather than unwanted. Requires the ' +
+        `manageServers capability, and ${CONDITIONAL_ASK}.`,
+      inputSchema: {
+        databaseName: z.string().describe('Friendly name exactly as returned by list_databases'),
+        intent: INTENT_PARAM
+      }
+    },
+    async (args, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const { session } = auth
+      const found = resolveDatabase(session, args.databaseName)
+      if ('error' in found) return found.error
+      const target = found.db
+      const workspace = getCachedWorkspace(target.workspaceId)
+
+      const ctx: AuditContext = {
+        session,
+        workspaceId: target.workspaceId,
+        workspaceName: workspace?.name ?? '',
+        serverId: target.id,
+        serverName: target.name,
+        action: `Remove database "${target.name}" from ${workspace?.name ?? 'its workspace'}`,
+        capability: 'manageServers'
+      }
+      const check = workspaceCheck(
+        session,
+        target.workspaceId,
+        (g) => evaluateServerWrite(g, 'delete'),
+        true,
+        target.sshServerId ?? null
+      )
+      const gated = await gate(
+        ctx,
+        check,
+        {
+          toolName: 'remove_database',
+          level: 'high',
+          because: 'it deletes a saved connection and its stored credential, and OpsMaxx keeps no copy to put back.',
+          intent: args.intent,
+          perCall: true
+        },
+        extra
+      )
+      if (!gated.ok) return gated.result
+
+      const result = await writeConfigForAgent({ kind: 'database.remove', databaseId: target.id })
+      if (!result.ok) {
+        recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: result.error ?? 'unknown error' })
+        return errorText(`Could not remove the database: ${result.error ?? 'unknown error'}`)
+      }
+      auditSuccess(ctx, gated.approval)
+      return text(`Removed "${target.name}", and the credential stored for it.`)
+    }
+  )
+
+  server.registerTool(
+    'test_database',
+    {
+      title: 'Test a database connection',
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+      description:
+        'Connects to a saved database and disconnects, reporting whether the connection came up. It ' +
+        'runs no statement. Use it to tell a misconfigured entry from a database that is down. The ' +
+        'reason for a failure is reported as a category; no host, port or username is disclosed. ' +
+        'Requires the databaseAccess capability.',
+      inputSchema: {
+        databaseName: z.string().describe('Friendly name exactly as returned by list_databases'),
+        intent: INTENT_PARAM
+      }
+    },
+    async (args, extra) => {
+      const auth = authenticateExtra(extra)
+      if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+      const { session } = auth
+      const found = resolveDatabase(session, args.databaseName)
+      if ('error' in found) return found.error
+      const db = found.db
+      const workspace = getCachedWorkspace(db.workspaceId)
+      const ctx: AuditContext = {
+        session,
+        workspaceId: db.workspaceId,
+        workspaceName: workspace?.name ?? '',
+        serverId: db.id,
+        serverName: db.name,
+        action: `Test connection to database "${db.name}"`,
+        capability: 'databaseAccess'
+      }
+      const check = workspaceCheck(
+        session,
+        db.workspaceId,
+        (g) => evaluateAsEnforced(g, 'databaseAccess'),
+        false,
+        db.sshServerId ?? null
+      )
+      const gated = await gate(
+        ctx,
+        check,
+        { toolName: 'test_database', level: 'low', because: 'it opens a connection and runs nothing', intent: args.intent },
+        extra
+      )
+      if (!gated.ok) return gated.result
+      const probe = await probeDatabase(db)
+      if (!probe.ok) {
+        recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: probe.reason })
+        return errorText(`"${db.name}" did not connect: ${probe.reason}.`)
+      }
+      auditSuccess(ctx, gated.approval)
+      return text(`"${db.name}" connected.`)
     }
   )
 
@@ -3282,7 +3798,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     async (extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
-      const vpns = listCachedVpns(auth.session.workspaces.map((w) => w.id))
+      const vpns = listCachedVpns([...workspacesThatMayList(auth.session, 'vpnControl')])
       if (vpns.length === 0) return text("No VPNs are configured in this session's workspaces.")
       // "Nothing is up" and "nobody has told me what is up yet" are different
       // answers about the user's network, and only the first one is safe to

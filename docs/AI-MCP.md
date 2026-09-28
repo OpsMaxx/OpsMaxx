@@ -53,8 +53,8 @@ another MCP client. For the short pitch and the security summary, see the
 
 ## The MCP server
 
-`src/main/services/mcpServer.ts` registers **36 tools** — 28 core, plus the 8-tool CI/CD set at
-the end of the table. `tests/localTerminalNotExposed.test.ts` holds the same 36 as a reviewed
+`src/main/services/mcpServer.ts` registers **45 tools** — 37 core, plus the 8-tool CI/CD set at
+the end of the table. `tests/localTerminalNotExposed.test.ts` holds the same 45 as a reviewed
 whitelist, so a new tool cannot appear on the bridge without a diff somebody reads.
 
 | Tool | Capability gating it | What it returns |
@@ -69,13 +69,17 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `get_capacity_trends` | `serverMetrics` | Where CPU, memory, disk and inodes are heading, from history already stored — it opens no connection and answers for an offline server. Answers with a **sentence per metric**, not the samples behind them: a rate, a crossing date or the named rule that refused, and always the window it was drawn from plus how much of that window was actually sampled. Disk is measured in bytes, because the stored percentage is df's rounded integer and too coarse to forecast |
 | `get_server_metrics` | `serverMetrics` | CPU/memory/disk/uptime — and every failed systemd unit and listening port with its owning process, which is a service and port inventory as much as a capacity read |
 | `get_host_facts` | `hostFacts` | Distribution, architecture, CPU model, virtualisation, package manager, pending updates and how many are security updates, and whether a reboot is owed. Its own capability rather than a widening of metrics, because it is a patch-status report. It never refreshes a package cache. A count reported as NOT AVAILABLE is not zero |
-| `list_databases` | `viewServer` | Friendly names and engines, never a hostname or credential |
+| `list_databases` | `databaseAccess`, resolved per **workspace** | Friendly names and engines, never a hostname or credential. A workspace whose group denies `databaseAccess` is left out |
 | `query_database` | `databaseAccess` for reads; `+ writeFiles` for anything that writes, which is **risky** | Rows, capped |
+| `add_database` | `manageServers`, resolved on the **workspace**, **never cached**; capped at ask when the SSH server it rides on is Protected | The name it was saved under. A password or connection string goes to the vault when it is open, otherwise the keychain; a connection string is never written to the record or the audit log. **No VPN can be chosen** |
+| `update_database` | `manageServers`, **risky**; a session grant covers only further changes to that one database | Which fields changed. The stored credential is kept unless a new one is sent |
+| `remove_database` | `manageServers`, **risky**, **never cached** | That the connection and its stored credential are gone |
+| `test_database` | `databaseAccess` | Whether the connection came up, and the *category* of failure if not — never the driver's text |
 | `list_tunnels` | `sshTunnel` | Configured tunnels and whether each is running |
 | `set_tunnel` | `sshTunnel`; starting is **risky** | Confirmation, with the bound port |
 | `create_tunnel` | `sshTunnel`, **risky**, **never cached** | A saved tunnel — **not a running one**. Starting it is `set_tunnel` and a second approval. A `remote` forward binding a non-loopback address is graded higher, and the prompt says it publishes that port on the server's network |
 | `delete_tunnel` | `sshTunnel`, **risky**, **never cached** | That the tunnel is gone; it is stopped first if running |
-| `list_vpns` | `vpnControl` | Names, engine, mode and state — **never an endpoint, key or listener address** |
+| `list_vpns` | `vpnControl`, resolved per **workspace** as a read | Names, engine, mode and state — **never an endpoint, key or listener address** |
 | `set_vpn` | `vpnControl`; starting, or stopping with live sessions depending on it, is **risky**; **frp refused outside Bypass** | Confirmation, with a listener count |
 | `add_server` | `manageServers`, resolved on the **workspace**, **never cached**; not risky, so ALLOW adds without asking | The name the new connection was saved under. `jumpHosts` names existing servers to reach it through, so a bastion-only host can be onboarded without disclosing one; `verify: true` dials it once and reports whether it came up rather than reporting a dead entry as added |
 | `update_server` | `manageServers`, **risky**; a session grant covers only further changes to that one server | Which fields changed. Only what you pass is touched — a port change does not disturb the stored credential |
@@ -200,7 +204,8 @@ future template string cannot leak one by accident.
 ### CI/CD
 
 Eight tools reach Jenkins, GitLab and GitHub Actions. They are the only tools on this bridge
-annotated `openWorldHint: true` besides `execute_command` and `query_database`, and the reason is
+annotated `openWorldHint: true` besides `execute_command`, `query_database`, `test_connection` and
+`test_database`, and the reason is
 narrower than "they use the network": every other tool acts on something OpsMaxx holds a record
 for, while these act on a third party the user does not administer, running a pipeline definition
 OpsMaxx has never read.
@@ -247,6 +252,14 @@ never seen and cannot enumerate. Only the pattern layer applies, and it is not e
 `add_server`, `update_server` and `remove_server` share the `manageServers` capability, and
 `test_connection` needs only `viewServer`. None of them touches the machine at the far end — they
 edit OpsMaxx's own records.
+
+`add_database`, `update_database` and `remove_database` are the same three acts on saved database
+connections, under the same capability and the same rules below — `manageServers` is the
+permission to edit OpsMaxx's connection list, and a second switch for the same act would be one an
+administrator could leave open while believing they had shut it. `test_database` needs
+`databaseAccess`. A database reached through an SSH server rides on it, so that server being
+Protected caps all four at ask, as it does `query_database`. The VPN a database travels over is
+not settable from the bridge, for the reason no VPN profile is.
 
 The capability used to mean only "add", and adding was all it could do. That made the bridge a
 one-way ratchet: an agent that wrote a wrong entry could not correct or withdraw it, so every

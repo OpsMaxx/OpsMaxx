@@ -66,6 +66,13 @@ const ALLOWED_TOOLS = [
   'get_host_facts',
   'list_databases',
   'query_database',
+  // The database half of add/update/remove/test_connection. They edit
+  // OpsMaxx's own connection list, as the server tools do, and reach nothing
+  // on this machine; test_database connects and hangs up. None can pick a VPN.
+  'add_database',
+  'update_database',
+  'remove_database',
+  'test_database',
   'list_tunnels',
   'set_tunnel',
   // Defining and deleting a tunnel record. Both write to OpsMaxx's own

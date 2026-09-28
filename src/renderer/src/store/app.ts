@@ -731,7 +731,9 @@ interface AppState {
   setServerStatus: (serverId: string, status: Server['status']) => void
   updateServer: (id: string, patch: Partial<Omit<Server, 'id' | 'workspaceId'>>) => void
   deleteServer: (id: string) => void
-  addDatabase: (input: Omit<DatabaseConn, 'id' | 'workspaceId'>) => string
+  // `workspaceId` is optional: the dialogs add to the workspace on screen, and
+  // an agent adds to the one it named, which need not be the one on screen.
+  addDatabase: (input: Omit<DatabaseConn, 'id' | 'workspaceId'> & { workspaceId?: UUID }) => string
   deleteDatabase: (id: string) => void
   setActiveDatabase: (id: string | null) => void
   openDatabase: (id: string) => void
@@ -753,7 +755,7 @@ interface AppState {
   // Creates the Ungrouped bucket and files any server that is not on the wall
   // yet. Writes nothing when the layout is already correct.
   syncMonitorLayout: () => void
-  addTunnel: (input: Omit<Tunnel, 'id' | 'workspaceId' | 'status'>) => string
+  addTunnel: (input: Omit<Tunnel, 'id' | 'workspaceId' | 'status'> & { workspaceId?: UUID }) => string
   deleteTunnel: (id: string) => void
   setTunnelStatus: (id: string, status: Tunnel['status']) => void
   setVpnProfiles: (profiles: VpnProfile[]) => void
@@ -2152,7 +2154,12 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({
       databases: [
         ...s.databases,
-        { ...input, vpnProfileId: input.vpnProfileId ?? null, id, workspaceId: s.activeWorkspaceId }
+        {
+          ...input,
+          vpnProfileId: input.vpnProfileId ?? null,
+          id,
+          workspaceId: input.workspaceId ?? s.activeWorkspaceId
+        }
       ],
       activeDatabaseId: id,
       openDatabaseIds: [...s.openDatabaseIds, id]
@@ -2218,7 +2225,10 @@ export const useApp = create<AppState>((set, get) => ({
   addTunnel: (input) => {
     const id = uid('tun')
     set((s) => ({
-      tunnels: [...s.tunnels, { ...input, id, workspaceId: s.activeWorkspaceId, status: 'inactive' }]
+      tunnels: [
+        ...s.tunnels,
+        { ...input, id, workspaceId: input.workspaceId ?? s.activeWorkspaceId, status: 'inactive' }
+      ]
     }))
     return id
   },

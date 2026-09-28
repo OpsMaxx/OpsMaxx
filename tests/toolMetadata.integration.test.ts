@@ -143,6 +143,8 @@ describe('tool metadata', () => {
       // from the far end, but whether the connection comes up is a fact about
       // the outside world and not about OpsMaxx's own configuration.
       'test_connection',
+      // The database half of test_connection, for the same reason.
+      'test_database',
       'trigger_run'
     ])
   })

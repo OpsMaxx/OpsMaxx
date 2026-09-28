@@ -22,6 +22,7 @@ let deleted: string[] = []
 let setCalls: { id: string; blob: string }[] = []
 let replies: { id: string; result: { ok: boolean; error?: string } }[] = []
 let stopped: string[] = []
+let closed: string[] = []
 
 function mount(): void {
   fire = null
@@ -29,6 +30,7 @@ function mount(): void {
   setCalls = []
   replies = []
   stopped = []
+  closed = []
   stubBridge({
     aiMcp: {
       onCreateServerRequest: vi.fn(() => () => {}),
@@ -55,6 +57,11 @@ function mount(): void {
       stop: vi.fn(async (id: string) => {
         stopped.push(id)
       })
+    },
+    db: {
+      close: vi.fn(async (id: string) => {
+        closed.push(id)
+      })
     }
   })
   render(<AgentConfigWatcher />)
@@ -77,11 +84,43 @@ const SERVER = {
   vpnProfileId: null
 }
 
+const DATABASE = {
+  id: 'd1',
+  workspaceId: 'w1',
+  name: 'Orders',
+  kind: 'postgres',
+  host: '10.0.0.5',
+  port: 5432,
+  username: 'app',
+  database: 'orders',
+  ssl: false,
+  uri: false,
+  folderId: null,
+  sshServerId: null,
+  vpnProfileId: null
+}
+
+const DB_FIELDS = {
+  name: 'Billing',
+  kind: 'mysql',
+  host: '10.0.0.7',
+  port: 3306,
+  username: 'billing',
+  database: '',
+  ssl: false,
+  uri: false,
+  sshServerId: null
+}
+
 beforeEach(() => {
   useApp.setState({
     servers: [SERVER],
     workspaces: [{ id: 'w1', name: 'W' }],
     tunnels: [{ id: 't1', workspaceId: 'w1', name: 'DB', kind: 'local', status: 'inactive', serverId: 's1', listen: '127.0.0.1:1', target: '10.0.0.1:2' }],
+    databases: [DATABASE],
+    openDatabaseIds: [],
+    activeDatabaseId: null,
+    activeWorkspaceId: 'w1',
     tabs: []
   } as never)
 })
@@ -179,6 +218,20 @@ describe('tunnels', () => {
     expect(added.status).toBe('inactive')
   })
 
+  it('lands in the workspace main named, not the one on screen', async () => {
+    // It used to take activeWorkspaceId, so a tunnel an agent defined over a
+    // carrier in one workspace appeared in whichever workspace was open.
+    useApp.setState({ activeWorkspaceId: 'w-other' } as never)
+    mount()
+    fire?.({
+      id: 'r1',
+      request: { kind: 'tunnel.add', workspaceId: 'w1', name: 'Placed', tunnelKind: 'socks', serverId: 's1', listen: '127.0.0.1:1080', target: '' }
+    })
+
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(useApp.getState().tunnels.find((t) => t.name === 'Placed')!.workspaceId).toBe('w1')
+  })
+
   it('stops a running forward before forgetting its record', async () => {
     // A listener whose record is gone is one nothing in the UI can close.
     mount()
@@ -187,5 +240,52 @@ describe('tunnels', () => {
     await waitFor(() => expect(replies).toHaveLength(1))
     expect(stopped).toContain('t1')
     expect(useApp.getState().tunnels).toHaveLength(0)
+  })
+})
+
+describe('databases', () => {
+  it('adds one to the named workspace and stores the credential under its id', async () => {
+    useApp.setState({ activeWorkspaceId: 'w-other' } as never)
+    mount()
+    fire?.({ id: 'r1', request: { kind: 'database.add', workspaceId: 'w1', fields: DB_FIELDS, secret: { password: 'pw' } } })
+
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(replies[0].result.ok).toBe(true)
+    const added = useApp.getState().databases.find((d) => d.name === 'Billing')!
+    expect(added.workspaceId).toBe('w1')
+    // Never chosen by an agent, whatever it sent.
+    expect(added.vpnProfileId).toBeNull()
+    expect(setCalls).toEqual([{ id: added.id, blob: JSON.stringify({ password: 'pw' }) }])
+  })
+
+  it('takes the row back out when secure storage refuses the credential', async () => {
+    mount()
+    window.opsmaxx!.secrets.set = vi.fn(async () => false) as never
+    fire?.({ id: 'r1', request: { kind: 'database.add', workspaceId: 'w1', fields: DB_FIELDS, secret: { password: 'pw' } } })
+
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(replies[0].result.ok).toBe(false)
+    expect(useApp.getState().databases.map((d) => d.name)).toEqual(['Orders'])
+  })
+
+  it('updates through the dialog\'s save path, bumping the revision, and keeps the credential when none was sent', async () => {
+    mount()
+    fire?.({ id: 'r1', request: { kind: 'database.update', databaseId: 'd1', patch: { port: 6432 } } })
+
+    await waitFor(() => expect(replies).toHaveLength(1))
+    const d = useApp.getState().databases[0]
+    expect(d.port).toBe(6432)
+    expect(d.rev).toBe(1)
+    expect(setCalls).toHaveLength(0)
+  })
+
+  it('closes the pooled client and deletes the credential on removal', async () => {
+    mount()
+    fire?.({ id: 'r1', request: { kind: 'database.remove', databaseId: 'd1' } })
+
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(closed).toContain('d1')
+    expect(deleted).toContain('d1')
+    expect(useApp.getState().databases).toHaveLength(0)
   })
 })
