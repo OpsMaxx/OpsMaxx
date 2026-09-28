@@ -147,6 +147,20 @@ const ALLOWED_TOOLS = [
   // container per call: there is no shape in which a single approval acts on a
   // host's worth of them.
   'container_action',
+  // Kubernetes. Each call finishes before it returns: nothing is scheduled and
+  // nothing outlives the approval (logs never follow, pod_command stops at 60s).
+  // The ban this replaces, and the conditions it was lifted on, are recorded in
+  // the forbidden list below.
+  'k8s_overview',
+  'k8s_logs',
+  'k8s_diagnose',
+  'k8s_resources',
+  'k8s_helm_releases',
+  'k8s_api_scan',
+  'k8s_drain_preflight',
+  'k8s_rollout_restart',
+  'k8s_node_action',
+  'pod_command',
   // Services and schedules. list_services and list_cron are reads. Neither
   // edits a crontab, and there is no tool that does: a crontab line is a
   // command that runs unattended on the server, forever, with nothing pending
@@ -1030,83 +1044,30 @@ describe('what must NOT be able to reach this', () => {
       'credproxy:remove-rule',
       'credproxy:token',
       'credproxy:calls',
-      // Kubernetes node lifecycle — roadmap item 22. The mutating half, and it
-      // is STRICTLY MORE POWERFUL than the job engine this file exists to keep
-      // away from the bridge.
+      // KUBERNETES CAME OFF THIS LIST ON 2026-09-28, by an explicit decision of
+      // the person who owns the product, for parity with the app's Kubernetes
+      // panel. The ban that stood here said cordon, drain, exec and the RBAC
+      // read were "not gated, not asked-for, NOT THERE"; its reasoning was real
+      // and it is why the tools that replaced it look the way they do, which
+      // the block after this describe pins:
       //
-      // A job runs a command on hosts a human picked. `kubectl cordon` takes a
-      // machine out of a cluster's schedulable capacity and `kubectl drain`
-      // evicts everything running on it — both against whatever cluster the
-      // kubeconfig on that host points at, which is a blast radius nobody
-      // chose per-server. `execute_command` gated per server against an access
-      // group is a consent story about ONE host and one command a human can
-      // read; "take this node out of the fleet" is a different question about a
-      // different system, and the answer is no — not "not yet".
+      //  - every change to a cluster is `containerControl`, graded high and
+      //    asked for on every call; a drain re-takes its own preflight and
+      //    refuses on any blocker, with no override;
+      //  - the pod command is checked as the command it is (effectiveCommand,
+      //    the execute_command rules), high, every call -- and it does NOT go
+      //    through the panel's record-verified exec, because an agent gate
+      //    minting that human record would be the laundering `approvalLog`
+      //    above exists to prevent. The approval record itself stays banned:
+      //    `recordJobApproval` and `approvalLog` are still on this list, and
+      //    `verifyApproval` / the broadcast module stay out of the closure;
+      //  - logs never follow.
       //
-      // Not gated, not asked-for, NOT THERE.
-      'buildK8sCordonCommand',
-      'planK8sCordon',
-      'parseK8sCordonResult',
-      'k8s:cordon',
-      // The drain, which is the sharpest case in this block. It evicts every
-      // controller-owned pod on a machine and leaves the machine cordoned
-      // afterwards — and unlike everything else on this list, a drain that
-      // fails has still moved half the workloads, so there is no state an
-      // agent could leave behind that a human can simply undo.
-      //
-      // The preflight is on the list too, and that is deliberate rather than
-      // over-broad. It is a read, and it is the read that decides whether the
-      // drain is allowed; a caller holding the preflight and not the drain
-      // would be holding the safety check for an action it cannot take, which
-      // is only useful to something planning to take it another way.
-      'buildK8sDrainCommand',
-      'buildK8sDrainPreflightCommand',
-      'assessK8sDrain',
-      'planK8sDrain',
-      'parseK8sDrainResult',
-      'parseK8sDrainPreflight',
-      'K8S_DRAIN_PHRASE',
-      'k8s:drain',
-      'k8s:drain-preflight',
-      // Exec, which is the one that needs no argument at all. Arbitrary code
-      // inside a container, under whatever identity that container runs as.
-      // The bridge's `execute_command` is gated per server against an access
-      // group a human wrote; `pods/exec` is a different subresource on a
-      // different system, and an agent reaching it would be running code
-      // somewhere nobody granted anything.
-      //
-      // Its approval record is on the list for the same reason `approvalLog`
-      // is: a caller that can mint one can launder consent for work it was
-      // never granted.
-      'buildK8sExecCommand',
-      'planK8sExec',
-      'parseK8sExecResult',
+      // What is still NOT THERE: applying, editing, scaling or deleting
+      // anything, and switching the kubeconfig's current context.
       'K8S_EXEC_PHRASE',
-      'k8s:exec',
-      'k8s:exec-plan',
-      // And the reads. Read-only is not the argument it sounds like — the same
-      // point posture and drift make on this list, one step sharper here.
-      // `k8s:resources` lists which secrets exist and every RBAC binding in the
-      // cluster: it does not read a secret's value, and "which service account
-      // is bound to cluster-admin, and what is the name of the secret holding
-      // its token" is a map of how to escalate, assembled and kept fresh. An
-      // agent asking that for one cluster could ask it for every cluster every
-      // host in the estate can reach.
-      'buildK8sResourcesCommand',
-      'parseK8sResources',
-      'buildK8sApiScanCommand',
-      'buildK8sHelmListCommand',
-      'k8s:resources',
-      'k8s:api-scan',
-      'k8s:helm',
-      // Already true before item 22 and asserted here now that the file has
-      // company: the one older mutation, and the module itself.
-      'buildK8sRolloutRestartCommand',
-      'planK8sRollout',
-      'k8s:rollout-restart',
-      'shared/kubernetes',
-      'services/kubernetes',
-      'KubernetesReader',
+      'K8S_DRAIN_PHRASE',
+      'verifyApproval',
       // Supervised local processes — roadmap item 1, and the sharpest entry on
       // this list.
       //
@@ -1173,5 +1134,47 @@ describe('what must NOT be able to reach this', () => {
     for (const forbidden of ['mcpServer', 'mcpAuth', 'approvals', 'policyEngine', 'policyStore']) {
       expect(runner, forbidden).not.toContain(forbidden)
     }
+  })
+})
+
+// What replaced the Kubernetes ban (see the note in the forbidden list above).
+// The ban was lifted on the condition that every change to a cluster asks, on
+// every call, at the highest grade -- so that condition is what is asserted,
+// in the source, where a diff that loosens it has to show up.
+describe('Kubernetes on the bridge is asked for, every time it changes anything', () => {
+  const mcp = read('src/main/services/mcpServer.ts')
+  const block = (tool: string): string => {
+    const at = mcp.indexOf(`'${tool}',\n    {`)
+    expect(at, `${tool} is not registered`).toBeGreaterThan(-1)
+    const next = mcp.indexOf('server.registerTool(', at)
+    return mcp.slice(at, next === -1 ? undefined : next)
+  }
+
+  it.each([
+    ['k8s_rollout_restart', 'containerControl'],
+    ['k8s_node_action', 'containerControl'],
+    ['pod_command', 'terminal']
+  ])('%s is graded high, asked per call, on %s', (tool, capability) => {
+    const b = block(tool)
+    expect(b).toContain(`capability: '${capability}'`)
+    expect(b).toContain("level: 'high'")
+    expect(b).toContain('perCall: true')
+    // An allow still asks: without this, containerControl at allow on Full
+    // Access would drain a node unasked.
+    expect(b).toContain('alwaysAsks: true')
+  })
+
+  it('checks a pod command as the command it is', () => {
+    expect(block('pod_command')).toContain('command\n')
+    expect(mcp).toContain('effectiveCommand(auth.session, s.id, opts.command)')
+  })
+
+  it('never reaches the panel exec, whose approval record only a person can mint', () => {
+    expect(mcp).not.toContain('k8sReader.exec(')
+    expect(mcp).toContain('execGatedByBridge')
+  })
+
+  it('never follows a log', () => {
+    expect(block('k8s_logs')).not.toMatch(/--follow|\s-f\b/)
   })
 })

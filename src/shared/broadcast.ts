@@ -35,11 +35,18 @@
 // because the UI happened to grow one would be an accident rather than a
 // decision.
 
-import { assessCommand, type BroadcastRisk } from './commandRisk'
+import { assessCommand, type BroadcastConfirmation, type BroadcastRisk } from './commandRisk'
 // Re-exported so every existing consumer keeps its import path: the classifier
 // moved for the reason commandRisk.ts explains, and moving its callers too
 // would have made that a much larger diff than the reason warrants.
-export { assessCommand, commandStart, SUDO_REASON, type BroadcastRisk, type RiskAssessment } from './commandRisk'
+export {
+  assessCommand,
+  commandStart,
+  SUDO_REASON,
+  type BroadcastConfirmation,
+  type BroadcastRisk,
+  type RiskAssessment
+} from './commandRisk'
 
 export interface BroadcastPlan {
   command: string
@@ -51,14 +58,6 @@ export interface BroadcastPlan {
   /** Why it was classified this way, for the dialog to show. */
   reasons: string[]
 }
-
-export type BroadcastConfirmation =
-  /** Run on click. One host, nothing alarming in the command. */
-  | { kind: 'none' }
-  /** A normal confirm step naming the hosts. */
-  | { kind: 'confirm' }
-  /** The user types this exact word. Reserved for genuine blast radius. */
-  | { kind: 'type-to-confirm'; phrase: string }
 
 /** Above this many hosts, even an ordinary command gets a confirm step. */
 export const CONFIRM_ABOVE_HOSTS = 1

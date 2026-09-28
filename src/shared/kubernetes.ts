@@ -57,11 +57,15 @@
 //    remember to undo, unlike a rollout restart, which converges back to the
 //    workload's own declared state.
 //
-//  - Reach the MCP bridge. Nothing here is registered as an agent tool. The
-//    bridge gates `execute_command` per server against an access group; a
-//    cluster-wide restart primitive is a different risk with a different
-//    consent story, and it would arrive there by accident rather than by
-//    decision. `rollout restart` is a human clicking a confirm dialog.
+//  - Reach the MCP bridge -- which WAS true, and stopped being true on
+//    2026-09-28 by an explicit decision of the product's owner, for parity
+//    with this panel. It arrived by decision, not by accident, and on
+//    conditions: every change to a cluster is asked for on every call at the
+//    highest grade, a drain still refuses on its own preflight, and the
+//    bridge's pod command is checked as a command rather than through the
+//    approval RECORD the exec below verifies, which only a person can mint.
+//    See the Kubernetes block in src/main/services/mcpServer.ts and the note
+//    that replaced the ban in tests/jobsNotExposed.test.ts.
 //
 // CORDON, UNCORDON AND DRAIN now ship. A cordon changes one boolean on the
 // Node object and evicts nothing, so it is the honest first step; a drain is
@@ -1427,7 +1431,7 @@ import {
   parsePodRequests,
   type AllocationReport
 } from './k8sAllocatable'
-import type { BroadcastConfirmation, BroadcastRisk } from './broadcast'
+import type { BroadcastConfirmation, BroadcastRisk } from './commandRisk'
 
 export interface K8sRolloutTarget {
   kind: K8sWorkloadKind

@@ -3363,7 +3363,7 @@ const dockerReader = new DockerReader({
 //
 // allowPrompt stays true for the same reason as Docker: one server the user
 // picked, not a fan-out.
-const k8sReader = new KubernetesReader({ exec: targetExec })
+const k8sReader = new KubernetesReader({ exec: targetExec, verifyApproval })
 
 ipcMain.handle('k8s:read', (_e, cfg: unknown, context?: string, namespace?: string) =>
   k8sReader.read(cfg, context, namespace)

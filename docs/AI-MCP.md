@@ -53,8 +53,8 @@ another MCP client. For the short pitch and the security summary, see the
 
 ## The MCP server
 
-`src/main/services/mcpServer.ts` registers **51 tools** — 43 core, plus the 8-tool CI/CD set at
-the end of the table. `tests/localTerminalNotExposed.test.ts` holds the same 51 as a reviewed
+`src/main/services/mcpServer.ts` registers **61 tools** — 53 core, plus the 8-tool CI/CD set at
+the end of the table. `tests/localTerminalNotExposed.test.ts` holds the same 61 as a reviewed
 whitelist, so a new tool cannot appear on the bridge without a diff somebody reads.
 
 | Tool | Capability gating it | What it returns |
@@ -92,6 +92,16 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `container_logs` | `containers`, weighed higher at the prompt than the list | The last lines a container wrote. **It never follows** — a stream would outlive the approval that authorised it, and the stop-all-AI-access switch works by resolving requests still pending |
 | `fleet_inventory` | `fleetRead`, resolved on the **workspace** | One row per server from what the sampler already collected, each stamped with when. Drift is deliberately absent from it |
 | `container_action` | `containerControl`, graded **high** at the prompt | Starts, stops or restarts exactly one container per call — there is no shape in which one approval acts on a host's worth of them. Starting is graded no lower than stopping: an agent starting a container begins serving traffic nobody asked for |
+| `k8s_overview` | `containers` | Contexts, namespaces, nodes, workloads, pods and warning events from the cluster one saved server's kubeconfig reaches. A section RBAC refused reports that, not an empty list. A named context is validated and refused if bad, never silently dropped |
+| `k8s_logs` | `containers`, weighed higher at the prompt | The last lines of every container in one pod, redacted. **It never follows** |
+| `k8s_diagnose` | `containers`, weighed higher at the prompt | One pod's description, events and previous container's last lines |
+| `k8s_resources` | `containers`, weighed higher at the prompt | PVCs, ingresses, RBAC bindings, and which secrets exist with their key names — **never a value**, but together a map of how to escalate, which is why it asks harder |
+| `k8s_helm_releases` | `containers` | Helm releases, or that helm is not installed |
+| `k8s_api_scan` | `containers` | Deprecated or removed API versions the cluster still serves, and what the scan could not see |
+| `k8s_drain_preflight` | `containers` | What a drain of one node would evict and what would block it. A read |
+| `k8s_rollout_restart` | `containerControl`, graded **high**, **never cached**, **asks even at allow** (only Bypass skips it) | A rolling restart of one Deployment, StatefulSet or DaemonSet |
+| `k8s_node_action` | `containerControl`, graded **high**, **never cached**, **asks even at allow** (only Bypass skips it) | Cordon, uncordon or drain one node. A drain re-takes its own preflight and **refuses on any blocker**; there is no force option |
+| `pod_command` | `terminal` + the command rules, as `execute_command`; graded **high**, **never cached**, **asks even at allow** (only Bypass skips it) | One command inside a container, no TTY or stdin, 60-second limit, output redacted. Not the panel's exec: that verifies an approval record only a person can mint |
 | `list_services` | `serverMetrics` | The `systemd --user` units of the account OpsMaxx connects as, with load/active/sub state and whether that account is **lingering** — without linger they stop when its last session ends. Not the system unit list; failed system units are in `get_server_metrics` |
 | `service_action` | Evaluated as the command it runs, `sudo -n systemctl <action> '<unit>'` — so `sudo`, the command rules and **risky** exactly as `execute_command`; graded **high**, **never cached** | One start, stop, restart, reload, enable or disable of one system unit, then a check that the unit reached that state. The unit name is checked with the same rules as the job step, and stopping, restarting, reloading or disabling ssh/sshd is refused at every setting |
 | `list_cron` | `readFiles`, with the path rules for `/etc/crontab`, `/etc/cron.d`, and the crontab spool; entries from a single file a stricter rule covers are withheld | Every crontab source and systemd timer, what each entry runs and as whom, and which sources could actually be read. Retries unreadable sources with `sudo -n` unless the session's `sudo` is deny. Commands are redacted. **There is no tool that edits a crontab**: a scheduled line outlives the session that wrote it, where the stop-all-AI-access switch cannot reach it |

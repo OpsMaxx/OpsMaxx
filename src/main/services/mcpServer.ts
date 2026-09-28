@@ -78,6 +78,16 @@ import {
 } from '../../shared/cloud'
 import { knownSecretValuesForServer, resolveChainSecrets, resolveDbSecrets } from './credentialResolver'
 import { DockerReader } from './docker'
+import { KubernetesReader } from './kubernetes'
+import {
+  buildK8sLogsCommand,
+  validateContext,
+  validateNamespace,
+  validateNodeName,
+  validatePodName,
+  type K8sSchedulingAction,
+  type K8sWorkloadKind
+} from '../../shared/kubernetes'
 import { buildDockerActionCommand, buildDockerLogsCommand } from '../../shared/docker'
 import { buildUserUnitsCommand, parseUserUnits, summariseUserUnits } from '../../shared/userUnits'
 import { buildCronCollectCommand, parseCronCollection } from '../../shared/cron'
@@ -1604,6 +1614,12 @@ Not available
 - No tool edits a crontab or a systemd timer, and doing it through execute_command instead is
   working around that. A scheduled command keeps running after this session ends, where the
   stop-all-AI-access switch cannot reach it, so changing a schedule is left to the user in OpsMaxx.
+- Kubernetes: k8s_overview, k8s_logs, k8s_diagnose, k8s_resources, k8s_helm_releases,
+  k8s_api_scan and k8s_drain_preflight read the cluster a saved server's kubeconfig reaches;
+  k8s_rollout_restart and k8s_node_action (cordon, uncordon, drain) change it and are asked for
+  on every call; pod_command runs one command inside a container, checked like execute_command.
+  Prefer them over kubectl through execute_command. Nothing applies, edits, scales or deletes a
+  Kubernetes object, switches the kubeconfig's current context, or follows a log.
 - No tool creates, edits or deletes a VPN profile. A VPN decides which network everything after
   it travels over, so you may start or stop one the user wrote and you can never author one.
   There is no add_vpn or edit_vpn to look for.
@@ -5279,6 +5295,569 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     }
   )
 
+  // ------------------------------------------------------------- Kubernetes
+  //
+  // The app's Kubernetes panel, reached by an agent. This was refused in
+  // writing until 2026-09-28, when the owner of the product reversed it for
+  // parity with the panel; tests/jobsNotExposed.test.ts records the decision
+  // and what replaced the ban. What makes it acceptable is the grading, not the
+  // reads being harmless:
+  //
+  //  - Everything runs through KubernetesReader, the same class the panel uses,
+  //    against the kubeconfig on ONE saved server named per call. The context
+  //    an agent names is validated here and refused if bad: the shared builders
+  //    silently drop an invalid one, which for an agent would mean acting on
+  //    whatever cluster the kubeconfig currently points at while believing it
+  //    named another.
+  //  - Reads sit on `containers`. The resources read is weighed higher, because
+  //    secret NAMES and RBAC bindings are a map of how to escalate even though
+  //    no value is ever read (see SECRET_TEMPLATE in shared/kubernetes.ts).
+  //  - Every change to a cluster -- rollout restart, cordon, uncordon, drain --
+  //    is `containerControl`, graded high and asked for on EVERY call. A drain
+  //    takes its own preflight and refuses on blockers; there is no override.
+  //  - pod_command runs arbitrary text inside a container, so it is checked as
+  //    the command it is, against the session's command rules, the way
+  //    execute_command is, and asked for every time. It is not the panel's exec:
+  //    that one verifies an approval record a person minted by typing a phrase,
+  //    and fabricating one from an agent gate would be a false record.
+  //  - Logs never follow. A stream would outlive the approval that authorised it.
+  //
+  // Not available at any setting: applying, editing, scaling or deleting
+  // anything, switching the kubeconfig's current context, and deleting a pod.
+
+  const K8S_OUTPUT_CAP = 60_000
+  const K8S_CONTEXT = z
+    .string()
+    .optional()
+    .describe(
+      'kubeconfig context to use on that server. Omit for its current context. Refused, never ignored, ' +
+        'when it is not a valid context name.'
+    )
+
+  /** The agent's context, or an error. Never silently dropped: see the note above. */
+  const k8sContext = (context: string | undefined): { ok: true; value?: string } | { ok: false; error: string } =>
+    context === undefined || context.trim() === ''
+      ? { ok: true }
+      : validateContext(context)
+        ? { ok: true, value: context.trim() }
+        : { ok: false, error: `"${context}" is not a valid kubeconfig context name.` }
+
+  /** A reader result as the agent reads it: capped, redacted, and marked as the host's words. */
+  const k8sBody = (serverId: string, value: unknown): string => {
+    const json = typeof value === 'string' ? value : JSON.stringify(value, null, 1)
+    const capped =
+      json.length > K8S_OUTPUT_CAP
+        ? `${json.slice(0, K8S_OUTPUT_CAP)}\n… (${json.length - K8S_OUTPUT_CAP} more characters withheld)`
+        : json
+    return hostReportedBlock(redactOutput(capped, knownSecretValuesForServer(serverId)))
+  }
+
+  /**
+   * The one shape every Kubernetes tool has: sign in, resolve the server, gate,
+   * run, audit exactly one row. `run` returns ok/text, or ok:false with the
+   * reason, which is audited as an error and returned as one.
+   */
+  const k8sTool = async (
+    extra: Parameters<typeof authenticateExtra>[0],
+    serverName: string,
+    opts: {
+      tool: string
+      capability: 'containers' | 'containerControl' | 'terminal'
+      level: 'low' | 'medium' | 'high'
+      because: string
+      action: string
+      intent?: string
+      perCall?: boolean
+      command?: string
+      /** A change to a cluster, or code run inside one: see ALWAYS_ASK below. */
+      alwaysAsks?: boolean
+    },
+    run: (cfg: ReturnType<typeof serverToSshConfig>, s: CachedServer) => Promise<{ ok: boolean; text: string }>
+  ): Promise<CallToolResult> => {
+    const auth = authenticateExtra(extra)
+    if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
+    const resolved = resolveServerOrError(auth.session, serverName)
+    if ('error' in resolved) return resolved.error
+    const { server: s, workspace } = resolved.match
+    let check =
+      opts.command !== undefined
+        ? effectiveCommand(auth.session, s.id, opts.command)
+        : effectiveCapability(auth.session, s.id, opts.capability)
+    // ALWAYS ASK. The condition the Kubernetes ban was lifted on was that every
+    // change to a cluster is asked for, and `containerControl` at allow would
+    // otherwise be silent: Confirm risky actions only upgrades stopping or
+    // removing a container, and Full Access has it off. So an allow becomes an
+    // ask here, whatever the group says. The one exception is the Bypass
+    // profile, whose whole meaning is that nothing asks, chosen per session by
+    // the person who connected the agent; a deny is never touched.
+    if (opts.alwaysAsks && check.decision === 'allow' && modeOf(auth.session) !== 'bypass') {
+      check = { ...check, decision: 'ask', reason: 'Changing a Kubernetes cluster, or running code inside one, is asked for every time.' }
+    }
+    const ctx: AuditContext = {
+      session: auth.session,
+      workspaceId: workspace.id,
+      workspaceName: workspace.name,
+      serverId: s.id,
+      serverName: s.name,
+      action: opts.action,
+      capability: opts.capability
+    }
+    const gated = await gate(
+      ctx,
+      check,
+      { toolName: opts.tool, level: opts.level, because: opts.because, intent: opts.intent, perCall: opts.perCall },
+      extra
+    )
+    if (!gated.ok) return gated.result
+    try {
+      const out = await run(resolveChainSecrets(serverToSshConfig(s)), s)
+      if (!out.ok) {
+        recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: out.text })
+        return errorText(out.text)
+      }
+      auditSuccess(ctx, gated.approval)
+      return text(out.text)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: message })
+      return errorText(`Kubernetes on ${s.name}: ${message}`)
+    }
+  }
+
+  /** Reader results carry ok/reason/detail; this turns a failure into a sentence. */
+  const k8sResult = (
+    s: CachedServer,
+    what: string,
+    r: { ok: boolean; reason?: string; detail?: string }
+  ): { ok: boolean; text: string } =>
+    r.ok
+      ? { ok: true, text: `${what} on ${s.name}:\n\n${k8sBody(s.id, r)}` }
+      : { ok: false, text: `${what} on ${s.name} failed (${r.reason ?? 'unknown'}): ${r.detail ?? 'no detail'}` }
+
+  /** A composite read whose sections each carry their own ok/reason. */
+  const k8sParts = (s: CachedServer, what: string, r: unknown): { ok: boolean; text: string } => ({
+    ok: true,
+    text: `${what} on ${s.name}:\n\n${k8sBody(s.id, r)}`
+  })
+
+  const NAMESPACE = z.string().describe('Namespace, exactly as k8s_overview reported it')
+
+  server.registerTool(
+    'k8s_overview',
+    {
+      title: 'Kubernetes overview',
+      description:
+        'The cluster reachable from one saved server’s kubeconfig: contexts, namespaces, nodes, ' +
+        'workloads, pods and recent warning events, as the app’s Kubernetes panel reads them. ' +
+        'Requires the containers capability. Prefer this over kubectl through execute_command: names ' +
+        'are validated rather than interpolated, and an RBAC refusal is reported as one rather than ' +
+        'as an empty cluster.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        context: K8S_CONTEXT,
+        namespace: z.string().optional().describe('Limit pods and workloads to one namespace'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false }
+    },
+    async ({ serverName, context, namespace, intent }, extra) => {
+      const c = k8sContext(context)
+      if (!c.ok) return errorText(c.error)
+      if (namespace !== undefined && !validateNamespace(namespace)) return errorText(`"${namespace}" is not a valid namespace.`)
+      return k8sTool(
+        extra,
+        serverName,
+        {
+          tool: 'k8s_overview',
+          capability: 'containers',
+          level: 'low',
+          because: 'it returns what runs in the cluster this server can reach',
+          action: `k8s_overview${c.value ? ` --context=${c.value}` : ''}${namespace ? ` -n ${namespace}` : ''}`,
+          intent
+        },
+        // Each section reports its own read, so one refused by RBAC does not hide
+        // the others; the body carries every section's ok/reason as it came.
+        async (cfg, s) => k8sParts(s, 'Kubernetes overview', await k8sReader.overview(cfg, c.value, namespace))
+      )
+    }
+  )
+
+  server.registerTool(
+    'k8s_logs',
+    {
+      title: 'Read a pod’s logs',
+      description:
+        'The last lines every container in one pod wrote, prefixed with the container name. It NEVER ' +
+        'follows: a stream would outlive the approval that authorised it, and the stop-all-AI-access ' +
+        'switch works by resolving requests still pending. Output is redacted and returned as data the ' +
+        'host reported. Requires the containers capability.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        namespace: NAMESPACE,
+        pod: z.string().describe('Pod name, exactly as k8s_overview reported it'),
+        lines: z.number().int().min(1).max(5000).optional().describe('How many trailing lines. Defaults to 200.'),
+        previous: z.boolean().optional().describe('Read the previous (crashed) container instance instead'),
+        context: K8S_CONTEXT,
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, namespace, pod, lines, previous, context, intent }, extra) => {
+      const c = k8sContext(context)
+      if (!c.ok) return errorText(c.error)
+      if (!validateNamespace(namespace) || !validatePodName(pod)) return errorText('Invalid namespace or pod name.')
+      return k8sTool(
+        extra,
+        serverName,
+        {
+          tool: 'k8s_logs',
+          capability: 'containers',
+          level: 'medium',
+          because: 'it returns whatever this pod printed, which routinely includes credentials and customer data',
+          action: `k8s_logs ${namespace}/${pod}${previous ? ' --previous' : ''}`,
+          intent
+        },
+        async (cfg, s) => {
+          const tail = lines ?? 200
+          const r = await sshExec(cfg, buildK8sLogsCommand(namespace, pod, tail, c.value, { previous }), 20_000, false)
+          const out = `${r.stdout ?? ''}${r.stderr ?? ''}`.trimEnd()
+          if (!r.ok) return { ok: false, text: `Could not read logs for ${namespace}/${pod} on ${s.name}: ${r.error ?? 'kubectl failed'}` }
+          return {
+            ok: true,
+            text: `Last ${tail} line(s) from ${namespace}/${pod} on ${s.name}${previous ? ' (previous instance)' : ''}:\n\n${k8sBody(s.id, out || '(nothing written in this window)')}`
+          }
+        }
+      )
+    }
+  )
+
+  server.registerTool(
+    'k8s_diagnose',
+    {
+      title: 'Diagnose a pod',
+      description:
+        'Why one pod is unhealthy: its description, its events and the previous container’s last ' +
+        'log lines, read in one call the way the panel’s Diagnose button reads them. Requires the ' +
+        'containers capability.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        namespace: NAMESPACE,
+        pod: z.string().describe('Pod name, exactly as k8s_overview reported it'),
+        context: K8S_CONTEXT,
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, namespace, pod, context, intent }, extra) => {
+      const c = k8sContext(context)
+      if (!c.ok) return errorText(c.error)
+      if (!validateNamespace(namespace) || !validatePodName(pod)) return errorText('Invalid namespace or pod name.')
+      return k8sTool(
+        extra,
+        serverName,
+        {
+          tool: 'k8s_diagnose',
+          capability: 'containers',
+          level: 'medium',
+          because: 'it includes the pod’s previous log lines, which can carry credentials',
+          action: `k8s_diagnose ${namespace}/${pod}`,
+          intent
+        },
+        async (cfg, s) => {
+          const r = await k8sReader.diagnose(cfg, namespace, pod, c.value)
+          return { ok: true, text: `Diagnosis of ${namespace}/${pod} on ${s.name}:\n\n${k8sBody(s.id, r)}` }
+        }
+      )
+    }
+  )
+
+  server.registerTool(
+    'k8s_resources',
+    {
+      title: 'Kubernetes resources and RBAC',
+      description:
+        'PVCs, ingresses, RBAC bindings, and which secrets exist with the names of their keys. Never a ' +
+        'secret’s value: the query cannot return one. Weighed higher at the approval prompt than ' +
+        'the other reads, because who is bound to what and where the tokens are kept is a map of how ' +
+        'to escalate. Requires the containers capability.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        context: K8S_CONTEXT,
+        namespace: z.string().optional().describe('Limit to one namespace'),
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false }
+    },
+    async ({ serverName, context, namespace, intent }, extra) => {
+      const c = k8sContext(context)
+      if (!c.ok) return errorText(c.error)
+      if (namespace !== undefined && !validateNamespace(namespace)) return errorText(`"${namespace}" is not a valid namespace.`)
+      return k8sTool(
+        extra,
+        serverName,
+        {
+          tool: 'k8s_resources',
+          capability: 'containers',
+          level: 'medium',
+          because: 'it lists which secrets exist and every RBAC binding, which together show how to escalate',
+          action: `k8s_resources${namespace ? ` -n ${namespace}` : ''}`,
+          intent
+        },
+        async (cfg, s) => k8sParts(s, 'Kubernetes resources', await k8sReader.resources(cfg, c.value, namespace))
+      )
+    }
+  )
+
+  server.registerTool(
+    'k8s_helm_releases',
+    {
+      title: 'Helm releases',
+      description: 'Helm releases in the cluster, with chart, version and status. Requires the containers capability.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        context: K8S_CONTEXT,
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false }
+    },
+    async ({ serverName, context, intent }, extra) => {
+      const c = k8sContext(context)
+      if (!c.ok) return errorText(c.error)
+      return k8sTool(
+        extra,
+        serverName,
+        { tool: 'k8s_helm_releases', capability: 'containers', level: 'low', because: 'it lists what is installed in the cluster', action: 'k8s_helm_releases', intent },
+        async (cfg, s) => k8sResult(s, 'Helm releases', await k8sReader.helm(cfg, c.value))
+      )
+    }
+  )
+
+  server.registerTool(
+    'k8s_api_scan',
+    {
+      title: 'Deprecated Kubernetes APIs',
+      description:
+        'Which deprecated or removed API versions the cluster still serves or has objects in, for ' +
+        'upgrade planning. Requires the containers capability.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        context: K8S_CONTEXT,
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false }
+    },
+    async ({ serverName, context, intent }, extra) => {
+      const c = k8sContext(context)
+      if (!c.ok) return errorText(c.error)
+      return k8sTool(
+        extra,
+        serverName,
+        { tool: 'k8s_api_scan', capability: 'containers', level: 'low', because: 'it reads which API versions the cluster serves', action: 'k8s_api_scan', intent },
+        async (cfg, s) => k8sParts(s, 'API scan', await k8sReader.apiScan(cfg, c.value))
+      )
+    }
+  )
+
+  server.registerTool(
+    'k8s_drain_preflight',
+    {
+      title: 'Check whether a node can be drained',
+      description:
+        'What draining one node would evict, which PodDisruptionBudgets and endpoints would block it, ' +
+        'and the verdict. A read: it changes nothing. k8s_node_action drain takes this reading again ' +
+        'for itself immediately before it runs and refuses on any blocker. Requires the containers capability.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        node: z.string().describe('Node name, exactly as k8s_overview reported it'),
+        context: K8S_CONTEXT,
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: false }
+    },
+    async ({ serverName, node, context, intent }, extra) => {
+      const c = k8sContext(context)
+      if (!c.ok) return errorText(c.error)
+      if (!validateNodeName(node)) return errorText(`"${node}" is not a valid node name.`)
+      return k8sTool(
+        extra,
+        serverName,
+        { tool: 'k8s_drain_preflight', capability: 'containers', level: 'low', because: 'it reads what a drain of this node would evict', action: `k8s_drain_preflight ${node}`, intent },
+        async (cfg, s) => {
+          const assessment = await k8sReader.drainPreflight(cfg, node, c.value)
+          return { ok: true, text: `Drain preflight for ${node} on ${s.name}:\n\n${k8sBody(s.id, assessment)}` }
+        }
+      )
+    }
+  )
+
+  server.registerTool(
+    'k8s_rollout_restart',
+    {
+      title: 'Restart a workload',
+      description:
+        'Rolling restart of ONE Deployment, StatefulSet or DaemonSet: the controller replaces its pods ' +
+        'gradually and converges back to the workload’s own declared state. Nothing is edited or ' +
+        'deleted. Requires the containerControl capability, and is asked for on EVERY call whatever the ' +
+        'access group says -- only a session on the Bypass profile runs it unasked. One approval never ' +
+        'covers the next restart.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        kind: z.enum(['deployment', 'statefulset', 'daemonset']).describe('Workload kind'),
+        namespace: NAMESPACE,
+        name: z.string().describe('Workload name, exactly as k8s_overview reported it'),
+        context: K8S_CONTEXT,
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, kind, namespace, name, context, intent }, extra) => {
+      const c = k8sContext(context)
+      if (!c.ok) return errorText(c.error)
+      if (!validateNamespace(namespace) || !validatePodName(name)) return errorText('Invalid namespace or workload name.')
+      return k8sTool(
+        extra,
+        serverName,
+        {
+          tool: 'k8s_rollout_restart',
+          capability: 'containerControl',
+          level: 'high',
+          because: 'it replaces every pod of a running workload in the cluster',
+          action: `kubectl rollout restart ${kind}/${name} -n ${namespace}${c.value ? ` --context=${c.value}` : ''}`,
+          intent,
+          perCall: true,
+          alwaysAsks: true
+        },
+        async (cfg, s) => {
+          const r = await k8sReader.rolloutRestart(
+            cfg,
+            { kind: kind as K8sWorkloadKind, namespace, name, desired: null, strategy: null, context: c.value ?? null },
+            true
+          )
+          return k8sResult(s, `Rollout restart of ${kind}/${name}`, r)
+        }
+      )
+    }
+  )
+
+  server.registerTool(
+    'k8s_node_action',
+    {
+      title: 'Cordon, uncordon or drain a node',
+      description:
+        'Changes whether ONE node takes new pods. cordon marks it unschedulable and evicts nothing; ' +
+        'uncordon reverses that; drain cordons it and evicts every controller-owned pod on it. A drain ' +
+        'takes its own preflight immediately before it runs and REFUSES on any blocker (a ' +
+        'PodDisruptionBudget, a pod nothing would recreate, a Service left with no ready endpoint); ' +
+        'there is no force option. A drain that fails part-way has still moved some workloads. ' +
+        'Requires the containerControl capability, and is asked for on EVERY call whatever the access ' +
+        'group says; only a session on the Bypass profile runs it unasked.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        node: z.string().describe('Node name, exactly as k8s_overview reported it'),
+        action: z.enum(['cordon', 'uncordon', 'drain']).describe('What to do to the node'),
+        context: K8S_CONTEXT,
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false }
+    },
+    async ({ serverName, node, action, context, intent }, extra) => {
+      const c = k8sContext(context)
+      if (!c.ok) return errorText(c.error)
+      if (!validateNodeName(node)) return errorText(`"${node}" is not a valid node name.`)
+      return k8sTool(
+        extra,
+        serverName,
+        {
+          tool: 'k8s_node_action',
+          capability: 'containerControl',
+          level: 'high',
+          because:
+            action === 'drain'
+              ? 'it evicts every workload running on this node and takes it out of the cluster’s capacity'
+              : action === 'cordon'
+                ? 'it stops this node taking new pods'
+                : 'it lets this node take new pods again',
+          action: `kubectl ${action} ${node}${c.value ? ` --context=${c.value}` : ''}`,
+          intent,
+          perCall: true,
+          alwaysAsks: true
+        },
+        async (cfg, s) => {
+          if (action === 'drain') return k8sResult(s, `Drain of ${node}`, await k8sReader.drain(cfg, node, c.value, true))
+          const r = await k8sReader.cordon(
+            cfg,
+            { node, action: action as K8sSchedulingAction, podCount: null, schedulableNodes: null, context: c.value ?? null },
+            true
+          )
+          return k8sResult(s, `${action} of ${node}`, r)
+        }
+      )
+    }
+  )
+
+  server.registerTool(
+    'pod_command',
+    {
+      title: 'Run a command in a pod',
+      description:
+        'Runs ONE non-interactive command inside a container (`kubectl exec … -- sh -c`), with no TTY ' +
+        'and no stdin, stopped after 60 seconds, output capped and redacted. It is checked as the ' +
+        'command it is, against the same command rules execute_command uses, and needs the terminal ' +
+        'capability. It is asked for on EVERY call whatever the access group says; only a session on ' +
+        'the Bypass profile runs it unasked. A program that waits for input will hang until the limit.',
+      inputSchema: {
+        serverName: z.string().describe('Friendly name or alias exactly as returned by list_servers'),
+        namespace: NAMESPACE,
+        pod: z.string().describe('Pod name, exactly as k8s_overview reported it'),
+        container: z.string().optional().describe('Container name, for a pod with more than one'),
+        command: z.string().describe('A single non-interactive shell command, run with sh -c inside the container'),
+        context: K8S_CONTEXT,
+        intent: INTENT_PARAM
+      },
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
+    },
+    async ({ serverName, namespace, pod, container, command, context, intent }, extra) => {
+      const c = k8sContext(context)
+      if (!c.ok) return errorText(c.error)
+      if (!validateNamespace(namespace) || !validatePodName(pod)) return errorText('Invalid namespace or pod name.')
+      if (container !== undefined && container !== '' && !validatePodName(container)) return errorText('Invalid container name.')
+      if (command.trim() === '') return errorText('A command is required.')
+      return k8sTool(
+        extra,
+        serverName,
+        {
+          tool: 'pod_command',
+          capability: 'terminal',
+          level: 'high',
+          because: 'it runs code inside a container, under whatever identity that container runs as',
+          action: `kubectl exec ${namespace}/${pod}${container ? ` -c ${container}` : ''} -- ${command}`,
+          intent,
+          perCall: true,
+          alwaysAsks: true,
+          command
+        },
+        async (cfg, s) => {
+          const r = await k8sReader.execGatedByBridge(cfg, {
+            serverId: s.id,
+            serverName: s.name,
+            namespace,
+            pod,
+            container: container ?? '',
+            command,
+            context: c.value ?? null
+          })
+          if (!r.ok) return { ok: false, text: `The command could not be run in ${namespace}/${pod}: ${r.detail ?? 'unknown'}` }
+          return {
+            ok: true,
+            text:
+              `Ran in ${namespace}/${pod} on ${s.name}` +
+              `${r.containerExit !== null ? ` (exit ${r.containerExit})` : ''}:\n\n${k8sBody(s.id, r.output || '(no output)')}`
+          }
+        }
+      )
+    }
+  )
+
   server.registerTool(
     'fleet_inventory',
     {
@@ -6968,6 +7547,17 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
  * looking for, so an unknown host fails here instead.
  */
 const dockerReader = new DockerReader({
+  exec: (cfg, command, timeoutMs) =>
+    sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
+})
+
+/**
+ * The bridge's own Kubernetes reader, for the same reason as the Docker one
+ * above: no host-key prompt an agent could raise. Built WITHOUT an approval
+ * verifier, so the panel's record-verified `exec` refuses here; the bridge's
+ * pod command is `execGatedByBridge`, behind the MCP gate.
+ */
+const k8sReader = new KubernetesReader({
   exec: (cfg, command, timeoutMs) =>
     sshExec(cfg as Parameters<typeof sshExec>[0], command, timeoutMs, false)
 })

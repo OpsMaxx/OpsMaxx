@@ -13,6 +13,22 @@
 
 export type BroadcastRisk = 'ordinary' | 'elevated' | 'destructive'
 
+/**
+ * What the user must do before a command runs.
+ *
+ * Here rather than in broadcast.ts, beside the risk it is derived from, so a
+ * module that only needs the VOCABULARY -- shared/kubernetes.ts, which the MCP
+ * bridge imports -- does not pull the broadcast runner into the bridge's import
+ * closure (tests/jobsNotExposed.test.ts walks type imports too).
+ */
+export type BroadcastConfirmation =
+  /** Run on click. One host, nothing alarming in the command. */
+  | { kind: 'none' }
+  /** A normal confirm step naming the hosts. */
+  | { kind: 'confirm' }
+  /** The user types this exact word. Reserved for genuine blast radius. */
+  | { kind: 'type-to-confirm'; phrase: string }
+
 // Verbs that destroy state, stop machines, or overwrite devices. Matched on the
 // command as written; this is a UX guard that decides how hard the user has to
 // press, not a security boundary. Anyone typing here already has a shell on

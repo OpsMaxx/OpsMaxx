@@ -121,6 +121,21 @@ const ALLOWED_TOOLS = [
   // container per call: there is no shape in which a single approval acts on a
   // host's worth of them.
   'container_action',
+  // Kubernetes, reached through the app's own KubernetesReader over SSH on a
+  // configured server -- never a kubectl on this machine. Reads on
+  // `containers`; every change to a cluster on `containerControl`, high, asked
+  // per call; pod_command checked as its command under `terminal`. Allowed by
+  // the product owner on 2026-09-28; see tests/jobsNotExposed.test.ts.
+  'k8s_overview',
+  'k8s_logs',
+  'k8s_diagnose',
+  'k8s_resources',
+  'k8s_helm_releases',
+  'k8s_api_scan',
+  'k8s_drain_preflight',
+  'k8s_rollout_restart',
+  'k8s_node_action',
+  'pod_command',
   // Services and schedules, over SSH on a configured server. list_services
   // and list_cron read; service_action runs one `sudo -n systemctl` there and
   // is checked as that exact command. None reaches a shell on this machine.

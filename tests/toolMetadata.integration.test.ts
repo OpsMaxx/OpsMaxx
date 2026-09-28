@@ -139,6 +139,9 @@ describe('tool metadata', () => {
       'list_ci_connections',
       'list_pipelines',
       'list_runs',
+      // Arbitrary text run inside a container, whose effects OpsMaxx does not
+      // model -- execute_command's reason, one hop further in.
+      'pod_command',
       'query_database',
       'rerun_run',
       // Dials a real host and hangs up. It runs nothing and returns nothing

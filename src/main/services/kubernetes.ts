@@ -72,7 +72,7 @@ import {
 // into a vague "no configuration has been provided". See
 // K8S_SUDO_DOES_NOT_HELP.
 
-import { verifyApproval } from '../../shared/broadcast'
+import type { BroadcastConfirmation, BroadcastRisk } from '../../shared/commandRisk'
 
 export type K8sExec = (
   cfg: unknown,
@@ -90,8 +90,25 @@ const merge = (r: { stdout?: string; stderr?: string }): string => {
   return stderr === '' ? stdout : `${stdout}\n${stderr}`
 }
 
+/**
+ * shared/broadcast.ts's `verifyApproval`, passed in rather than imported.
+ *
+ * The MCP bridge constructs this reader too, and tests/jobsNotExposed.test.ts
+ * forbids broadcast anywhere in the bridge's import closure. So the app's
+ * reader is given the real verifier (main/index.ts) and the bridge's is given
+ * none -- and `exec` below refuses outright without one. The bridge's pod
+ * command is `execGatedByBridge`, whose approval is the MCP gate that ran
+ * before it: minting an app approval record from that would be a record of a
+ * human answer nobody gave.
+ */
+export type K8sApprovalVerifier = (
+  approval: unknown,
+  actual: { commands: string[]; targets: { serverId: string; serverName: string }[] },
+  rederived: { risk: BroadcastRisk; confirmation: BroadcastConfirmation }
+) => { ok: true } | { ok: false; reason: string }
+
 export class KubernetesReader {
-  constructor(private readonly deps: { exec: K8sExec }) {}
+  constructor(private readonly deps: { exec: K8sExec; verifyApproval?: K8sApprovalVerifier }) {}
 
   async read(cfg: unknown, context?: string, namespace?: string): Promise<K8sProbe> {
     try {
@@ -456,7 +473,16 @@ export class KubernetesReader {
       // would leave a gap between what was agreed and what runs.
       const command = buildK8sExecCommand(target)
       const plan = planK8sExec(target)
-      const verdict = verifyApproval(
+      if (!this.deps.verifyApproval) {
+        return {
+          ok: false,
+          output: '',
+          containerExit: null,
+          reason: 'unknown',
+          detail: 'this reader was built without an approval verifier, so it runs no exec'
+        }
+      }
+      const verdict = this.deps.verifyApproval(
         approval,
         {
           commands: [command],
@@ -467,6 +493,45 @@ export class KubernetesReader {
       if (!verdict.ok) {
         return { ok: false, output: '', containerExit: null, reason: 'unknown', detail: verdict.reason }
       }
+      return await this.runExec(cfg, command)
+    } catch (e) {
+      return {
+        ok: false,
+        output: '',
+        containerExit: null,
+        reason: 'unknown',
+        detail: e instanceof Error ? e.message : String(e)
+      }
+    }
+  }
+
+  /**
+   * The MCP bridge's pod command, after the bridge's own gate has run.
+   *
+   * No approval RECORD, deliberately: the record `exec` verifies is minted when
+   * a person types the phrase in the app's dialog. The bridge's consent is the
+   * gate that ran before this call -- checked against the session's command
+   * rules, asked every time, audited -- and it is not the same thing, so it is
+   * not dressed up as one. Everything else is identical: the same builder, the
+   * same one-command/no-TTY shape, the same ceiling and the same reading of a
+   * transport failure.
+   */
+  async execGatedByBridge(cfg: unknown, target: K8sExecTarget): Promise<K8sExecResult> {
+    try {
+      return await this.runExec(cfg, buildK8sExecCommand(target))
+    } catch (e) {
+      return {
+        ok: false,
+        output: '',
+        containerExit: null,
+        reason: 'unknown',
+        detail: e instanceof Error ? e.message : String(e)
+      }
+    }
+  }
+
+  private async runExec(cfg: unknown, command: string): Promise<K8sExecResult> {
+    try {
       // 60s. An exec runs somebody else's program and there is no sensible
       // upper bound on it, so this is a deliberate ceiling rather than a
       // measurement: past a minute the answer is "use a job", and a command

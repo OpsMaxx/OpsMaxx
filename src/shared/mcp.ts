@@ -135,7 +135,7 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
     detail:
       'Runs shell commands over SSH. Unrestricted privilege-escalation shells (sudo -i, su, sudo bash) are refused ' +
       'whatever this is set to, in every mode but Bypass. While the group\'s Confirm risky actions is on, a ' +
-      'destructive, elevated or run-time-computed command still asks even when this is allow.'
+      'destructive, elevated or run-time-computed command still asks even when this is allow. It also governs pod_command, one command run inside a Kubernetes container, which is checked against the same command rules and asked for on every call even when this is allow (only the Bypass profile skips it).'
   },
   {
     id: 'readFiles',
@@ -294,15 +294,15 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
   },
   {
     id: 'containers',
-    label: 'Containers: what is running, and their logs',
+    label: 'Containers and Kubernetes: what is running, and their logs',
     detail:
-      'Lists containers with their image, state, ports, uptime and compose project, and reads container logs. The logs are the part to weigh: an application writes its own connection strings, tokens and customer records to stdout, and this returns them as the container emitted them. It reads only — starting and stopping is a separate permission.'
+      'Lists containers with their image, state, ports, uptime and compose project, and reads container logs. The logs are the part to weigh: an application writes its own connection strings, tokens and customer records to stdout, and this returns them as the container emitted them. It reads only — starting and stopping is a separate permission. It also covers the Kubernetes cluster a server\'s kubeconfig reaches: pods, workloads, nodes, events, pod logs, Helm releases, and which secrets exist and who is bound to what (names only, never a secret\'s value — but together a map of how to escalate).'
   },
   {
     id: 'containerControl',
-    label: 'Containers: start, stop and restart them',
+    label: 'Containers and Kubernetes: start, stop, restart and drain',
     detail:
-      'Restarts, stops and starts containers, and brings compose projects up and down. Stopping a container is an outage for whatever it serves, so this is separate from reading the list: an agent that may see what is running does not thereby get to stop it.'
+      'Restarts, stops and starts containers, and brings compose projects up and down. Stopping a container is an outage for whatever it serves, so this is separate from reading the list: an agent that may see what is running does not thereby get to stop it. In Kubernetes it covers a rolling restart of one workload and cordoning, uncordoning or draining one node; each is asked for on every call even when this is allow (only the Bypass profile skips it), and a drain refuses whenever its own preflight finds a blocker.'
   },
   {
     id: 'backupRead',

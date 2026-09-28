@@ -11,7 +11,7 @@ import {
   K8S_FAILURE_HELP,
   type K8sExecTarget
 } from '../src/shared/kubernetes'
-import { approvalFor } from '../src/shared/broadcast'
+import { approvalFor, verifyApproval } from '../src/shared/broadcast'
 import { KubernetesReader } from '../src/main/services/kubernetes'
 
 // Roadmap item 22, part three. The file's original refusal named the
@@ -209,7 +209,8 @@ describe('the approval is a record, not a boolean', () => {
         exec: async (_c, command) => {
           sent.push(command)
           return reply()
-        }
+        },
+        verifyApproval
       })
     }
   }
