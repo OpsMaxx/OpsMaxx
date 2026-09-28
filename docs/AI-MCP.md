@@ -53,8 +53,8 @@ another MCP client. For the short pitch and the security summary, see the
 
 ## The MCP server
 
-`src/main/services/mcpServer.ts` registers **45 tools** — 37 core, plus the 8-tool CI/CD set at
-the end of the table. `tests/localTerminalNotExposed.test.ts` holds the same 45 as a reviewed
+`src/main/services/mcpServer.ts` registers **51 tools** — 43 core, plus the 8-tool CI/CD set at
+the end of the table. `tests/localTerminalNotExposed.test.ts` holds the same 51 as a reviewed
 whitelist, so a new tool cannot appear on the bridge without a diff somebody reads.
 
 | Tool | Capability gating it | What it returns |
