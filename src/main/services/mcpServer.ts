@@ -3444,18 +3444,37 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const uri = args.uri?.trim()
       if (uri !== undefined && (args.host !== undefined || args.username !== undefined || args.password !== undefined))
         return errorText('Pass either uri, or host/username/password — a connection string already carries those.')
-      if (args.kind !== undefined) (patch.kind = args.kind), changes.push(`engine to ${args.kind}`)
+      if (args.kind !== undefined) {
+        patch.kind = args.kind
+        changes.push(`engine to ${args.kind}`)
+      }
       if (uri) {
         patch.uri = true
         patch.host = displayHostFromUri(uri)
         patch.username = ''
         changes.push('connection string')
       }
-      if (args.host !== undefined) (patch.host = args.host.trim()), (patch.uri = false), changes.push('host')
-      if (args.port !== undefined) (patch.port = args.port), changes.push(`port to ${args.port}`)
-      if (args.username !== undefined) (patch.username = args.username.trim()), changes.push(`user to ${args.username.trim()}`)
-      if (args.database !== undefined) (patch.database = args.database.trim()), changes.push('database')
-      if (args.ssl !== undefined) (patch.ssl = args.ssl), changes.push(`TLS ${args.ssl ? 'on' : 'off'}`)
+      if (args.host !== undefined) {
+        patch.host = args.host.trim()
+        patch.uri = false
+        changes.push('host')
+      }
+      if (args.port !== undefined) {
+        patch.port = args.port
+        changes.push(`port to ${args.port}`)
+      }
+      if (args.username !== undefined) {
+        patch.username = args.username.trim()
+        changes.push(`user to ${patch.username}`)
+      }
+      if (args.database !== undefined) {
+        patch.database = args.database.trim()
+        changes.push('database')
+      }
+      if (args.ssl !== undefined) {
+        patch.ssl = args.ssl
+        changes.push(`TLS ${args.ssl ? 'on' : 'off'}`)
+      }
       if (args.password !== undefined) changes.push('credential')
 
       let carrierId = target.sshServerId ?? null
