@@ -66,22 +66,17 @@ export interface TerminalTransport {
 /**
  * The stored auth method, as the SSH layer understands it.
  *
- * `certificate` is in the AuthMethod union and is NOT implemented, and this
- * function used to fold it into 'key' along with everything else it did not
- * recognise. So a profile saved as Certificate connected as private-key
- * authentication using whatever key path happened to be set, and failed with a
- * message about a key the user never chose.
- *
- * Folding an unimplemented value into a working one is the same mistake as a
- * parser whose fallback returns its input: it turns "I do not support this"
- * into "here is something else". 'key' is still the fallback for a value from
- * a newer build we genuinely cannot interpret — there is no safer guess and
- * refusing to connect at all would be worse — but certificate is a value we DO
- * recognise and do not implement, so it is named, and the Add Server dialog
- * disables it for the same reason.
+ * `certificate` used to be folded into 'key' here along with everything else
+ * this did not recognise, so a profile saved as Certificate connected as
+ * private-key authentication and failed with a message about a key the user
+ * never chose. It is passed through now that main presents the certificate
+ * (resolveSecrets promotes it from the saved record as well, for the callers
+ * that still fold). 'key' remains the fallback for a value from a newer build
+ * we genuinely cannot interpret — there is no safer guess, and refusing to
+ * connect at all would be worse.
  */
 const asAuth = (a: string): SshAuth => {
-  if (a === 'password' || a === 'agent' || a === 'key') return a
+  if (a === 'password' || a === 'agent' || a === 'key' || a === 'certificate') return a
   return 'key'
 }
 

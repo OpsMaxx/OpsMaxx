@@ -1,4 +1,5 @@
 import { getSecret, setSecret } from './secrets'
+import { getCachedServer } from './mcpDataCache'
 import type { CredentialShape } from '../../shared/credentialShape'
 import { vaultEntriesForResolve, vaultStatus } from './vault'
 import { VpnError } from './vpn/errors'
@@ -18,6 +19,8 @@ export interface SecretBlob {
   password?: string
   keyPath?: string
   passphrase?: string
+  /** The certificate file for Certificate authentication. See SshHop.certificatePath. */
+  certificatePath?: string
   /**
    * Where this server's SSH agent listens. Not a secret — a socket path is not
    * a credential — but it lives here because this is the per-server blob and it
@@ -90,6 +93,21 @@ function applyVaultEntry<T extends SshHop>(cfg: T, entry: VaultEntry): void {
 // exactly the same way a human-driven terminal/SFTP session does, so there is
 // only one place that ever reads a server's stored secret.
 export function resolveSecrets<T extends SshHop & { serverId?: string }>(cfg: T): T {
+  /**
+   * The saved record's method wins over the caller's for Certificate.
+   *
+   * A dozen renderer paths (the monitor panes, broadcast, jobs, Docker, cron,
+   * the log tail...) build their own SSH config and fold every method that is
+   * not password or agent into 'key'. For a certificate server that is a
+   * connection presenting the bare key, which the server was never told about,
+   * and it fails as a rejected credential. Every one of those paths comes
+   * through here, and so does every jump hop, so this is the one place that
+   * fixes all of them. Only ever promotes to certificate: a caller that says
+   * 'certificate' for an unsaved server being tested is left alone.
+   */
+  if (cfg.serverId && cfg.auth !== 'certificate' && getCachedServer(cfg.serverId)?.auth === 'certificate') {
+    cfg.auth = 'certificate'
+  }
   if (cfg.serverId && !cfg.password && !cfg.privateKey && !cfg.keyPath) {
     const raw = getSecret(cfg.serverId)
     if (raw) {
@@ -112,6 +130,7 @@ export function resolveSecrets<T extends SshHop & { serverId?: string }>(cfg: T)
         cfg.password = cfg.password ?? blob.password
         cfg.keyPath = cfg.keyPath ?? blob.keyPath
         cfg.passphrase = cfg.passphrase ?? blob.passphrase
+        cfg.certificatePath = cfg.certificatePath ?? blob.certificatePath
         cfg.agentSocket = cfg.agentSocket ?? blob.agentSocket
       }
     }
@@ -220,10 +239,16 @@ export function credentialShapeForServer(serverId: string): CredentialShape {
     } catch (e) {
       locked = isVaultLockedError(e)
     }
-    return { kind: 'vault', vaultLocked: locked, vaultEntryId: blob.vaultEntryId, savedAnswer }
+    return {
+      kind: 'vault',
+      vaultLocked: locked,
+      vaultEntryId: blob.vaultEntryId,
+      certificatePath: blob.certificatePath,
+      savedAnswer
+    }
   }
   if (blob.agentSocket) return { kind: 'agent', savedAnswer }
-  if (blob.keyPath) return { kind: 'key', keyPath: blob.keyPath, savedAnswer }
+  if (blob.keyPath) return { kind: 'key', keyPath: blob.keyPath, certificatePath: blob.certificatePath, savedAnswer }
   if (blob.password) return { kind: 'password', savedAnswer }
   return { kind: 'none', savedAnswer }
 }

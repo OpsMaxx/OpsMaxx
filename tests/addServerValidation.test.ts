@@ -2,38 +2,33 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-// Certificate was offered as an equal fourth authentication method and revealed
-// no fields at all when picked. That was the visible half.
-//
-// The real defect was in the transport: `asAuth` mapped every value that was
-// not password or agent to 'key', so choosing Certificate did not do nothing —
-// it silently connected as PRIVATE KEY authentication using whatever key path
-// happened to be set, and failed with a message about a key the user never
-// chose. Folding an unimplemented value into a working one turns "I do not
-// support this" into "here is something else", which is the same mistake as a
-// parser whose fallback returns its input.
+// Certificate was once offered with no fields behind it, and the transport then
+// folded it into 'key' -- so choosing it silently connected as plain private-key
+// authentication with whatever key path happened to be set. It was disabled
+// for that reason. It is implemented now, so what is pinned is the opposite:
+// offered, with the fields it needs, and passed through as itself.
 
 const ROOT = join(__dirname, '..')
 const read = (p: string): string => readFileSync(join(ROOT, p), 'utf8')
 
-describe('an authentication method the build cannot honour is not offered', () => {
+describe('certificate authentication is offered and asks for what it needs', () => {
   const modal = read('src/renderer/src/components/connections/AddServerModal.tsx')
 
-  it('marks certificate unavailable with a reason', () => {
-    expect(modal).toMatch(/id: 'certificate'[\s\S]{0,400}unavailable:/)
-  })
-
-  // Disabled rather than deleted: the concept exists and OpsMaxx reads
-  // certificate state elsewhere. An option that vanishes teaches the user the
-  // product cannot do something when the truth is that this build cannot.
-  it('keeps the option visible so the absence is explained, not hidden', () => {
+  it('is not marked unavailable', () => {
     expect(modal).toContain("id: 'certificate'")
-    expect(modal).toMatch(/disabled=\{a\.unavailable !== undefined/)
+    expect(modal).not.toMatch(/id: 'certificate'[\s\S]{0,200}unavailable:/)
   })
 
-  // A profile already saved with it opens on this screen, and a tooltip is not
-  // a way to tell somebody their connection cannot work.
-  it('states the reason when the value is selected, not only on hover', () => {
+  it('shows the private key fields and a certificate field when chosen', () => {
+    expect(modal).toContain("const usesKeyFile = auth === 'key' || auth === 'certificate'")
+    expect(modal).toContain('{usesKeyFile && !usingVault && (')
+    expect(modal).toContain("{auth === 'certificate' && (")
+  })
+
+  // The mechanism that stays: a method some future build adds and this one
+  // cannot honour is still shown, disabled, with its reason on screen.
+  it('keeps the disabled-with-a-reason mechanism for any method that needs it', () => {
+    expect(modal).toMatch(/disabled=\{a\.unavailable !== undefined/)
     expect(modal).toMatch(/AUTH\.find\(\(a\) => a\.id === auth\)\?\.unavailable/)
   })
 })
@@ -57,8 +52,8 @@ describe('the form knows what is still missing', () => {
 describe('the transport does not reinterpret a method it was given', () => {
   const transport = read('src/renderer/src/lib/transport.ts')
 
-  it('passes key, password and agent through unchanged', () => {
-    expect(transport).toMatch(/a === 'password' \|\| a === 'agent' \|\| a === 'key'/)
+  it('passes key, password, agent and certificate through unchanged', () => {
+    expect(transport).toMatch(/a === 'password' \|\| a === 'agent' \|\| a === 'key' \|\| a === 'certificate'/)
   })
 
   // The fallback survives for a value from a NEWER build we genuinely cannot
@@ -70,7 +65,7 @@ describe('the transport does not reinterpret a method it was given', () => {
     expect(i).toBeGreaterThan(-1)
     const doc = transport.slice(Math.max(0, i - 1400), i)
     expect(doc).toMatch(/certificate/i)
-    expect(doc).toMatch(/not implemented|do not implement/i)
+    expect(doc).toMatch(/cannot interpret/i)
   })
 })
 

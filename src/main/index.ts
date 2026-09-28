@@ -921,10 +921,12 @@ ipcMain.handle('theme:set', (_e, mode: unknown) => {
 
 ipcMain.handle('ssh:defaultKeys', () => listDefaultKeys())
 
-ipcMain.handle('dialog:openKey', async () => {
+ipcMain.handle('dialog:openKey', async (_e, title?: unknown) => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select private key',
+    // The same picker also finds a certificate for Certificate auth. Only the
+    // wording changes; a string from the renderer cannot widen what it opens.
+    title: typeof title === 'string' && title.length <= 80 ? title : 'Select private key',
     // ~/.ssh is where keys actually live and the picker will not show a hidden
     // folder unless it opens there, so landing anywhere else means the user
     // has to type the path they came here to avoid typing.

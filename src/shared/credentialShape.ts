@@ -44,6 +44,11 @@ export interface CredentialShape {
    */
   vaultEntryId?: string
   /**
+   * The certificate file a Certificate-auth server was saved with, for `key`
+   * and `vault`. A path, shown in the editor like `keyPath`, so not a secret.
+   */
+  certificatePath?: string
+  /**
    * True when a second-factor answer has been remembered for this server.
    *
    * A boolean, never the answer — same rule as everything else here. It exists

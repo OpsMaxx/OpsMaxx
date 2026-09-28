@@ -155,8 +155,12 @@ interface DataShape {
   cicdConnections?: unknown
 }
 
+// Every member of SshAuth. 'certificate' was missing, so a server saved with
+// Certificate authentication was cached as 'key' and every main-side path --
+// the MCP bridge, the sampler, the resolver's promotion -- dialled it with the
+// bare key.
 function isSshAuth(v: unknown): v is SshAuth {
-  return v === 'password' || v === 'key' || v === 'agent'
+  return v === 'password' || v === 'key' || v === 'agent' || v === 'certificate'
 }
 
 function parseRoute(raw: unknown): CachedHop[] {

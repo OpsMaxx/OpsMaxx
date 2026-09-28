@@ -589,7 +589,8 @@ const api = {
     set: (mode: ThemeMode): Promise<boolean> => ipcRenderer.invoke('theme:set', mode)
   },
   dialog: {
-    openKey: (): Promise<string | null> => ipcRenderer.invoke('dialog:openKey'),
+    /** `title` lets the same ~/.ssh picker ask for a certificate as well as a key. */
+    openKey: (title?: string): Promise<string | null> => ipcRenderer.invoke('dialog:openKey', title),
     /** The same picker, plus the key's PEM body when the file is one — so a key
      *  can be stored in the vault as material rather than as a path to
      *  plaintext on disk. `material: null` means the user picked something that

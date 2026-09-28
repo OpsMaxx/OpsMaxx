@@ -42,19 +42,11 @@ import { Switch } from '../common/Switch'
 
 // `unavailable` says why rather than hiding the option.
 //
-// Certificate was offered as an equal fourth choice and revealed no fields at
-// all when picked — no certificate file, no signed key, no CA hint. That was
-// the visible half. The real defect is in the transport: `asAuth` in
-// lib/transport.ts maps every value that is not password or agent to 'key', so
-// choosing Certificate did not merely do nothing, it silently connected as
-// PRIVATE KEY authentication using whatever key path happened to be set. A
-// profile saved that way cannot work and does not say why, and the user's
-// choice was reinterpreted without telling them.
-//
-// Disabled with a reason rather than deleted: the concept exists, OpsMaxx
-// reads certificate state elsewhere (shared/access.ts), and an option that
-// vanishes teaches a user the product cannot do something when the truth is
-// that this build cannot.
+// Certificate was disabled for a while, because picking it revealed no fields
+// and the transport then connected as plain private-key authentication. It is
+// real now: the private key AND the OpenSSH certificate that signs it (the
+// `*-cert.pub` a CA issues) are both asked for, and main presents the
+// certificate at dial time (ssh.ts, readCertificateFile).
 const AUTH: {
   id: AuthMethod
   label: string
@@ -67,9 +59,7 @@ const AUTH: {
   {
     id: 'certificate',
     label: 'Certificate',
-    icon: <FileBadge size={16} />,
-    unavailable:
-      'OpsMaxx can present an SSH certificate — that is how Microsoft Entra ID logins work — but this form has no field to supply one, and a connection saved with it here would fall back to private-key authentication without saying so. Choose Google Cloud, AWS or Azure above for a certificate issued by a cloud provider.'
+    icon: <FileBadge size={16} />
   }
 ]
 
@@ -112,6 +102,7 @@ function missingField(f: {
   host: string
   auth: AuthMethod
   keyPath: string
+  certificatePath: string
   password: string
   usingVault: boolean
   editing: boolean
@@ -149,8 +140,10 @@ function missingField(f: {
    * SSH, even though both are fully separate connections".
    */
   if (f.rdpOnly) return null
-  if (f.auth === 'certificate') {
-    return { field: 'auth', why: 'Pick an authentication method this build supports.' }
+  // A key from the vault is material, not a file, so there is nothing to find
+  // a `-cert.pub` beside. Everywhere else the convention supplies the path.
+  if (f.auth === 'certificate' && f.usingVault && !f.editing && !f.certificatePath.trim()) {
+    return { field: 'certificatePath', why: 'Select the certificate file for the key from the vault.' }
   }
   // The vault entry supplies the credential, so the field below is empty on
   // purpose and must not be reported as missing.
@@ -222,6 +215,10 @@ export function AddServerModal(): React.JSX.Element {
     existing?.cloud ? targetToDraft(existing.cloud) : emptyCloudDraft
   )
   const [keyPath, setKeyPath] = useState('')
+  const [certificatePath, setCertificatePath] = useState('')
+  // Certificate auth is a private key plus the certificate that signs it, so
+  // everything the key method asks for, it asks for too.
+  const usesKeyFile = auth === 'key' || auth === 'certificate'
   // Blank means "leave whatever is stored", the same contract the key path box
   // has when editing — see the placeholder.
   const [agentSocket, setAgentSocket] = useState('')
@@ -358,12 +355,20 @@ export function AddServerModal(): React.JSX.Element {
   const options: { id: string; name: string; sub: string }[] = vaultUnlocked
     ? vaultEntries
         .filter((e) =>
-          auth === 'key' ? !!e.privateKey : auth === 'password' ? !!e.password && !e.privateKey : false
+          auth === 'key' || auth === 'certificate'
+            ? !!e.privateKey
+            : auth === 'password'
+              ? !!e.password && !e.privateKey
+              : false
         )
         .map((e) => ({ id: e.id, name: e.name, sub: e.username }))
     : (descriptors ?? [])
         .filter((d) =>
-          auth === 'key' ? d.has.privateKey : auth === 'password' ? d.has.password && !d.has.privateKey : false
+          auth === 'key' || auth === 'certificate'
+            ? d.has.privateKey
+            : auth === 'password'
+              ? d.has.password && !d.has.privateKey
+              : false
         )
         .map((d) => ({ id: d.id, name: d.name, sub: '' }))
   const usableEntries = options
@@ -396,6 +401,7 @@ export function AddServerModal(): React.JSX.Element {
     host,
     auth,
     keyPath,
+    certificatePath,
     password,
     usingVault,
     editing: !!editId,
@@ -434,6 +440,11 @@ export function AddServerModal(): React.JSX.Element {
     // become a vault record.
     const p = await window.opsmaxx?.dialog.openKey()
     if (p) chooseKey(p, null)
+  }
+
+  const pickCertificate = async (): Promise<void> => {
+    const p = await window.opsmaxx?.dialog.openKey('Select SSH certificate (*-cert.pub)')
+    if (p) setCertificatePath(p)
   }
 
   const pickFoundKey = async (fileName: string, path: string): Promise<void> => {
@@ -495,10 +506,11 @@ export function AddServerModal(): React.JSX.Element {
         host: host.trim(),
         port: Number(port) || 22,
         username: username.trim() || 'root',
-        auth: auth === 'password' || auth === 'agent' ? auth : 'key',
+        auth: auth === 'password' || auth === 'agent' || auth === 'certificate' ? auth : 'key',
         password: auth === 'password' ? password || undefined : undefined,
-        keyPath: auth === 'key' ? keyPath || undefined : undefined,
-        passphrase: auth === 'key' ? passphrase || undefined : undefined,
+        keyPath: usesKeyFile ? keyPath || undefined : undefined,
+        passphrase: usesKeyFile ? passphrase || undefined : undefined,
+        certificatePath: auth === 'certificate' ? certificatePath.trim() || undefined : undefined,
         // So Test connection exercises the agent the user just typed rather
         // than the one already stored — otherwise the test cannot tell them
         // whether the path they are about to save actually works.
@@ -680,7 +692,7 @@ export function AddServerModal(): React.JSX.Element {
             run: () => setActivity('vault')
           })
       }
-    } else if (auth === 'key' && keyPath.trim()) {
+    } else if (usesKeyFile && keyPath.trim()) {
       secret = { keyPath: keyPath.trim(), passphrase: passphrase || undefined }
 
       /**
@@ -724,6 +736,35 @@ export function AddServerModal(): React.JSX.Element {
       // A socket path is not a credential, but it rides in the same per-server
       // blob because that is where the auth method's details live.
       secret = { agentSocket: agentSocket.trim() }
+    }
+
+    /**
+     * The certificate rides beside whichever key reference was stored.
+     *
+     * Named explicitly, or derived from the key's path by OpenSSH's own rule
+     * BEFORE the key's material may have moved into the vault above — after
+     * that there is no file left to put `-cert.pub` next to.
+     *
+     * An edit that leaves the key blank and changes only the certificate has
+     * no secret yet, and writing `{ certificatePath }` alone would drop the key
+     * reference. So it is rebuilt from what is stored: the vault entry, or the
+     * key path. A passphrase is not readable back, which is what the hint under
+     * the certificate field says.
+     */
+    if (auth === 'certificate') {
+      // Typed, then what is stored (the placeholder promises blank keeps it),
+      // then the convention.
+      const certPath =
+        certificatePath.trim() ||
+        stored?.certificatePath ||
+        (keyPath.trim() ? `${keyPath.trim()}-cert.pub` : '')
+      if (!secret && certPath && certPath !== (stored?.certificatePath ?? '')) {
+        if (stored?.kind === 'vault' && stored.vaultEntryId) secret = { vaultEntryId: stored.vaultEntryId }
+        else if (stored?.kind === 'key' && stored.keyPath)
+          secret = { keyPath: stored.keyPath, passphrase: passphrase || undefined }
+        else secret = {}
+      }
+      if (secret && certPath) secret = { ...secret, certificatePath: certPath }
     }
 
     if (secret) await storeSecret(id, secret, fields.name)
@@ -1002,7 +1043,7 @@ export function AddServerModal(): React.JSX.Element {
       {auth !== 'agent' && descriptors !== null && usableEntries.length === 0 && (
         <div className="field">
           <span className="field-hint">
-            No saved {auth === 'key' ? 'SSH key' : 'login'} in the vault yet — type one below and it
+            No saved {usesKeyFile ? 'SSH key' : 'login'} in the vault yet — type one below and it
             will be saved there.
           </span>
         </div>
@@ -1050,7 +1091,35 @@ export function AddServerModal(): React.JSX.Element {
         </div>
       )}
 
-      {auth === 'key' && !usingVault && (
+      {auth === 'certificate' && (
+        <div className="field">
+          <label className="field-label">Certificate</label>
+          <div className="row" style={{ gap: 8 }}>
+            <input
+              className="input"
+              placeholder={
+                stored?.certificatePath
+                  ? `Using ${stored.certificatePath} — leave blank to keep it`
+                  : keyPath.trim()
+                    ? `${keyPath.trim()}-cert.pub — leave empty to use this`
+                    : 'Leave empty to use the key path with -cert.pub, as ssh does'
+              }
+              value={certificatePath}
+              onChange={(e) => setCertificatePath(e.target.value)}
+            />
+            <button className="btn" onClick={() => void pickCertificate()}>
+              <FolderOpen size={14} /> Browse
+            </button>
+          </div>
+          <span className="field-hint">
+            The OpenSSH certificate your CA signed for the key below. It is read from disk on
+            every connection, so re-signing it in place needs no edit here.
+            {editId && ' Changing only the certificate keeps the saved key; retype its passphrase if it has one.'}
+          </span>
+        </div>
+      )}
+
+      {usesKeyFile && !usingVault && (
         <div className="field">
           <label className="field-label">Private key</label>
           <div className="input-group">

@@ -66,6 +66,15 @@ export interface SshHop {
    * temporary directory it arrived in.
    */
   certificate?: string
+  /**
+   * Where a user-supplied certificate lives, for a server saved with
+   * Certificate authentication. Read in main at dial time, so a certificate
+   * re-signed on disk (they are short-lived by design) is picked up on the next
+   * connection without editing the server. Absent means OpenSSH's own
+   * convention: the key's path with `-cert.pub` appended, which is where
+   * `ssh-keygen -s` writes it and where `ssh` looks for it.
+   */
+  certificatePath?: string
 }
 
 export interface SshConnectConfig extends SshHop {

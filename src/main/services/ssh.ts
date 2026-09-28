@@ -105,6 +105,43 @@ function loadPrivateKey(hop: SshHop): string {
 }
 
 /**
+ * The certificate a user saved a server with, read from disk at dial time.
+ *
+ * A cloud connection mints its certificate and hands it over as text; a server
+ * saved with Certificate authentication names a file instead, because a
+ * certificate is short-lived by design and is re-signed in place -- reading it
+ * per connection means a fresh one is used without editing anything.
+ *
+ * No path named means OpenSSH's convention, the key's own path plus
+ * `-cert.pub`: where `ssh-keygen -s` writes it and where `ssh` looks for it. A
+ * key held in the vault has no path to put that next to, so there the file has
+ * to be named.
+ */
+export function readCertificateFile(hop: SshHop): string {
+  const keyPath = hop.keyPath?.replace(/^"(.*)"$/, '$1').trim() || (hop.privateKey ? '' : defaultIdentityPath())
+  const named = hop.certificatePath?.replace(/^"(.*)"$/, '$1').trim()
+  const path = named || (keyPath ? `${keyPath}-cert.pub` : '')
+  if (!path) {
+    throw new Error(
+      'No certificate file is configured for this connection. Edit the server and select the certificate (the *-cert.pub file your CA issued).'
+    )
+  }
+  const resolved = path.replace(/^~(?=$|[\\/])/, homedir())
+  if (!existsSync(resolved)) {
+    throw new Error(
+      named
+        ? `Certificate not found: ${resolved}`
+        : `No certificate was found next to the key, at ${resolved}. Edit the server and select the certificate file.`
+    )
+  }
+  try {
+    return readFileSync(resolved, 'utf8')
+  } catch (err) {
+    throw new Error(`Could not read certificate ${resolved}: ${(err as Error).message}`)
+  }
+}
+
+/**
  * Read and sanity-check one key file.
  *
  * Split out so a key chosen by the user and one found by the default-identity
@@ -200,8 +237,7 @@ function authFor(hop: SshHop): Partial<ConnectConfig> {
        * sends the user to look at their cloud roles instead of at an expiry
        * they can fix by signing in again.
        */
-      if (!hop.certificate) throw new Error('No certificate was supplied for this connection.')
-      const cert = parseOpenSshCertificate(hop.certificate)
+      const cert = parseOpenSshCertificate(hop.certificate ?? readCertificateFile(hop))
       assertCertificateUsable(cert)
       const certKeyFile = loadPrivateKey(hop)
       if (isSecurityKeyPrivateKey(certKeyFile.slice(0, 512))) {
