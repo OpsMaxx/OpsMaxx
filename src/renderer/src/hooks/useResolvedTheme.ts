@@ -33,7 +33,8 @@ export function useResolvedTheme(): 'dark' | 'light' {
   return theme
 }
 
-// Every theme but light is painted on a dark ground, the OpsMaxx one included.
+// Two themes are painted on a light ground; every other one is dark.
 function read(): 'dark' | 'light' {
-  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+  const t = document.documentElement.getAttribute('data-theme')
+  return t === 'light' || t === 'opsmaxx-light' ? 'light' : 'dark'
 }

@@ -43,7 +43,7 @@ function contrast(a: string, b: string): number {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
 }
 
-type Theme = 'dark' | 'light' | 'opsmaxx'
+type Theme = 'dark' | 'light' | 'opsmaxx' | 'opsmaxx-light'
 
 /**
  * Read a token out of one theme's block.
@@ -51,22 +51,31 @@ type Theme = 'dark' | 'light' | 'opsmaxx'
  * Each block is sliced between its own selector and the next one, so a token
  * missing from the light block is not silently read out of the block after
  * it -- which is the exact bug class this file exists to catch. The OpsMaxx
- * block restates only what differs from dark, so a token it does not define is
- * read from dark: that is what the cascade does with it too.
+ * blocks restate only what differs from their base -- dark for OpsMaxx, light
+ * for OpsMaxx Light -- so a token one does not define is read from its base:
+ * that is what the cascade does with it too.
+ *
+ * OpsMaxx Light is located by its LAST occurrence: its name also appears in
+ * the classic light block's selector list, which is how it inherits.
  */
 function token(theme: Theme, name: string): string {
   const light = CSS.indexOf(":root[data-theme='light']")
   const opsmaxx = CSS.indexOf(":root[data-theme='opsmaxx']")
+  const opsmaxxLight = CSS.lastIndexOf(":root[data-theme='opsmaxx-light']")
   expect(light, 'light theme block must exist').toBeGreaterThan(-1)
   expect(opsmaxx, 'opsmaxx theme block must exist').toBeGreaterThan(light)
+  expect(opsmaxxLight, 'opsmaxx-light theme block must exist').toBeGreaterThan(opsmaxx)
   const blocks: Record<Theme, string> = {
     dark: CSS.slice(0, light),
     light: CSS.slice(light, opsmaxx),
-    opsmaxx: CSS.slice(opsmaxx)
+    opsmaxx: CSS.slice(opsmaxx, opsmaxxLight),
+    'opsmaxx-light': CSS.slice(opsmaxxLight)
   }
+  const base: Partial<Record<Theme, Theme>> = { opsmaxx: 'dark', 'opsmaxx-light': 'light' }
   const find = (block: string): string | undefined =>
     new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`).exec(block)?.[1]
-  const value = find(blocks[theme]) ?? (theme === 'opsmaxx' ? find(blocks.dark) : undefined)
+  const from = base[theme]
+  const value = find(blocks[theme]) ?? (from ? find(blocks[from]) : undefined)
   expect(value, `--${name} must be defined as a hex in the ${theme} theme`).toBeDefined()
   return value!
 }
@@ -75,7 +84,8 @@ function token(theme: Theme, name: string): string {
 const SURFACES: Record<Theme, string[]> = {
   dark: ['bg-app', 'bg-sidebar', 'bg-panel', 'bg-card', 'bg-elevated', 'bg-input'],
   light: ['bg-app', 'bg-sidebar', 'bg-panel', 'bg-card', 'bg-elevated', 'bg-input'],
-  opsmaxx: ['bg-app', 'bg-sidebar', 'bg-panel', 'bg-card', 'bg-elevated', 'bg-input']
+  opsmaxx: ['bg-app', 'bg-sidebar', 'bg-panel', 'bg-card', 'bg-elevated', 'bg-input'],
+  'opsmaxx-light': ['bg-app', 'bg-sidebar', 'bg-panel', 'bg-card', 'bg-elevated', 'bg-input']
 }
 
 const AA = 4.5
@@ -89,7 +99,7 @@ function worstOnSurfaces(theme: Theme, fg: string): { ratio: number; on: string 
   return worst
 }
 
-describe.each(['dark', 'light', 'opsmaxx'] as const)('%s theme', (theme) => {
+describe.each(['dark', 'light', 'opsmaxx', 'opsmaxx-light'] as const)('%s theme', (theme) => {
   // The tokens that carry running text. --text-faint is in here deliberately:
   // "faint" is a hierarchy position, not a licence to fall below the floor.
   it.each(['text', 'text-muted', 'text-faint'])('--%s clears AA on every surface', (name) => {
@@ -150,11 +160,14 @@ describe('hover and press darken on a light ground', () => {
   // top of it, so the hover state was less legible than the resting state —
   // 3.86:1 against 3.38:1. The direction is a consequence of the theme, not a
   // stylistic preference.
-  it('light hover and press are darker than the resting accent', () => {
-    const base = luminance(token('light', 'accent'))
-    expect(luminance(token('light', 'accent-hover'))).toBeLessThan(base)
-    expect(luminance(token('light', 'accent-press'))).toBeLessThan(base)
-  })
+  it.each(['light', 'opsmaxx-light'] as const)(
+    '%s hover and press are darker than the resting accent',
+    (theme) => {
+      const base = luminance(token(theme, 'accent'))
+      expect(luminance(token(theme, 'accent-hover'))).toBeLessThan(base)
+      expect(luminance(token(theme, 'accent-press'))).toBeLessThan(base)
+    }
+  )
 
   it.each(['dark', 'opsmaxx'] as const)(
     '%s hover is lighter than the resting accent, for the same reason inverted',

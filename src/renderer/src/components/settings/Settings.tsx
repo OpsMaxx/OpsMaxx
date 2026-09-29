@@ -93,12 +93,13 @@ import { useFleetStatus } from '../../store/fleetStatus'
 import { toast } from '../../store/toast'
 import { Switch } from '../common/Switch'
 
-// The default first; the classic themes after it. Labelled rather than
+// The OpsMaxx pair first, the classic pair after. Labelled rather than
 // capitalised, because "OpsMaxx" is not what capitalising "opsmaxx" gives.
 const THEME_OPTIONS: [ThemeMode, string][] = [
   ['opsmaxx', 'OpsMaxx'],
-  ['dark', 'Dark'],
-  ['light', 'Light'],
+  ['opsmaxx-light', 'OpsMaxx Light'],
+  ['dark', 'Classic dark'],
+  ['light', 'Classic light'],
   ['system', 'System']
 ]
 

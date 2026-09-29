@@ -1,6 +1,7 @@
 /* OpsMaxx design tokens
    The OpsMaxx theme is the default: a colour, type and radius override on
-   [data-theme="opsmaxx"], at the end of this file. Dark and light are the
+   [data-theme="opsmaxx"], at the end of this file, with a light variant on
+   [data-theme="opsmaxx-light"] after it. Dark and light are the
    classic themes and stay selectable. Dark is the :root baseline every theme
    inherits from; light is a full colour override on [data-theme="light"]. */
 
@@ -291,7 +292,11 @@
   --z-revoked: 10200;
 }
 
-:root[data-theme='light'] {
+/* Also the base of the OpsMaxx Light theme, which restates only what differs
+   from it -- so the database, host, method and status hues below, each
+   darkened to clear 4.5:1 on a light ground, are shared rather than copied. */
+:root[data-theme='light'],
+:root[data-theme='opsmaxx-light'] {
   color-scheme: light;
 
   --bg-app: #f4f6fa;
@@ -431,4 +436,55 @@
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.6);
+}
+
+/* OpsMaxx Light. The same language on a warm off-white ground, built on the
+   classic light block (see its selector) rather than on dark. Lime is kept as
+   the FILL of every primary control -- 13.99:1 under --accent-text -- but it
+   is 1.4:1 as text on white, so --accent-ink is a dark olive of the same hue,
+   5.41:1 on the lightest surface. Hover and press go darker, as in light. */
+:root[data-theme='opsmaxx-light'] {
+  --bg-app: #f7f7f2;
+  --bg-sidebar: #eeefe6;
+  --bg-panel: #fbfbf8;
+  --bg-card: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-input: #ffffff;
+  --bg-terminal: #fbfbf8;
+  --bg-hover: #e9eadf;
+  --bg-active: #e0e2d2;
+  --bg-scrim: rgba(21, 22, 15, 0.3);
+  --row-hover-veil: rgba(21, 22, 15, 0.045);
+  --brand-grad-end: #8fbf1f;
+  --brand-ink: #15160f;
+
+  --border: #e2e3d8;
+  --border-strong: #cfd1c2;
+  --border-subtle: #ebece3;
+
+  --text: #15160f;
+  --text-muted: #595b4f;
+  --text-faint: #66685b;
+  --text-inverse: #ffffff;
+
+  --accent: #c5f23a;
+  --accent-ink: #4a6a00;
+  --accent-hover: #b6e22a;
+  --accent-press: #a5cf1f;
+  --accent-soft: rgba(197, 242, 58, 0.28);
+  --accent-border: rgba(74, 106, 0, 0.35);
+  --accent-text: #15160f;
+
+  --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'SF Mono', 'Cascadia Code', 'Menlo', Consolas, monospace;
+  --fw-display: 700;
+  --fw-title: 650;
+  --tracking-caption: 0.12em;
+
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  --shadow-sm: 0 1px 2px rgba(21, 22, 15, 0.06);
+  --shadow-md: 0 8px 24px rgba(21, 22, 15, 0.08);
+  --shadow-lg: 0 20px 50px rgba(21, 22, 15, 0.14);
 }

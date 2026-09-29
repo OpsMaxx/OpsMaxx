@@ -4206,10 +4206,16 @@ body:has(.palette-scrim) .toasts:not(.in-slot) {
 /* The OpsMaxx theme's display type is set tight, as its heavier weight wants,
    and an empty view carries the faint square grid the site uses. Only the
    empty state: a grid behind a table or a terminal is noise over data. */
-:root[data-theme='opsmaxx'] .ui-page-title {
+:root[data-theme='opsmaxx-light'] {
+  --state-unknown: #626456;
+  --state-unknown-soft: rgba(98, 100, 86, 0.12);
+}
+:root[data-theme='opsmaxx'] .ui-page-title,
+:root[data-theme='opsmaxx-light'] .ui-page-title {
   letter-spacing: -0.03em;
 }
-:root[data-theme='opsmaxx'] .empty {
+:root[data-theme='opsmaxx'] .empty,
+:root[data-theme='opsmaxx-light'] .empty {
   background-image:
     linear-gradient(var(--border-subtle) 1px, transparent 1px),
     linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);

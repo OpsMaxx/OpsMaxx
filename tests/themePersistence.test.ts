@@ -34,7 +34,7 @@ describe('restoring the theme', () => {
   })
 
   it('restores every value the picker can produce', () => {
-    for (const t of ['opsmaxx', 'dark', 'light', 'system'] as const) {
+    for (const t of ['opsmaxx', 'opsmaxx-light', 'dark', 'light', 'system'] as const) {
       useApp.getState().replaceAll({ theme: t })
       expect(useApp.getState().theme, t).toBe(t)
     }
@@ -99,7 +99,7 @@ describe('moving the old default to the OpsMaxx theme', () => {
   })
 
   it('leaves every other theme alone', () => {
-    for (const t of ['opsmaxx', 'light', 'system', undefined]) {
+    for (const t of ['opsmaxx', 'opsmaxx-light', 'light', 'system', undefined]) {
       expect(isOldDefaultTheme({ theme: t }), String(t)).toBe(false)
     }
   })

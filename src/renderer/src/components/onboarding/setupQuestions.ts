@@ -394,8 +394,9 @@ export const PREF_GROUPS: PrefGroup[] = [
         fallback: 'opsmaxx',
         options: [
           { value: 'opsmaxx', label: 'OpsMaxx' },
-          { value: 'dark', label: 'Dark' },
-          { value: 'light', label: 'Light' },
+          { value: 'opsmaxx-light', label: 'OpsMaxx Light' },
+          { value: 'dark', label: 'Classic dark' },
+          { value: 'light', label: 'Classic light' },
           { value: 'system', label: 'Match my system' }
         ]
       },

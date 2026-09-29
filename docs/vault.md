@@ -81,7 +81,7 @@ A red **Backup out of date** indicator appears whenever your connections change,
 | Section | What it covers |
 |---|---|
 | **General** | The version and update checks — channel, how often, automatic download, install on quit — and the walkthrough |
-| **Appearance** | Theme (OpsMaxx, the default / dark / light / system) and density |
+| **Appearance** | Theme (OpsMaxx, the default / OpsMaxx Light / classic dark / classic light / system) and density |
 | **Terminal** | Font family, **font size** (also <kbd>Ctrl</kbd>+<kbd>+</kbd>/<kbd>-</kbd>), **colour scheme** (see [Terminal](terminal.md)), cursor blink, scroll behaviour |
 | **Connections** | Defaults for new connections |
 | **SSH** | **How long an authenticated connection is kept** after its last session closes, and a live list of shared connections with a Disconnect button |

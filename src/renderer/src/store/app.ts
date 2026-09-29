@@ -54,7 +54,7 @@ const DEFAULT_WORKSPACE: Workspace = {
 let seq = 0
 const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${seq++}`
 
-export type ThemeMode = 'opsmaxx' | 'dark' | 'light' | 'system'
+export type ThemeMode = 'opsmaxx' | 'opsmaxx-light' | 'dark' | 'light' | 'system'
 
 // The axis a tab's panes are laid out along. 'v' puts the next pane to the
 // right, 'h' puts it underneath — the same two letters `toggleSplit` has always
@@ -2552,6 +2552,7 @@ export const useApp = create<AppState>((set, get) => ({
       // store's own default.
       theme:
         data.theme === 'opsmaxx' ||
+        data.theme === 'opsmaxx-light' ||
         data.theme === 'dark' ||
         data.theme === 'light' ||
         data.theme === 'system'
