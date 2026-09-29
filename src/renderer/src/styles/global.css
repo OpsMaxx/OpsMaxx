@@ -4196,6 +4196,26 @@ body:has(.palette-scrim) .toasts:not(.in-slot) {
   --state-unknown: #5c6579;
   --state-unknown-soft: rgba(92, 101, 121, 0.12);
 }
+:root[data-theme='opsmaxx'] {
+  /* Warm grey rather than slate, so it sits on the olive-black ground as an
+     absence and not as a stray blue. Still the only achromatic state. */
+  --state-unknown: #9a9c8f;
+  --state-unknown-soft: rgba(154, 156, 143, 0.16);
+}
+
+/* The OpsMaxx theme's display type is set tight, as its heavier weight wants,
+   and an empty view carries the faint square grid the site uses. Only the
+   empty state: a grid behind a table or a terminal is noise over data. */
+:root[data-theme='opsmaxx'] .ui-page-title {
+  letter-spacing: -0.03em;
+}
+:root[data-theme='opsmaxx'] .empty {
+  background-image:
+    linear-gradient(var(--border-subtle) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-position: center;
+}
 
 /* ---- Status markers -------------------------------------------------------
    Colour is never the only signal. Each state carries a distinct SHAPE as well

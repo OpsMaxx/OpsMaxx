@@ -391,8 +391,9 @@ export const PREF_GROUPS: PrefGroup[] = [
         key: 'theme',
         label: 'Theme',
         detail: 'System follows your operating system, including when it changes at sunset.',
-        fallback: 'dark',
+        fallback: 'opsmaxx',
         options: [
+          { value: 'opsmaxx', label: 'OpsMaxx' },
           { value: 'dark', label: 'Dark' },
           { value: 'light', label: 'Light' },
           { value: 'system', label: 'Match my system' }

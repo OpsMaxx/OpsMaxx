@@ -644,7 +644,8 @@ function createWindow(): void {
     minWidth: 1024,
     minHeight: 640,
     show: false,
-    backgroundColor: '#0d1017',
+    // --bg-app of the default (OpsMaxx) theme, so the frame before first paint matches it.
+    backgroundColor: '#0b0c09',
     icon: appIcon(),
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'hidden',
     frame: process.platform === 'darwin',

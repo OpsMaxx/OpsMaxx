@@ -83,6 +83,7 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
   settings: 'the cosmetic subset is the T2 public profile; the rest is per-device',
   theme: 'carried in the T2 public profile so a new device looks right before pairing',
   version: 'a local on-disk seed marker, not user data',
+  themeRevision: 'a local marker of which default the saved theme was written under, not user data',
   // The previous contents of opsmaxx-data.json. `saveData` copies the live
   // file here before each write so one bad write cannot take the estate with
   // it, which makes this a full second copy of everything the eleven blob

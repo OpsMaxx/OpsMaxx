@@ -43,31 +43,44 @@ function contrast(a: string, b: string): number {
   return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05)
 }
 
+type Theme = 'dark' | 'light' | 'opsmaxx'
+
 /**
- * Read a token out of one of the two theme blocks.
+ * Read a token out of one theme's block.
  *
- * Split on the light selector rather than regexing the whole file, so a token
- * defined only in the dark block is not silently read as the light value —
- * which is the exact bug class this file exists to catch.
+ * Each block is sliced between its own selector and the next one, so a token
+ * missing from the light block is not silently read out of the block after
+ * it -- which is the exact bug class this file exists to catch. The OpsMaxx
+ * block restates only what differs from dark, so a token it does not define is
+ * read from dark: that is what the cascade does with it too.
  */
-function token(theme: 'dark' | 'light', name: string): string {
-  const at = CSS.indexOf(":root[data-theme='light']")
-  expect(at, 'light theme block must exist').toBeGreaterThan(-1)
-  const block = theme === 'dark' ? CSS.slice(0, at) : CSS.slice(at)
-  const m = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`).exec(block)
-  expect(m, `--${name} must be defined as a hex in the ${theme} theme`).not.toBeNull()
-  return m![1]
+function token(theme: Theme, name: string): string {
+  const light = CSS.indexOf(":root[data-theme='light']")
+  const opsmaxx = CSS.indexOf(":root[data-theme='opsmaxx']")
+  expect(light, 'light theme block must exist').toBeGreaterThan(-1)
+  expect(opsmaxx, 'opsmaxx theme block must exist').toBeGreaterThan(light)
+  const blocks: Record<Theme, string> = {
+    dark: CSS.slice(0, light),
+    light: CSS.slice(light, opsmaxx),
+    opsmaxx: CSS.slice(opsmaxx)
+  }
+  const find = (block: string): string | undefined =>
+    new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6})`).exec(block)?.[1]
+  const value = find(blocks[theme]) ?? (theme === 'opsmaxx' ? find(blocks.dark) : undefined)
+  expect(value, `--${name} must be defined as a hex in the ${theme} theme`).toBeDefined()
+  return value!
 }
 
 /** Every surface a piece of text can land on, per theme. Worst case governs. */
-const SURFACES: Record<'dark' | 'light', string[]> = {
+const SURFACES: Record<Theme, string[]> = {
   dark: ['bg-app', 'bg-sidebar', 'bg-panel', 'bg-card', 'bg-elevated', 'bg-input'],
-  light: ['bg-app', 'bg-sidebar', 'bg-panel', 'bg-card', 'bg-elevated', 'bg-input']
+  light: ['bg-app', 'bg-sidebar', 'bg-panel', 'bg-card', 'bg-elevated', 'bg-input'],
+  opsmaxx: ['bg-app', 'bg-sidebar', 'bg-panel', 'bg-card', 'bg-elevated', 'bg-input']
 }
 
 const AA = 4.5
 
-function worstOnSurfaces(theme: 'dark' | 'light', fg: string): { ratio: number; on: string } {
+function worstOnSurfaces(theme: Theme, fg: string): { ratio: number; on: string } {
   let worst = { ratio: Infinity, on: '' }
   for (const s of SURFACES[theme]) {
     const r = contrast(fg, token(theme, s))
@@ -76,7 +89,7 @@ function worstOnSurfaces(theme: 'dark' | 'light', fg: string): { ratio: number; 
   return worst
 }
 
-describe.each(['dark', 'light'] as const)('%s theme', (theme) => {
+describe.each(['dark', 'light', 'opsmaxx'] as const)('%s theme', (theme) => {
   // The tokens that carry running text. --text-faint is in here deliberately:
   // "faint" is a hierarchy position, not a licence to fall below the floor.
   it.each(['text', 'text-muted', 'text-faint'])('--%s clears AA on every surface', (name) => {
@@ -143,9 +156,12 @@ describe('hover and press darken on a light ground', () => {
     expect(luminance(token('light', 'accent-press'))).toBeLessThan(base)
   })
 
-  it('dark hover is lighter than the resting accent, for the same reason inverted', () => {
-    expect(luminance(token('dark', 'accent-hover'))).toBeGreaterThan(
-      luminance(token('dark', 'accent'))
-    )
-  })
+  it.each(['dark', 'opsmaxx'] as const)(
+    '%s hover is lighter than the resting accent, for the same reason inverted',
+    (theme) => {
+      expect(luminance(token(theme, 'accent-hover'))).toBeGreaterThan(
+        luminance(token(theme, 'accent'))
+      )
+    }
+  )
 })

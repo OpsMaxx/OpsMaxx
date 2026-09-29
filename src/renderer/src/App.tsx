@@ -199,13 +199,20 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const apply = (mode: string): void => {
+      if (mode === 'opsmaxx') {
+        document.documentElement.setAttribute('data-theme', 'opsmaxx')
+        return
+      }
       const dark =
         mode === 'dark' ||
         (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
       document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
     }
     apply(theme)
-    window.opsmaxx?.theme.set(theme as 'dark' | 'light' | 'system')
+    // The OpsMaxx theme is a dark one as far as the OS is concerned: native
+    // menus, scrollbars and the title bar follow `nativeTheme`, which only
+    // knows dark, light and system.
+    window.opsmaxx?.theme.set(theme === 'opsmaxx' ? 'dark' : theme)
   }, [theme])
 
   // Nothing at all rather than a flash of the app. The window is already

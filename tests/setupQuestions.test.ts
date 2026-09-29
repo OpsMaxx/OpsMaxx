@@ -260,7 +260,8 @@ describe('the preference controls', () => {
 
   it('summarises a group from what is actually showing', () => {
     const look = PREF_GROUPS.find((g) => g.id === 'look')!
-    expect(prefSummary(look, {})).toContain('Dark')
+    expect(prefSummary(look, {})).toContain('OpsMaxx')
+    expect(prefSummary(look, { theme: 'dark' })).toContain('Dark')
     expect(prefSummary(look, { theme: 'light' })).toContain('Light')
   })
 

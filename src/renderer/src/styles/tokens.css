@@ -1,5 +1,27 @@
 /* OpsMaxx design tokens
-   Dark is the primary theme. Light is a full override on [data-theme="light"]. */
+   The OpsMaxx theme is the default: a colour, type and radius override on
+   [data-theme="opsmaxx"], at the end of this file. Dark and light are the
+   classic themes and stay selectable. Dark is the :root baseline every theme
+   inherits from; light is a full colour override on [data-theme="light"]. */
+
+/* Bundled rather than named. The classic themes name Inter and JetBrains Mono
+   and ship neither, so most machines render the system fallback and the app
+   looks different on each OS. Both faces are variable and OFL-licensed; the
+   licence travels beside them in assets/fonts/OFL.txt. */
+@font-face {
+  font-family: 'Geist';
+  src: url('../assets/fonts/Geist-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('../assets/fonts/GeistMono-Variable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
 
 :root,
 :root[data-theme='dark'] {
@@ -352,4 +374,61 @@
   --shadow-sm: 0 1px 2px rgba(30, 41, 59, 0.1);
   --shadow-md: 0 8px 24px rgba(30, 41, 59, 0.12);
   --shadow-lg: 0 20px 50px rgba(30, 41, 59, 0.18);
+}
+
+/* The OpsMaxx theme. Warm near-black, one lime accent, heavier display type
+   and rounder cards. Only what differs from the :root baseline is restated:
+   the status, database, host and HTTP-method hues are inherited from dark,
+   and every one of them clears 4.5:1 here too, because these surfaces are
+   darker than dark's (tests/contrast.test.ts reads them through the same
+   inheritance). */
+:root[data-theme='opsmaxx'] {
+  color-scheme: dark;
+
+  --bg-app: #0b0c09;
+  --bg-sidebar: #0e0f0b;
+  --bg-panel: #111210;
+  --bg-card: #151612;
+  --bg-elevated: #1a1b16;
+  --bg-input: #0f100c;
+  --bg-terminal: #0b0c09;
+  --bg-hover: #1d1e18;
+  --bg-active: #24261e;
+  --bg-scrim: rgba(5, 6, 4, 0.66);
+  --row-hover-veil: rgba(242, 243, 236, 0.03);
+  --brand-grad-end: #8fbf1f;
+  --brand-ink: #0b0c09;
+
+  --border: #272921;
+  --border-strong: #35382c;
+  --border-subtle: #1c1d17;
+
+  --text: #f2f3ec;
+  --text-muted: #a3a597;
+  --text-faint: #8b8d80;
+  --text-inverse: #0b0c09;
+
+  /* Lime is bright enough to serve both roles, as dark's teal does: 15.07:1
+     as a fill under --accent-text, 13.31:1 as text on the lightest surface.
+     Hover lightens and press darkens, as in dark. */
+  --accent: #c5f23a;
+  --accent-ink: #c5f23a;
+  --accent-hover: #d3fb57;
+  --accent-press: #b2dd26;
+  --accent-soft: rgba(197, 242, 58, 0.12);
+  --accent-border: rgba(197, 242, 58, 0.4);
+  --accent-text: #0b0c09;
+
+  --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+  --font-mono: 'Geist Mono', 'SF Mono', 'Cascadia Code', 'Menlo', Consolas, monospace;
+  --fw-display: 700;
+  --fw-title: 650;
+  --tracking-caption: 0.12em;
+
+  --r-md: 8px;
+  --r-lg: 12px;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 18px 50px rgba(0, 0, 0, 0.6);
 }

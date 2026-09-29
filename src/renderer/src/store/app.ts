@@ -54,7 +54,7 @@ const DEFAULT_WORKSPACE: Workspace = {
 let seq = 0
 const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${seq++}`
 
-export type ThemeMode = 'dark' | 'light' | 'system'
+export type ThemeMode = 'opsmaxx' | 'dark' | 'light' | 'system'
 
 // The axis a tab's panes are laid out along. 'v' puts the next pane to the
 // right, 'h' puts it underneath — the same two letters `toggleSplit` has always
@@ -1253,7 +1253,7 @@ export const useApp = create<AppState>((set, get) => ({
   routeEditorServerId: null,
   editServerId: null,
   paletteOpen: false,
-  theme: 'dark',
+  theme: 'opsmaxx',
   settings: DEFAULT_SETTINGS,
   unlockedWorkspaces: [],
   pendingWorkspaceId: null,
@@ -2547,11 +2547,14 @@ export const useApp = create<AppState>((set, get) => ({
       // Narrowed rather than trusted, for the same reason the `kind` default
       // above is: a blob is a file on disk that things other than this app can
       // write. An unrecognised value would reach App.tsx's `apply()`, which
-      // treats anything that is not 'dark' or 'system' as light -- so a corrupt
+      // treats anything that is not a theme it knows as light -- so a corrupt
       // field would silently mean light mode rather than falling back to the
       // store's own default.
       theme:
-        data.theme === 'dark' || data.theme === 'light' || data.theme === 'system'
+        data.theme === 'opsmaxx' ||
+        data.theme === 'dark' ||
+        data.theme === 'light' ||
+        data.theme === 'system'
           ? data.theme
           : s.theme,
       // Narrowed for the same reason: ids only, and never more than the list

@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { useApp } from '../src/renderer/src/store/app'
+import { isOldDefaultTheme } from '../src/renderer/src/store/persist'
 
 /**
  * The colour scheme survives a restart.
@@ -33,7 +34,7 @@ describe('restoring the theme', () => {
   })
 
   it('restores every value the picker can produce', () => {
-    for (const t of ['dark', 'light', 'system'] as const) {
+    for (const t of ['opsmaxx', 'dark', 'light', 'system'] as const) {
       useApp.getState().replaceAll({ theme: t })
       expect(useApp.getState().theme, t).toBe(t)
     }
@@ -76,5 +77,45 @@ describe('saving the theme', () => {
       PERSIST.indexOf('const activeChanged')
     )
     expect(dataChanged).not.toContain('theme')
+  })
+})
+
+/**
+ * The OpsMaxx theme became the default, and existing installs move to it ONCE.
+ *
+ * Every save before this says `'dark'`, chosen or not, because `save()` writes
+ * the theme unconditionally. So `'dark'` without a revision is the old default
+ * and moves; `'dark'` with one is somebody who picked it afterwards, and stays.
+ * Through `initPersistence` rather than a helper, because the real call site is
+ * what the module-backfill bug in the same function taught us to test.
+ */
+describe('moving the old default to the OpsMaxx theme', () => {
+  it("moves a 'dark' saved before the revision existed", () => {
+    expect(isOldDefaultTheme({ theme: 'dark' })).toBe(true)
+  })
+
+  it("keeps a 'dark' chosen after it", () => {
+    expect(isOldDefaultTheme({ theme: 'dark', themeRevision: 1 })).toBe(false)
+  })
+
+  it('leaves every other theme alone', () => {
+    for (const t of ['opsmaxx', 'light', 'system', undefined]) {
+      expect(isOldDefaultTheme({ theme: t }), String(t)).toBe(false)
+    }
+  })
+
+  // Source-level for the same reason as the save check above: hydrate() is
+  // private, and it has to run AFTER replaceAll or replaceAll puts 'dark' back.
+  it('is applied after the saved blob is restored', () => {
+    const hydrate = PERSIST.slice(PERSIST.indexOf('async function hydrate('))
+    const restored = hydrate.indexOf('replaceAll(saved')
+    const moved = hydrate.indexOf("isOldDefaultTheme(saved)) useApp.getState().setTheme('opsmaxx')")
+    expect(restored).toBeGreaterThan(-1)
+    expect(moved).toBeGreaterThan(restored)
+  })
+
+  it('writes the revision into every save', () => {
+    const save = PERSIST.slice(PERSIST.indexOf('function save('))
+    expect(save).toMatch(/themeRevision: THEME_REVISION/)
   })
 })

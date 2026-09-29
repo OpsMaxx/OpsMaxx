@@ -93,6 +93,15 @@ import { useFleetStatus } from '../../store/fleetStatus'
 import { toast } from '../../store/toast'
 import { Switch } from '../common/Switch'
 
+// The default first; the classic themes after it. Labelled rather than
+// capitalised, because "OpsMaxx" is not what capitalising "opsmaxx" gives.
+const THEME_OPTIONS: [ThemeMode, string][] = [
+  ['opsmaxx', 'OpsMaxx'],
+  ['dark', 'Dark'],
+  ['light', 'Light'],
+  ['system', 'System']
+]
+
 // Keyed by the nav store's union rather than by a list that describes itself,
 // so a page added here without being added there — and therefore unreachable
 // from any `openSettings(...)` button — fails the build, and a page added to
@@ -197,7 +206,7 @@ const SETTING_INDEX: SettingEntry[] = [
   { section: 'general', title: 'Install on quit', desc: 'Apply a downloaded update when you quit.', aliases: 'update upgrade restart' },
   { section: 'general', title: 'Channel', desc: 'Which release channel updates come from.', aliases: 'beta stable release channel update' },
   // Appearance
-  { section: 'appearance', title: 'Theme', desc: 'Dark is the primary OpsMaxx experience.', aliases: 'dark light system colour color' },
+  { section: 'appearance', title: 'Theme', desc: 'OpsMaxx is the default look. The classic dark and light themes are still here.', aliases: 'opsmaxx dark light system colour color' },
   {
     section: 'appearance',
     title: 'Start when I log in',
@@ -964,17 +973,18 @@ export function Settings(): React.JSX.Element {
               <div className="setting-row">
                 <div className="s-info">
                   <div className="s-title">Theme</div>
-                  <div className="s-desc">Dark is the primary OpsMaxx experience.</div>
+                  <div className="s-desc">
+                    OpsMaxx is the default look. The classic dark and light themes are still here.
+                  </div>
                 </div>
                 <div className="segment">
-                  {(['dark', 'light', 'system'] as ThemeMode[]).map((t) => (
+                  {THEME_OPTIONS.map(([t, label]) => (
                     <button
                       key={t}
                       className={clsx('seg-btn', theme === t && 'active')}
                       onClick={() => setTheme(t)}
-                      style={{ textTransform: 'capitalize' }}
                     >
-                      {t}
+                      {label}
                     </button>
                   ))}
                 </div>

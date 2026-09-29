@@ -8,6 +8,16 @@ import { apiSaveFields, applyExternalApi, hydrateApi, subscribeApiPersistence } 
 // data (e.g. removing the original sample/dummy dataset).
 const SEED_VERSION = 2
 
+// Which default theme the saved `theme` was written under. Not SEED_VERSION:
+// a mismatch there discards every saved server, and this only has to move one
+// field. Revision 1 is the OpsMaxx theme becoming the default.
+const THEME_REVISION = 1
+
+/** A `'dark'` written before the revision existed: the old default, not a choice. */
+export function isOldDefaultTheme(saved: { theme?: unknown; themeRevision?: unknown }): boolean {
+  return saved.theme === 'dark' && saved.themeRevision !== THEME_REVISION
+}
+
 interface Persisted {
   version?: number
   /**
@@ -26,6 +36,14 @@ interface Persisted {
    * store's own default stands in.
    */
   theme?: unknown
+  /**
+   * Absent in every save written before the OpsMaxx theme became the default.
+   * Every such save says `'dark'` whether or not anybody chose it, because
+   * `save()` writes the theme unconditionally -- so an absent revision on a
+   * `'dark'` save is the old default, and it moves once. A `'dark'` saved
+   * alongside the revision is a choice, and it stays.
+   */
+  themeRevision?: unknown
   workspaces: unknown
   monitorGroups?: unknown
   // Absent in saves written before this was stored; the store falls back to
@@ -128,6 +146,7 @@ async function hydrate(): Promise<void> {
     // function with a partial object rather than the real call site.
     const savedModules = (saved as { settings?: { modules?: ModuleState } }).settings?.modules
     useApp.getState().replaceAll(saved as never)
+    if (isOldDefaultTheme(saved)) useApp.getState().setTheme('opsmaxx')
     // An upgrade is not consent: the user has already decided what their app
     // looks like. A fresh install gets the defaults instead, from
     // defaultModuleState() in DEFAULT_SETTINGS.
@@ -366,6 +385,7 @@ function save(): Promise<void> {
     window.opsmaxx?.data.save({
       version: SEED_VERSION,
       theme: s.theme,
+      themeRevision: THEME_REVISION,
       workspaces: s.workspaces,
       activeWorkspaceId: s.activeWorkspaceId,
       monitorGroups: s.monitorGroups,

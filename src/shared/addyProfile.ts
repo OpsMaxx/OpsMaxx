@@ -48,7 +48,7 @@ export type T2Field =
  * classified" but "no capability-gating key is in T2".
  */
 export const T2_ALLOWLIST: readonly T2Field[] = [
-  { name: 'theme', kind: 'enum', values: ['light', 'dark', 'system'] },
+  { name: 'theme', kind: 'enum', values: ['opsmaxx', 'light', 'dark', 'system'] },
   { name: 'terminalFontSize', kind: 'int', min: 8, max: 32 },
   /**
    * The BUILT-IN scheme ids, and `''` for the app palette.
