@@ -35,6 +35,9 @@ export interface Shot {
   run(p: Page): Promise<void>
   /** What to crop to. Defaults to the main content area. */
   crop?: string
+  /** Frame this element instead: itself plus a margin, widened to 99:50 around
+   *  its centre. For a dialog, which is lost at site width in a whole window. */
+  focus?: string
 }
 
 const OUT_W = 1800
@@ -91,9 +94,22 @@ function page(win: BrowserWindow): Page {
   return p
 }
 
-async function capture(win: BrowserWindow, crop: string, file: string): Promise<void> {
+async function capture(win: BrowserWindow, crop: string, file: string, focus?: string): Promise<void> {
   const rect = await win.webContents.executeJavaScript(
-    `(() => { const r = document.querySelector(${JSON.stringify(crop)})?.getBoundingClientRect()
+    focus
+      ? `(() => {
+          const r = document.querySelector(${JSON.stringify(focus)})?.getBoundingClientRect()
+          if (!r) return null
+          const W = innerWidth, H = innerHeight, pad = 48
+          let w = r.width + pad * 2, h = r.height + pad * 2
+          if (w / h < 99 / 50) w = (h * 99) / 50
+          else h = (w * 50) / 99
+          w = Math.min(w, W); h = Math.min(h, H)
+          const x = Math.min(Math.max(0, r.x + r.width / 2 - w / 2), W - w)
+          const y = Math.min(Math.max(0, r.y + r.height / 2 - h / 2), H - h)
+          return { x, y, width: w, height: h }
+        })()`
+      : `(() => { const r = document.querySelector(${JSON.stringify(crop)})?.getBoundingClientRect()
       return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null })()`,
     true
   )
@@ -124,7 +140,7 @@ export async function runCapture(outdir: string, shots: Shot[], defaultCrop: str
     try {
       await shot.run(p)
       await p.sleep(1200)
-      await capture(win, shot.crop ?? defaultCrop, join(outdir, `${shot.name}.png`))
+      await capture(win, shot.crop ?? defaultCrop, join(outdir, `${shot.name}.png`), shot.focus)
       console.warn(`[demo] captured ${shot.name}`)
     } catch (err) {
       failed.push(shot.name)

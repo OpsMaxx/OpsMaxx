@@ -152,6 +152,7 @@ export const SHOTS: Shot[] = [
   },
   {
     name: 'workspaces',
+    focus: '.modal',
     async run(p) {
       await p.click('.ws-trigger')
       await tap(p, 'Manage workspaces')
@@ -187,6 +188,7 @@ export const SHOTS: Shot[] = [
   },
   {
     name: 'approval',
+    focus: '.modal',
     async run(p) {
       raiseDemoApproval()
       await p.sleep(3_000)
