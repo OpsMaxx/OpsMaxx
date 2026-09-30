@@ -72,4 +72,21 @@ describe('themeFromCss', () => {
       .filter(Boolean)
     expect(same).toEqual([])
   })
+
+  /**
+   * A theme can restate a slot, and one that says nothing keeps the default.
+   * OpsMaxx Light does restate them: the dark defaults' white and yellow are
+   * unreadable on its ground. Read through the real custom-property path.
+   */
+  it('takes a slot from --ansi-* when the theme sets it, and the default otherwise', () => {
+    const root = document.documentElement
+    root.style.setProperty('--ansi-bright-red', '#123456')
+    try {
+      const theme = themeFromCss()
+      expect(theme.brightRed).toBe('#123456')
+      expect(theme.red).toBe('#f85149')
+    } finally {
+      root.style.removeProperty('--ansi-bright-red')
+    }
+  })
 })

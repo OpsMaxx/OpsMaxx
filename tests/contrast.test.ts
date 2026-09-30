@@ -160,6 +160,17 @@ describe('hover and press darken on a light ground', () => {
   // top of it, so the hover state was less legible than the resting state —
   // 3.86:1 against 3.38:1. The direction is a consequence of the theme, not a
   // stylistic preference.
+  // The terminal's sixteen, on the terminal's own ground. Only OpsMaxx Light
+  // restates them; the others use themeFromCss's dark defaults on a dark ground.
+  it.each([
+    'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'white',
+    'bright-black', 'bright-red', 'bright-green', 'bright-yellow',
+    'bright-blue', 'bright-magenta', 'bright-cyan', 'bright-white'
+  ])('OpsMaxx Light --ansi-%s clears AA on --bg-terminal', (slot) => {
+    const ratio = contrast(token('opsmaxx-light', `ansi-${slot}`), token('opsmaxx-light', 'bg-terminal'))
+    expect(ratio, `--ansi-${slot} is ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(AA)
+  })
+
   it.each(['light', 'opsmaxx-light'] as const)(
     '%s hover and press are darker than the resting accent',
     (theme) => {

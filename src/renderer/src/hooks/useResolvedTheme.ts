@@ -1,7 +1,12 @@
 import { useEffect, useState } from 'react'
 
 /**
- * The theme actually being painted, 'dark' or 'light'.
+ * The theme actually being painted: the root's `data-theme`, never 'system'.
+ *
+ * It returns the painted theme itself rather than 'dark' or 'light'. It did
+ * the latter, and OpsMaxx and Classic dark are both dark -- so switching
+ * between them changed nothing this reported, and every open terminal kept the
+ * previous theme's background until it was closed.
  *
  * The store holds the user's *setting*, which can be 'system' — and a
  * component that needs to hand a concrete mode to something else (the API
@@ -10,8 +15,8 @@ import { useEffect, useState } from 'react'
  * from there rather than duplicating the media query and risking the two
  * disagreeing for a frame.
  */
-export function useResolvedTheme(): 'dark' | 'light' {
-  const [theme, setTheme] = useState<'dark' | 'light'>(read)
+export function useResolvedTheme(): string {
+  const [theme, setTheme] = useState<string>(read)
 
   useEffect(() => {
     const observer = new MutationObserver(() => setTheme(read()))
@@ -33,8 +38,6 @@ export function useResolvedTheme(): 'dark' | 'light' {
   return theme
 }
 
-// Two themes are painted on a light ground; every other one is dark.
-function read(): 'dark' | 'light' {
-  const t = document.documentElement.getAttribute('data-theme')
-  return t === 'light' || t === 'opsmaxx-light' ? 'light' : 'dark'
+function read(): string {
+  return document.documentElement.getAttribute('data-theme') ?? 'dark'
 }

@@ -30,9 +30,11 @@ import type { TerminalTransport } from '../lib/transport'
  * else entirely. Every bright except brightBlack was missing, which is the half
  * of the palette that `ls`, `git status` and most prompts actually reach for.
  *
- * The values are GitHub's dark set, matching the normals that were already
- * here. Only the four surface colours track the app theme; the ANSI slots are
- * deliberately fixed, because a program that asks for red has asked for red.
+ * The defaults are GitHub's dark set, matching the normals that were already
+ * here, and a program that asks for red gets red in every theme. A theme may
+ * still restate a slot as `--ansi-<slot>` in tokens.css -- OpsMaxx Light does,
+ * because GitHub's dark whites and yellows are unreadable on a light ground.
+ * The literal stays as the fallback, so a theme that says nothing keeps it.
  */
 export function themeFromCss(
   schemeId?: string,
@@ -40,28 +42,31 @@ export function themeFromCss(
 ): Record<string, string> {
   const css = getComputedStyle(document.documentElement)
   const v = (n: string): string => css.getPropertyValue(n).trim()
+  // `brightRed` reads `--ansi-bright-red`, and falls back to the default.
+  const ansi = (slot: string, fallback: string): string =>
+    v(`--ansi-${slot.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`)}`) || fallback
   const base = {
     background: v('--bg-terminal'),
     foreground: v('--text'),
     cursor: v('--accent'),
     cursorAccent: v('--bg-terminal'),
     selectionBackground: v('--accent-soft'),
-    black: '#0b0e14',
-    red: '#f85149',
-    green: '#3fb950',
-    yellow: '#d29922',
-    blue: '#58a6ff',
-    magenta: '#a371f7',
-    cyan: '#22c7d6',
-    white: '#e6edf3',
-    brightBlack: '#6b7484',
-    brightRed: '#ff7b72',
-    brightGreen: '#56d364',
-    brightYellow: '#e3b341',
-    brightBlue: '#79c0ff',
-    brightMagenta: '#d2a8ff',
-    brightCyan: '#56d4dd',
-    brightWhite: '#f0f6fc'
+    black: ansi('black', '#0b0e14'),
+    red: ansi('red', '#f85149'),
+    green: ansi('green', '#3fb950'),
+    yellow: ansi('yellow', '#d29922'),
+    blue: ansi('blue', '#58a6ff'),
+    magenta: ansi('magenta', '#a371f7'),
+    cyan: ansi('cyan', '#22c7d6'),
+    white: ansi('white', '#e6edf3'),
+    brightBlack: ansi('brightBlack', '#6b7484'),
+    brightRed: ansi('brightRed', '#ff7b72'),
+    brightGreen: ansi('brightGreen', '#56d364'),
+    brightYellow: ansi('brightYellow', '#e3b341'),
+    brightBlue: ansi('brightBlue', '#79c0ff'),
+    brightMagenta: ansi('brightMagenta', '#d2a8ff'),
+    brightCyan: ansi('brightCyan', '#56d4dd'),
+    brightWhite: ansi('brightWhite', '#f0f6fc')
   }
 
   const scheme = resolveScheme(schemeId, custom)

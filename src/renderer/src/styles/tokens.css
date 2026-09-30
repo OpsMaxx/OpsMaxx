@@ -424,6 +424,12 @@
   --accent-border: rgba(197, 242, 58, 0.4);
   --accent-text: #0b0c09;
 
+  /* The workspace colour every workspace starts with. It is stored by name as
+     'cyan' because it was the classic brand teal, so it is the BRAND slot in
+     practice: here it takes the brand's lime, or the default workspace's dot
+     in the title bar, switcher and status bar is the one teal left. */
+  --ws-cyan: #c5f23a;
+
   --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'SF Mono', 'Cascadia Code', 'Menlo', Consolas, monospace;
   --fw-display: 700;
@@ -474,6 +480,29 @@
   --accent-soft: rgba(197, 242, 58, 0.28);
   --accent-border: rgba(74, 106, 0, 0.35);
   --accent-text: #15160f;
+
+  /* The brand slot, as in OpsMaxx dark: lime is a fill here, not text. */
+  --ws-cyan: #8fbf1f;
+
+  /* GitHub's dark ANSI set is the fallback in themeFromCss, and its white
+     (#e6edf3) and yellow are unreadable on this ground. Same hues, each
+     darkened to clear 5:1 on --bg-terminal; the whites become greys. */
+  --ansi-black: #15160f;
+  --ansi-red: #b3261e;
+  --ansi-green: #2a7a35;
+  --ansi-yellow: #8a5a00;
+  --ansi-blue: #2b6bab;
+  --ansi-magenta: #8a3bbd;
+  --ansi-cyan: #0f6f7c;
+  --ansi-white: #595b4f;
+  --ansi-bright-black: #66685b;
+  --ansi-bright-red: #d0231a;
+  --ansi-bright-green: #1f6b2a;
+  --ansi-bright-yellow: #7a4f00;
+  --ansi-bright-blue: #0059c2;
+  --ansi-bright-magenta: #9a36cd;
+  --ansi-bright-cyan: #0b5f6b;
+  --ansi-bright-white: #3d3f35;
 
   --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'SF Mono', 'Cascadia Code', 'Menlo', Consolas, monospace;
