@@ -6,8 +6,8 @@ documents:
     authority: historical
     visibility: internal
     title: Working on OpsMaxx
-    hash: 7dfe736e1811e9b5
-    lines: 115
+    hash: b1dbf8f616ee0f1c
+    lines: 116
   code-of-conduct:
     path: CODE_OF_CONDUCT.md
     type: unknown
@@ -39,24 +39,24 @@ documents:
     authority: historical
     visibility: internal
     title: AI agent access
-    hash: 3146efa7d99397a7
-    lines: 211
+    hash: a23017d941375de0
+    lines: 236
   docs-ai-mcp:
     path: docs/AI-MCP.md
     type: unknown
     authority: historical
     visibility: internal
     title: "AI & MCP — technical guide"
-    hash: 6c435919d28f2ae9
-    lines: 752
+    hash: d330fa518f74584c
+    lines: 996
   docs-ai-security:
     path: docs/AI-SECURITY.md
     type: unknown
     authority: historical
     visibility: internal
     title: "AI & MCP — threat model and security boundaries"
-    hash: 6635b9fbca3becd3
-    lines: 511
+    hash: 8d225cc214cbc7f3
+    lines: 599
   docs-cloud:
     path: docs/cloud.md
     type: unknown
@@ -87,8 +87,8 @@ documents:
     authority: historical
     visibility: internal
     title: FAQ
-    hash: 79ef6d5dd446427f
-    lines: 214
+    hash: a11e56051e914403
+    lines: 218
   docs-features:
     path: docs/features.md
     type: unknown
@@ -215,7 +215,7 @@ documents:
     authority: historical
     visibility: internal
     title: Tunnels and VPN
-    hash: 781531868d85412f
+    hash: 7ee5d39e79c86c75
     lines: 43
   docs-vault:
     path: docs/vault.md
@@ -223,7 +223,7 @@ documents:
     authority: historical
     visibility: internal
     title: "Vault, backup and settings"
-    hash: cee0ad665fef8423
+    hash: 57604061cb02a297
     lines: 103
   docs-vpn:
     path: docs/VPN.md
@@ -231,8 +231,8 @@ documents:
     authority: historical
     visibility: internal
     title: VPN and reverse-proxy tunnels
-    hash: c3e2a18c0cb199ef
-    lines: 377
+    hash: a586812eaf5273bb
+    lines: 382
   docs-workspaces:
     path: docs/workspaces.md
     type: unknown
@@ -265,13 +265,22 @@ documents:
     title: OpsMaxx
     hash: 51eaceb52358be32
     lines: 164
+  screenshot-demo:
+    path: docs/05-engineering/development/screenshot-demo.md
+    type: engineering.development
+    authority: audience
+    visibility: internal
+    title: Screenshot demo
+    status: draft
+    hash: 732f2954fb9dcbd8
+    lines: 93
   security:
     path: SECURITY.md
     type: unknown
     authority: historical
     visibility: internal
     title: Security Policy
-    hash: 5138cef8a65a73b4
+    hash: 2af86808ec885e2a
     lines: 444
   sidecar-addyd-pair-vendored:
     path: sidecar/addyd/pair/VENDORED.md

@@ -8,6 +8,7 @@ import { PasteConfirm, useTerminalPasteRequest } from './PasteConfirm'
 import { EmptyState } from '../common/EmptyState'
 import { useApp } from '../../store/app'
 import {
+  brandBanner,
   createTerm,
   observeSize,
   setupTerminalUX,
@@ -44,7 +45,7 @@ function useDemoSession(server: Server, hostRef: React.RefObject<HTMLDivElement 
     const home = `/home/${user}`
     const prompt = (): void => term.write(`\r\n\x1b[32m${user}@${short}\x1b[0m:\x1b[34m~\x1b[0m$ `)
 
-    term.writeln('\x1b[38;5;80mOpsMaxx\x1b[0m — simulated session')
+    term.writeln(`${brandBanner()} — simulated session`)
     term.writeln(`Connected to \x1b[1m${server.name}\x1b[0m (${server.host}) · ${server.os}`)
     if (server.route.length) {
       term.writeln(`\x1b[90mvia ${server.route.map((h) => h.label).join(' -> ')}\x1b[0m`)

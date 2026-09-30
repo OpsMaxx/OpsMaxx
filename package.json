@@ -58,6 +58,8 @@
   "scripts": {
     "postinstall": "patch-package",
     "dev": "electron-vite dev",
+    "demo": "node scripts/demo.mjs",
+    "demo:shots": "node scripts/demo.mjs --shots",
     "start": "electron-vite preview",
     "build": "electron-vite build && npm run build:cli",
     "build:cli": "esbuild src/cli/index.ts --bundle --platform=node --format=esm --outfile=out/cli/index.js --external:electron",

@@ -36,6 +36,21 @@ import type { TerminalTransport } from '../lib/transport'
  * because GitHub's dark whites and yellows are unreadable on a light ground.
  * The literal stays as the fallback, so a theme that says nothing keeps it.
  */
+/**
+ * The product name in the terminal banner, in the theme's accent-as-text colour.
+ *
+ * It was a fixed ANSI 80, the classic theme's teal, so every other theme opened
+ * each session with a teal word. Read from --accent-ink at write time, which is
+ * the token that is legible as text on the terminal's ground in every theme.
+ */
+export function brandBanner(): string {
+  const hex = getComputedStyle(document.documentElement).getPropertyValue('--accent-ink').trim()
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex)
+  if (!m) return '\x1b[1mOpsMaxx\x1b[0m'
+  const [r, g, b] = m.slice(1).map((x) => parseInt(x, 16))
+  return `\x1b[1;38;2;${r};${g};${b}mOpsMaxx\x1b[0m`
+}
+
 export function themeFromCss(
   schemeId?: string,
   custom?: TerminalScheme[]
@@ -551,7 +566,7 @@ export function useTerminalSession(
     setOnline(false)
 
     if (generation > 0) term.writeln('')
-    term.writeln('\x1b[38;5;80mOpsMaxx\x1b[0m')
+    term.writeln(brandBanner())
     term.writeln(`Connecting to \x1b[1m${transport.title}\x1b[0m (${transport.endpoint})…`)
 
     const offData = transport.onData(sessionId, (d) => {

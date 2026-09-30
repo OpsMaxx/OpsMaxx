@@ -24,6 +24,9 @@ import { secretsAvailable } from './secretsBackend'
 // password-derived key here would invert that and make the app unusable until
 // you had already committed to using it.
 const FILE = join(app.getPath('userData'), 'opsmaxx-data.json')
+/** Exported so the screenshot demo can prove this resolved inside its own
+ *  profile before it writes anything. See src/main/demo/index.ts. */
+export const DATA_FILE_PATH = FILE
 const BAK = `${FILE}.bak`
 
 /** The on-disk shape once sealed. Still JSON, so anything that parses this

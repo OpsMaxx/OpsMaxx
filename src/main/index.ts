@@ -1,6 +1,15 @@
 // Must come first: redirects userData for portable builds before any
 // service module resolves its file paths.
-import './portable'
+import { isDemo } from './portable'
+// STATIC, and second, on purpose. A dynamic import() made Rollup split every
+// module the demo shares with this file (store, vault, policy, audit) into a
+// chunk that this file imports -- and an imported chunk evaluates before this
+// file's own body, which is where portable.ts's redirect is inlined. Those
+// services then resolved their paths against the REAL profile. Imported here,
+// everything stays in one chunk in import order. A production build still
+// drops it: the only use is behind `import.meta.env.DEV` below, and nothing
+// else references the module.
+import { installDemo } from './demo'
 import { parseAddyLink, ADDY_LINK_SCHEME, type AddyLink } from '../shared/addyLink'
 import { app, shell, BrowserWindow, clipboard, globalShortcut, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
 import { join, resolve} from 'node:path'
@@ -538,6 +547,13 @@ import { forgetSession as forgetOAuthSession, listPendingConsents, approveConsen
 // being true. services/debugLog.ts has the rest of the reasoning, including why
 // the arguments are never recorded.
 installIpcDebugTap()
+
+// The screenshot demo, and only in a development build. `import.meta.env.DEV`
+// is replaced at build time, so a production build drops this branch and,
+// with nothing else using it, the demo module; `isDemo` is portable.ts's runtime guard, which is false
+// in a packaged app whatever the environment says. Second, after the debug
+// tap, because it replaces a few handlers at registration in the same way.
+if (import.meta.env.DEV && isDemo) installDemo()
 
 const isDev = !app.isPackaged
 

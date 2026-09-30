@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-23",
+  "generated": "2026-09-30",
   "nodes": [
     {
       "id": "claude",
@@ -11,8 +11,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 115,
-      "hash": "7dfe736e1811e9b5",
+      "lines": 116,
+      "hash": "b1dbf8f616ee0f1c",
       "generated": false
     },
     {
@@ -64,7 +64,7 @@
       "status": "active",
       "kind": "document",
       "lines": 444,
-      "hash": "5138cef8a65a73b4",
+      "hash": "2af86808ec885e2a",
       "generated": false
     },
     {
@@ -78,6 +78,19 @@
       "kind": "document",
       "lines": 600,
       "hash": "2e4816dd9cedc292",
+      "generated": false
+    },
+    {
+      "id": "screenshot-demo",
+      "path": "docs/05-engineering/development/screenshot-demo.md",
+      "type": "engineering.development",
+      "authority": "audience",
+      "visibility": "internal",
+      "domain": null,
+      "status": "draft",
+      "kind": "document",
+      "lines": 93,
+      "hash": "732f2954fb9dcbd8",
       "generated": false
     },
     {
@@ -115,8 +128,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 752,
-      "hash": "6c435919d28f2ae9",
+      "lines": 996,
+      "hash": "d330fa518f74584c",
       "generated": false
     },
     {
@@ -128,8 +141,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 511,
-      "hash": "6635b9fbca3becd3",
+      "lines": 599,
+      "hash": "8d225cc214cbc7f3",
       "generated": false
     },
     {
@@ -154,8 +167,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 377,
-      "hash": "c3e2a18c0cb199ef",
+      "lines": 382,
+      "hash": "a586812eaf5273bb",
       "generated": false
     },
     {
@@ -167,8 +180,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 211,
-      "hash": "3146efa7d99397a7",
+      "lines": 236,
+      "hash": "a23017d941375de0",
       "generated": false
     },
     {
@@ -219,8 +232,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 214,
-      "hash": "79ef6d5dd446427f",
+      "lines": 218,
+      "hash": "a11e56051e914403",
       "generated": false
     },
     {
@@ -415,7 +428,7 @@
       "status": "active",
       "kind": "document",
       "lines": 43,
-      "hash": "781531868d85412f",
+      "hash": "7ee5d39e79c86c75",
       "generated": false
     },
     {
@@ -428,7 +441,7 @@
       "status": "active",
       "kind": "document",
       "lines": 103,
-      "hash": "cee0ad665fef8423",
+      "hash": "57604061cb02a297",
       "generated": false
     },
     {
@@ -839,6 +852,18 @@
     },
     {
       "from": "docs-ai-security",
+      "to": "docs-ai-mcp",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-security",
+      "to": "docs-ai-mcp",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-security",
       "to": "security",
       "rel": "references",
       "inferred": true
@@ -875,7 +900,19 @@
     },
     {
       "from": "docs-ai-agents",
+      "to": "docs-ai-mcp",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-agents",
       "to": "docs-ai-security",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-ai-agents",
+      "to": "docs-ai-mcp",
       "rel": "references",
       "inferred": true
     },
@@ -1062,6 +1099,12 @@
     {
       "from": "docs-tunnels",
       "to": "docs-vpn",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-tunnels",
+      "to": "docs-ai-mcp",
       "rel": "references",
       "inferred": true
     },

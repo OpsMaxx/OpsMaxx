@@ -1,6 +1,7 @@
 import { app } from 'electron'
 import { closeSync, constants, fchmodSync, lstatSync, mkdirSync, openSync } from 'node:fs'
 import { join } from 'node:path'
+import { demoProfileDir } from './demoGuard'
 
 // electron-builder's portable target sets PORTABLE_EXECUTABLE_DIR to the folder
 // the .exe was launched from. When present, keep all app data beside the
@@ -17,6 +18,34 @@ if (portableDir) {
 }
 
 export const isPortable = !!portableDir
+
+// The screenshot demo profile, for the same reason and at the same moment as
+// the portable redirect: every service resolves its path at import time. See
+// demoGuard.ts for why a packaged app can never take this branch, and why the
+// real profile is refused.
+//
+// Nothing here runs unless the demo was asked for, so an ordinary launch
+// cannot fail on it (see the rule above ensureUserDataDir: nothing at this
+// module's scope may throw). When it WAS asked for, any failure -- the refusal
+// included -- quits instead of carrying on, because carrying on would run the
+// demo against the real profile.
+function resolveDemoDir(): string | null {
+  if (portableDir || app.isPackaged || !process.env.OPSMAXX_DEMO_PROFILE) return null
+  try {
+    return demoProfileDir(process.env, app.isPackaged, app.getPath('userData'))
+  } catch (err) {
+    console.error(`[demo] ${(err as Error).message}`)
+    app.exit(1)
+    process.exit(1)
+  }
+}
+const demoDir = resolveDemoDir()
+
+if (demoDir) {
+  app.setPath('userData', demoDir)
+}
+
+export const isDemo = !!demoDir
 
 /**
  * Make sure the app's own data directory exists and is 0700.

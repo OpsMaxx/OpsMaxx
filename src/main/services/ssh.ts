@@ -3,7 +3,7 @@ import { Client, type ConnectConfig } from 'ssh2'
 import type { ClientChannel } from 'ssh2'
 import { readFileSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
-import { WebContents } from 'electron'
+import { WebContents, app } from 'electron'
 import type { SshCloseInfo, SshConnectConfig, SshHop, SshStatus, SshStatusPhase } from '../../shared/ssh'
 import type { CloudTarget } from '../../shared/cloud'
 import { agentForHop } from '../../shared/sshAgent'
@@ -331,11 +331,29 @@ const HANDSHAKE_HUMAN_MS = 135000
 /** ssh2's own timer, purely so a bug in ours cannot hang a connection. */
 const HANDSHAKE_BACKSTOP_MS = 150000
 
+/**
+ * The screenshot demo's stand-in for a real SSH connection, or null.
+ *
+ * Set only by src/main/demo, which index.ts loads behind `import.meta.env.DEV`
+ * and portable.ts's demo guard -- so in a production build nothing can set it,
+ * and a packaged app refuses even if something tried. Every SSH feature (the
+ * pool, terminal sessions, SFTP, the fleet sampler, docker, kubectl) dials
+ * through connectClient below, which is why this one seam is enough for the
+ * demo to fake all of them without a network.
+ */
+let demoConnector: ((hop: SshHop) => Client) | null = null
+
+export function setDemoConnector(fn: (hop: SshHop) => Client): void {
+  if (app.isPackaged) throw new Error('the demo connector is not available in a packaged app')
+  demoConnector = fn
+}
+
 async function connectClient(
   hop: SshHop,
   sock?: NodeJS.ReadableStream,
   allowPrompt = true
 ): Promise<Client> {
+  if (demoConnector) return demoConnector(hop)
   // The credentials are settled BEFORE a socket exists. Resolving them can
   // fail on its own (a hardware key with no agent to route it to), and that
   // used to happen inside the promise below, after tcpSocket() had opened the
