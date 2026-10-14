@@ -51,8 +51,8 @@ export function parseVpnConfig(
       /**
        * There is nothing to import.
        *
-       * Tailscale has no profile file: the daemon holds its own state and its
-       * own login, and this app attaches to it rather than configuring it. So
+       * Tailscale has no profile file: the embedded node holds its own state
+       * and its own login, and there is nothing for a file to carry. So
        * this is not an unimplemented parser — it is a kind that has no config
        * to parse, and saying so is better than a parse failure that reads like
        * the file was wrong.
@@ -62,7 +62,7 @@ export function parseVpnConfig(
         error:
           kind === 'ngrok'
             ? 'ngrok is configured in OpsMaxx rather than imported. Add it from the Tunnels view and choose which ports to publish.'
-            : 'Tailscale has no configuration file to import. Add it from the Tunnels view — it uses the Tailscale client already installed on this machine.',
+            : 'Tailscale has no configuration file to import. Add it from the Tunnels view — OpsMaxx runs its own node, with no client to install.',
         errorCode: 'unsupported',
         stripped: [],
         warnings: []

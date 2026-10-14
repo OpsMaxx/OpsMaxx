@@ -83,10 +83,7 @@ brew install --cask opsmaxx/tap/opsmaxx     # macOS
 
 The tap is third-party, so Homebrew asks you to `brew tap opsmaxx/tap` and trust it first.
 
-**Windows** is a direct download for now: the winget manifest is
-[in review](https://github.com/microsoft/winget-pkgs/pulls?q=OpsMaxx) and community
-submissions wait on a volunteer moderator, so `winget install OpsMaxx.OpsMaxx` does not
-work yet. This line will say otherwise the day it does.
+**Windows** is a direct download.
 
 Download an installer from the **[latest release](https://github.com/OpsMaxx/OpsMaxx/releases/latest)** — `.exe` for Windows, `.dmg` for macOS, `.AppImage` or `.deb` for Linux.
 

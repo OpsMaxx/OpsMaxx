@@ -25,13 +25,14 @@ Download the latest build from the [Releases](https://github.com/OpsMaxx/OpsMaxx
 | | |
 |---|---|
 | **macOS** | `brew trust opsmaxx/tap` then `brew install --cask opsmaxx/tap/opsmaxx` |
-| **Windows** | `winget install OpsMaxx.OpsMaxx` — [pending review](https://github.com/microsoft/winget-pkgs/pull/431465) |
 
 Homebrew's main cask repository has a notability threshold OpsMaxx does not meet yet, so
 the cask lives in [its own tap](https://github.com/OpsMaxx/homebrew-tap) for now. The
 `brew trust` step is Homebrew refusing to load a third-party tap until you say you trust
 it; the cask it guards is a few lines of metadata you can read first. Homebrew clears the
 quarantine flag on install, so this route also sidesteps the first-run warning below.
+
+There is no winget package and none is planned; the `.exe` above is the Windows route.
 
 <details>
 <summary><b>What are the other files on the release page?</b></summary>

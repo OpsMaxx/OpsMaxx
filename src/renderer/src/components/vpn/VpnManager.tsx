@@ -22,13 +22,13 @@ export function VpnManager(): React.JSX.Element {
   /**
    * Tailscale is ADDED, not imported.
    *
-   * There is no file and nothing to fill in: the daemon on this machine holds
-   * its own state and its own login, and this profile is only the app's view of
-   * it. So the whole creation flow is one button — a form would be a form with
-   * no fields.
+   * There is no file and nothing to fill in: the embedded node holds its own
+   * state and its own login, and there is nothing for a form to carry. So the
+   * whole creation flow is one button — a form would be a form with no fields.
    *
-   * One per workspace, because a second profile would poll the same daemon and
-   * report the same state twice.
+   * One per workspace, because the spec is `{ kind: 'tailscale' }` and carries
+   * nothing to tell two of them apart — a second would describe the same thing
+   * twice.
    */
   const addTailscale = (): void => {
     if (hasTailscale) {
@@ -46,7 +46,7 @@ export function VpnManager(): React.JSX.Element {
       spec: { kind: 'tailscale' }
     }
     upsertVpnProfile(profile)
-    toast('Tailscale added — it uses the client already installed on this machine.', 'ok')
+    toast('Tailscale added — a node of its own on your tailnet. Start it and authorise it once in the browser.', 'ok')
   }
 
   return (
@@ -54,7 +54,7 @@ export function VpnManager(): React.JSX.Element {
       <div className="content-header">
         <div>
           <h1>VPN</h1>
-          <div className="sub">WireGuard and OpenVPN tunnels</div>
+          <div className="sub">WireGuard, OpenVPN and Tailscale tunnels</div>
         </div>
         <div className="spacer" />
         <button className="btn secondary size-28" onClick={() => importProfile('wireguard')}>
@@ -82,7 +82,7 @@ export function VpnManager(): React.JSX.Element {
         <EmptyState
           icon={<Globe size={26} />}
           title="No VPN profiles"
-          message="Import a WireGuard .conf or an OpenVPN .ovpn to carry servers, databases and tunnels over a VPN. Tailscale needs no file — it uses the client already on this machine."
+          message="Import a WireGuard .conf or an OpenVPN .ovpn to carry servers, databases and tunnels over a VPN. Tailscale needs no file — OpsMaxx runs a node of its own on your tailnet."
           // Both, because the header offers both and the sentence above names
           // both. A single "Import WireGuard" button here was the only thing on
           // an OpenVPN user's first screen that looked like the way in, and it
