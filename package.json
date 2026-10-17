@@ -155,6 +155,9 @@
     "vite": "^7.3.6",
     "vitest": "^4.1.11"
   },
+  "overrides": {
+    "@electron/get": "^5.1.0"
+  },
   "productName": "OpsMaxx",
   "engines": {
     "node": ">=20"
