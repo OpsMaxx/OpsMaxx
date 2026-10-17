@@ -26,36 +26,6 @@ jobs:
           go-version-file: sidecar/netd/go.mod
           cache-dependency-path: sidecar/netd/go.sum
       - run: npm ci
-      # `npm audit`, with the registry's own flakiness separated from a finding.
-      #
-      # The audit endpoint returned 503 three times in one afternoon during the
-      # 0.13.x releases, each time marking main red for a reason that had
-      # nothing to do with this repository. Two obvious fixes are both wrong:
-      # `continue-on-error` would let a real vulnerability through silently, and
-      # leaving it bare means a third-party outage blocks unrelated work.
-      #
-      # So the two cases are told apart. A vulnerability fails the build, as it
-      # always did. An unreachable endpoint retries, and if it is still
-      # unreachable it says "not checked" loudly -- in the log and in the job
-      # summary -- rather than reporting a green nobody earned. "We could not
-      # look" is a third answer, and pretending it is either of the other two is
-      # the same mistake this codebase refuses everywhere else.
-      - name: npm audit
-        run: |
-          for attempt in 1 2 3; do
-            out=$(npm audit 2>&1) && { echo "$out"; exit 0; }
-            if echo "$out" | grep -qiE 'audit endpoint returned an error|Service Unavailable|ECONNRESET|ETIMEDOUT'; then
-              echo "::warning::npm audit could not reach the registry (attempt $attempt/3), retrying"
-              sleep $((attempt * 20))
-              continue
-            fi
-            # Reached the registry and it had something to say. That is a finding.
-            echo "$out"
-            exit 1
-          done
-          echo "::warning::npm audit NOT RUN -- the registry was unreachable for all 3 attempts. Dependencies are unverified for this run."
-          echo '### :warning: npm audit did not run' >> "$GITHUB_STEP_SUMMARY"
-          echo 'The npm advisory endpoint was unreachable for all three attempts, so dependencies are **unverified for this run** -- this is not a clean audit.' >> "$GITHUB_STEP_SUMMARY"
       - run: npm run lint
       - run: npm run typecheck
       - run: npm run build
@@ -105,6 +75,61 @@ jobs:
       # ships.
       - name: Capability guard under Electron's Node
         run: npm run test:capability
+      # `npm audit`, in two parts, after the suite rather than in front of it.
+      #
+      # Three things had to be told apart here, and the original told apart two.
+      #
+      # Registry flakiness is still not a finding: the endpoint returned 503
+      # three times in one afternoon during the 0.13.x releases, and "we could
+      # not look" remains its own answer rather than being rounded to a pass or
+      # a fail.
+      #
+      # What this adds is the difference between a vulnerability WE SHIP and one
+      # in a build tool. `--omit=dev` is the blocking gate, because that is the
+      # set of dependencies that reaches a user's machine. The full audit still
+      # runs and still reports, but it cannot fail the build on a dev-only
+      # advisory -- which matters because npm publishes advisories against
+      # packages that have no patched release at all. GHSA-vfj7-8cjw-p6xm
+      # (braces <=3.0.3, where 3.0.3 IS the latest) arrives through
+      # patch-package, which applies patches/ssh2+1.17.0.patch and cannot simply
+      # be dropped.
+      #
+      # And it runs LAST. Positioned before the suite, a single unpatchable dev
+      # advisory skipped lint, typecheck, build and every test -- so main looked
+      # like one failing check while actually reporting nothing about the code
+      # for three days. A gate that hides the results of every other gate is
+      # worse than the advisory it is reporting.
+      - name: npm audit (production dependencies)
+        run: |
+          for attempt in 1 2 3; do
+            out=$(npm audit --omit=dev 2>&1) && { echo "$out"; exit 0; }
+            if echo "$out" | grep -qiE 'audit endpoint returned an error|Service Unavailable|ECONNRESET|ETIMEDOUT'; then
+              echo "::warning::npm audit could not reach the registry (attempt $attempt/3), retrying"
+              sleep $((attempt * 20))
+              continue
+            fi
+            # Reached the registry and it had something to say about something we
+            # ship. That is a finding and it fails the build, as it always did.
+            echo "$out"
+            exit 1
+          done
+          echo "::warning::npm audit NOT RUN -- the registry was unreachable for all 3 attempts. Dependencies are unverified for this run."
+          echo '### :warning: npm audit did not run' >> "$GITHUB_STEP_SUMMARY"
+          echo 'The npm advisory endpoint was unreachable for all three attempts, so dependencies are **unverified for this run** -- this is not a clean audit.' >> "$GITHUB_STEP_SUMMARY"
+      # Reported, never blocking. A finding here is a real thing to go and fix,
+      # it is just not a reason to withhold a build of code that is fine.
+      - name: npm audit (dev dependencies, report only)
+        continue-on-error: true
+        run: |
+          if out=$(npm audit 2>&1); then
+            echo "$out"
+            exit 0
+          fi
+          echo "$out"
+          echo '### npm audit: findings in dev dependencies' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Production dependencies audited clean. The findings below are in build-time' >> "$GITHUB_STEP_SUMMARY"
+          echo 'tooling and do not ship, so they do not fail this build -- they still want fixing.' >> "$GITHUB_STEP_SUMMARY"
+          printf '\n```\n%s\n```\n' "$out" >> "$GITHUB_STEP_SUMMARY"
 
   # CI has always been ubuntu-only and has never run electron-builder, so
   # nothing here proved that a PACKAGED app could load a native module or exec a

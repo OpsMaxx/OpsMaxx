@@ -102,7 +102,7 @@
     "@devolutions/iron-remote-desktop-rdp": "0.7.0",
     "@lezer/highlight": "1.2.3",
     "@lydell/node-pty": "1.2.0-beta.15",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "@scalar/openapi-upgrader": "0.2.15",
     "@scalar/snippetz": "0.9.30",
     "@xterm/addon-fit": "^0.10.0",
@@ -154,6 +154,9 @@
     "typescript-eslint": "^8.69.0",
     "vite": "^7.3.6",
     "vitest": "^4.1.11"
+  },
+  "overrides": {
+    "@electron/get": "^5.1.0"
   },
   "productName": "OpsMaxx",
   "engines": {
