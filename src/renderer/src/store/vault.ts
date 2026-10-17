@@ -32,7 +32,7 @@ export function newField(): VaultField {
   return { id: uid('f'), key: '', value: '', secret: false }
 }
 
-interface VaultState {
+export interface VaultState {
   /**
    * Whether a vault file is there -- `null` until the main process has said.
    *
@@ -222,7 +222,19 @@ export const useVault = create<VaultState>((set, get) => ({
       set({ error: r?.error ?? 'Could not delete the vault.' })
       return false
     }
-    set({ exists: false, unlocked: false, entries: [], selectedId: null })
+    // `damaged` and `stage` too, not just `exists`. The unlock modal branches
+    // on `damaged` before anything else, so leaving it set would delete the
+    // file and keep the "Vault file unreadable" screen on top of a vault that
+    // is no longer there.
+    set({
+      exists: false,
+      damaged: false,
+      unlocked: false,
+      stage: 'locked',
+      entries: [],
+      selectedId: null,
+      error: null
+    })
     return true
   },
 
@@ -281,6 +293,18 @@ export const useVault = create<VaultState>((set, get) => ({
 
   clearError: () => set({ error: null })
 }))
+
+// Enabled for this vault but not usable right now -- the fingerprint was
+// un-enrolled, or safeStorage went away. `canUseBio` hides the button in that
+// case, and a button that silently vanishes is read as the feature breaking,
+// which is exactly the report that led here. `biometricSupport()` already
+// returns the sentence for this; it was being thrown away.
+//
+// Returns a primitive, so it is safe as a zustand selector in both screens.
+export const bioBlockedReason = (s: VaultState): string | null =>
+  s.bioEnabled && !s.bioAvailable
+    ? s.bioReason ?? 'Biometric unlock is not available on this machine right now.'
+    : null
 
 async function persist(
   entries: VaultEntry[],

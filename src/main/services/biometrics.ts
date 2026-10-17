@@ -209,7 +209,22 @@ export async function biometricUnlock(reason = 'unlock your OpsMaxx vault'): Pro
     const result = vaultUnlockWithKey(key, Buffer.from(stored.salt, 'base64'))
     // A key that no longer opens the vault — the master password was changed,
     // or the file was replaced — is dead weight that would fail every time.
-    if (!result.ok) disableBiometricUnlock()
+    //
+    // Say so. Dropping it silently is what makes this read as the sensor
+    // breaking: the prompt stops appearing, the button goes with it, and
+    // nothing ever explains why. Replacing the result here rather than at the
+    // call sites because every caller — both auto-prompts and both buttons —
+    // comes through this function, and both screens already render `error`.
+    if (!result.ok) {
+      disableBiometricUnlock()
+      return {
+        ok: false,
+        error:
+          'The saved biometric key no longer opens this vault — the master password was changed, ' +
+          'or the vault file was replaced. Biometric unlock has been switched off: unlock with ' +
+          'your master password and turn it back on.'
+      }
+    }
     return result
   } catch (err) {
     return { ok: false, error: `Could not read the stored key: ${(err as Error).message}` }

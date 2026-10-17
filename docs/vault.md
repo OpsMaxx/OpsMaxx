@@ -20,7 +20,10 @@ rotates, and carried inside an encrypted backup to another machine.
 - Entries hold a URL, username, password, notes, tags and **any number of custom key/value fields**, each markable secret
 - **Search matches every field**, so you can find an entry by hostname or username, not just its title
 
-> There is **no recovery** if the master password is lost. That is the point.
+> There is **no recovery** if the master password is lost. That is the point. What you can
+> do is abandon that vault and start a new one — the locked screen offers it under **Lost
+> your master password?**, which deletes every entry and keeps your servers, settings and
+> anything held in this machine's own keychain.
 
 ### What can live in it
 

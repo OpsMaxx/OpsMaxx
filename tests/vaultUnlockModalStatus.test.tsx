@@ -102,3 +102,36 @@ describe('the vault prompt, opened from a screen that never loaded vault status'
     expect(statusCalls()).toBe(0)
   })
 })
+
+describe('a vault file that cannot be read', () => {
+  it('offers to delete it here rather than sending the user to the Finder', async () => {
+    // This branch told the truth -- nothing is lost, the file is still there --
+    // and then offered Close as the only action, with the way forward written
+    // as prose: "move it aside to start a new vault". That is an instruction to
+    // go and find a file in the application support directory, which is not
+    // something to ask of the person this screen is shown to. `vaultDestroy`
+    // was already wired from here and simply had no caller.
+    ;(window as unknown as { opsmaxx: unknown }).opsmaxx = {
+      vault: {
+        status: async () => ({ exists: true, damaged: true, unlocked: false, stage: 'locked' }),
+        list: async () => ({ ok: true, entries: [] }),
+        unlock: async () => ({ ok: false, error: 'unreadable' }),
+        destroy: async () => ({ ok: true }),
+        bioSupport: async () => ({ available: false, kind: 'none' }),
+        bioEnabled: async () => false,
+        bioScope: async () => null
+      }
+    }
+    render(<VaultUnlockModal />)
+    useVaultPrompt.setState({ open: true, reason: 'Reading services needs a credential.' })
+
+    await waitFor(() => expect(screen.getByText(/Vault file unreadable/i)).toBeTruthy())
+    // Close stays: abandoning a damaged vault must remain a choice, not the
+    // only one.
+    // getAllBy: the Modal chrome has its own Close as well as this branch's.
+    expect(screen.getAllByRole('button', { name: /Close/ }).length).toBeGreaterThan(0)
+    expect(screen.getByText(/Lost your master password/i)).toBeTruthy()
+    expect(screen.queryByText(/move it aside/i)).toBeNull()
+    expect(screen.getByText(/delete it here and start a new vault/i)).toBeTruthy()
+  })
+})

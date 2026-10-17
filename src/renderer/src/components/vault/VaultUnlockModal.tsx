@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { AlertTriangle, Eye, EyeOff, Fingerprint, Lock, ShieldCheck } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
-import { useVault } from '../../store/vault'
+import { useVault, bioBlockedReason } from '../../store/vault'
+import { VaultReset } from './VaultReset'
 import { useVaultPrompt } from '../../store/vaultPrompt'
 import { VAULT_MIN_PASSWORD } from '../../../../shared/vault'
 
@@ -81,6 +82,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
   const checking = exists === null
   const creating = exists === false
   const canUseBio = bioAvailable && bioEnabled && !creating && !checking
+  const bioBlocked = useVault(bioBlockedReason)
 
   // Only meaningful while creating, and only once the user has typed something
   // into the second field — showing "does not match" against an empty box is a
@@ -198,7 +200,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
             <div className="s-desc">
               Your vault is still on this machine and nothing has been deleted — but the file
               cannot be read, so no master password will open it. Restore it from a backup, or
-              move it aside to start a new vault.
+              delete it here and start a new vault.
             </div>
           </div>
           <div className="row" style={{ gap: 8 }}>
@@ -206,6 +208,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
               Close
             </button>
           </div>
+          <VaultReset />
         </div>
       ) : (
         <>
@@ -233,6 +236,16 @@ export function VaultUnlockModal(): React.JSX.Element | null {
         >
           <Fingerprint size={15} /> Unlock with {BIO_LABEL[bioKind] ?? 'biometrics'}
         </button>
+      )}
+
+      {/* Set up, but not usable right now. Same words as the Vault screen, for
+          the same reason: a button that is simply absent reads as the feature
+          having broken. */}
+      {bioBlocked && !creating && !checking && (
+        <div className="s-desc" style={{ marginBottom: 10 }}>
+          Biometric unlock is switched on for this vault but is not available right now —{' '}
+          {bioBlocked} Unlock with your master password below.
+        </div>
       )}
 
       <div className="row" style={{ gap: 6 }}>

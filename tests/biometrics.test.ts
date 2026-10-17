@@ -229,8 +229,15 @@ describe('unlocking', () => {
     if (!bio.biometricSupport().available) return
     bio.enableBiometricUnlock()
     unlockWithKeyResult = { ok: false, error: 'stale' }
-    expect((await bio.biometricUnlock()).ok).toBe(false)
+    const r = await bio.biometricUnlock()
+    expect(r.ok).toBe(false)
     expect(bio.biometricEnabled()).toBe(false)
+    // And it has to SAY so. Dropping the key silently is what makes this read
+    // as the sensor having broken: the prompt stops appearing, the button goes
+    // with it, and the user is left waiting for something that will never come.
+    // 'stale' from the vault is not an explanation anyone can act on.
+    expect(r.error).toMatch(/no longer opens this vault/i)
+    expect(r.error).toMatch(/switched off/i)
   })
 })
 

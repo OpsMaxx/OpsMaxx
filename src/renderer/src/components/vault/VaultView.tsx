@@ -13,7 +13,8 @@ import {
   Trash2,
   Unlock
 } from 'lucide-react'
-import { useVault, newField } from '../../store/vault'
+import { useVault, newField, bioBlockedReason } from '../../store/vault'
+import { VaultReset } from './VaultReset'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
@@ -136,6 +137,7 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
   const refreshBiometrics = useVault((s) => s.refreshBiometrics)
   const unlockWithBiometrics = useVault((s) => s.unlockWithBiometrics)
   const canUseBio = mode === 'unlock' && bioAvailable && bioEnabled
+  const bioBlocked = useVault(bioBlockedReason)
 
   useEffect(() => {
     void refreshBiometrics()
@@ -216,6 +218,19 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
           >
             <Fingerprint size={15} /> Unlock with {BIO_LABEL[bioKind] ?? 'biometrics'}
           </button>
+        )}
+
+        {/* Set up for this vault, but not usable right now. Without this the
+            button simply is not there, which reads as the feature having broken
+            -- and the user is left guessing whether to wait for a prompt that
+            is never coming. No BIO_LABEL here on purpose: biometricSupport()
+            reports kind 'none' on every unavailable branch, so there is no
+            honest name to use. */}
+        {!creating && bioBlocked && (
+          <div className="s-desc" style={{ marginBottom: 10, textAlign: 'left' }}>
+            Biometric unlock is switched on for this vault but is not available right now —{' '}
+            {bioBlocked} Unlock with your master password below.
+          </div>
         )}
 
         <div className="row" style={{ gap: 6, marginTop: 4 }}>
@@ -308,7 +323,8 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
         {creating && bioAvailable && (
           <div className="s-desc" style={{ marginTop: 6 }}>
             You can turn on {BIO_LABEL[bioKind] ?? 'biometric'} unlock as soon as the vault is set
-            up, so this is the last time you type this password today.
+            up, so you mostly stop typing it — with the default setting you type it once each time
+            OpsMaxx starts.
           </div>
         )}
 
@@ -318,8 +334,9 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
             leaving someone hunting for one. Caps lock is the usual culprit. */}
         {error && !creating && (
           <div className="s-desc" style={{ marginTop: 6 }}>
-            Master passwords are case sensitive — check caps lock. Nothing can reset one: only this
-            password opens this vault.
+            Master passwords are case sensitive — check caps lock. Nothing can recover one: only
+            this password opens this vault. If it is gone for good, you can delete the vault and
+            start over below.
             {canUseBio ? ` You can also unlock with ${BIO_LABEL[bioKind] ?? 'biometrics'} above.` : ''}
           </div>
         )}
@@ -333,6 +350,22 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
           {creating ? <ShieldCheck size={15} /> : <Unlock size={15} />}
           {creating ? 'Create vault' : 'Unlock'}
         </button>
+
+        {/* Not on the secured screen: that one belongs to someone who typed the
+            password this session and whose key main still holds. They have not
+            lost anything, so a delete button there is only a footgun.
+            `onDone` is not cosmetic -- after a destroy `exists` flips false and
+            this same component instance re-renders as mode="create", keeping
+            its React state, so the create screen would arrive pre-filled with
+            the forgotten password one click from becoming the new one. */}
+        {!creating && !secured && (
+          <VaultReset
+            onDone={() => {
+              setPassword('')
+              setConfirm('')
+            }}
+          />
+        )}
       </div>
     </div>
   )
