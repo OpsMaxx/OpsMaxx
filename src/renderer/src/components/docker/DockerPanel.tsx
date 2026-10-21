@@ -907,6 +907,16 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     })
   }
 
+  // Every row draws the same slots — start|restart, stop|remove, shell — and
+  // an empty one where a verb does not apply. Rows used to draw only the
+  // buttons they had, so a stopped container's icons sat one column right of
+  // the running ones above it and no column meant one thing. `alignSelf`
+  // because .cron-row aligns on the baseline, and an empty box's baseline is
+  // its bottom edge: it rode up and made its row 5px taller than the rest.
+  const emptySlot = (
+    <span className="icon-btn sm" aria-hidden style={{ visibility: 'hidden', alignSelf: 'center' }} />
+  )
+
   const actionButtons = (c: DockerContainer): React.JSX.Element => (
     <>
       {c.state !== 'running' && (
@@ -919,7 +929,7 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
           <Play size={13} />
         </button>
       )}
-      {(c.state === 'exited' || c.state === 'created' || c.state === 'dead') && (
+      {c.state === 'exited' || c.state === 'created' || c.state === 'dead' ? (
         <button
           className="icon-btn sm"
           title={`Remove ${c.name}. Its volumes stay; you confirm on the next step.`}
@@ -928,6 +938,8 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
         >
           <Trash2 size={13} className={clsx(removingId === c.id && 'spin')} />
         </button>
+      ) : (
+        c.state !== 'running' && emptySlot
       )}
       {c.state === 'running' && (
         <>
@@ -1486,6 +1498,8 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
                           <SquareTerminal size={13} />
                         </button>
                       )}
+                      {/* The shell's column, kept on rows that cannot have one. */}
+                      {server && !(c.state === 'running' && validateContainerRef(c.name)) && emptySlot}
                     </div>
 
                     {open && (
