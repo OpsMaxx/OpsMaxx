@@ -1221,8 +1221,21 @@ ipcMain.handle('ssh:connect', (e, cfg: SshConnectConfig & { serverId?: string })
 // pressed Test, so a fingerprint to confirm or a code to type is the answer to
 // their click. sshTest defaults to false for the MCP bridge's probe, which has
 // nobody in front of it.
-ipcMain.handle('ssh:test', (_e, cfg: SshConnectConfig & { serverId?: string }) =>
-  sshTest(preparedSshTarget(cfg), true)
+//
+// The VPN is the FORM's, not the saved record's. Everywhere else the record
+// wins so a caller cannot re-route a saved server, but this channel is only
+// the connection editor, and it already tests the form's host and port: with
+// the record's VPN on top, editing a server to change or drop its VPN tested
+// the new address through the old tunnel until the user saved. Absent means
+// "no VPN" here, because the form sends undefined for none.
+ipcMain.handle('ssh:test', (_e, cfg: SshConnectConfig & { serverId?: string; vpnProfileId?: string }) =>
+  sshTest(
+    {
+      ...preparedSshTarget(cfg),
+      vpnProfileId: typeof cfg.vpnProfileId === 'string' && cfg.vpnProfileId ? cfg.vpnProfileId : undefined
+    },
+    true
+  )
 )
 /**
  * What credential a server has, with none of its value.

@@ -792,7 +792,7 @@ async function openChainOverVpn(
   onHop?: (index: number, count: number) => void,
   allowPrompt = true
 ): Promise<{ clients: Client[]; client: Client; close?: () => void }> {
-  const { vpnOpenForward, vpnStart } = await import('./vpn/manager')
+  const { vpnOpenForward, vpnStart, vpnStatus } = await import('./vpn/manager')
   const vpnId = cfg.vpnProfileId as string
 
   const started = await vpnStart(vpnId)
@@ -800,6 +800,7 @@ async function openChainOverVpn(
     // The VPN's own message, not a connect timeout twenty seconds later.
     throw new Error(started.error ?? 'The VPN for this server could not be started.')
   }
+  assertVpnCarriesTraffic(vpnStatus(vpnId), cfg)
 
   const first = cfg.hops?.[0] ?? cfg
   let fwd: { port: number; close: () => void } | null = null
@@ -1332,6 +1333,42 @@ async function cloudDial(
 
 // Bring the profile up and open a forward to the first hop, returning a config
 // that dials the loopback end of it.
+/**
+ * Started is not the same as carrying traffic.
+ *
+ * A Tailscale node that has not been authorised yet starts perfectly well —
+ * the process is up, the engine is running, `vpnStart` reports success — and
+ * routes nothing at all, because it is not on the tailnet. Forwarding
+ * through it then produced a connection that sat there until the SSH
+ * handshake deadline and failed with "Timed out", which says nothing about
+ * the node, the tailnet or the authorisation waiting to be done. The user
+ * sees a server that will not connect and a VPN that claims to be up.
+ *
+ * So the state is checked before anything is dialled, and the refusal names
+ * the actual reason and where to fix it.
+ *
+ * Shared by vpnDial and openChainOverVpn. It lived inline in vpnDial only, so
+ * Test connection — which takes the unpooled path — kept the bare timeout:
+ * the test failed, the node finished authorising meanwhile, and the saved
+ * server then connected, which read as "only works once saved".
+ */
+function assertVpnCarriesTraffic(
+  vs: { state: string; error?: string } | null,
+  cfg: SshHop & { serverName?: string }
+): void {
+  if (!vs || vs.state === 'connected') return
+  if (vs.state === 'authenticating') {
+    throw new Error(
+      `${cfg.serverName ?? cfg.host} is reached through a VPN that has not been authorised yet. ` +
+        'Open VPN and authorise the node — nothing can route through it until you do.'
+    )
+  }
+  throw new Error(
+    `${cfg.serverName ?? cfg.host} is reached through a VPN that is not connected ` +
+      `(${vs.state}). ${vs.error ?? 'Open VPN to see why.'}`
+  )
+}
+
 async function vpnDial(
   cfg: SshHop & { serverId?: string; hops?: SshHop[]; vpnProfileId?: string; serverName?: string }
 ): Promise<{ cfg: SshHop & { serverId?: string; hops?: SshHop[] }; release: () => void } | null> {
@@ -1342,34 +1379,7 @@ async function vpnDial(
   if (!started.ok) {
     throw new Error(started.error ?? 'The VPN for this server could not be started.')
   }
-
-  /**
-   * Started is not the same as carrying traffic.
-   *
-   * A Tailscale node that has not been authorised yet starts perfectly well —
-   * the process is up, the engine is running, `vpnStart` reports success — and
-   * routes nothing at all, because it is not on the tailnet. Forwarding
-   * through it then produced a connection that sat there until the SSH
-   * handshake deadline and failed with "Timed out", which says nothing about
-   * the node, the tailnet or the authorisation waiting to be done. The user
-   * sees a server that will not connect and a VPN that claims to be up.
-   *
-   * So the state is checked before anything is dialled, and the refusal names
-   * the actual reason and where to fix it.
-   */
-  const vs = vpnStatus(vpnId)
-  if (vs && vs.state !== 'connected') {
-    if (vs.state === 'authenticating') {
-      throw new Error(
-        `${cfg.serverName ?? cfg.host} is reached through a VPN that has not been authorised yet. ` +
-          'Open VPN and authorise the node — nothing can route through it until you do.'
-      )
-    }
-    throw new Error(
-      `${cfg.serverName ?? cfg.host} is reached through a VPN that is not connected ` +
-        `(${vs.state}). ${vs.error ?? 'Open VPN to see why.'}`
-    )
-  }
+  assertVpnCarriesTraffic(vpnStatus(vpnId), cfg)
 
   const first = cfg.hops?.[0] ?? cfg
   const consumer = {
