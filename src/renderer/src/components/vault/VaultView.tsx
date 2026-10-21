@@ -351,14 +351,17 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
           {creating ? 'Create vault' : 'Unlock'}
         </button>
 
-        {/* Not on the secured screen: that one belongs to someone who typed the
-            password this session and whose key main still holds. They have not
-            lost anything, so a delete button there is only a footgun.
+        {/* Not on the secured screen until an unlock has failed. That screen
+            belongs to someone who typed the password this session, so up front
+            a delete button is only a footgun -- but typing a password this
+            morning is no proof of remembering it this afternoon, and the hint
+            above promises a way out "below" on every error. Hiding it here left
+            Cmd+Q as the only route to it, and nothing said so.
             `onDone` is not cosmetic -- after a destroy `exists` flips false and
             this same component instance re-renders as mode="create", keeping
             its React state, so the create screen would arrive pre-filled with
             the forgotten password one click from becoming the new one. */}
-        {!creating && !secured && (
+        {!creating && (!secured || error) && (
           <VaultReset
             onDone={() => {
               setPassword('')

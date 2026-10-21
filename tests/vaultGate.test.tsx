@@ -217,6 +217,30 @@ describe('the way out when the master password is gone', () => {
     expect(button.disabled).toBe(false)
   })
 
+  it('is offered on the secured screen once an unlock has failed, not before', async () => {
+    // The secured screen said "start over below" after a wrong password and
+    // there was nothing below it: quitting was the only way to reach this.
+    stubBridge({
+      vault: {
+        status: async () => ({ exists: true, unlocked: true, stage: 'secured' }),
+        list: async () => ({ ok: true, entries: [] }),
+        bioSupport: async () => ({ available: false, kind: 'none' }),
+        bioEnabled: async () => false,
+        bioScope: async () => null,
+        unlock: async () => ({ ok: false, error: 'Wrong master password.' })
+      }
+    } as never)
+    render(<VaultView />)
+
+    await waitFor(() => expect(screen.getByText('Vault secured')).toBeTruthy())
+    expect(screen.queryByText(/Lost your master password/i)).toBeNull()
+
+    fireEvent.change(screen.getByPlaceholderText(/Master password/i), { target: { value: 'nope' } })
+    fireEvent.click(screen.getByText('Unlock').closest('button')!)
+
+    await waitFor(() => expect(screen.getByText(/Lost your master password/i)).toBeTruthy())
+  })
+
   it('deletes it and offers a fresh one, with nothing carried over', async () => {
     const destroy = vi.fn(async () => ({ ok: true }))
     lockedVault(destroy)
