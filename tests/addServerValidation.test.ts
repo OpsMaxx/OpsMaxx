@@ -253,7 +253,9 @@ describe('a profile can be checked before it is saved', () => {
   // fingerprint to confirm or a code to type is the answer to their click.
   it('is opted in to prompting only from the IPC handler', () => {
     const main = read('src/main/index.ts')
-    expect(main).toContain('sshTest(preparedSshTarget(cfg), true)')
+    // The handler spreads the prepared target and overrides the VPN with the
+    // form's choice (tests/sshTestVpnState.test.ts), so match the shape.
+    expect(main).toMatch(/sshTest\(\s*\{\s*\.\.\.preparedSshTarget\(cfg\),[\s\S]{0,200}?\},\s*true\s*\)/)
     // And not by the agent-facing probe, which has nobody to ask.
     const mcp = read('src/main/services/mcpServer.ts')
     expect(mcp).toContain('sshTest(preparedSshTarget(serverToSshConfig(server)))')
