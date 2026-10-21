@@ -53,6 +53,27 @@ describe('main resolves credentials and the VPN together', () => {
   })
 })
 
+describe('the MCP server resolves them together too', () => {
+  // The same pairing, in the file this test did not read. execute_command,
+  // list_files and every other agent tool built its target with a bare
+  // resolveChainSecrets, so a server behind OpsMaxx's own Tailscale node
+  // worked in the app's terminal and failed for an agent with
+  // `getaddrinfo ENOTFOUND <machine-name>` — the MagicDNS name only resolves
+  // inside the node. Only test_connection had the helper.
+  // Raw, not comment-stripped: this file has strings the stripping regexes
+  // mistake for comments, and they swallow real calls. Neither pattern below
+  // appears in a comment here.
+  const MCP = readFileSync(join(__dirname, '..', 'src/main/services/mcpServer.ts'), 'utf8')
+
+  it('never calls resolveChainSecrets on its own', () => {
+    expect(MCP).not.toMatch(/\bresolveChainSecrets\s*\(/)
+  })
+
+  it('prepares every server it dials', () => {
+    expect((MCP.match(/\bpreparedSshTarget\(serverToSshConfig\(/g) ?? []).length).toBeGreaterThanOrEqual(18)
+  })
+})
+
 describe('the helper itself', () => {
   const SRC = readFileSync(
     join(__dirname, '..', 'src/main/services/vpn/transport.ts'),

@@ -76,7 +76,7 @@ import {
   validateCloudTarget,
   type CloudTarget
 } from '../../shared/cloud'
-import { knownSecretValuesForServer, resolveChainSecrets, resolveDbSecrets } from './credentialResolver'
+import { knownSecretValuesForServer, resolveDbSecrets } from './credentialResolver'
 import { DockerReader } from './docker'
 import { KubernetesReader } from './kubernetes'
 import {
@@ -2556,7 +2556,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       const secrets = knownSecretValuesForServer(s.id)
-      const cfg = resolveChainSecrets(serverToSshConfig(s))
+      const cfg = preparedSshTarget(serverToSshConfig(s))
       const result = await sshExec(cfg, command)
       if (!result.ok) {
         recordAudit({
@@ -2628,7 +2628,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       const secrets = knownSecretValuesForServer(s.id)
-      const cfg = resolveChainSecrets(serverToSshConfig(s))
+      const cfg = preparedSshTarget(serverToSshConfig(s))
       const key = `mcp:${s.id}`
       const conn = await sftpConnect(key, cfg)
       if (!conn.ok) {
@@ -2695,7 +2695,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       )
       if (!gated.ok) return gated.result
 
-      const cfg = resolveChainSecrets(serverToSshConfig(s))
+      const cfg = preparedSshTarget(serverToSshConfig(s))
       const key = `mcp:${s.id}`
       const conn = await sftpConnect(key, cfg)
       if (!conn.ok) {
@@ -2756,7 +2756,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       )
       if (!gated.ok) return gated.result
 
-      const cfg = resolveChainSecrets(serverToSshConfig(s))
+      const cfg = preparedSshTarget(serverToSshConfig(s))
       const key = `mcp:${s.id}`
       const conn = await sftpConnect(key, cfg)
       if (!conn.ok) {
@@ -2788,7 +2788,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     run: (key: string) => Promise<{ ok: boolean; error?: string }>
   ): Promise<CallToolResult | null> {
     const key = `mcp:${s.id}`
-    const conn = await sftpConnect(key, resolveChainSecrets(serverToSshConfig(s)))
+    const conn = await sftpConnect(key, preparedSshTarget(serverToSshConfig(s)))
     if (!conn.ok) {
       auditError(ctx, approval, `could not connect: ${conn.error}`)
       return errorText(`Could not connect: ${conn.error}`)
@@ -3149,7 +3149,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         provenance = `Taken by background checking ${agePhrase(age)}, not sampled just now.`
         auditSuccess(ctx, gated.approval)
       } else {
-        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const cfg = preparedSshTarget(serverToSshConfig(s))
         // No dialog: an agent asked for this, so there is nobody whose click a
         // verification-code prompt would be the answer to.
         const result = await metricsSample(`mcp:${s.id}`, cfg, false)
@@ -3271,7 +3271,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         provenance = 'Read from OpsMaxx’s background collection, not collected just now.'
         auditSuccess(ctx, gated.approval)
       } else {
-        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const cfg = preparedSshTarget(serverToSshConfig(s))
         const reader = new HostFactsReader({
           exec: (target, command, timeoutMs) =>
             sshExec(target as Parameters<typeof sshExec>[0], command, timeoutMs)
@@ -4051,7 +4051,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         const result = await tunnelStart(
           null,
           tunnelConfigFor(tunnel),
-          resolveChainSecrets(serverToSshConfig(server))
+          preparedSshTarget(serverToSshConfig(server))
         )
         if (!result.ok) {
           recordAudit({ ...auditBase(ctx), approval, result: 'error', error: result.error ?? 'failed to start' })
@@ -5137,7 +5137,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       try {
-        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const cfg = preparedSshTarget(serverToSshConfig(s))
         const probe = await dockerReader.list(cfg, { autoSudo: true })
         if (!probe.ok) {
           recordAudit({
@@ -5245,7 +5245,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
 
       const tail = lines ?? 200
       const secrets = knownSecretValuesForServer(s.id)
-      const cfg = resolveChainSecrets(serverToSshConfig(s))
+      const cfg = preparedSshTarget(serverToSshConfig(s))
       // Two attempts at most, and only in this order: the builder throws on a
       // reference or a window it does not recognise, which is what keeps an
       // agent-supplied string out of the command line.
@@ -5410,7 +5410,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     )
     if (!gated.ok) return gated.result
     try {
-      const out = await run(resolveChainSecrets(serverToSshConfig(s)), s)
+      const out = await run(preparedSshTarget(serverToSshConfig(s)), s)
       if (!out.ok) {
         recordAudit({ ...auditBase(ctx), approval: gated.approval, result: 'error', error: out.text })
         return errorText(out.text)
@@ -6019,7 +6019,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       )
       if (!gated.ok) return gated.result
 
-      const cfg = resolveChainSecrets(serverToSshConfig(s))
+      const cfg = preparedSshTarget(serverToSshConfig(s))
       // One ref, always. The builder accepts a list and caps it; this passes a
       // single-element one so there is no shape in which an agent acts on a
       // host's worth of containers from one approval.
@@ -6150,7 +6150,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       try {
-        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const cfg = preparedSshTarget(serverToSshConfig(s))
         const r = await sshExec(cfg, buildUserUnitsCommand(), 20_000, false)
         if (!r.ok) {
           auditError(ctx, gated.approval, r.error ?? 'the server could not be reached')
@@ -6258,7 +6258,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       try {
-        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const cfg = preparedSshTarget(serverToSshConfig(s))
         const secrets = knownSecretValuesForServer(s.id)
         const said = (r: { stdout?: string; stderr?: string }): string =>
           redactOutput(`${r.stdout ?? ''}${r.stderr ?? ''}`, secrets).trim()
@@ -6350,7 +6350,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         // where the session's sudo is deny: that is a human saying "never as
         // root", and a read is not an exception to it.
         const sudo = effectiveCapability(auth.session, s.id, 'sudo', { mutating: false }).decision !== 'deny'
-        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const cfg = preparedSshTarget(serverToSshConfig(s))
         const r = await sshExec(cfg, buildCronCollectCommand({ sudo }), 20_000, false)
         if (!r.ok) {
           auditError(ctx, gated.approval, r.error ?? 'the server could not be reached')
@@ -6687,7 +6687,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       try {
-        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const cfg = preparedSshTarget(serverToSshConfig(s))
         // Same read as the container list — no second command, and therefore no
         // second thing that can be true of the host at a different moment.
         const probe = await dockerReader.list(cfg, { autoSudo: true })
@@ -6806,7 +6806,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if (!gated.ok) return gated.result
 
       try {
-        const cfg = resolveChainSecrets(serverToSshConfig(s))
+        const cfg = preparedSshTarget(serverToSshConfig(s))
         const probe = await dockerReader.images(cfg, { autoSudo: true })
         if (!probe.ok) {
           recordAudit({
