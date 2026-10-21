@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   Container,
@@ -310,6 +310,8 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   const [removingId, setRemovingId] = useState<string | null>(null)
   const [removeNote, setRemoveNote] = useState<string | null>(null)
   const reclaimDialogRef = useRef<HTMLDivElement>(null)
+  // Prefix for the compose group headings' ids, which label their groups.
+  const groupIdBase = useId()
   const [statsLoading, setStatsLoading] = useState(false)
   const [detail, setDetail] = useState<{ id: string; probe: DockerInspectProbe | null } | null>(null)
 
@@ -1370,20 +1372,48 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
             </div>
           )}
 
-          {groups.map((g) => (
-            <div key={g.project ?? ' ungrouped'}>
+          {groups.map((g, gi) => (
+            <div
+              key={g.project ?? ' ungrouped'}
+              role={groups.length > 1 ? 'group' : undefined}
+              aria-labelledby={groups.length > 1 ? `${groupIdBase}-${gi}` : undefined}
+            >
               {/* Only worth a header when there is more than one bucket —
                   otherwise it is a heading over the whole list saying nothing. */}
+              {/* The group's rank, not a caption's. It was 11px muted text over
+                  13px full-brightness mono rows, so the parent was the weakest
+                  thing in the list and 35 containers read as one flat run
+                  (user report). `.ui-subtitle` is the rank made for group
+                  headers; --fw-title makes it read as bold against the rows.
+                  The gap sits ABOVE the heading so it joins its own rows, not
+                  the group before. An h3 under the panel's h2, so a screen
+                  reader can jump between projects. */}
               {groups.length > 1 && (
-                <div className="row muted" style={{ fontSize: 11, marginTop: 8, alignItems: 'center' }}>
-                  <span className="grow">
+                <div
+                  className="row"
+                  style={{ marginTop: 'var(--sp-5)', marginBottom: 'var(--sp-1)', alignItems: 'center' }}
+                >
+                  <h3
+                    id={`${groupIdBase}-${gi}`}
+                    className="ui-subtitle grow"
+                    title={g.project ?? undefined}
+                    style={{
+                      margin: 0,
+                      fontWeight: 'var(--fw-title)',
+                      minWidth: 0,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap'
+                    }}
+                  >
                     {g.project === null ? 'Not part of a compose project' : g.project}
-                  </span>
+                  </h3>
                   {g.project !== null && g.containers.some((c) => c.state === 'running') && (
                     <button
                       className="btn ghost sm"
                       disabled={acting}
                       title={`Restart every running container in ${g.project}. This takes the stack down and back up.`}
+                      aria-label={`Restart project ${g.project}`}
                       onClick={() =>
                         requestAction(
                           'restart',
