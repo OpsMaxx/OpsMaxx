@@ -58,6 +58,15 @@ describe('the terminal', () => {
     expect(create).toMatch(/registerOscHandler\(52,[\s\S]*parseOsc52\(data\)[\s\S]*clipboard\.write\(text\)/)
   })
 
+  it('checks the setting on every sequence, before writing anything', () => {
+    // Per sequence rather than at creation, so switching it off covers the
+    // terminals already open — and before parsing, so nothing reaches the
+    // clipboard once it is off.
+    expect(create).toMatch(
+      /registerOscHandler\(52, \(data\) => \{\s*if \(useApp\.getState\(\)\.settings\.terminalOsc52 === false\) return true/
+    )
+  })
+
   it('lets Option-drag select on macOS inside a mouse-capturing program', () => {
     expect(create).toMatch(/macOptionClickForcesSelection: true/)
   })

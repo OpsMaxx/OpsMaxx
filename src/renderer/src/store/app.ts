@@ -361,6 +361,13 @@ export interface AppSettings {
   /** Blink the terminal cursor. Was hardcoded on in createTerm. */
   terminalCursorBlink: boolean
   /**
+   * Let programs in a terminal set this machine's clipboard with OSC 52 —
+   * how Claude Code, tmux and Neovim on a server copy to here. On by default,
+   * as in kitty and WezTerm; off for anyone who would rather a remote program
+   * never touched their clipboard. Write-only either way: see shared/osc52.ts.
+   */
+  terminalOsc52: boolean
+  /**
    * Start local shells with OSC 133 prompt marks.
    *
    * Optional, and absence reads as OFF. This changes how every local shell
@@ -432,6 +439,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   terminalCustomSchemes: [],
   terminalFontFamily: '',
   terminalCursorBlink: true,
+  terminalOsc52: true,
   jobsDetached: true,
   shortcuts: {}
 }

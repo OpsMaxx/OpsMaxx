@@ -183,7 +183,10 @@ export function createTerm(
   })
   // Remote programs copy to this machine's clipboard through OSC 52. See
   // shared/osc52.ts for why it is write-only. Disposed with the terminal.
+  // The setting is read per sequence, not at creation, so switching it off
+  // covers terminals that are already open.
   term.parser.registerOscHandler(52, (data) => {
+    if (useApp.getState().settings.terminalOsc52 === false) return true
     const text = parseOsc52(data)
     if (text !== null) window.opsmaxx?.clipboard.write(text)
     return true

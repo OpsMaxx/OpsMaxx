@@ -59,6 +59,13 @@ describe('terminal appearance settings persist', () => {
     useApp.getState().replaceAll({ settings: {} } as never)
     expect(useApp.getState().settings.terminalFontFamily).toBe('')
     expect(useApp.getState().settings.terminalCursorBlink).toBe(true)
+    // A save from before the OSC 52 switch existed keeps copying working.
+    expect(useApp.getState().settings.terminalOsc52).toBe(true)
+  })
+
+  it('round-trips the OSC 52 clipboard switch', () => {
+    useApp.getState().setSettings({ terminalOsc52: false })
+    expect(useApp.getState().settings.terminalOsc52).toBe(false)
   })
 
   it('reaches xterm rather than stopping at the store', () => {

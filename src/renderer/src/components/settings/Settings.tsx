@@ -1106,6 +1106,12 @@ export function Settings(): React.JSX.Element {
                 onChange={(v) => setSettings({ terminalCursorBlink: v })}
               />
               <SettingSwitch
+                label="Let remote programs copy to the clipboard"
+                desc="Programs running in a terminal — Claude Code, tmux, Neovim on a server — can put text on this computer's clipboard when you copy inside them. They can only write to it: a request to read your clipboard is never answered. Turn this off to stop any program in a terminal from changing your clipboard."
+                checked={settings.terminalOsc52 !== false}
+                onChange={(v) => setSettings({ terminalOsc52: v })}
+              />
+              <SettingSwitch
                 label="Shell integration"
                 desc="Start local shells so they report where each prompt begins and what each command exited with. Uses the shell's own startup options for the session OpsMaxx starts — your shell config files are never modified, and turning this off restores the previous behaviour exactly. zsh and bash get prompt and command marks; fish gets command marks only; a login bash and PowerShell are not supported."
                 checked={settings.shellIntegration === true}
