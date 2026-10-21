@@ -29,6 +29,7 @@ import {
   groupByComposeProject,
   planDockerAction,
   planDockerReclaim,
+  reclaimItemForContainer,
   validateContainerRef,
   type DockerAction,
   type DockerActionPlan,
@@ -305,6 +306,10 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
   const [reclaimResult, setReclaimResult] = useState<DockerReclaimResult | null>(null)
   const [stats, setStats] = useState<Record<string, DockerStat> | null>(null)
   const [statsError, setStatsError] = useState<string | null>(null)
+  // The row whose Remove is reading the disk, and why a Remove could not open.
+  const [removingId, setRemovingId] = useState<string | null>(null)
+  const [removeNote, setRemoveNote] = useState<string | null>(null)
+  const reclaimDialogRef = useRef<HTMLDivElement>(null)
   const [statsLoading, setStatsLoading] = useState(false)
   const [detail, setDetail] = useState<{ id: string; probe: DockerInspectProbe | null } | null>(null)
 
@@ -689,6 +694,61 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
     }
   }
 
+  /**
+   * Remove one container from its own row.
+   *
+   * Not a second `docker rm`: it opens the Disk usage reclaim dialog with this
+   * container as the only pick, so the re-read-and-refuse on confirm, the
+   * caveats and the per-item outcome are the ones that path already has. The
+   * disk is read here because that dialog is planned from the itemised read,
+   * and a plan made from the container list alone would be one the confirm
+   * step has nothing to compare against.
+   */
+  const requestRemove = async (c: DockerContainer): Promise<void> => {
+    if (!hasTarget || removingId !== null) return
+    setRemoveNote(null)
+    setRemovingId(c.id)
+    const gen = generation.current
+    try {
+      const [d, detail, nets] = await Promise.all([
+        bridge()?.disk?.(targetCfg(), { sudo: useSudo }),
+        bridge()?.diskDetail?.(targetCfg(), { sudo: useSudo }),
+        bridge()?.networks?.(targetCfg(), { sudo: useSudo })
+      ])
+      if (generation.current !== gen) return
+      clearReclaim()
+      setReclaimResult(null)
+      setDisk(d ?? { ok: false, reason: 'unknown', detail: 'Disk usage is not wired up in this build.' })
+      setDiskItems(
+        detail ?? { ok: false, reason: 'unknown', detail: 'The itemised disk view is not wired up in this build.' }
+      )
+      setNetItems(nets ?? { ok: false, reason: 'unknown', detail: 'The network read is not wired up in this build.' })
+      if (!d?.ok || !detail?.ok) {
+        setRemoveNote(`${c.name} was not removed: the disk could not be read to plan it. See Disk usage above.`)
+        return
+      }
+      const found = reclaimItemForContainer(buildDockerReclaimPreview(detail.disk), c.id)
+      if (found === null) {
+        setRemoveNote(`${c.name} is not in docker's disk listing any more. Refresh and look again.`)
+        return
+      }
+      if ('withheld' in found) {
+        setRemoveNote(`${c.name} cannot be removed: ${found.withheld}.`)
+        return
+      }
+      setPicked(new Set([dockerReclaimKey(found.item)]))
+      setReclaimPlan(planDockerReclaim([found.item]))
+      // The dialog lives in the Disk usage block, above the list this button
+      // is on, so without this the click appears to do nothing.
+      requestAnimationFrame(() => reclaimDialogRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
+    } catch (e) {
+      if (generation.current !== gen) return
+      setRemoveNote(`${c.name} was not removed: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setRemovingId(null)
+    }
+  }
+
   const running = probe?.ok ? probe.containers.filter((c) => c.state === 'running') : []
 
   const loadStats = async (): Promise<void> => {
@@ -855,6 +915,16 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
           onClick={() => requestAction('start', [c])}
         >
           <Play size={13} />
+        </button>
+      )}
+      {(c.state === 'exited' || c.state === 'created' || c.state === 'dead') && (
+        <button
+          className="icon-btn sm"
+          title={`Remove ${c.name}. Its volumes stay; you confirm on the next step.`}
+          disabled={acting || removingId !== null}
+          onClick={() => void requestRemove(c)}
+        >
+          <Trash2 size={13} className={clsx(removingId === c.id && 'spin')} />
         </button>
       )}
       {c.state === 'running' && (
@@ -1198,26 +1268,29 @@ export function DockerPanel({ servers }: { servers: Server[] }): React.JSX.Eleme
                 </>
               )}
               {reclaimPlan && (
-                <ReclaimDialog
-                  plan={reclaimPlan}
-                  diff={reclaimDiff}
-                  checking={reclaimChecking}
-                  running={reclaiming}
-                  phrase={reclaimPhrase}
-                  onPhrase={setReclaimPhrase}
-                  onConfirm={() => void confirmReclaim()}
-                  onCancel={() => {
-                    setReclaimPlan(null)
-                    setReclaimDiff(null)
-                    setReclaimPhrase('')
-                  }}
-                />
+                <div ref={reclaimDialogRef}>
+                  <ReclaimDialog
+                    plan={reclaimPlan}
+                    diff={reclaimDiff}
+                    checking={reclaimChecking}
+                    running={reclaiming}
+                    phrase={reclaimPhrase}
+                    onPhrase={setReclaimPhrase}
+                    onConfirm={() => void confirmReclaim()}
+                    onCancel={() => {
+                      setReclaimPlan(null)
+                      setReclaimDiff(null)
+                      setReclaimPhrase('')
+                    }}
+                  />
+                </div>
               )}
               {reclaimResult && <ReclaimOutcome result={reclaimResult} />}
             </>
           )}
 
           {statsError && <div className="s-desc danger">{statsError}</div>}
+          {removeNote && <div className="s-desc danger">{removeNote}</div>}
 
           {probe.containers.length === 0 && (
             <div className="faint" style={{ fontSize: 12 }}>

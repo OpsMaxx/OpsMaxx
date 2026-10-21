@@ -2776,6 +2776,33 @@ export interface DockerReclaimDiff {
  * survive a re-read that changed the thing it was keyed on, and the diff below
  * would then be comparing an item against itself under a name that had moved.
  */
+/**
+ * The reclaim item for one container, for the Remove button on its row.
+ *
+ * Removing a container already existed, three clicks down inside Disk usage,
+ * and the container list it belongs to offered only start, stop and restart.
+ * The row button goes through the same offer set rather than building its own
+ * `docker rm`, so everything the reclaim path refuses — running, paused,
+ * restarting — it refuses too, with the same sentence.
+ *
+ * Matched by prefix in either direction: `docker ps` and `system df -v` both
+ * print the 12-character short id today, but nothing promises they always
+ * will, and a full id against a short one is the same container. Twelve is
+ * the floor so a short or empty id can never match by accident.
+ */
+export function reclaimItemForContainer(
+  preview: DockerReclaimPreview,
+  containerId: string
+): { item: DockerReclaimItem } | { withheld: string } | null {
+  const id = containerId.trim()
+  if (id.length < 12) return null
+  const same = (other: string): boolean => other.length >= 12 && (other.startsWith(id) || id.startsWith(other))
+  const item = preview.items.find((i) => i.kind === 'container' && same(i.id))
+  if (item) return { item }
+  const held = preview.withheld.find((w) => w.kind === 'container' && same(w.id))
+  return held ? { withheld: held.reason } : null
+}
+
 export function dockerReclaimKey(item: { kind: string; id: string }): string {
   return `${item.kind} ${item.id}`
 }
