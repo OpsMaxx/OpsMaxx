@@ -522,7 +522,7 @@ function VaultBrowser(): React.JSX.Element {
       {changing && <ChangePassword onDone={() => setChanging(false)} />}
 
       {entry ? (
-        <EntryEditor entry={entry} />
+        <EntryEditor key={entry.id} entry={entry} />
       ) : (
         <div className="faint" style={{ padding: 24, fontSize: 13 }}>
           Select an entry, or create one with <b>New entry</b>.
@@ -615,6 +615,10 @@ function EntryEditor({ entry }: { entry: VaultEntry }): React.JSX.Element {
   const update = useVault((s) => s.updateEntry)
   const remove = useVault((s) => s.deleteEntry)
   const [revealed, setRevealed] = useState<Record<string, boolean>>({})
+  // What is typed, kept apart from the parsed list. Showing the list back
+  // re-joined it on every keystroke, so "prod," became "prod" and a second tag
+  // could never be started. Per entry because the editor is keyed by id.
+  const [tagsDraft, setTagsDraft] = useState<string | null>(null)
 
   const set = (patch: Partial<VaultEntry>): void => void update(entry.id, patch)
   const toggle = (id: string): void => setRevealed((r) => ({ ...r, [id]: !r[id] }))
@@ -722,8 +726,11 @@ function EntryEditor({ entry }: { entry: VaultEntry }): React.JSX.Element {
 
       <Row
         label="Tags"
-        value={entry.tags.join(', ')}
-        onChange={(v) => set({ tags: v.split(',').map((t) => t.trim()).filter(Boolean) })}
+        value={tagsDraft ?? entry.tags.join(', ')}
+        onChange={(v) => {
+          setTagsDraft(v)
+          set({ tags: v.split(',').map((t) => t.trim()).filter(Boolean) })
+        }}
         placeholder="prod, aws"
       />
 
