@@ -13,6 +13,7 @@ import {
 import { useResolvedTheme } from './useResolvedTheme'
 import { resolveScheme, type TerminalScheme } from '../../../shared/terminalTheme'
 import { parseOsc133, parseOsc7 } from '../../../shared/shellIntegration'
+import { parseOsc52 } from '../../../shared/osc52'
 import { NO_PROMPT, applyMark, movementFor, isClickNotDrag, type PromptState } from '../lib/clickToMove'
 import type { TerminalTransport } from '../lib/transport'
 
@@ -172,7 +173,20 @@ export function createTerm(
     cursorBlink: cursorBlink !== false,
     allowProposedApi: true,
     theme: themeFromCss(schemeId, custom) as never,
-    scrollback: 10000
+    scrollback: 10000,
+    // A program that captures the mouse — Claude Code, vim, htop — gets every
+    // drag, so the terminal never selects. Elsewhere Shift-drag overrides
+    // that; on macOS xterm.js has NO override unless this is on, so a Mac
+    // user simply could not copy out of such a program. Option-drag now
+    // selects, the way it does in iTerm2 and Terminal.app.
+    macOptionClickForcesSelection: true
+  })
+  // Remote programs copy to this machine's clipboard through OSC 52. See
+  // shared/osc52.ts for why it is write-only. Disposed with the terminal.
+  term.parser.registerOscHandler(52, (data) => {
+    const text = parseOsc52(data)
+    if (text !== null) window.opsmaxx?.clipboard.write(text)
+    return true
   })
   const fit = new FitAddon()
   const search = new SearchAddon()
