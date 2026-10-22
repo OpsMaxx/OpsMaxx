@@ -12,6 +12,7 @@ import { askedWithoutWindow, verifyHostKey } from './knownhosts'
 // Names only, and only for an error message: a hop is addressed by the
 // friendly name of a saved server, so that is what a failure has to say.
 import { getCachedServer } from './mcpDataCache'
+import { unmountSession } from './reverseMount'
 import { isEncryptedPrivateKey, isSecurityKeyPrivateKey, defaultIdentityPath } from './sshKeys'
 import {
   assertCertificateUsable,
@@ -1699,6 +1700,11 @@ export function sshClose(sessionId: string): void {
   cleanup(sessionId)
 }
 
+/** The pooled connection a terminal session is riding, if it is up. */
+export function sessionConnection(sessionId: string): PooledConnection | null {
+  return sessions.get(sessionId)?.conn ?? null
+}
+
 export interface ExecResult {
   ok: boolean
   stdout: string
@@ -2137,6 +2143,10 @@ function cleanup(sessionId: string): void {
   const s = sessions.get(sessionId)
   if (!s) return
   sessions.delete(sessionId)
+  // Folders from this machine mounted through this session go with it. Each
+  // mount holds its own reference on the connection, so the release below does
+  // not pull the connection out from under the unmount.
+  unmountSession(sessionId)
   try {
     s.stream?.close()
   } catch {

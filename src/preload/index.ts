@@ -707,6 +707,13 @@ const api = {
     resize: (id: string, cols: number, rows: number): void =>
       ipcRenderer.send('ssh:resize', id, cols, rows),
     close: (id: string): void => ipcRenderer.send('ssh:close', id),
+    /** Mount a local folder on the session's server. Read-only unless `readOnly: false`. */
+    mount: (
+      id: string,
+      spec: { localDir: string; mountpoint: string; readOnly?: boolean }
+    ): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('ssh:mount', id, spec),
+    unmount: (id: string, mountpoint: string): Promise<boolean> =>
+      ipcRenderer.invoke('ssh:unmount', id, mountpoint),
     /** Dial, then hang up. Nothing is pooled and nothing is saved. */
     test: (cfg: SshConnectConfig & { serverId?: string }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('ssh:test', cfg),

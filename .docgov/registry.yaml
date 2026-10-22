@@ -103,8 +103,8 @@ documents:
     authority: historical
     visibility: internal
     title: Install
-    hash: 233f3eab3cf31631
-    lines: 288
+    hash: 1ac03dc63fae8696
+    lines: 289
   docs-monitoring:
     path: docs/monitoring.md
     type: unknown
@@ -223,8 +223,8 @@ documents:
     authority: historical
     visibility: internal
     title: "Vault, backup and settings"
-    hash: 57604061cb02a297
-    lines: 103
+    hash: 34e334bfbc74984a
+    lines: 106
   docs-vpn:
     path: docs/VPN.md
     type: unknown
@@ -263,8 +263,17 @@ documents:
     authority: historical
     visibility: internal
     title: OpsMaxx
-    hash: 51eaceb52358be32
-    lines: 164
+    hash: 0a0cd018f8eaad56
+    lines: 161
+  reverse-mount-spike:
+    path: docs/10-internal/reverse-mount-spike.md
+    type: note.internal
+    authority: historical
+    visibility: internal
+    title: Reverse mount spike
+    status: draft
+    hash: e98847749d2f54c8
+    lines: 130
   screenshot-demo:
     path: docs/05-engineering/development/screenshot-demo.md
     type: engineering.development

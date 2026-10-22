@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-09-30",
+  "generated": "2026-10-22",
   "nodes": [
     {
       "id": "claude",
@@ -50,8 +50,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 164,
-      "hash": "51eaceb52358be32",
+      "lines": 161,
+      "hash": "0a0cd018f8eaad56",
       "generated": false
     },
     {
@@ -117,6 +117,19 @@
       "kind": "document",
       "lines": 234,
       "hash": "4fbfb03987920272",
+      "generated": false
+    },
+    {
+      "id": "reverse-mount-spike",
+      "path": "docs/10-internal/reverse-mount-spike.md",
+      "type": "note.internal",
+      "authority": "historical",
+      "visibility": "internal",
+      "domain": null,
+      "status": "draft",
+      "kind": "document",
+      "lines": 130,
+      "hash": "e98847749d2f54c8",
       "generated": false
     },
     {
@@ -258,8 +271,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 288,
-      "hash": "233f3eab3cf31631",
+      "lines": 289,
+      "hash": "1ac03dc63fae8696",
       "generated": false
     },
     {
@@ -440,8 +453,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 103,
-      "hash": "57604061cb02a297",
+      "lines": 106,
+      "hash": "34e334bfbc74984a",
       "generated": false
     },
     {

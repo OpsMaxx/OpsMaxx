@@ -31,8 +31,10 @@ import {
   sshExec,
   sshExecStream,
   sshOpenFresh,
-  sshTest
+  sshTest,
+  sessionConnection
 } from './services/ssh'
+import { mountShare, unmountShare, type ShareSpec } from './services/reverseMount'
 import type { KeyboardRequest } from './services/ssh'
 import { atomicWriteFileSync } from './services/atomicWrite'
 import {
@@ -1285,6 +1287,19 @@ ipcMain.on('clipboard:write', (_e, text: unknown) => {
 ipcMain.on('ssh:write', (_e, id: string, data: string) => sshWrite(id, data))
 ipcMain.on('ssh:resize', (_e, id: string, cols: number, rows: number) => sshResize(id, cols, rows))
 ipcMain.on('ssh:close', (_e, id: string) => sshClose(id))
+// A folder on this machine mounted on the session's server (reverse sshfs).
+// Spike: no UI yet, reachable from the renderer as window.api.ssh.mount.
+ipcMain.handle('ssh:mount', async (_e, id: string, spec: ShareSpec) => {
+  const conn = sessionConnection(id)
+  if (!conn) return { ok: false, error: 'That session is not connected' }
+  try {
+    await mountShare(id, conn, { ...spec, readOnly: spec.readOnly !== false })
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: (err as Error).message }
+  }
+})
+ipcMain.handle('ssh:unmount', (_e, id: string, mountpoint: string) => unmountShare(id, mountpoint))
 
 // ---- Local terminal ----
 //
