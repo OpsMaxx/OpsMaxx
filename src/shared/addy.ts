@@ -74,6 +74,11 @@ export type SyncedCollection = (typeof SYNCED_COLLECTIONS)[number]
  * currently destroyed on a device wipe with no copy anywhere.
  */
 export const NOT_SYNCED: Readonly<Record<string, string>> = {
+  // Folder shares name folders on THIS computer and what they are mounted on.
+  // Synced, a share set up on one machine would mount the same path on
+  // another — read-write, on connect — on a server nobody chose to give that
+  // machine's files to. The reason it is not on the server record at all.
+  folderShares: 'local folders mounted on servers; synced, another device would mount its own folder of that name',
   tabs: 'per-device window state; syncing it would fight the user on two screens',
   panes: 'per-device window state; syncing it would fight the user on two screens',
   activeTabId: 'per-device window state; syncing it would fight the user on two screens',

@@ -3,7 +3,6 @@ import { useShallow } from 'zustand/react/shallow'
 import { FLEET_INTERVAL_DEFAULT_MS } from '../../../shared/fleet'
 import { defaultModuleState, type ModuleState } from '../../../shared/modules'
 import type { DriftWatchProposal } from '../../../shared/driftWatch'
-import type { LocalShare } from '../../../shared/localMounts'
 import { forgetServer } from './serverCleanup'
 import {
   moveTab as moveTabIn,
@@ -739,8 +738,6 @@ interface AppState {
   addWorkspace: (name: string, color: Workspace['color']) => string
   deleteWorkspace: (id: string) => void
   toggleFavorite: (serverId: string) => void
-  /** Saved folder shares. Not `updateServer`: a share is not a connection edit and must not retire the connection its mounts ride on. */
-  setServerShares: (serverId: string, shares: LocalShare[]) => void
   addServer: (input: Partial<Server> & { name: string; host: string }) => string
   setServerStatus: (serverId: string, status: Server['status']) => void
   updateServer: (id: string, patch: Partial<Omit<Server, 'id' | 'workspaceId'>>) => void
@@ -2052,11 +2049,6 @@ export const useApp = create<AppState>((set, get) => ({
       servers: s.servers.map((sv) =>
         sv.id === serverId ? { ...sv, favorite: !sv.favorite } : sv
       )
-    })),
-
-  setServerShares: (serverId, shares) =>
-    set((s) => ({
-      servers: s.servers.map((sv) => (sv.id === serverId ? { ...sv, shares } : sv))
     })),
 
   addServer: (input) => {

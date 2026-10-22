@@ -303,7 +303,7 @@ import type {
   ConflictCopy
 } from '../shared/addy'
 import type { ProvisionManifest, ProvisionPlan } from '../shared/provision'
-import type { LocalShare, MountReply, MountStatus } from '../shared/localMounts'
+import type { LocalShare, MountReply, MountsView } from '../shared/localMounts'
 import type {
   AgentApprovalRequest,
   AgentDecision,
@@ -701,16 +701,20 @@ const api = {
     ): Promise<CloudReply<CloudInstance[]>> =>
       ipcRenderer.invoke('cloud:instances', provider, account, location)
   },
-  /** Folders on this computer mounted on a server. Not reachable from the MCP bridge. */
+  /** Folder shares: folders on this computer mounted on a server. Not reachable from the MCP bridge. */
   mounts: {
     pickFolder: (): Promise<string | null> => ipcRenderer.invoke('mounts:pick-folder'),
-    list: (serverId: string): Promise<MountStatus[]> => ipcRenderer.invoke('mounts:list', serverId),
-    mount: (serverId: string, share: LocalShare): Promise<MountReply> =>
-      ipcRenderer.invoke('mounts:mount', serverId, share),
+    view: (serverId: string): Promise<MountsView> => ipcRenderer.invoke('mounts:view', serverId),
+    /** `identity` is `serverIdentity` of the server as it is being saved. */
+    setShares: (serverId: string, shares: LocalShare[], identity: string): Promise<MountReply> =>
+      ipcRenderer.invoke('mounts:set-shares', serverId, shares, identity),
+    reenable: (serverId: string): Promise<void> => ipcRenderer.invoke('mounts:reenable', serverId),
+    mount: (serverId: string, shareId: string): Promise<MountReply> =>
+      ipcRenderer.invoke('mounts:mount', serverId, shareId),
     unmount: (serverId: string, mountpoint: string): Promise<boolean> =>
       ipcRenderer.invoke('mounts:unmount', serverId, mountpoint),
-    onChanged: (cb: (serverId: string, list: MountStatus[]) => void): (() => void) => {
-      const h = (_e: IpcRendererEvent, serverId: string, list: MountStatus[]): void => cb(serverId, list)
+    onChanged: (cb: (serverId: string, view: MountsView) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, serverId: string, view: MountsView): void => cb(serverId, view)
       ipcRenderer.on('mounts:changed', h)
       return () => ipcRenderer.removeListener('mounts:changed', h)
     }

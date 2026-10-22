@@ -448,6 +448,11 @@ export const ALL_DATA_FILES = [
   'opsmaxx-spec-files.json',
   'opsmaxx-spec-files.seeded',
   'opsmaxx-known-hosts.json',
+  // Folder shares: which folders on THIS machine are mounted on which server.
+  // Per-machine by design and never in a backup bundle or a sync (a share
+  // restored elsewhere would mount that machine's folder), but it is a record
+  // of local paths and what they were given to, so "delete everything" removes it.
+  'opsmaxx-folder-shares.json',
   'opsmaxx-mcp-config.json',
   'opsmaxx-mcp-sessions.json',
   'opsmaxx-ai-policy.json',

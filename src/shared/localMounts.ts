@@ -7,7 +7,15 @@
  * docs/10-internal/reverse-mount-spike.md.
  */
 
-/** A share as saved on a server record. */
+/**
+ * A share as this machine saves it.
+ *
+ * NOT on the server record. Server records sync between devices (addy) and
+ * ride inside every backup, and a share names a folder on THIS computer: one
+ * synced or restored onto another machine would mount that machine's folder
+ * on a server nobody chose to give it to. Shares live in main's own
+ * per-machine file instead, which nothing syncs, backs up or exports.
+ */
 export interface LocalShare {
   id: string
   /** Absolute path on this computer. */
@@ -19,7 +27,34 @@ export interface LocalShare {
   autoMount: boolean
 }
 
-export type MountState = 'mounting' | 'mounted' | 'failed'
+/** A saved share as the renderer sees it. */
+export interface ShareView extends LocalShare {
+  /**
+   * The server's address, port or account has changed since the share was
+   * set up — by the user, a synced edit or an agent's update_server. A share
+   * in this state does not mount until someone re-enables it.
+   */
+  stale: boolean
+}
+
+/** Everything the UI shows for one server. */
+export interface MountsView {
+  /** A terminal to this server is open, so there is a connection to mount over. */
+  connected: boolean
+  shares: ShareView[]
+  mounts: MountStatus[]
+}
+
+/**
+ * Who a share was given to: the account, address and port, or the cloud
+ * target. Stored with each share and compared before every mount, so a server
+ * record that now points somewhere else does not inherit the folder.
+ */
+export function serverIdentity(s: { host: string; port: number; username: string; cloud?: unknown }): string {
+  return JSON.stringify([s.username, s.host, s.port, s.cloud ?? null])
+}
+
+export type MountState = 'mounting' | 'mounted' | 'unmounting' | 'failed'
 
 export interface MountStatus {
   shareId: string
@@ -95,7 +130,12 @@ export function explainMountFailure(code: number | null, stderr: string, usernam
       return {
         ok: false,
         error: `${username || 'This account'} is not allowed to use /dev/fuse on this server.`,
-        fix: `This usually means the account is not in the fuse group: sudo usermod -aG fuse ${username || '<user>'}, then reconnect.`
+        // Distribution-specific: Ubuntu and Debian have no fuse group and leave
+        // /dev/fuse open to everyone. And group membership is read when the
+        // connection authenticates, which the pool keeps alive across tabs.
+        fix:
+          `Where /dev/fuse belongs to a fuse group (some older or hardened systems; not Ubuntu or Debian), add the account: ` +
+          `sudo usermod -aG fuse ${username || '<user>'}. Then close every tab to this server, so the next one connects afresh.`
       }
     case MOUNT_EXIT.notEmpty:
       return {
@@ -144,4 +184,16 @@ export function parseShares(raw: unknown): LocalShare[] {
     })
   }
   return out
+}
+
+/** Why these shares cannot be saved, and which one, or null. */
+export function sharesProblem(shares: LocalShare[]): { shareId: string; message: string } | null {
+  const seen = new Set<string>()
+  for (const s of shares) {
+    const p = mountpointProblem(s.mountpoint)
+    if (p) return { shareId: s.id, message: p }
+    if (seen.has(s.mountpoint)) return { shareId: s.id, message: `Two folders are shared at ${s.mountpoint}.` }
+    seen.add(s.mountpoint)
+  }
+  return null
 }

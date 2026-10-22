@@ -32,18 +32,18 @@ import {
   sshExecStream,
   sshOpenFresh,
   sshTest,
-  onServerSession,
   liveServerConnection
 } from './services/ssh'
 import {
-  autoMount,
-  listMounts,
   mountShare,
-  notePickedFolder,
+  mountsView,
   onMountsChanged,
-  syncShares,
-  unmountServer,
-  unmountShare
+  reenableShares,
+  refreshShareViews,
+  setShares,
+  unmountAll,
+  unmountShare,
+  wireFolderShares
 } from './services/reverseMount'
 import { parseShares } from '../shared/localMounts'
 import type { KeyboardRequest } from './services/ssh'
@@ -1299,22 +1299,19 @@ ipcMain.on('ssh:write', (_e, id: string, data: string) => sshWrite(id, data))
 ipcMain.on('ssh:resize', (_e, id: string, cols: number, rows: number) => sshResize(id, cols, rows))
 ipcMain.on('ssh:close', (_e, id: string) => sshClose(id))
 
-// ---- Folders on this computer, mounted on a server (reverse sshfs) ----
+// ---- Folder shares: folders on this computer, mounted on a server (reverse sshfs) ----
 //
 // Renderer IPC only, and deliberately so: nothing on the MCP bridge or the CLI
-// can create, change or remove a mount, or read which folders are shared.
-// tests/reverseMountNotExposed.test.ts keeps that true. The manager is told
-// about terminals through onServerSession instead of being imported by ssh.ts,
-// which would put it in the bridge's import closure.
-onServerSession((event, serverId, conn) => {
-  if (event === 'ready' && conn) autoMount(serverId, conn)
-  else if (event === 'closed') void unmountServer(serverId)
+// can create, change or remove a share or a mount, or read which folders are
+// shared. tests/reverseMountNotExposed.test.ts keeps that true. The shares
+// themselves are in main's per-machine file (see services/reverseMount.ts),
+// never on the server record, so neither sync nor a backup restore carries
+// them. The folder is whatever the renderer saves — the app's own UI, which
+// offers the OS folder dialog; there is no further check on which folder.
+wireFolderShares()
+onMountsChanged((serverId, view) => {
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('mounts:changed', serverId, view)
 })
-onMountsChanged((serverId, list) => {
-  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('mounts:changed', serverId, list)
-})
-// The folder to share comes from the OS dialog, as the download folder does:
-// mountShare refuses a path that came neither from here nor from a saved share.
 ipcMain.handle('mounts:pick-folder', async () => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {
@@ -1322,23 +1319,30 @@ ipcMain.handle('mounts:pick-folder', async () => {
     buttonLabel: 'Choose folder',
     properties: ['openDirectory']
   })
-  const dir = result.canceled ? undefined : result.filePaths[0]
-  if (!dir) return null
-  notePickedFolder(dir)
-  return dir
+  return result.canceled ? null : (result.filePaths[0] ?? null)
 })
-ipcMain.handle('mounts:list', (_e, serverId: unknown) => (typeof serverId === 'string' ? listMounts(serverId) : []))
-ipcMain.handle('mounts:mount', async (_e, serverId: unknown, share: unknown) => {
-  const [parsed] = parseShares([share])
-  if (typeof serverId !== 'string' || !parsed) return { ok: false, error: 'That share is not complete.' }
+ipcMain.handle('mounts:view', (_e, serverId: unknown) =>
+  typeof serverId === 'string' ? mountsView(serverId) : { connected: false, shares: [], mounts: [] }
+)
+ipcMain.handle('mounts:set-shares', (_e, serverId: unknown, shares: unknown, identity: unknown) => {
+  const parsed = parseShares(shares)
+  if (typeof serverId !== 'string' || typeof identity !== 'string' || !Array.isArray(shares) || parsed.length !== shares.length)
+    return { ok: false, error: 'Those shares are not complete.' }
+  return setShares(serverId, parsed, identity)
+})
+ipcMain.handle('mounts:reenable', (_e, serverId: unknown) => {
+  if (typeof serverId === 'string') reenableShares(serverId)
+})
+ipcMain.handle('mounts:mount', async (_e, serverId: unknown, shareId: unknown) => {
+  if (typeof serverId !== 'string' || typeof shareId !== 'string') return { ok: false, error: 'That share is not saved.' }
   const conn = liveServerConnection(serverId)
   if (!conn)
     return {
       ok: false,
-      error: 'Open a terminal to this server first.',
-      fix: 'Folders are mounted over a terminal connection and stay mounted while one is open.'
+      error: 'No terminal to this server is open.',
+      fix: 'Folder shares are mounted over a terminal connection. Open a terminal to this server first.'
     }
-  return mountShare(serverId, conn, parsed)
+  return mountShare(serverId, conn, shareId, true)
 })
 ipcMain.handle('mounts:unmount', (_e, serverId: unknown, mountpoint: unknown) =>
   typeof serverId === 'string' && typeof mountpoint === 'string' ? unmountShare(serverId, mountpoint) : false
@@ -5858,9 +5862,9 @@ ipcMain.handle('data:save', (_e, data: unknown) => {
   // renderer on every tool call, so its cache is refreshed right after the
   // write that would otherwise make it stale.
   refreshMcpDataCache(data)
-  // Auto-mount reads the saved shares here rather than taking them from a
-  // caller. See services/reverseMount.ts.
-  syncShares(data)
+  // A server whose address just changed shows its folder shares as needing
+  // re-enabling, without waiting for the next connect to find out.
+  refreshShareViews()
   // Same file, same reason. The CI/CD module reads its connections from disk
   // rather than from IPC (see services/cicd/wiring.ts), so the write that just
   // changed them is where it has to look again.
@@ -6116,6 +6120,17 @@ app.on('before-quit', (e) => {
   teardownStarted = true
   e.preventDefault()
 
+  // Folder shares first, while the pool is still up: unmounting runs
+  // fusermount over the connection the mount rides, and sshDisposeAll below
+  // destroys it. Bounded, because a server that has stopped answering must not
+  // hold the app open; a mount left behind dies with the connection anyway
+  // (sshfs exits on EOF), and a stale mount point is cleared by the next mount.
+  void Promise.race([unmountAll(), new Promise<void>((resolve) => setTimeout(resolve, 2000))])
+    .catch(() => undefined)
+    .finally(quitTeardown)
+})
+
+function quitTeardown(): void {
   // Before sshDisposeAll, not after: both of these hold pooled connections and
   // should hand their references back while the pool is still there to take
   // them. The comments were also the wrong way round — each now sits above what
@@ -6200,7 +6215,7 @@ app.on('before-quit', (e) => {
     ]),
     cap
   ]).finally(() => app.exit(0))
-})
+}
 
 // The safety net that used to be here — never let a stray async error (e.g. a
 // failed child_process spawn) crash the main process with a fatal dialog — now
@@ -6361,7 +6376,6 @@ app.whenReady().then(() => {
   // Primed once at launch so the MCP bridge can resolve server/workspace
   // names even before the renderer's first data:save call.
   refreshMcpDataCache(boot)
-  syncShares(boot)
   // And the CI connections, for the same reason one line up: an agent can call
   // a ci_* tool before any window has opened the CI tab, and an empty list
   // there reads to the agent as "this user has no CI connections" rather than

@@ -39,7 +39,8 @@ import { classifyConnectionError, faultAdvice } from '../../lib/connectionError'
 import { MAX_TAGS, parseTags } from '../../lib/serverTags'
 import type { AuthMethod, Hop, UUID } from '../../types'
 import { Switch } from '../common/Switch'
-import { FolderSharesSection, applyShareChanges, sharesProblem } from '../panel/LocalMounts'
+import { FolderSharesSection } from '../panel/LocalMounts'
+import { serverIdentity, sharesProblem, type LocalShare } from '../../../../shared/localMounts'
 
 // `unavailable` says why rather than hiding the option.
 //
@@ -232,16 +233,37 @@ export function AddServerModal(): React.JSX.Element {
   const [hops, setHops] = useState<Hop[]>(existing?.route ?? [])
   const [vpnProfileId, setVpnProfileId] = useState<UUID | null>(existing?.vpnProfileId ?? null)
   const [sftpOnly, setSftpOnly] = useState(existing?.sftpOnly === true)
-  // Folder shares, saved with the server through setServerShares rather than
-  // in `fields`: addServer builds its record field by field and would drop
-  // them. Live mounts are brought in line by applyShareChanges after the save.
-  const [shares, setShares] = useState(existing?.shares ?? [])
-  const setServerShares = useApp((s) => s.setServerShares)
+  // Folder shares. NOT part of `fields`: they are per-machine and live in
+  // main's own file, never on the server record, which syncs and is backed up
+  // (see services/reverseMount.ts). Loaded from main, saved back through it.
+  const [shares, setShares] = useState<LocalShare[]>([])
+  // Saving an editor whose shares never loaded would erase them.
+  const [sharesLoaded, setSharesLoaded] = useState(!editId)
+  useEffect(() => {
+    if (!editId) return
+    let alive = true
+    void window.opsmaxx?.mounts
+      ?.view(editId)
+      .then((v) => {
+        if (!alive) return
+        setShares(v.shares.map(({ stale: _stale, ...share }) => share))
+        setSharesLoaded(true)
+      })
+      .catch(() => undefined)
+    return () => {
+      alive = false
+    }
+  }, [editId])
   const openOnShares = useApp((s) => s.editServerSection === 'shares')
   const sharesRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    if (openOnShares) sharesRef.current?.scrollIntoView({ block: 'center' })
-  }, [openOnShares])
+    // Opened from the tab's Folder shares indicator: land on the section, with
+    // focus on its first control, not just scrolled to it.
+    if (!openOnShares || !sharesLoaded) return
+    sharesRef.current?.scrollIntoView({ block: 'center' })
+    sharesRef.current?.querySelector<HTMLElement>('button, input, select')?.focus()
+  }, [openOnShares, sharesLoaded])
+  const sharesIssue = sharesProblem(shares)
   /**
    * A record saved when one machine could be both, before RDP became a
    * connection type of its own.
@@ -419,7 +441,7 @@ export function AddServerModal(): React.JSX.Element {
     rdpOnly: speaks === 'rdp',
     cloud: cloudProvider ? { provider: cloudProvider, target: cloudTarget } : null
   })
-  const valid = missing === null && sharesProblem(shares) === null
+  const valid = missing === null && sharesIssue === null
 
   /**
    * The key's PEM body, when we could read it, for the file currently in
@@ -642,10 +664,14 @@ export function AddServerModal(): React.JSX.Element {
         : undefined
     }
     const id = editId ? (updateServer(editId, fields), editId) : addServer(fields)
-    const sharesBefore = existing?.shares ?? []
-    if (shares.length || sharesBefore.length) {
-      setServerShares(id, shares)
-      void applyShareChanges(id, sharesBefore, shares)
+    if (sharesLoaded && (shares.length || editId)) {
+      // Stamped with who the server is as saved, so a later change of address
+      // — by anyone, an agent included — stops the shares mounting there.
+      void window.opsmaxx?.mounts?.setShares(
+        id,
+        shares,
+        serverIdentity({ host: fields.host, port: fields.port, username: fields.username ?? '', cloud: fields.cloud })
+      )
     }
 
     // What gets stored against the server is a reference wherever possible.
@@ -844,7 +870,8 @@ export function AddServerModal(): React.JSX.Element {
       footerNote={
         <>
           {missing && <span className="field-hint danger">{missing.why}</span>}
-          {!missing && testResult && (
+          {!missing && sharesIssue && <span className="field-hint danger">Folder shares: {sharesIssue.message}</span>}
+          {!missing && !sharesIssue && testResult && (
             <span className={clsx('field-hint', testResult.ok ? 'ok' : 'danger')}>{testResult.text}</span>
           )}
         </>

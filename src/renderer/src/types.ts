@@ -1,5 +1,4 @@
 import type { CloudTarget } from '../../shared/cloud'
-import type { LocalShare } from '../../shared/localMounts'
 import type { RdpSettings } from '../../shared/rdp'
 
 // Re-exported for the same reason the VPN domain is: one definition of the
@@ -155,14 +154,6 @@ export interface Server {
    * this existed.
    */
   rdpOnly?: boolean
-  /**
-   * Folders on this computer to mount on this server (reverse sshfs), each
-   * read-only or read-write. Set only from the Files view: agents cannot set
-   * it, and mcpDataCache never reads it. See shared/localMounts.ts.
-   *
-   * Absent means none, which is every server saved before this existed.
-   */
-  shares?: LocalShare[]
   demo?: boolean
 }
 
