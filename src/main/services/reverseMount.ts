@@ -9,12 +9,21 @@ import type { Attributes, ClientChannel, SFTPWrapper } from 'ssh2'
 import sftpProtocol from 'ssh2/lib/protocol/SFTP.js'
 import { release, type PooledConnection } from './ssh'
 import { shellQuote } from '../../shared/curl'
+import {
+  MOUNT_EXIT,
+  explainMountFailure,
+  mountpointProblem,
+  parseShares,
+  type LocalShare,
+  type MountReply,
+  type MountStatus
+} from '../../shared/localMounts'
 
 /**
  * A folder on THIS machine, mounted on the server the session is connected to.
  *
- * Reverse sshfs: the server runs `sshfs -o slave` over an exec channel on the
- * session's own connection, and this file is the SFTP server on the other end
+ * Reverse sshfs: the server runs `sshfs -o passive` over an exec channel on the
+ * server's pooled connection, and this file is the SFTP server on the other end
  * of that channel. ssh2's SFTP server runs in Node, so no local `sftp-server`
  * binary is involved and it works the same on Windows.
  *
@@ -130,7 +139,10 @@ function toAttrs(st: import('node:fs').Stats): Attributes {
     mode: st.mode,
     uid: st.uid,
     gid: st.gid,
-    size: st.size,
+    // A link's size is the length of its target, and the target is a path on
+    // this machine: its length alone says how long the account name is. The
+    // server reads the target through READLINK, rewritten, so it needs no size.
+    size: st.isSymbolicLink() ? 0 : st.size,
     atime: Math.floor(st.atimeMs / 1000),
     mtime: Math.floor(st.mtimeMs / 1000)
   }
@@ -141,6 +153,31 @@ function statusFor(err: unknown): number {
   if (code === 'ENOENT' || code === 'ENOTDIR') return STATUS_CODE.NO_SUCH_FILE
   if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS') return STATUS_CODE.PERMISSION_DENIED
   return STATUS_CODE.FAILURE
+}
+
+/**
+ * A link's target as the server may see it: relative, and only if it stays in
+ * the share.
+ *
+ * `readlink` hands over the literal target, and an absolute one is a path on
+ * THIS machine — on macOS that includes the account name. A target that lands
+ * inside the share is rewritten relative to the link, which is also the only
+ * form that resolves on the server's side of the mount. One that lands outside
+ * is refused: the server gets nothing it could not already list.
+ */
+export async function shareLinkTarget(root: string, link: string): Promise<string> {
+  const raw = await fs.readlink(link)
+  const dir = path.dirname(link)
+  const lexical = path.resolve(dir, raw)
+  let landed: string | null = inside(root, lexical) ? lexical : null
+  if (!landed) {
+    // An alias of a path inside (macOS's /var for /private/var) is still inside.
+    const real = await fs.realpath(lexical).catch(() => null)
+    if (real && inside(root, real)) landed = real
+  }
+  if (!landed) throw new Denied('That link points outside the share')
+  const rel = path.relative(landed === lexical ? dir : await fs.realpath(dir), landed)
+  return rel.split(path.sep).join('/') || '.'
 }
 
 type Handle =
@@ -224,7 +261,7 @@ export function serveShare(sftp: SFTPWrapper, share: Share): void {
   )
   sftp.on('READLINK', (reqid, p) =>
     serial(reqid, async () => {
-      const target = await fs.readlink(await locate(root, p, false))
+      const target = await shareLinkTarget(root, await locate(root, p, false))
       sftp.name(reqid, [{ filename: target, longname: target, attrs: {} as Attributes }])
     })
   )
@@ -353,23 +390,76 @@ export function serveShare(sftp: SFTPWrapper, share: Share): void {
   })
 }
 
-// ---------------------------------------------------------------- the mount
+// ---------------------------------------------------------------- the mounts
 
-export interface ShareSpec {
-  localDir: string
-  /** On the server. Relative means relative to the login directory. */
-  mountpoint: string
-  readOnly: boolean
-}
-
+/**
+ * Mounts are per SERVER, not per terminal: two panes on one server share one
+ * mount, and it lives while any terminal to that server is open. ssh.ts reports
+ * session starts and ends; index.ts wires them to `autoMount` and
+ * `unmountServer`. This module is not imported by ssh.ts on purpose — that
+ * would put it in the MCP bridge's import closure, and no agent path may reach
+ * a mount (tests/reverseMountNotExposed.test.ts).
+ */
 interface Mount {
-  spec: ShareSpec
-  conn: PooledConnection
-  channel: ClientChannel
+  status: MountStatus
+  conn: PooledConnection | null
+  channel: ClientChannel | null
+  /** Set once teardown has begun or the channel has gone, so neither runs twice. */
   closed: boolean
 }
 
-const mounts = new Map<string, Mount[]>()
+const mounts = new Map<string, Map<string, Mount>>()
+let changed: (serverId: string, list: MountStatus[]) => void = () => {}
+
+/** Saved shares per server, from the data file. See `syncShares`. */
+let saved = new Map<string, LocalShare[]>()
+/** Folders the OS dialog handed back this run. See `allowLocalDir`. */
+const picked = new Set<string>()
+
+export function onMountsChanged(cb: (serverId: string, list: MountStatus[]) => void): void {
+  changed = cb
+}
+
+export function listMounts(serverId: string): MountStatus[] {
+  return [...(mounts.get(serverId)?.values() ?? [])].map((m) => ({ ...m.status }))
+}
+
+function emit(serverId: string): void {
+  changed(serverId, listMounts(serverId))
+}
+
+/**
+ * Read the saved shares out of the data blob, the way the other main-side
+ * consumers of it do (see the `data:save` handler). Auto-mount reads THIS, not
+ * whatever a caller passes, and mcpDataCache never sees the field at all.
+ */
+export function syncShares(data: unknown): void {
+  const next = new Map<string, LocalShare[]>()
+  const servers = (data as { servers?: unknown } | null)?.servers
+  if (Array.isArray(servers)) {
+    for (const s of servers) {
+      if (!s || typeof s !== 'object') continue
+      const r = s as Record<string, unknown>
+      const shares = parseShares(r.shares)
+      if (typeof r.id === 'string' && shares.length) next.set(r.id, shares)
+    }
+  }
+  saved = next
+}
+
+/** A folder the user just chose in the OS dialog. */
+export function notePickedFolder(dir: string): void {
+  picked.add(dir)
+}
+
+/**
+ * Only folders the person chose — in the OS dialog this run, or saved on this
+ * server's record — can be mounted. A path the renderer simply names is not
+ * one of them, the same rule the download folder follows in index.ts.
+ */
+function allowLocalDir(serverId: string, dir: string): boolean {
+  return picked.has(dir) || !!saved.get(serverId)?.some((s) => s.localDir === dir)
+}
 
 function exec(conn: PooledConnection, cmd: string): Promise<ClientChannel> {
   return new Promise((resolve, reject) =>
@@ -386,106 +476,205 @@ async function run(conn: PooledConnection, cmd: string): Promise<{ code: number;
 }
 
 /**
+ * The mount point as a shell word. `~/x` becomes `"$HOME"/'x'`: quoting the
+ * whole thing would make the tilde literal, and not quoting it is how a
+ * folder name becomes a command.
+ */
+function mountpointWord(mp: string): string {
+  return mp.startsWith('~/') ? `"$HOME"/${shellQuote(mp.slice(2))}` : shellQuote(mp)
+}
+
+/**
  * Everything the server runs, as one `sh -c`.
  *
  * Nothing before the `exec` may write to stdout: stdout IS the SFTP stream, and
- * a stray byte there fails the INIT. Diagnostics go to stderr. `-o slave` was
- * renamed `-o passive` in sshfs 3.7.2; older ones only know the old name.
+ * a stray byte there fails the INIT. Diagnostics go to stderr, and the failures
+ * the script can name itself exit with MOUNT_EXIT codes that
+ * `explainMountFailure` turns into a sentence and a fix.
+ *
+ * `-o slave` was renamed `-o passive` in sshfs 3.7.2; older ones only know the
+ * old name. libfuse 3 mounts over a non-empty folder without complaint and
+ * hides what was in it, so that is refused here. A mount point left behind by
+ * an sshfs that lost its connection ("Transport endpoint is not connected") is
+ * cleared first, or nothing can be mounted there again.
  */
 export function mountScript(mp: string, readOnly: boolean): string {
-  const q = shellQuote(mp)
+  const e = MOUNT_EXIT
   return [
-    `command -v sshfs >/dev/null || { echo 'sshfs is not installed on this server' >&2; exit 127; }`,
-    `[ -r /dev/fuse ] && [ -w /dev/fuse ] || { echo '/dev/fuse is missing or this user cannot open it' >&2; exit 126; }`,
-    `mkdir -p -- ${q} || exit 1`,
+    `export LC_ALL=C`,
+    `mp=${mountpointWord(mp)}`,
+    `command -v sshfs >/dev/null 2>&1 || exit ${e.noSshfs}`,
+    `[ -e /dev/fuse ] || exit ${e.noFuse}`,
+    `[ -r /dev/fuse ] && [ -w /dev/fuse ] || exit ${e.fuseDenied}`,
+    `case "$(stat -- "$mp" 2>&1)" in *'not connected'*) fusermount3 -uz -- "$mp" 2>/dev/null || fusermount -uz "$mp" 2>/dev/null;; esac`,
+    `mkdir -p -- "$mp" >&2 || exit ${e.mkdirFailed}`,
+    `[ -z "$(ls -A -- "$mp" 2>/dev/null)" ] || exit ${e.notEmpty}`,
     `o=slave; sshfs -h 2>&1 | grep -q passive && o=passive`,
-    `exec sshfs -f -o "$o" -o idmap=user -o fsname=opsmaxx${readOnly ? ' -o ro' : ''} :/ ${q}`
+    `exec sshfs -f -o "$o" -o idmap=user -o fsname=opsmaxx${readOnly ? ' -o ro' : ''} :/ "$mp"`
   ].join('\n')
 }
 
 export function unmountScript(mp: string): string {
-  const q = shellQuote(mp)
   // -z: lazy, so a shell sitting inside the mount does not keep it pinned.
-  return `fusermount3 -uz ${q} 2>/dev/null || fusermount -uz ${q}`
+  return `mp=${mountpointWord(mp)}; fusermount3 -uz -- "$mp" 2>/dev/null || fusermount -uz "$mp"`
 }
 
-/** Mount `spec.localDir` on the server `conn` is connected to. */
-export async function mountShare(sessionId: string, conn: PooledConnection, spec: ShareSpec): Promise<void> {
-  if (!spec.mountpoint.trim()) throw new Error('A mount point is required')
-  if ((mounts.get(sessionId) ?? []).some((m) => m.spec.mountpoint === spec.mountpoint))
-    throw new Error(`${spec.mountpoint} is already mounted in this session`)
-  const root = await shareRoot(spec.localDir)
+/**
+ * Mount one share on the server `conn` is connected to.
+ *
+ * Never throws: the outcome is in the reply and in the mount's status, which is
+ * what the Files view lists. A share already mounted or mounting at that mount
+ * point is left alone, which is what makes auto-mount safe to call on every
+ * connect of every pane.
+ */
+export async function mountShare(serverId: string, conn: PooledConnection, share: LocalShare): Promise<MountReply> {
+  const problem = mountpointProblem(share.mountpoint)
+  if (problem) return { ok: false, error: problem }
+  if (!allowLocalDir(serverId, share.localDir))
+    return { ok: false, error: 'Choose the folder again: only folders picked in the folder dialog can be shared.' }
 
-  const channel = await exec(conn, `sh -c ${shellQuote(mountScript(spec.mountpoint, spec.readOnly))}`)
-  // Held for as long as the mount lives, so closing the terminal that started
-  // it does not destroy the connection before the unmount has run.
+  const byPoint = mounts.get(serverId) ?? new Map<string, Mount>()
+  mounts.set(serverId, byPoint)
+  const existing = byPoint.get(share.mountpoint)
+  if (existing && existing.status.state !== 'failed') {
+    if (existing.status.localDir === share.localDir) return { ok: true }
+    return { ok: false, error: `${share.mountpoint} is already in use by ${existing.status.localDir}.` }
+  }
+
+  const mount: Mount = {
+    status: {
+      shareId: share.id,
+      localDir: share.localDir,
+      mountpoint: share.mountpoint,
+      readOnly: share.readOnly,
+      state: 'mounting'
+    },
+    conn: null,
+    channel: null,
+    closed: false
+  }
+  byPoint.set(share.mountpoint, mount)
+  emit(serverId)
+
+  const fail = (reply: MountReply): MountReply => {
+    if (byPoint.get(share.mountpoint) === mount) {
+      mount.status = { ...mount.status, state: 'failed', error: reply.error, fix: reply.fix }
+      emit(serverId)
+    }
+    return reply
+  }
+
+  let root: string
+  try {
+    root = await shareRoot(share.localDir)
+  } catch {
+    return fail({ ok: false, error: `${share.localDir} is not a folder on this computer any more.` })
+  }
+
+  let channel: ClientChannel
+  try {
+    channel = await exec(conn, `sh -c ${shellQuote(mountScript(share.mountpoint, share.readOnly))}`)
+  } catch (err) {
+    return fail({ ok: false, error: `The server would not start sshfs: ${(err as Error).message}` })
+  }
+  // Held for as long as the mount lives, so the terminal that started it can
+  // close without destroying the connection under the unmount.
   conn.refs++
-  const mount: Mount = { spec, conn, channel, closed: false }
+  mount.conn = conn
+  mount.channel = channel
   let stderr = ''
-  channel.stderr.on('data', (d: Buffer) => (stderr += d.toString()))
+  channel.stderr.on('data', (d: Buffer) => {
+    if (stderr.length < 4000) stderr += d.toString()
+  })
 
-  serveShare(sftpOverStream(channel as unknown as Duplex, true), { root, readOnly: spec.readOnly })
-  mounts.set(sessionId, [...(mounts.get(sessionId) ?? []), mount])
-  const ended = new Promise<never>((_, reject) =>
+  serveShare(sftpOverStream(channel as unknown as Duplex, true), { root, readOnly: share.readOnly })
+
+  const ended = new Promise<MountReply>((resolve) =>
     channel.on('close', (code: number | null) => {
+      const reply = explainMountFailure(code, stderr, conn.username)
       if (!mount.closed) {
         mount.closed = true
+        mount.conn = null
         release(conn)
-        forget(sessionId, mount)
+        if (mount.status.state === 'mounted')
+          reply.error = `The mount stopped. ${stderr.trim() ? reply.error : 'The connection to the server closed.'}`
+        fail(reply)
       }
-      reject(new Error(stderr.trim() || `sshfs exited with code ${code}`))
+      resolve(reply)
     })
   )
-  ended.catch(() => {})
 
-  try {
-    // sshfs sends INIT before it mounts, so being spoken to is not proof of a
-    // mount. The kernel's mount table is.
-    const check = `for i in $(seq 50); do mountpoint -q ${shellQuote(spec.mountpoint)} && exit 0; sleep 0.1; done; exit 1`
-    const mounted = run(conn, check).then((r) => {
-      if (r.code !== 0) throw new Error(stderr.trim() || `${spec.mountpoint} did not appear as a mount`)
-    })
-    await Promise.race([mounted, ended])
-  } catch (err) {
-    await teardown(sessionId, mount)
-    throw err
+  // sshfs sends INIT before it mounts, so being spoken to is not proof of a
+  // mount. The kernel's mount table is.
+  const check = `mp=${mountpointWord(share.mountpoint)}; for i in $(seq 100); do mountpoint -q -- "$mp" && exit 0; sleep 0.1; done; exit 1`
+  const mounted = run(conn, check).then(
+    (r): MountReply =>
+      r.code === 0 ? { ok: true } : { ok: false, error: stderr.trim() || `${share.mountpoint} did not appear as a mount.` },
+    (err): MountReply => ({ ok: false, error: (err as Error).message })
+  )
+  const outcome = await Promise.race([mounted, ended])
+  if (outcome.ok && !mount.closed) {
+    mount.status = { ...mount.status, state: 'mounted' }
+    emit(serverId)
+    return outcome
   }
+  if (!mount.closed) await teardown(serverId, mount, true)
+  return fail(outcome.ok ? { ok: false, error: 'sshfs stopped as soon as it started.' } : outcome)
 }
 
-function forget(sessionId: string, mount: Mount): void {
-  const rest = (mounts.get(sessionId) ?? []).filter((m) => m !== mount)
-  if (rest.length) mounts.set(sessionId, rest)
-  else mounts.delete(sessionId)
-}
-
-async function teardown(sessionId: string, mount: Mount): Promise<void> {
-  forget(sessionId, mount)
+/**
+ * Unmount first, then close the channel. Closing alone makes sshfs exit, but an
+ * sshfs that loses its transport can leave the mount point answering
+ * "Transport endpoint is not connected" until someone unmounts it.
+ */
+async function teardown(serverId: string, mount: Mount, keepEntry: boolean): Promise<void> {
+  const byPoint = mounts.get(serverId)
+  if (!keepEntry && byPoint?.get(mount.status.mountpoint) === mount) {
+    byPoint.delete(mount.status.mountpoint)
+    if (byPoint.size === 0) mounts.delete(serverId)
+    emit(serverId)
+  }
   if (mount.closed) return
   mount.closed = true
+  const conn = mount.conn
+  mount.conn = null
+  if (!conn) return
   try {
-    // Unmount FIRST. Closing the channel alone makes sshfs exit, but a
-    // foreground sshfs that loses its transport can leave the mount point
-    // answering "Transport endpoint is not connected" until someone unmounts it.
-    await run(mount.conn, unmountScript(mount.spec.mountpoint))
+    await run(conn, unmountScript(mount.status.mountpoint))
   } catch {
     /* the connection is already gone; nothing on the server can be reached */
   }
   try {
-    mount.channel.close()
+    mount.channel?.close()
   } catch {
     /* already closed by sshfs exiting */
   }
-  release(mount.conn)
+  release(conn)
 }
 
-export async function unmountShare(sessionId: string, mountpoint: string): Promise<boolean> {
-  const mount = (mounts.get(sessionId) ?? []).find((m) => m.spec.mountpoint === mountpoint)
+export async function unmountShare(serverId: string, mountpoint: string): Promise<boolean> {
+  const mount = mounts.get(serverId)?.get(mountpoint)
   if (!mount) return false
-  await teardown(sessionId, mount)
+  await teardown(serverId, mount, false)
   return true
 }
 
-/** Every mount a session made, for when the session closes. */
-export function unmountSession(sessionId: string): void {
-  for (const m of mounts.get(sessionId) ?? []) void teardown(sessionId, m)
+/** Every mount on a server, for when its last terminal closes or the app quits. */
+export function unmountServer(serverId: string): Promise<void[]> {
+  return Promise.all([...(mounts.get(serverId)?.values() ?? [])].map((m) => teardown(serverId, m, false)))
+}
+
+export function unmountAll(): Promise<void[][]> {
+  return Promise.all([...mounts.keys()].map((id) => unmountServer(id)))
+}
+
+/**
+ * Mount this server's auto-mount shares, quietly: a failure lands in the
+ * mount's status for the Files view to show, never in a toast, so a server
+ * without sshfs does not complain on every reconnect.
+ */
+export function autoMount(serverId: string, conn: PooledConnection): void {
+  for (const share of saved.get(serverId) ?? []) {
+    if (share.autoMount) void mountShare(serverId, conn, share)
+  }
 }

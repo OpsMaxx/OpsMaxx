@@ -12,7 +12,6 @@ import { askedWithoutWindow, verifyHostKey } from './knownhosts'
 // Names only, and only for an error message: a hop is addressed by the
 // friendly name of a saved server, so that is what a failure has to say.
 import { getCachedServer } from './mcpDataCache'
-import { unmountSession } from './reverseMount'
 import { isEncryptedPrivateKey, isSecurityKeyPrivateKey, defaultIdentityPath } from './sshKeys'
 import {
   assertCertificateUsable,
@@ -24,6 +23,27 @@ import {
 interface Session {
   conn: PooledConnection | null
   stream: ClientChannel | null
+  /** The saved server this terminal is to, when it is one. */
+  serverId?: string
+}
+
+/**
+ * Told when a terminal to a saved server has its shell, and when it is gone.
+ *
+ * A setter rather than an import of whoever listens: the listener is the
+ * reverse-mount manager, and ssh.ts is in the MCP bridge's import closure,
+ * which a mount must never be. index.ts does the wiring.
+ */
+type ServerSessionListener = (event: 'ready' | 'closed', serverId: string, conn: PooledConnection | null) => void
+let serverSessionListener: ServerSessionListener = () => {}
+export function onServerSession(listener: ServerSessionListener): void {
+  serverSessionListener = listener
+}
+
+/** A connection a live terminal to this server is using, if any is. */
+export function liveServerConnection(serverId: string): PooledConnection | null {
+  for (const s of sessions.values()) if (s.serverId === serverId && s.stream && s.conn) return s.conn
+  return null
 }
 
 const sessions = new Map<string, Session>()
@@ -1597,7 +1617,8 @@ export function poolDisposeAll(): void {
 
 export async function sshConnect(wc: WebContents, cfg: SshConnectConfig): Promise<void> {
   const { sessionId } = cfg
-  sessions.set(sessionId, { conn: null, stream: null })
+  const serverId = (cfg as { serverId?: unknown }).serverId
+  sessions.set(sessionId, { conn: null, stream: null, ...(typeof serverId === 'string' && serverId ? { serverId } : {}) })
 
   try {
     status(wc, sessionId, 'connecting')
@@ -1643,6 +1664,7 @@ export async function sshConnect(wc: WebContents, cfg: SshConnectConfig): Promis
       }
       s.stream = stream
       status(wc, sessionId, 'ready')
+      if (s.serverId) serverSessionListener('ready', s.serverId, conn)
 
       // Commands like `cat` on a large file arrive as hundreds of small
       // chunks. One IPC message each floods the renderer and stalls input, so
@@ -1700,10 +1722,6 @@ export function sshClose(sessionId: string): void {
   cleanup(sessionId)
 }
 
-/** The pooled connection a terminal session is riding, if it is up. */
-export function sessionConnection(sessionId: string): PooledConnection | null {
-  return sessions.get(sessionId)?.conn ?? null
-}
 
 export interface ExecResult {
   ok: boolean
@@ -2143,10 +2161,11 @@ function cleanup(sessionId: string): void {
   const s = sessions.get(sessionId)
   if (!s) return
   sessions.delete(sessionId)
-  // Folders from this machine mounted through this session go with it. Each
-  // mount holds its own reference on the connection, so the release below does
-  // not pull the connection out from under the unmount.
-  unmountSession(sessionId)
+  // The last terminal to a server takes its mounts with it. Each mount holds
+  // its own reference on the connection, so the release below does not pull
+  // the connection out from under the unmount.
+  if (s.serverId && ![...sessions.values()].some((o) => o.serverId === s.serverId))
+    serverSessionListener('closed', s.serverId, s.conn)
   try {
     s.stream?.close()
   } catch {

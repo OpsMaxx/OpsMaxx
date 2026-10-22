@@ -303,6 +303,7 @@ import type {
   ConflictCopy
 } from '../shared/addy'
 import type { ProvisionManifest, ProvisionPlan } from '../shared/provision'
+import type { LocalShare, MountReply, MountStatus } from '../shared/localMounts'
 import type {
   AgentApprovalRequest,
   AgentDecision,
@@ -700,6 +701,20 @@ const api = {
     ): Promise<CloudReply<CloudInstance[]>> =>
       ipcRenderer.invoke('cloud:instances', provider, account, location)
   },
+  /** Folders on this computer mounted on a server. Not reachable from the MCP bridge. */
+  mounts: {
+    pickFolder: (): Promise<string | null> => ipcRenderer.invoke('mounts:pick-folder'),
+    list: (serverId: string): Promise<MountStatus[]> => ipcRenderer.invoke('mounts:list', serverId),
+    mount: (serverId: string, share: LocalShare): Promise<MountReply> =>
+      ipcRenderer.invoke('mounts:mount', serverId, share),
+    unmount: (serverId: string, mountpoint: string): Promise<boolean> =>
+      ipcRenderer.invoke('mounts:unmount', serverId, mountpoint),
+    onChanged: (cb: (serverId: string, list: MountStatus[]) => void): (() => void) => {
+      const h = (_e: IpcRendererEvent, serverId: string, list: MountStatus[]): void => cb(serverId, list)
+      ipcRenderer.on('mounts:changed', h)
+      return () => ipcRenderer.removeListener('mounts:changed', h)
+    }
+  },
   ssh: {
     connect: (cfg: SshConnectConfig & { serverId?: string }): Promise<void> =>
       ipcRenderer.invoke('ssh:connect', cfg),
@@ -707,13 +722,6 @@ const api = {
     resize: (id: string, cols: number, rows: number): void =>
       ipcRenderer.send('ssh:resize', id, cols, rows),
     close: (id: string): void => ipcRenderer.send('ssh:close', id),
-    /** Mount a local folder on the session's server. Read-only unless `readOnly: false`. */
-    mount: (
-      id: string,
-      spec: { localDir: string; mountpoint: string; readOnly?: boolean }
-    ): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('ssh:mount', id, spec),
-    unmount: (id: string, mountpoint: string): Promise<boolean> =>
-      ipcRenderer.invoke('ssh:unmount', id, mountpoint),
     /** Dial, then hang up. Nothing is pooled and nothing is saved. */
     test: (cfg: SshConnectConfig & { serverId?: string }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('ssh:test', cfg),

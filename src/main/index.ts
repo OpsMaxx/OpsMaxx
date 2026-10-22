@@ -32,9 +32,20 @@ import {
   sshExecStream,
   sshOpenFresh,
   sshTest,
-  sessionConnection
+  onServerSession,
+  liveServerConnection
 } from './services/ssh'
-import { mountShare, unmountShare, type ShareSpec } from './services/reverseMount'
+import {
+  autoMount,
+  listMounts,
+  mountShare,
+  notePickedFolder,
+  onMountsChanged,
+  syncShares,
+  unmountServer,
+  unmountShare
+} from './services/reverseMount'
+import { parseShares } from '../shared/localMounts'
 import type { KeyboardRequest } from './services/ssh'
 import { atomicWriteFileSync } from './services/atomicWrite'
 import {
@@ -1287,19 +1298,51 @@ ipcMain.on('clipboard:write', (_e, text: unknown) => {
 ipcMain.on('ssh:write', (_e, id: string, data: string) => sshWrite(id, data))
 ipcMain.on('ssh:resize', (_e, id: string, cols: number, rows: number) => sshResize(id, cols, rows))
 ipcMain.on('ssh:close', (_e, id: string) => sshClose(id))
-// A folder on this machine mounted on the session's server (reverse sshfs).
-// Spike: no UI yet, reachable from the renderer as window.api.ssh.mount.
-ipcMain.handle('ssh:mount', async (_e, id: string, spec: ShareSpec) => {
-  const conn = sessionConnection(id)
-  if (!conn) return { ok: false, error: 'That session is not connected' }
-  try {
-    await mountShare(id, conn, { ...spec, readOnly: spec.readOnly !== false })
-    return { ok: true }
-  } catch (err) {
-    return { ok: false, error: (err as Error).message }
-  }
+
+// ---- Folders on this computer, mounted on a server (reverse sshfs) ----
+//
+// Renderer IPC only, and deliberately so: nothing on the MCP bridge or the CLI
+// can create, change or remove a mount, or read which folders are shared.
+// tests/reverseMountNotExposed.test.ts keeps that true. The manager is told
+// about terminals through onServerSession instead of being imported by ssh.ts,
+// which would put it in the bridge's import closure.
+onServerSession((event, serverId, conn) => {
+  if (event === 'ready' && conn) autoMount(serverId, conn)
+  else if (event === 'closed') void unmountServer(serverId)
 })
-ipcMain.handle('ssh:unmount', (_e, id: string, mountpoint: string) => unmountShare(id, mountpoint))
+onMountsChanged((serverId, list) => {
+  for (const w of BrowserWindow.getAllWindows()) w.webContents.send('mounts:changed', serverId, list)
+})
+// The folder to share comes from the OS dialog, as the download folder does:
+// mountShare refuses a path that came neither from here nor from a saved share.
+ipcMain.handle('mounts:pick-folder', async () => {
+  if (!mainWindow) return null
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Choose a folder to mount on the server',
+    buttonLabel: 'Choose folder',
+    properties: ['openDirectory']
+  })
+  const dir = result.canceled ? undefined : result.filePaths[0]
+  if (!dir) return null
+  notePickedFolder(dir)
+  return dir
+})
+ipcMain.handle('mounts:list', (_e, serverId: unknown) => (typeof serverId === 'string' ? listMounts(serverId) : []))
+ipcMain.handle('mounts:mount', async (_e, serverId: unknown, share: unknown) => {
+  const [parsed] = parseShares([share])
+  if (typeof serverId !== 'string' || !parsed) return { ok: false, error: 'That share is not complete.' }
+  const conn = liveServerConnection(serverId)
+  if (!conn)
+    return {
+      ok: false,
+      error: 'Open a terminal to this server first.',
+      fix: 'Folders are mounted over a terminal connection and stay mounted while one is open.'
+    }
+  return mountShare(serverId, conn, parsed)
+})
+ipcMain.handle('mounts:unmount', (_e, serverId: unknown, mountpoint: unknown) =>
+  typeof serverId === 'string' && typeof mountpoint === 'string' ? unmountShare(serverId, mountpoint) : false
+)
 
 // ---- Local terminal ----
 //
@@ -5815,6 +5858,9 @@ ipcMain.handle('data:save', (_e, data: unknown) => {
   // renderer on every tool call, so its cache is refreshed right after the
   // write that would otherwise make it stale.
   refreshMcpDataCache(data)
+  // Auto-mount reads the saved shares here rather than taking them from a
+  // caller. See services/reverseMount.ts.
+  syncShares(data)
   // Same file, same reason. The CI/CD module reads its connections from disk
   // rather than from IPC (see services/cicd/wiring.ts), so the write that just
   // changed them is where it has to look again.
@@ -6315,6 +6361,7 @@ app.whenReady().then(() => {
   // Primed once at launch so the MCP bridge can resolve server/workspace
   // names even before the renderer's first data:save call.
   refreshMcpDataCache(boot)
+  syncShares(boot)
   // And the CI connections, for the same reason one line up: an agent can call
   // a ci_* tool before any window has opened the CI tab, and an empty list
   // there reads to the agent as "this user has no CI connections" rather than
