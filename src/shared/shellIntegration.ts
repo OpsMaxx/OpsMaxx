@@ -273,11 +273,36 @@ const REMOTE_PRINTF = `printf "${OSC('7;file://%s')}" "$PWD"`
  * navigation rather than per session.
  */
 export const REMOTE_CWD_BOOTSTRAP =
-  `test -n "$BASH_VERSION$ZSH_VERSION" && eval '` +
+  // Leading space: bash with HISTCONTROL=ignorespace/ignoreboth (Ubuntu's
+  // default .bashrc) and zsh with HIST_IGNORE_SPACE keep it out of history.
+  ` test -n "$BASH_VERSION$ZSH_VERSION" && eval '` +
   `__om_cwd() { ${REMOTE_PRINTF}; }; ` +
   `if [ -n "$ZSH_VERSION" ]; then precmd_functions+=(__om_cwd); ` +
   `else PROMPT_COMMAND="__om_cwd\${PROMPT_COMMAND:+;$PROMPT_COMMAND}"; fi; ` +
   `__om_cwd'\n`
+
+/**
+ * The text "cd terminal here" types, or null when the path cannot be typed.
+ *
+ * No trailing newline: the user presses Enter. Whatever has the terminal — a
+ * half-typed command, Claude Code, vim — is on screen before anything runs.
+ *
+ * Typed, not executed: every byte goes through the far end's tty first, and the
+ * line discipline acts on control characters before any shell sees them — a
+ * name holding \x03 would interrupt, \x15 would erase the line, \n would submit
+ * half of it. Quoting cannot help with that, so such a path is refused.
+ *
+ * So is a backslash: fish reads `\\` and `\'` as escapes even inside single
+ * quotes, so a name ending in one leaves the quote open there. POSIX quoting
+ * cannot express a path for every shell, and refusing is the honest answer.
+ *
+ * The leading space keeps it out of history, as with REMOTE_CWD_BOOTSTRAP.
+ */
+export function cdLine(path: string): string | null {
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f\\]/.test(path)) return null
+  return ` cd '${path.replace(/'/g, `'\\''`)}'`
+}
 
 // ---------------------------------------------------------------------------
 // Parsing, for the renderer

@@ -14,7 +14,7 @@ import {
   Trash2,
   Link2,
   Loader2,
-  AlertTriangle, CornerLeftUp
+  AlertTriangle, CornerLeftUp, SquareTerminal
 } from 'lucide-react'
 import { ContextMenu, MenuEntry } from '../connections/ContextMenu'
 import { Modal } from '../common/Modal'
@@ -23,7 +23,7 @@ import { useApp } from '../../store/app'
 import { bytes, clsx } from '../../lib/format'
 import { sshHopsFor } from '../../lib/ssh'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
-import { REMOTE_CWD_BOOTSTRAP } from '../../../../shared/shellIntegration'
+import { REMOTE_CWD_BOOTSTRAP, cdLine } from '../../../../shared/shellIntegration'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { classifyConnectionError, errorText } from '../../lib/connectionError'
 import { openSettings } from '../../store/nav'
@@ -184,11 +184,17 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       else toast(`${name} was saved locally, but uploading it to the server failed.`, 'error')
     })
   }, [])
-  const [linked, setLinked] = useState(true)
+  // Following is one-way — the terminal moves this pane, browsing here never
+  // types into the terminal (that is the explicit "cd terminal here" button).
+  //
+  // On by default for a local pane, where following only reads what the shell
+  // already reports. Off for a remote one: linking there types the cwd
+  // bootstrap into the terminal, which may not be at a prompt — on by default,
+  // opening this tab beside Claude Code on a server typed it into Claude Code.
+  const [linked, setLinked] = useState(local)
   const connectedRef = useRef(false)
 
-  // Sync with the terminal: follow its cwd (via OSC 7) and push `cd` when the
-  // user navigates here.
+  // Sync with the terminal: follow its cwd (via OSC 7).
   //
   // Both live under the **active pane's** id, not the tab's: a tab holds up to
   // four terminals and "the terminal" this view follows is whichever one has
@@ -211,8 +217,8 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     return pane.target.kind === 'ssh' && pane.target.serverId === server?.id ? pane.id : undefined
   })
   const session = useApp((s) => (paneId ? s.tabSession[paneId] : undefined))
-  const termCwd = useApp((s) => (paneId ? s.tabCwd[paneId] : undefined))
-  const setTabCwd = useApp((s) => s.setTabCwd)
+  const reportedCwd = useApp((s) => (paneId ? s.tabCwd[paneId] : undefined))
+  const setTabView = useApp((s) => s.setTabView)
   // A local shell only reports its directory when the shell-integration snippet
   // was injected at spawn, and that is a setting which ships OFF. Without it
   // there is nothing to follow and no amount of waiting will produce one.
@@ -236,25 +242,37 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   )
 
   /**
-   * Ask a REMOTE shell to report its directory, once per session.
+   * Ask a REMOTE shell to report its directory — only from a click on the link
+   * button, and only the session active at that click.
    *
    * A local shell is spawned by this app and gets the OSC 7 emitter through its
    * own startup files (shared/shellIntegration.ts). Nothing spawns the remote
    * one, so the only way in is the channel the user types on — hence a line
-   * typed into it, which echoes once. Sent only while following is switched on,
-   * so a user who never links never sees it.
+   * typed into it, which echoes once.
+   *
+   * Never from an effect. This view stays mounted while hidden, so an effect
+   * keyed on the session fired whenever focus moved to another pane on the
+   * server or a reconnect minted a new session id — typing the line into
+   * whatever that terminal was running, with nobody having clicked anything
+   * here. A session not yet asked says so on the button and waits for a click.
    *
    * It cannot be made to work everywhere: the snippet installs a prompt hook in
    * bash and zsh, and deliberately evaluates to nothing in fish or dash rather
    * than erroring there. Those shells report no directory at all, which the
    * link button below has to say out loud.
    */
-  const bootstrapped = useRef<string | null>(null)
-  useEffect(() => {
-    if (local || !linked || !session || bootstrapped.current === session) return
-    bootstrapped.current = session
+  const [asked, setAsked] = useState<ReadonlySet<string>>(() => new Set())
+  const canAsk = !local && !!session && !asked.has(session)
+  // A remote pane's reported cwd is trusted only from a session this view has
+  // asked. tabCwd is kept per pane across reconnects and restarts (persist.ts),
+  // so after either it holds the previous shell's folder — which would make the
+  // pane look followed while a new, never-asked shell sits behind it.
+  const termCwd = local || (session && asked.has(session)) ? reportedCwd : undefined
+  const ask = (): void => {
+    if (!session) return
+    setAsked((prev) => new Set(prev).add(session))
     window.opsmaxx?.ssh?.write(session, REMOTE_CWD_BOOTSTRAP)
-  }, [local, linked, session])
+  }
 
   /**
    * Whether following can work here at all, and why not when it cannot.
@@ -265,7 +283,11 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
    * Collapsing them into an enabled-looking toggle is what made this read as
    * broken — the button was on, the pane never moved, and nothing said why.
    */
-  const follow: { can: boolean; why: string; fix?: Fix } = !paneId
+  const follow: { can: boolean; why: string; fix?: Fix } = server?.sftpOnly
+    ? // A files-only tab still gets an ssh pane id, but no terminal is ever
+      // started for it, so without this it read as "still connecting" forever.
+      { can: false, why: 'This account has no terminal, so there is nothing to follow.' }
+    : !paneId
     ? {
         can: false,
         why: local
@@ -278,14 +300,18 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
           why: 'Following needs shell integration, which is off. Without it the shell never tells OpsMaxx where it is.',
           fix: { label: 'Turn on shell integration', run: () => openSettings('terminal') }
         }
-      : !termCwd
-        ? {
-            can: true,
-            why: local
-              ? 'This shell has not reported a directory. zsh, bash and fish report one; cmd, PowerShell and a login bash cannot be asked to.'
-              : 'This shell has not reported a directory. OpsMaxx asks bash and zsh to on the first link; other remote shells cannot be asked.'
-          }
-        : { can: true, why: '' }
+      : !session
+        ? { can: false, why: 'The terminal in this tab is not connected yet.' }
+        : !termCwd
+          ? {
+              can: true,
+              why: local
+                ? 'This shell has not reported a directory. zsh, bash and fish report one; cmd, PowerShell and a login bash cannot be asked to.'
+                : canAsk
+                  ? 'This shell has not been asked to report its folder.'
+                  : 'This shell did not report its folder. bash and zsh do; fish and sh cannot be asked.'
+            }
+          : { can: true, why: '' }
   const following = linked && follow.can && !!termCwd
 
   const cfg = useCallback(
@@ -359,19 +385,41 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     [key, path, unlocked]
   )
 
-  // Navigate here AND mirror the change to the terminal (cd) when linked.
-  const navigate = useCallback(
-    async (p: string): Promise<void> => {
-      const ok = await list(p)
-      if (!ok) return
-      if (paneId) setTabCwd(paneId, p)
-      if (linked && session) {
-        const q = p.replace(/'/g, `'\\''`)
-        writeToShell(`cd '${q}'\n`)
-      }
-    },
-    [list, paneId, setTabCwd, linked, session, writeToShell]
-  )
+  /**
+   * "cd terminal here": the one way a path reaches the terminal, and only when
+   * asked. Typed but not submitted — the tab switches to its terminal and the
+   * user presses Enter, so a half-typed command or a program that is not a
+   * shell is seen before anything runs.
+   *
+   * Browsing used to push a `cd` per click while linked, into a terminal the
+   * Files view hides. It landed in whatever had the terminal: Claude Code or
+   * vim got it as input, and a half-typed command at the prompt got it appended
+   * and ran — `rm -rf ` plus a click on `build` deleted `build`.
+   */
+  const cdBlocked = server?.sftpOnly
+    ? 'This account has no terminal.'
+    : !paneId
+      ? local
+        ? 'No local shell open in this tab.'
+        : `No terminal on ${server?.name ?? 'this server'} open in this tab.`
+      : !session
+        ? 'The terminal in this tab is not connected yet.'
+        : // The quoting is POSIX. A local shell that reports its folder is one
+          // OpsMaxx instrumented — zsh, bash or fish — and cmd, PowerShell or
+          // WSL never do, so this is what keeps a Windows path out of them.
+          local && !termCwd
+          ? 'cd here needs a shell that reports its folder: zsh, bash or fish, with shell integration on.'
+          : !connectedRef.current
+            ? 'The folder list has not loaded yet.'
+            : ''
+  const cdHere = (): void => {
+    if (cdBlocked) return toast(cdBlocked, 'error')
+    const line = cdLine(path)
+    if (line === null)
+      return toast('This folder name has a backslash or control character, which cannot be typed into a shell safely.', 'error')
+    writeToShell(line)
+    if (tabId) setTabView(tabId, 'terminal')
+  }
 
   // Opening the channel, and the way back in after it failed. Retrying a failed
   // connect has to redial — listing a key that never connected only produces a
@@ -435,15 +483,24 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   // connecting and the shell prints its first prompt — was previously tested
   // once against a stale `loading`, dropped, and never re-tested, so the first
   // `cd` after opening the tab was the one most likely to be missed.
+  //
+  // Acts on a cwd once, not whenever it differs from `path`: browsing here no
+  // longer moves the terminal, so the two legitimately disagree after any click,
+  // and comparing against `path` would yank the pane back to the terminal's
+  // directory as soon as the listing finished. Cleared on link, so linking
+  // jumps to wherever the terminal is now.
+  const followed = useRef<string | null>(null)
   useEffect(() => {
-    if (linked && termCwd && connectedRef.current && termCwd !== path && !loading) {
-      void list(termCwd)
+    if (!linked) followed.current = null
+    else if (termCwd && connectedRef.current && !loading && termCwd !== followed.current) {
+      followed.current = termCwd
+      if (termCwd !== path) void list(termCwd)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [termCwd, linked, loading])
 
   const open = (e: SftpEntry): void => {
-    if (e.dir) void navigate(join(path, e.name))
+    if (e.dir) void list(join(path, e.name))
     else if (preferExternal) void openExternally(e)
     else void openFile(e)
   }
@@ -670,7 +727,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       toast(
         `${e.name} is a folder. Only files can be downloaded so far — open it and download what is inside.`,
         'info',
-        { label: `Open ${e.name}`, run: () => void navigate(join(path, e.name)) }
+        { label: `Open ${e.name}`, run: () => void list(join(path, e.name)) }
       )
       return
     }
@@ -807,7 +864,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       onDrop={onDrop}
     >
       <div className="viewbar" style={{ margin: '0 -20px 16px', paddingLeft: 20, paddingRight: 20 }}>
-        <button className="icon-btn" onClick={() => void navigate('/')} title="Root">
+        <button className="icon-btn" onClick={() => void list('/')} title="Root">
           <Home size={15} />
         </button>
         {/* Click the trail to type a path.
@@ -830,7 +887,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
                   className="btn ghost sm"
                   onClick={(ev) => {
                     ev.stopPropagation()
-                    void navigate('/' + parts.slice(0, i + 1).join('/'))
+                    void list('/' + parts.slice(0, i + 1).join('/'))
                   }}
                 >
                   {p}
@@ -854,7 +911,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
                 // A path that does not exist reports itself through the usual
                 // failure banner rather than being validated here, so the
                 // message says what the server said.
-                if (target !== '') void navigate(target.startsWith('/') ? target : `/${target}`)
+                if (target !== '') void list(target.startsWith('/') ? target : `/${target}`)
               }
               if (ev.key === 'Escape') setEditingPath(null)
             }}
@@ -879,22 +936,47 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
           aria-label="Follow terminal"
           aria-pressed={follow.can ? linked : undefined}
           title={
-            follow.why
+            !follow.can
               ? follow.why
-              : linked
-                ? `Following the terminal (${termCwd}) — click to unlink`
-                : 'Not following the terminal — click to link'
+              : !linked
+                ? canAsk && !termCwd
+                  ? 'Not following the terminal — click to link. Linking types one line into the terminal so its shell reports its folder; leave it at a prompt.'
+                  : 'Not following the terminal — click to link'
+                : termCwd
+                  ? `Following the terminal (${termCwd}) — click to unlink`
+                  : canAsk
+                    ? 'Click to ask this shell to report its folder. That types one line into the terminal; leave it at a prompt.'
+                    : `${follow.why} Click to unlink.`
           }
           onClick={() => {
             // A reason on a tooltip is a reason nobody on a keyboard ever
             // reads, and nobody reads one before clicking anyway. Say it when
             // they ask for the thing it prevents.
             if (!follow.can) return toast(follow.why, 'error', follow.fix)
-            setLinked((v) => !v)
-            if (!linked && follow.why) toast(follow.why, 'error', follow.fix)
+            const asking = canAsk && !termCwd
+            // Linked to a shell that has not been asked (focus moved, or the
+            // terminal reconnected): the click asks rather than unlinking.
+            if (linked && !asking) return setLinked(false)
+            setLinked(true)
+            if (asking) {
+              ask()
+              toast('Asked the shell to report its folder. bash and zsh answer straight away; fish and sh cannot be asked.', 'info')
+            } else if (follow.why) toast(follow.why, 'error', follow.fix)
           }}
         >
           <Link2 size={15} />
+        </button>
+        {/* The only way a path reaches the terminal. Browsing used to type a
+            `cd` per click; this types one, when asked. */}
+        <button
+          className="icon-btn"
+          style={cdBlocked ? { opacity: 0.45 } : undefined}
+          aria-disabled={!!cdBlocked}
+          aria-label="cd terminal here"
+          title={cdBlocked || `Type cd ${path} into the terminal — press Enter there to run it`}
+          onClick={cdHere}
+        >
+          <SquareTerminal size={15} />
         </button>
         <button className="icon-btn" title="Refresh" onClick={() => void list(path)}>
           <RefreshCw size={14} />

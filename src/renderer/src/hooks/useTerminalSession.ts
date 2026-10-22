@@ -617,6 +617,9 @@ export function useTerminalSession(
       transport.onLifecycle?.('offline')
       setOnline(false)
       setDead(why ? `Session closed · ${why}` : 'Session closed')
+      // A closed session is not one anything should write to — the Files
+      // pane's cd button reads this to know whether a shell is there.
+      if (tabId) setTabSession(tabId, null)
     })
 
     transport.onLifecycle?.('connecting')

@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
+import { execFileSync } from 'node:child_process'
+import { mkdtempSync, mkdirSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
+  cdLine,
   integrationFor,
   parseOsc133,
   snippetFor,
@@ -365,5 +370,28 @@ describe('movementFor safety bounds', () => {
     const seq = movementFor({ ...base, click: { row: 13, col: 15 } })
     expect(seq).not.toBeNull()
     expect(seq!.length).toBeGreaterThan(0)
+  })
+})
+
+describe('cdLine', () => {
+  it('starts with a space so history-ignoring shells skip it, and does not submit', () => {
+    expect(cdLine('/srv')).toBe(" cd '/srv'")
+  })
+
+  it('reaches a directory whose name holds quotes and spaces, in a real shell', () => {
+    const dir = join(realpathSync(mkdtempSync(join(tmpdir(), 'om-cd-'))), `it's a "dir" $HOME`)
+    mkdirSync(dir)
+    const line = cdLine(dir)!
+    const out = execFileSync('/bin/sh', ['-c', `${line} && pwd`], { encoding: 'utf8' })
+    expect(out.trim()).toBe(dir)
+  })
+
+  it('refuses control characters the tty would act on before any shell sees them', () => {
+    for (const c of ['\x03', '\x15', '\n', '\r', '\x1b', '\x7f']) expect(cdLine(`/tmp/a${c}b`)).toBeNull()
+  })
+
+  it('refuses a backslash, which fish reads as an escape inside single quotes', () => {
+    expect(cdLine('/tmp/ends-in\\')).toBeNull()
+    expect(cdLine('C:\\Users\\x')).toBeNull()
   })
 })
