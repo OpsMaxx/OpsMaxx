@@ -14,8 +14,9 @@ docgov:
 
 > Internal Note. Historical record. Correct only factual errors. Keep it under 400 lines; 1000 triggers review.
 
-> **Status: shipped as a feature, 2026-10-22.** The spike became the Files view's **Local folders**
-> dialog. User guide: [Mount a folder from this computer](../08-user/guides/mount-a-folder-from-this-computer.md).
+> **Status: shipped as a feature, 2026-10-22.** The spike became **Folder shares**. They are defined in the
+> server editor like `docker -v host:path:ro`, mounted when an SSH session to the server opens, and shown on
+> the tab's view bar. User guide: [Mount a folder from this computer](../08-user/guides/mount-a-folder-from-this-computer.md).
 > Code: `src/main/services/reverseMount.ts` and `src/shared/localMounts.ts`. Tests: `tests/reverseMount.test.ts`,
 > `tests/localMounts.test.ts`, `tests/localMountsDialog.test.tsx` and `tests/reverseMountNotExposed.test.ts`.
 > The sections below record the spike as it was measured. **What changed after the spike** lists where the
@@ -130,8 +131,13 @@ sshfs was installed for the run and removed after it.
   torn down when the last terminal to it closes. `ssh.ts` reports session start and end through
   `onServerSession`. It does **not** import the manager: the spike's import put `reverseMount.ts` into the MCP
   bridge's import closure, and `tests/reverseMountNotExposed.test.ts` now forbids that.
+- **Bound to the session.** At the requester's ask ("can't we bind it to the SSH session?"), a share is part
+  of the server's connection settings: a **Folder shares** section in the server editor, one row per share.
+  It mounts with the session and unmounts with the last one. The tab's view bar carries an indicator with
+  state, Unmount and Retry, and a shortcut back to that section (`openServerEditor(id, 'shares')`).
 - **Saved shares and auto-mount.** Shares live on the server record (`Server.shares`). They are written by
-  `setServerShares`, which, unlike `updateServer`, does not bump `rev` or retire the connection the mounts run on.
+  `setServerShares`, because `addServer` builds its record field by field. On save, `applyShareChanges`
+  unmounts what was removed or changed and mounts what is new.
   Main reads them from the data blob (`syncShares`) and mounts the auto ones when a terminal's shell is ready. A
   failure is recorded in the mount's status, never raised as a toast.
 - **Only chosen folders.** `mountShare` refuses a local path that came from neither the OS folder dialog in

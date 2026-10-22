@@ -12,40 +12,39 @@ docgov:
 ---
 # Mount a folder from this computer
 
-Make a folder on your computer appear on a server, as a folder on the server's own disk, while you are connected to it.
+Make a folder on your computer part of a server's connection: mounted on the server while you are connected, unmounted when you leave.
 
 ## Goal
 
-You have a folder here, such as a project, a set of config files or a build output, and you want to use it on a server without copying it there. OpsMaxx mounts it at a path on the server with **sshfs**. Programs on the server then read it, and if you allow it change it, as if it were local. Every read and write travels back over your SSH connection to the folder on this computer.
+You have a folder here, such as a project, a set of config files or a build output, and you want it on a server while you work there, without copying it. A folder share works like `docker -v host:path:ro`. You define it once in the server's connection settings: a folder on this computer, a path on the server, read-only or read-write. From then on it is mounted whenever an SSH session to that server is open, and unmounted when the last session closes.
 
-Each folder is shared either **read-only** (the default) or **read-write**.
+Under the hood it is **sshfs**. Programs on the server see an ordinary folder, and every read and write travels back over your SSH connection to the folder on this computer.
 
 **What the server needs.** sshfs installed, and a usable `/dev/fuse`. Most containers have neither, so this usually works on a VM or a physical machine and not inside a container. OpsMaxx checks both before mounting. When something is missing it tells you what, and what to run.
 
-**What sharing means.** For as long as the folder is mounted, anyone who can act as your account on that server, or as root there, can read every file in it. With read-write, they can also change and delete those files. Share the folder you mean to share, not your home folder.
+**What sharing means.** While a share is mounted, anyone who can act as your account on that server, or as root there, can read every file in it. With read-write, they can also change and delete those files. Share the folder you mean to share, not your home folder.
 
 ## Steps
 
-### 1. Open a terminal and the Files view
+### 1. Add a share to the server
 
-1. Open the server. The folder is mounted over the terminal's own SSH connection, so **a terminal to this server has to be open**. If it is not, mounting says *Open a terminal to this server first*.
-2. Switch the tab to **Files**. The toolbar has a **Local folders** button.
+1. Open the server's connection settings: right-click it, then **Edit server**.
+2. Under **Folder shares**, click **Add folder share** and pick a folder. Only a folder picked in this dialog can be shared.
+3. Check the row:
+   - **Mount point.** The path on the server, after the arrow. It defaults to `~/opsmaxx/<folder name>` in your home folder there. It is created if it does not exist, and it must be empty: mounting over files would hide them, so OpsMaxx refuses.
+   - **Access.** Defaults to **Read-only**. Choose **Read-write** only if the server should be able to change these files.
+   - **Mount on connect.** On by default. Turn it off to keep the share defined but mount it only when you ask.
+4. Click **Save Changes**.
 
-   The button is not there for a server marked *files only* (that kind of account cannot run sshfs), or for the Files view of this computer.
+If a session to the server is already open, a share set to mount on connect mounts straight away. Otherwise it mounts the next time you connect.
 
-### 2. Share a folder
+The section is not offered for a server that only speaks RDP, and is switched off for a *files only* account, because that kind of account cannot run sshfs.
 
-1. Click **Local folders**, then **Choose…**, and pick the folder in the dialog. Only a folder picked here, or one already saved, can be shared.
-2. **Mount point on the server.** This defaults to `~/opsmaxx/<folder name>` in your home folder on the server. You can change it. It is created if it does not exist, and it must be empty: mounting over files would hide them, so OpsMaxx refuses.
-3. **Access.** This defaults to **Read-only**. Choose **Read-write** only if the server should be able to change these files.
-4. **Mount automatically when a terminal to this server connects.** This is on by default. Leave it on to have the folder come back whenever you connect.
-5. Click **Share and mount**.
+### 2. Connect
 
-The folder is saved on this server's connection profile and appears in the list as **Mounting…**, then **Mounted**. The toolbar button shows how many folders are mounted.
+Open the server as usual. When the terminal is ready, each share set to mount on connect is mounted. There is nothing to click and nothing typed into the terminal: the mount runs over its own channel on the same connection, including through jump hosts.
 
 ### 3. Use it on the server
-
-In the terminal:
 
 ```bash
 ls ~/opsmaxx/site
@@ -53,17 +52,24 @@ ls ~/opsmaxx/site
 
 The files are those on this computer. On a read-only share, any attempt to write fails with *Read-only file system*.
 
-### 4. Unmount, or stop sharing
+### 4. Check, unmount or retry from the tab
 
-- **Unmount** removes the mount from the server and keeps the folder in the list, so you can mount it again.
-- **Remove** unmounts the folder and deletes it from the list.
-- Turning off **Mount automatically on connect** keeps the folder in the list without mounting it each time.
+The tab's view bar, next to the server's address, has a **Folder shares** icon. It shows how many shares are mounted, and turns into a warning sign when one has failed. Click it to see each share's state (**Mounting…**, **Mounted** or **Failed** with the reason and the fix), with:
 
-Mounts also end on their own when **the last terminal to that server closes**, or when the connection drops. A folder set to mount automatically comes back the next time a terminal connects. One that is not stays unmounted until you click **Mount**.
+- **Unmount** to take a share off the server until the next connect.
+- **Retry**, or **Mount** for a share that is not set to mount on connect.
+- **Edit shares…** (or **Add a share…** when there are none), which opens the server's settings at the Folder shares section.
+
+### When shares come and go
+
+- They mount when an SSH session to the server opens. Several terminals to one server share one mount.
+- They unmount when **the last session to that server closes**, or when the connection drops.
+- A reconnect mounts them again.
+- Removing a share in the server settings, or changing its folder, mount point or access, unmounts the old mount when you save.
 
 ## Verification
 
-- **The list shows Mounted.** On the server, `findmnt -t fuse.sshfs` lists the mount point with source `opsmaxx`.
+- **The Folder shares icon shows it mounted.** On the server, `findmnt -t fuse.sshfs` lists the mount point with source `opsmaxx`.
 - **Read-only holds.** On the server, `touch ~/opsmaxx/site/x` fails with *Read-only file system*, and nothing appears in the folder on this computer.
 - **A failed mount says why.** The row shows **Failed** with the reason, plus the fix when there is one:
 
@@ -75,7 +81,7 @@ Mounts also end on their own when **the last terminal to that server closes**, o
   | The server refused the FUSE mount | Seen inside most containers, which cannot mount filesystems |
   | The mount point already has files in it | Choose an empty or new folder |
 
-  A folder that fails to mount automatically shows this in the list. It does not pop up a notice on every reconnect.
+  A share that fails to mount on connect shows this under the Folder shares icon. It does not pop up a notice on every reconnect.
 
 ## What OpsMaxx enforces
 
@@ -84,7 +90,7 @@ These limits are enforced by OpsMaxx on this computer, not by the server. They h
 - **Read-only** refuses every write, create, rename, delete, permission change and new folder that the server asks for. The mount is also made with `-o ro`, but only so that the server shows a clear error. That flag is not what keeps your files safe.
 - **The share's edges.** Paths that climb out of the folder with `..`, and symbolic links that lead outside it, are refused. A link that points outside the folder cannot be read or followed. A link that points inside it is shown as a relative link, so the server never learns a path on this computer.
 - **No new links, and no ownership changes.** The server cannot create symbolic links in the folder, and requests to change a file's owner are ignored.
-- **No AI agents.** Mounting is only available here in the Files view. Nothing on the MCP bridge or the command-line bridge can mount, unmount or change a share, or list which folders are shared.
+- **No AI agents.** Shares are defined only in the server settings and controlled only from the tab. Nothing on the MCP bridge or the command-line bridge can mount, unmount or change a share, or list which folders are shared. An agent that edits a server's connection details cannot add a share to it.
 
 Two things are not done:
 

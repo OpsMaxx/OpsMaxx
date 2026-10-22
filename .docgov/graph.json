@@ -115,8 +115,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 97,
-      "hash": "9753d69d496bc971",
+      "lines": 103,
+      "hash": "8cd7460dcd98527b",
       "generated": false
     },
     {
@@ -141,8 +141,8 @@
       "domain": null,
       "status": "draft",
       "kind": "document",
-      "lines": 151,
-      "hash": "9f8162a8de70200a",
+      "lines": 157,
+      "hash": "0cba13b3d62107ff",
       "generated": false
     },
     {
@@ -271,8 +271,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 119,
-      "hash": "ba3e187669164532",
+      "lines": 120,
+      "hash": "8d9b05f9b2f237f0",
       "generated": false
     },
     {
@@ -1029,6 +1029,12 @@
     {
       "from": "docs-features",
       "to": "readme",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "docs-features",
+      "to": "mount-a-folder-from-this-computer",
       "rel": "references",
       "inferred": true
     },
