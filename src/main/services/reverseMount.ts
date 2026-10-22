@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises'
+import { constants as fsc } from 'node:fs'
 import path from 'node:path'
 import type { Duplex } from 'node:stream'
 // Default imports: ssh2 is CommonJS and Node's lexer cannot see `utils` as a
@@ -33,11 +34,18 @@ import {
  * speak SFTP on the channel directly. Design note: docs/10-internal/reverse-mount-spike.md.
  */
 
-const { STATUS_CODE, OPEN_MODE, flagsToString } = ssh2.utils.sftp
+const { STATUS_CODE, OPEN_MODE } = ssh2.utils.sftp
 const { SFTP } = sftpProtocol
 
 const WRITE_FLAGS =
   OPEN_MODE.WRITE | OPEN_MODE.APPEND | OPEN_MODE.CREAT | OPEN_MODE.TRUNC | OPEN_MODE.EXCL
+
+/** OpenSSH's sftp-server clamps a READ to this, and so does this one. */
+export const MAX_READ = 256 * 1024
+/** Open files and directories per share. sshfs keeps a handful; thousands is an attack. */
+export const MAX_HANDLES = 256
+/** Requests waiting for the queue, per share. Past this the channel is closed. */
+export const MAX_PENDING = 1024
 
 /**
  * ssh2's SFTP state machine, driven over any byte stream instead of an SSH
@@ -99,38 +107,62 @@ export function confine(remote: string): string[] | null {
   return segs
 }
 
-function inside(root: string, p: string): boolean {
-  return p === root || p.startsWith(root + path.sep)
+/**
+ * Whether `p` is `root` or under it. By `path.relative`, not by prefix: a
+ * prefix test against `root + sep` refuses everything when the share IS the
+ * filesystem root, whose realpath already ends in a separator (`/`, `C:\`).
+ */
+export function inside(root: string, p: string): boolean {
+  const rel = path.relative(root, p)
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel))
 }
+
+const isLink = (p: string): Promise<boolean> =>
+  fs.lstat(p).then(
+    (st) => st.isSymbolicLink(),
+    () => false
+  )
 
 /**
  * The local path for a remote one, with every symlink resolved and checked.
  *
- * The parent is always resolved, so `link/x` cannot reach through a link that
- * points out of the share. The leaf is resolved too unless the op acts on the
- * link itself (lstat, readlink, remove, rename). A dangling leaf link is
- * refused outright: creating through it would write wherever it points.
+ * Component by component, so every link on the way is resolved and must land
+ * inside. A link that cannot be resolved is refused the same way as one that
+ * resolves outside: answering "no such file" for one and "permission denied"
+ * for the other would tell the server whether a path on this machine exists.
+ *
+ * The leaf is resolved too unless the op acts on the link itself (lstat,
+ * readlink, remove, rename). A dangling leaf link is refused for the same
+ * reason, and because creating through it would write wherever it points.
  */
 async function locate(root: string, remote: string, followLeaf: boolean): Promise<string> {
   const segs = confine(remote)
-  if (!segs) throw new Denied(`${remote} is outside the share`)
+  if (!segs) throw new Denied()
   if (segs.length === 0) return root
-  const parent = await fs.realpath(path.join(root, ...segs.slice(0, -1)))
-  if (!inside(root, parent)) throw new Denied(`${remote} is outside the share`)
+  let parent = root
+  for (const seg of segs.slice(0, -1)) {
+    const next = path.join(parent, seg)
+    let real: string
+    try {
+      real = await fs.realpath(next)
+    } catch (err) {
+      if (await isLink(next)) throw new Denied()
+      throw err
+    }
+    if (!inside(root, real)) throw new Denied()
+    parent = real
+  }
   const leaf = path.join(parent, segs[segs.length - 1])
   if (!followLeaf) return leaf
   try {
     const real = await fs.realpath(leaf)
-    if (!inside(root, real)) throw new Denied(`${remote} is outside the share`)
+    if (!inside(root, real)) throw new Denied()
     return real
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
-    const dangling = await fs.lstat(leaf).then(
-      () => true,
-      () => false
-    )
-    if (dangling) throw new Denied(`${remote} is a link to nowhere`)
-    return leaf
+    if (err instanceof Denied) throw err
+    if (await isLink(leaf)) throw new Denied()
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return leaf
+    throw err
   }
 }
 
@@ -148,11 +180,34 @@ function toAttrs(st: import('node:fs').Stats): Attributes {
   }
 }
 
+/**
+ * A status code and a FIXED message for it. Never `err.message`: a Node error
+ * carries the full local path, `/Users/<name>/…`, and the server would read it.
+ */
+const STATUS_TEXT: Record<number, string> = {
+  [STATUS_CODE.NO_SUCH_FILE]: 'No such file',
+  [STATUS_CODE.PERMISSION_DENIED]: 'Permission denied',
+  [STATUS_CODE.FAILURE]: 'Failure'
+}
+
 function statusFor(err: unknown): number {
   const code = (err as NodeJS.ErrnoException).code
   if (code === 'ENOENT' || code === 'ENOTDIR') return STATUS_CODE.NO_SUCH_FILE
   if (code === 'EACCES' || code === 'EPERM' || code === 'EROFS') return STATUS_CODE.PERMISSION_DENIED
   return STATUS_CODE.FAILURE
+}
+
+/** SFTP open flags as the numeric ones `open(2)` takes; ssh2's string table lacks most write combinations. */
+export function openFlags(f: number): number {
+  const access =
+    f & OPEN_MODE.READ && f & OPEN_MODE.WRITE ? fsc.O_RDWR : f & OPEN_MODE.WRITE ? fsc.O_WRONLY : fsc.O_RDONLY
+  return (
+    access |
+    (f & OPEN_MODE.CREAT ? fsc.O_CREAT : 0) |
+    (f & OPEN_MODE.TRUNC ? fsc.O_TRUNC : 0) |
+    (f & OPEN_MODE.EXCL ? fsc.O_EXCL : 0) |
+    (f & OPEN_MODE.APPEND ? fsc.O_APPEND : 0)
+  )
 }
 
 /**
@@ -163,7 +218,7 @@ function statusFor(err: unknown): number {
  * THIS machine — on macOS that includes the account name. A target that lands
  * inside the share is rewritten relative to the link, which is also the only
  * form that resolves on the server's side of the mount. One that lands outside
- * is refused: the server gets nothing it could not already list.
+ * is refused, whether or not it exists.
  */
 export async function shareLinkTarget(root: string, link: string): Promise<string> {
   const raw = await fs.readlink(link)
@@ -175,14 +230,14 @@ export async function shareLinkTarget(root: string, link: string): Promise<strin
     const real = await fs.realpath(lexical).catch(() => null)
     if (real && inside(root, real)) landed = real
   }
-  if (!landed) throw new Denied('That link points outside the share')
+  if (!landed) throw new Denied()
   const rel = path.relative(landed === lexical ? dir : await fs.realpath(dir), landed)
   return rel.split(path.sep).join('/') || '.'
 }
 
 type Handle =
-  | { kind: 'file'; fh: fs.FileHandle }
-  | { kind: 'dir'; dir: string; names: string[] }
+  | { kind: 'file'; fh: fs.FileHandle; append: boolean }
+  | { kind: 'dir'; remote: string; dir: string; names: string[] }
 
 export interface Share {
   /** The local directory, from `shareRoot`. Nothing outside it is reachable. */
@@ -193,19 +248,25 @@ export interface Share {
 /** The share's root with its own symlinks resolved, which `locate` compares against. */
 export async function shareRoot(dir: string): Promise<string> {
   const root = await fs.realpath(dir)
-  if (!(await fs.stat(root)).isDirectory()) throw new Error(`${dir} is not a folder`)
+  if (!(await fs.stat(root)).isDirectory()) throw new Error('not a folder')
   return root
 }
 
 /**
+ * ONE queue for every share, so requests are handled one at a time across all
+ * of them. That is the confinement guarantee, not a convenience: `locate`
+ * checks a path and the op then opens it, and if anything could run between
+ * the two — a rename on this share, or the same folder shared twice and
+ * renamed through the other — a checked directory could be swapped for a link
+ * out of the share.
+ * ponytail: one op in flight for the whole app caps throughput; openat2 with
+ * RESOLVE_BENEATH (Linux only, not in Node) or per-root queues with fd-relative
+ * opens are the upgrade if that ever matters.
+ */
+let queue: Promise<void> = Promise.resolve()
+
+/**
  * Answer SFTP requests on `sftp` from the files under `share.root`.
- *
- * Requests are handled ONE AT A TIME. That is the confinement guarantee, not a
- * convenience: `locate` checks a path and the op then opens it, and if the
- * remote could slip a rename between the two it could swap a checked directory
- * for a link out of the share.
- * ponytail: serial queue caps throughput at one op in flight; openat2 with
- * RESOLVE_BENEATH (Linux only, not in Node) is the upgrade if that matters.
  */
 export function serveShare(sftp: SFTPWrapper, share: Share): void {
   // Synchronous on purpose: a request that arrives before its listener is
@@ -223,28 +284,54 @@ export function serveShare(sftp: SFTPWrapper, share: Share): void {
   }
   const getHandle = (buf: Buffer): Handle | undefined =>
     buf.length === 4 ? handles.get(buf.readUInt32BE(0)) : undefined
+  const roomForHandle = (): void => {
+    if (handles.size >= MAX_HANDLES) throw new Error('too many handles')
+  }
 
-  let queue: Promise<void> = Promise.resolve()
+  let pending = 0
+  let closed = false
   const serial = (reqid: number, op: () => Promise<void>): void => {
-    queue = queue.then(() =>
-      op().catch((err) => {
-        sftp.status(reqid, statusFor(err), (err as Error).message)
-      })
-    )
+    if (closed) return
+    // A server that queues faster than this machine answers is not sshfs.
+    // Hanging up is the only answer that does not grow without limit.
+    if (++pending > MAX_PENDING) {
+      closed = true
+      sftp.end()
+      return
+    }
+    queue = queue.then(async () => {
+      try {
+        if (!closed) await op()
+      } catch (err) {
+        const code = statusFor(err)
+        if (!closed) sftp.status(reqid, code, STATUS_TEXT[code])
+      } finally {
+        pending--
+      }
+    })
   }
   const writes = (reqid: number, op: () => Promise<void>): void =>
     serial(reqid, async () => {
-      if (share.readOnly) throw new Denied('This share is read-only')
+      if (share.readOnly) throw new Denied()
       await op()
     })
   const ok = (reqid: number): void => {
     sftp.status(reqid, STATUS_CODE.OK)
   }
+  const fileOf = (handle: Buffer): fs.FileHandle => {
+    const h = getHandle(handle)
+    if (h?.kind !== 'file') throw new Error('bad handle')
+    return h.fh
+  }
+  const appending = (handle: Buffer): boolean => {
+    const h = getHandle(handle)
+    return h?.kind === 'file' && h.append
+  }
 
   sftp.on('REALPATH', (reqid, p) =>
     serial(reqid, async () => {
       const segs = confine(p)
-      if (!segs) throw new Denied(`${p} is outside the share`)
+      if (!segs) throw new Denied()
       const name = '/' + segs.join('/')
       sftp.name(reqid, [{ filename: name, longname: name, attrs: {} as Attributes }])
     })
@@ -268,34 +355,31 @@ export function serveShare(sftp: SFTPWrapper, share: Share): void {
 
   sftp.on('OPEN', (reqid, p, flags, attrs) =>
     serial(reqid, async () => {
-      if (share.readOnly && flags & WRITE_FLAGS) throw new Denied('This share is read-only')
-      const mode = flagsToString(flags)
-      if (!mode) throw new Error(`Unsupported open flags ${flags}`)
-      const fh = await fs.open(await locate(root, p, true), mode, attrs?.mode ?? 0o644)
-      sftp.handle(reqid, newHandle({ kind: 'file', fh }))
+      if (share.readOnly && flags & WRITE_FLAGS) throw new Denied()
+      roomForHandle()
+      const fh = await fs.open(await locate(root, p, true), openFlags(flags), attrs?.mode ?? 0o644)
+      sftp.handle(reqid, newHandle({ kind: 'file', fh, append: (flags & OPEN_MODE.APPEND) !== 0 }))
     })
   )
   sftp.on('READ', (reqid, handle, offset, length) =>
     serial(reqid, async () => {
-      const h = getHandle(handle)
-      if (h?.kind !== 'file') throw new Error('Bad handle')
-      const buf = Buffer.alloc(length)
-      const { bytesRead } = await h.fh.read(buf, 0, length, offset)
+      const fh = fileOf(handle)
+      const want = Math.min(length, MAX_READ)
+      const buf = Buffer.alloc(want)
+      const { bytesRead } = await fh.read(buf, 0, want, offset)
       if (bytesRead === 0) sftp.status(reqid, STATUS_CODE.EOF)
       else sftp.data(reqid, buf.subarray(0, bytesRead))
     })
   )
   sftp.on('FSTAT', (reqid, handle) =>
     serial(reqid, async () => {
-      const h = getHandle(handle)
-      if (h?.kind !== 'file') throw new Error('Bad handle')
-      sftp.attrs(reqid, toAttrs(await h.fh.stat()))
+      sftp.attrs(reqid, toAttrs(await fileOf(handle).stat()))
     })
   )
   sftp.on('CLOSE', (reqid, handle) =>
     serial(reqid, async () => {
       const h = getHandle(handle)
-      if (!h) throw new Error('Bad handle')
+      if (!h) throw new Error('bad handle')
       handles.delete(handle.readUInt32BE(0))
       if (h.kind === 'file') await h.fh.close()
       ok(reqid)
@@ -303,14 +387,20 @@ export function serveShare(sftp: SFTPWrapper, share: Share): void {
   )
   sftp.on('OPENDIR', (reqid, p) =>
     serial(reqid, async () => {
+      roomForHandle()
       const dir = await locate(root, p, true)
-      sftp.handle(reqid, newHandle({ kind: 'dir', dir, names: await fs.readdir(dir) }))
+      sftp.handle(reqid, newHandle({ kind: 'dir', remote: p, dir, names: await fs.readdir(dir) }))
     })
   )
   sftp.on('READDIR', (reqid, handle) =>
     serial(reqid, async () => {
       const h = getHandle(handle)
-      if (h?.kind !== 'dir') throw new Error('Bad handle')
+      if (h?.kind !== 'dir') throw new Error('bad handle')
+      // Resolved again on every call, and it must still be the same folder.
+      // Between two READDIRs the server can rename the opened directory away
+      // and put a link to somewhere outside in its place; the names were read
+      // at OPENDIR, but the sizes and times below are read now.
+      if ((await locate(root, h.remote, true)) !== h.dir) throw new Denied()
       const batch = h.names.splice(0, 100)
       if (batch.length === 0) return void sftp.status(reqid, STATUS_CODE.EOF)
       const entries = []
@@ -328,9 +418,10 @@ export function serveShare(sftp: SFTPWrapper, share: Share): void {
   // before a path is even looked at.
   sftp.on('WRITE', (reqid, handle, offset, data) =>
     writes(reqid, async () => {
-      const h = getHandle(handle)
-      if (h?.kind !== 'file') throw new Error('Bad handle')
-      await h.fh.write(data, 0, data.length, offset)
+      // An append handle writes at the end, whatever offset was sent — as
+      // OpenSSH's sftp-server does. pwrite() honours the offset on macOS even
+      // under O_APPEND, so the offset is dropped rather than trusted.
+      await fileOf(handle).write(data, 0, data.length, appending(handle) ? null : offset)
       ok(reqid)
     })
   )
@@ -350,9 +441,7 @@ export function serveShare(sftp: SFTPWrapper, share: Share): void {
   )
   sftp.on('FSETSTAT', (reqid, handle, attrs) =>
     writes(reqid, async () => {
-      const h = getHandle(handle)
-      if (h?.kind !== 'file') throw new Error('Bad handle')
-      await applyAttrs(h.fh, attrs)
+      await applyAttrs(fileOf(handle), attrs)
       ok(reqid)
     })
   )
@@ -385,6 +474,7 @@ export function serveShare(sftp: SFTPWrapper, share: Share): void {
   // of the share and then race a check, so it does not get to make one.
 
   sftp.on('close', () => {
+    closed = true
     for (const h of handles.values()) if (h.kind === 'file') void h.fh.close().catch(() => {})
     handles.clear()
   })
