@@ -100,8 +100,11 @@ let port: number
 let tmp: string
 const SID = 'srv-session'
 const wc = { isDestroyed: () => false, send: () => {} } as never
+// Password, not agent: ssh2 is faked, but agent auth still resolves a real
+// agent socket first, and a CI runner has none — every connect failed there
+// and no share ever started, while a Mac with launchd's agent passed.
 const cfg = (sessionId: string) =>
-  ({ sessionId, serverId: SID, host: '127.0.0.1', port, username: 'deploy', auth: 'agent', cols: 80, rows: 24, hops: [] }) as never
+  ({ sessionId, serverId: SID, host: '127.0.0.1', port, username: 'deploy', auth: 'password', password: 'unused', cols: 80, rows: 24, hops: [] }) as never
 const until = async (pred: () => boolean, what: string): Promise<void> => {
   for (let i = 0; i < 200; i++) {
     if (pred()) return
