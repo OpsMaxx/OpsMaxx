@@ -4,6 +4,7 @@ import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
 import { toast } from '../../store/toast'
 import { bridgeOn } from '../../lib/bridge'
+import { agentServerFields } from '../../lib/agentServerPatch'
 import { rdpSecretId } from '../../../../shared/rdp'
 import type { DbKind } from '../../../../shared/db'
 import { saveDatabaseEdit } from '../../store/dbEditor'
@@ -282,7 +283,8 @@ export function AgentConfigWatcher(): null {
             case 'server.update': {
               const before = useApp.getState().servers.find((s) => s.id === req.serverId)
               if (!before) throw new Error('That server no longer exists.')
-              const { password, keyPath, passphrase, certificatePath, route, ...rest } = req.patch
+              const { password, keyPath, passphrase, certificatePath, route } = req.patch
+              const rest = agentServerFields(req.patch)
               const hops = toHops(route)
               useApp.getState().updateServer(req.serverId, { ...rest, ...(hops ? { route: hops } : {}) })
 
