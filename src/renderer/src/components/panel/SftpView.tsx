@@ -31,6 +31,7 @@ import type { Server } from '../../types'
 import type { SftpEntry, SftpProgress, SftpResult, SftpUploadSummary, SshAuth } from '../../../../shared/ssh'
 import { bridgeOn } from '../../lib/bridge'
 import { EmptyState } from '../common/EmptyState'
+import { LocalMountsButton } from './LocalMounts'
 
 const asAuth = (a: string): SshAuth => (a === 'password' || a === 'agent' ? a : 'key')
 
@@ -991,6 +992,9 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
         >
           <Upload size={13} /> Upload
         </button>
+        {/* Reverse sshfs needs `exec` on the server, which a files-only
+            account does not have, and a local tab has no server at all. */}
+        {server && !server.sftpOnly && <LocalMountsButton server={server} />}
       </div>
 
       <div className="row" style={{ marginBottom: 12, gap: 6, position: 'relative' }}>
