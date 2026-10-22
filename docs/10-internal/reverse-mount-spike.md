@@ -15,7 +15,7 @@ docgov:
 > Internal Note. Historical record. Correct only factual errors. Keep it under 400 lines; 1000 triggers review.
 
 > **Status: shipped as a feature, 2026-10-22.** The spike became **Folder shares**. They are defined in the
-> server editor like `docker -v host:path:ro`, mounted when an SSH session to the server opens, and shown on
+> server editor like `docker -v host:path:ro`, mounted when a terminal to the server connects, and shown on
 > the tab's view bar. User guide: [Mount a folder from this computer](../08-user/guides/mount-a-folder-from-this-computer.md).
 > Code: `src/main/services/reverseMount.ts` and `src/shared/localMounts.ts`. Tests: `tests/reverseMount.test.ts`,
 > `tests/localMounts.test.ts`, `tests/localMountsDialog.test.tsx` and `tests/reverseMountNotExposed.test.ts`.
@@ -94,18 +94,27 @@ as a path relative to the link, and refuses one that lands outside.
 
 ## Teardown
 
-Each mount holds its own reference on the pooled connection. That way closing the terminal
-that started it cannot destroy the connection before the unmount runs.
+As shipped (the spike's version differed; see the end of this note).
 
-- **Explicit, or session close:** `ssh.ts` `cleanup()` calls `unmountSession`, which runs
-  `fusermount3 -uz <mp> || fusermount -uz <mp>` and then closes the channel. `-z` is a
-  lazy unmount, so a remote shell sitting inside the mount does not pin it.
-- **Connection lost:** sshfs reads EOF and exits. On sshfs 3.7.3 / libfuse 3.14 the mount
-  was gone afterwards (measured below). Older sshfs may leave
-  *Transport endpoint is not connected* behind, and nothing can clean that up until the
-  user reconnects.
-- The mount point directory is created with `mkdir -p` and left in place after unmount. It
-  is not removed, because it may be a directory the user already had.
+Each mount holds its own reference on the pooled connection, taken before the first await of the mount,
+so closing the terminal that started it cannot destroy the connection under a mount still being set up.
+
+- **The last terminal to a server closes:** `ssh.ts` `cleanup()` calls the `onServerSession` listener with
+  `closed`, which `wireFolderShares` routes to `unmountServer`. Each mount's `teardown` closes the sshfs
+  channel (sshfs exits and libfuse unmounts), waits up to 3 s for it, then runs
+  `fusermount3 -uz <mp> || fusermount -uz <mp>; ! mountpoint -q <mp>` to clear and check whatever is
+  left. `-z` is a lazy unmount, so a remote shell sitting inside the mount does not pin it. If the mount
+  point is still a mount afterwards, the share shows **Failed** with that reason instead of vanishing.
+- **Mid-mount:** mount and teardown of one `serverId:mountpoint` are serialised. A teardown asked for while
+  the mount is being set up wakes it (`wake`) and then undoes whatever it got to, so a mount that lands
+  after its terminal closed is still unmounted, and a late unmount cannot remove a newer mount.
+- **Quit:** `before-quit` runs `unmountAll` first, bounded at 2 s, then the usual teardown, so fusermount
+  runs while the pool is still up.
+- **Connection lost:** sshfs reads EOF and exits. On sshfs 3.7.3 / libfuse 3.14 the mount was gone
+  afterwards (measured below). Older sshfs may leave *Transport endpoint is not connected* behind. The
+  mount script clears that at the start of the next mount.
+- The mount point directory is created with `mkdir -p` and left in place after unmount. It is not removed,
+  because it may be a directory the user already had.
 
 ## Measured on the test host
 
@@ -119,7 +128,7 @@ sshfs was installed for the run and removed after it.
   expected, with mode 600 preserved. `ln -s` was refused. A 20 MiB `dd` wrote at 2.2 MB/s and
   the sha256 matched on both sides. At this RTT the network bound is sshfs's write
   pipelining, not the serial queue, which spends sub-millisecond local time per op.
-- **Teardown:** after `unmountShare`, after `unmountSession`, and after the connection was
+- **Teardown:** after `unmountShare`, after the spike's per-session unmount (now `unmountServer`), and after the connection was
   dropped with the mount up, `mountpoint` reported *not a mountpoint* and no `sshfs`
   process was left.
 - `df` on the mount shows 1000G free, because `statvfs@openssh.com` is not implemented, so
@@ -135,15 +144,30 @@ sshfs was installed for the run and removed after it.
   of the server's connection settings: a **Folder shares** section in the server editor, one row per share.
   It mounts with the session and unmounts with the last one. The tab's view bar carries an indicator with
   state, Unmount and Retry, and a shortcut back to that section (`openServerEditor(id, 'shares')`).
-- **Saved shares and auto-mount.** Shares live on the server record (`Server.shares`). They are written by
-  `setServerShares`, because `addServer` builds its record field by field. On save, `applyShareChanges`
-  unmounts what was removed or changed and mounts what is new.
-  Main reads them from the data blob (`syncShares`) and mounts the auto ones when a terminal's shell is ready. A
-  failure is recorded in the mount's status, never raised as a toast.
-- **Only chosen folders.** `mountShare` refuses a local path that came from neither the OS folder dialog in
-  this run nor a saved share.
-- **Agents.** `mcpDataCache` never reads `shares`, and the renderer now applies an `update_server` patch by
+- **Per-machine shares, never on the server record** (after expert review). Server records sync between
+  devices (addy) and ride inside every backup, so a share on one would arrive on another machine and mount
+  that machine's folder there. Shares now live in main's `opsmaxx-folder-shares.json`, which is not in the
+  backup payload or any addy collection. backup.ts lists it only in `ALL_DATA_FILES`, so "delete everything"
+  removes it. The editor reads and writes them over `mounts:view` / `mounts:set-shares`, and main reconciles
+  live mounts on save.
+- **Identity.** Each share stores `serverIdentity` (account, address, port, cloud target) as saved. If the
+  server record changes, whether by the user, a synced edit or an agent's `update_server`, the share is
+  *stale*: it does not auto-mount or mount until re-enabled (`mounts:reenable`, or saving the editor).
+- **Retry policy.** A setup failure (no sshfs, no /dev/fuse, the mount point not empty, the local folder
+  gone) is kept and not retried by auto-mount, even across reconnects; Retry is manual. A failure because the
+  connection dropped is cleared with the session and remounts on reconnect.
+- **The folder is the renderer's to choose.** The UI offers the OS folder dialog, but main does not check
+  where a folder came from. The renderer is the app's own UI, and agents cannot reach these IPC channels.
+- **Agents.** `mcpDataCache` never reads `shares`, and the renderer applies an `update_server` patch by
   named field (`agentServerFields`) instead of spreading it.
+- **SFTP server hardening** (after expert review): READ clamped to 256 KiB as OpenSSH does; at most 256
+  open handles per share; more than 1024 queued requests closes the channel; one serial queue across ALL
+  shares (two shares of one folder could otherwise race a check against an open); READDIR re-resolves its
+  directory on every call; status messages are fixed per code, never `err.message`, which carries local
+  paths; a link out of the share is refused identically whether or not its target exists; containment by
+  `path.relative`, so a share of `/` or `C:\` works; open flags mapped to numeric `O_*`, because ssh2's
+  string table has no `WRITE|CREAT`, `WRITE|CREAT|EXCL` or `READ|WRITE|CREAT`, which broke `touch`, `cp`,
+  sqlite and git on read-write shares; an append handle writes at the end, as sftp-server does.
 - **The script.** `~/` is expanded by the shell without quoting the rest away. A non-empty mount point is
   refused, because libfuse 3 would mount over it and hide the files. A stale `Transport endpoint is not
   connected` mount point is cleared first. Each failure it can name has its own exit code, which

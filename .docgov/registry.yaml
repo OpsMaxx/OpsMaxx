@@ -255,8 +255,8 @@ documents:
     authority: audience
     visibility: public
     title: Mount a folder from this computer
-    hash: 8cd7460dcd98527b
-    lines: 103
+    hash: cd643cbefe049677
+    lines: 108
   packaging-winget-readme:
     path: packaging/winget/README.md
     type: unknown
@@ -280,8 +280,8 @@ documents:
     visibility: internal
     title: Reverse mount spike
     status: draft
-    hash: 0cba13b3d62107ff
-    lines: 157
+    hash: f65c4696dea68bbb
+    lines: 181
   screenshot-demo:
     path: docs/05-engineering/development/screenshot-demo.md
     type: engineering.development
