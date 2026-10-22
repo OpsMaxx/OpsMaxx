@@ -33,10 +33,10 @@ Under the hood it is **sshfs**. Programs on the server see an ordinary folder, a
 1. Open the server's connection settings: right-click it, then **Edit server**.
 2. Under **Folder shares**, click **Add folder share** and pick a folder.
 3. Check the row:
-   - **Mount point.** The path on the server, after the arrow. It defaults to `~/opsmaxx/<folder name>` in your home folder there. It is created if it does not exist, and it must be empty: mounting over files would hide them, so OpsMaxx refuses.
+   - **Mount point.** The path on the server, after the arrow. It defaults to `~/opsmaxx/<folder name>` in your home folder there. A path without a leading `/` is in your home folder too, so `site`, `~/site` and `$HOME/site` are the same place and only one folder can be shared there. It is created if it does not exist, and it must be empty: mounting over files would hide them, so OpsMaxx refuses.
    - **Access.** Defaults to **Read-only**. Choose **Read-write** only if the server should be able to change these files.
    - **Mount on connect.** On by default. Turn it off to keep the share defined but mount it only when you ask.
-4. Click **Save Changes**. If something in the shares is wrong, such as two folders at one mount point, the reason is shown beside the button and the row is marked.
+4. Click **Save Changes**. If something in the shares is wrong, such as two folders at one mount point, the reason is shown beside the button and that row's mount point is outlined in red.
 
 If a terminal to the server is already open, a share set to mount on connect mounts straight away. Otherwise it mounts the next time you connect.
 
@@ -69,7 +69,7 @@ The tab's view bar, next to the server's address, has a **Folder shares** button
 - If the connection drops, sshfs on the server stops. A mount point left behind is cleared the next time the share mounts, and a reconnect mounts the share again.
 - A failure from the server's setup, such as no sshfs, no `/dev/fuse` or a mount point that is not empty, is **not** retried on every reconnect. Fix the cause, then press **Retry**.
 - Removing a share in the server settings, or changing its folder, mount point or access, unmounts the old mount when you save.
-- If the server's address, port or account changes after a share was set up, the share is **paused** and does not mount. This applies whoever changed it, whether you, a synced edit from another device or an AI agent. The Folder shares dialog says so. **Re-enable for this address** (or saving the server's settings yourself) starts it again.
+- A share only mounts over a connection to the server it was given to. If the server's address, port or account changes after a share was set up, the share is **paused** and does not mount. This applies whoever changed it, whether you, a synced edit from another device or an AI agent. The Folder shares dialog says so. **Re-enable for this address** (or saving the server's settings yourself) starts it again.
 
 ## Verification
 
@@ -81,7 +81,7 @@ The tab's view bar, next to the server's address, has a **Folder shares** button
   |---|---|
   | sshfs is not installed on this server | `sudo apt install sshfs` (Debian, Ubuntu) or `sudo dnf install fuse-sshfs` (Fedora, RHEL) |
   | /dev/fuse is not available on this server | Containers usually lack it. On a full machine, `sudo modprobe fuse` |
-  | *account* is not allowed to use /dev/fuse | On systems where `/dev/fuse` belongs to a `fuse` group (some older or hardened ones; not Ubuntu or Debian, which have no such group), add the account with `sudo usermod -aG fuse <user>`. Then close every tab to this server, so the next one connects afresh: an open connection keeps the account's old groups |
+  | *account* is not allowed to use /dev/fuse | On systems where `/dev/fuse` belongs to a `fuse` group (some older or hardened ones; not Ubuntu or Debian, which have no such group), add the account on the server with `sudo usermod -aG fuse <user>`, then press **Retry**. Retry opens a new connection for the mount, which is what picks up the new group; an existing connection keeps the account's old groups |
   | The server refused the FUSE mount | Seen inside most containers, which cannot mount filesystems |
   | The mount point already has files in it | Choose an empty or new folder |
 
@@ -93,14 +93,14 @@ These limits are enforced by OpsMaxx on this computer, not by the server. They h
 
 - **Read-only** refuses every write, create, rename, delete, permission change and new folder that the server asks for. The mount is also made with `-o ro`, but only so that the server shows a clear error. That flag is not what keeps your files safe.
 - **The share's edges.** Paths that climb out of the folder with `..`, and symbolic links that lead outside it, are refused, with the same answer whether or not the place they point to exists. A link that points outside the folder cannot be read or followed. A link that points inside it is shown as a relative link. Error messages the server sees are fixed words, never a path on this computer.
-- **Limits.** One read returns at most 256 KiB, a share can hold a bounded number of files open at once, and a server that sends requests faster than they can be answered is disconnected.
+- **Limits.** One read returns at most 256 KiB, a share can hold a bounded number of files open at once, and a server that sends requests faster than they can be answered is disconnected. Only regular files can be opened: a named pipe or a device inside a share is refused, because opening one could wait forever.
 - **No new links, and no ownership changes.** The server cannot create symbolic links in the folder, and requests to change a file's owner are ignored.
 - **No AI agents.** Shares are defined only in the server settings and controlled only from the tab. Nothing on the MCP bridge or the command-line bridge can mount, unmount or change a share, or list which folders are shared. An agent that edits a server's connection details cannot add a share, and changing the address pauses the ones already there. An agent with command access on the server can still read a mounted folder, as described above.
 
 Two things are not done:
 
 - Free space reported for the mount (`df`) is a placeholder, not the free space on this computer.
-- Speed depends on the connection: every file operation is a round trip to this computer, and OpsMaxx answers one file operation at a time across all shares. That is part of how the share's edges are kept.
+- Speed depends on the connection: every file operation is a round trip to this computer, and OpsMaxx answers one file operation at a time across all shares. That is part of how the share's edges are kept. It also means a file on a network drive that stops responding, inside any share, holds up every share until it answers.
 
 ## Related
 

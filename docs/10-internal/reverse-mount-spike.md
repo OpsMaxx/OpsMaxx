@@ -173,6 +173,24 @@ sshfs was installed for the run and removed after it.
   connected` mount point is cleared first. Each failure it can name has its own exit code, which
   `explainMountFailure` turns into a sentence and a fix.
 
+## After re-review
+
+- **Identity is checked against the connection, not only the record.** `acquire` stamps `dialledAs` (account,
+  address, port and cloud target as asked for) on each pooled connection, and `mountShare` refuses when the
+  share's stored identity differs from it. Otherwise a terminal opened while the record named host B would carry
+  A's folder to B after the record moved back to A.
+- **Regular files only.** OPEN `lstat`s the resolved path and refuses anything else, and adds `O_NONBLOCK`. A
+  FIFO or device would block the one global queue. A hung network volume inside a share still stalls every share;
+  that is the queue's ceiling, recorded beside it.
+- **Classification.** sshfs closing with no exit status, or the mount check timing out or losing its connection,
+  is `dropped` and remounts on reconnect. Only the script's own exit codes and sshfs refusing the mount count as
+  `setup`.
+- **Fuse group.** Retry after a fuse-group failure evicts the server's pooled connection and dials a fresh one for
+  the mount (`needsNewConnection`), because the pool keeps an idle connection, with the old groups, for 15 minutes.
+- **One key per mount point.** `normalizeMountpoint` makes `~/x`, `x`, `$HOME/x` and `~//x/./` one key, and
+  refuses `..`.
+- A leftover `shares` field on a server record is dropped in `replaceAll`, so it is not written back.
+
 ## Not done
 
 - Performance work beyond the serial queue: the `posix-rename`, `statvfs` and `fsync` extensions.
