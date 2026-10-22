@@ -32,11 +32,14 @@ import {
   sshExecStream,
   sshOpenFresh,
   sshTest,
-  liveServerConnection
+  liveServerConnection,
+  acquire,
+  release
 } from './services/ssh'
 import {
   mountShare,
   mountsView,
+  needsNewConnection,
   onMountsChanged,
   reenableShares,
   refreshShareViews,
@@ -1342,6 +1345,28 @@ ipcMain.handle('mounts:mount', async (_e, serverId: unknown, shareId: unknown) =
       error: 'No terminal to this server is open.',
       fix: 'Folder shares are mounted over a terminal connection. Open a terminal to this server first.'
     }
+  // A fuse-group failure is fixed on the server by adding the account to the
+  // group, and group membership is read when a connection authenticates. The
+  // pool keeps the old connection for as long as any tab, or its idle window,
+  // holds it, so Retry evicts the server's pooled connection and dials one
+  // afresh for the mount. Terminals already open keep theirs.
+  if (needsNewConnection(serverId, shareId)) {
+    const record = getCachedServer(serverId)
+    if (!record) return { ok: false, error: 'That server is no longer saved.' }
+    poolEvictServer(serverId)
+    let fresh: Awaited<ReturnType<typeof acquire>>
+    try {
+      fresh = await acquire(preparedSshTarget({ ...serverToSshConfig(record), serverId }))
+    } catch (err) {
+      return { ok: false, error: `Could not reconnect to the server: ${err instanceof Error ? err.message : String(err)}` }
+    }
+    try {
+      return await mountShare(serverId, fresh, shareId, true)
+    } finally {
+      // The mount holds its own reference; this one was only for the dial.
+      release(fresh)
+    }
+  }
   return mountShare(serverId, conn, shareId, true)
 })
 ipcMain.handle('mounts:unmount', (_e, serverId: unknown, mountpoint: unknown) =>

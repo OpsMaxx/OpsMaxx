@@ -81,6 +81,21 @@ export function defaultMountpoint(localDir: string): string {
   return `~/opsmaxx/${safe || 'folder'}`
 }
 
+/**
+ * One spelling per mount point, so `~/x`, `x`, `$HOME/x` and `~//x/./` are
+ * the same key and two shares cannot be stacked on one directory under
+ * different names. A relative path is relative to the login's home, which is
+ * where the exec channel starts, so it becomes `~/…`. `..` is kept, for
+ * `mountpointProblem` to refuse.
+ */
+export function normalizeMountpoint(mp: string): string {
+  let p = mp.trim().replace(/^(\$HOME|\$\{HOME\})(?=\/|$)/, '~')
+  const home = p === '~' || p.startsWith('~/') || !p.startsWith('/')
+  if (p === '~' || p.startsWith('~/')) p = p.slice(1)
+  const segs = p.split('/').filter((s) => s !== '' && s !== '.')
+  return home ? (segs.length ? `~/${segs.join('/')}` : '~') : `/${segs.join('/')}`
+}
+
 /** Why a mount point cannot be used, or null if it can. */
 export function mountpointProblem(mp: string): string | null {
   const t = mp.trim()
@@ -89,9 +104,9 @@ export function mountpointProblem(mp: string): string | null {
   // eslint-disable-next-line no-control-regex
   if (/[\x00-\x1f\x7f]/.test(mp)) return 'The mount point has a control character in it.'
   if (mp.length > 1024) return 'The mount point is too long.'
-  const bare = mp.replace(/\/+$/, '')
-  if (bare === '' || bare === '~' || bare === '.' || bare === '..')
-    return 'Mount into a folder of its own, not over the root or your home folder.'
+  const n = normalizeMountpoint(mp)
+  if (n === '/' || n === '~') return 'Mount into a folder of its own, not over the root or your home folder.'
+  if (n.split('/').includes('..')) return 'The mount point cannot contain "..".'
   return null
 }
 
@@ -134,8 +149,9 @@ export function explainMountFailure(code: number | null, stderr: string, usernam
         // /dev/fuse open to everyone. And group membership is read when the
         // connection authenticates, which the pool keeps alive across tabs.
         fix:
-          `Where /dev/fuse belongs to a fuse group (some older or hardened systems; not Ubuntu or Debian), add the account: ` +
-          `sudo usermod -aG fuse ${username || '<user>'}. Then close every tab to this server, so the next one connects afresh.`
+          `Where /dev/fuse belongs to a fuse group (some older or hardened systems; not Ubuntu or Debian), add the account ` +
+          `on the server: sudo usermod -aG fuse ${username || '<user>'}. Then press Retry: it opens a new connection, ` +
+          `which is what picks up the new group.`
       }
     case MOUNT_EXIT.notEmpty:
       return {
@@ -192,8 +208,9 @@ export function sharesProblem(shares: LocalShare[]): { shareId: string; message:
   for (const s of shares) {
     const p = mountpointProblem(s.mountpoint)
     if (p) return { shareId: s.id, message: p }
-    if (seen.has(s.mountpoint)) return { shareId: s.id, message: `Two folders are shared at ${s.mountpoint}.` }
-    seen.add(s.mountpoint)
+    const key = normalizeMountpoint(s.mountpoint)
+    if (seen.has(key)) return { shareId: s.id, message: `Two folders are shared at ${key}.` }
+    seen.add(key)
   }
   return null
 }

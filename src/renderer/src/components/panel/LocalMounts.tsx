@@ -363,7 +363,22 @@ function FolderSharesDialog({
                 <td className="mono selectable">{st.localDir}</td>
                 <td className="mono selectable">{st.mountpoint}</td>
                 <td>{st.readOnly ? 'Read-only' : 'Read-write'}</td>
-                <td>{st.state === 'unmounting' ? 'Unmounting…' : 'Mounted'} (no longer saved)</td>
+                <td>
+                  {st.state === 'mounted'
+                    ? 'Mounted'
+                    : st.state === 'mounting'
+                      ? 'Mounting…'
+                      : st.state === 'unmounting'
+                        ? 'Unmounting…'
+                        : 'Failed'}{' '}
+                  (no longer saved)
+                  {st.error && (
+                    <div className="field-hint danger selectable" role="alert">
+                      {st.error}
+                      {st.fix && <div className="faint">{st.fix}</div>}
+                    </div>
+                  )}
+                </td>
                 <td>
                   <button className="btn sm" onClick={() => void unmount(st.mountpoint, st.shareId)}>
                     Unmount

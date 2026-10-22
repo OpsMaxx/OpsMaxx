@@ -1370,6 +1370,11 @@ button {
 .input::placeholder {
   color: var(--text-faint);
 }
+/* A field a form has marked wrong. aria-invalid is what a screen reader
+   hears; this is what everyone else sees. */
+.input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
 .input-group {
   display: flex;
   gap: var(--sp-2);

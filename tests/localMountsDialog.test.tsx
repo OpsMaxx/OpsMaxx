@@ -110,6 +110,16 @@ describe('the folder shares indicator', () => {
     expect(api.reenable).toHaveBeenCalledWith('s1')
   })
 
+  it('shows a share that is no longer saved with its real state and reason', async () => {
+    stub({
+      shares: [],
+      mounts: [{ ...mounted, shareId: 'gone', state: 'failed', error: 'Could not unmount ~/opsmaxx/site on the server.' }]
+    })
+    await openIndicator()
+    expect(await screen.findByText(/Failed\s*\(no longer saved\)/)).toBeTruthy()
+    expect(screen.getByText('Could not unmount ~/opsmaxx/site on the server.')).toBeTruthy()
+  })
+
   it('opens the server editor on its Folder shares section', async () => {
     stub()
     useApp.setState({ servers: [server], modal: null, editServerId: null, editServerSection: null })
@@ -167,6 +177,15 @@ describe('the Folder shares section of the server editor', () => {
     expect(bad.getAttribute('aria-invalid')).toBe('true')
     expect(document.getElementById(bad.getAttribute('aria-describedby')!)!.textContent).toMatch(/Two folders/)
     expect(screen.getByLabelText('Mount point on the server for site').getAttribute('aria-invalid')).toBeNull()
+  })
+})
+
+describe('loading saved data', () => {
+  it('drops a leftover shares field from server records, so it is never written back', () => {
+    useApp.getState().replaceAll({
+      servers: [{ ...server, workspaceId: 'ws', shares: [share] } as unknown as Server]
+    } as never)
+    expect(Object.keys(useApp.getState().servers[0])).not.toContain('shares')
   })
 })
 

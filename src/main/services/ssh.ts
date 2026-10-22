@@ -960,6 +960,17 @@ export interface PooledConnection {
   // the caller because the pool outlives any one acquire(): the socket must
   // stay up until the last session using it lets go.
   transportRelease?: () => void
+  /**
+   * The target this connection was dialled FOR: account, address, port and
+   * cloud target as the caller asked, before any VPN forward or cloud broker
+   * rewrote the address. Set by the first `acquire` that returned it.
+   *
+   * A folder share is checked against this, not against the saved record: the
+   * record can have changed since the connection was made, and a share
+   * mounted over a connection to host B because the record now says A would
+   * hand B the folder.
+   */
+  dialledAs?: { host: string; port: number; username: string; cloud?: CloudTarget }
 }
 
 const pool = new Map<string, PooledConnection>()
@@ -1196,9 +1207,14 @@ export async function acquire(
    * between. `connecting` is included so a second caller joins an open already
    * in flight instead of starting a second broker for the same server.
    */
+  const asked = { host: cfg.host, port: cfg.port || 22, username: cfg.username, cloud: cfg.cloudTarget }
+  const stamp = (c: PooledConnection): PooledConnection => {
+    if (!c.dialledAs) c.dialledAs = asked
+    return c
+  }
   const cloudKey = cfg.cloudTarget && !cfg.hops?.length ? hopKey(cfg) : null
   if (cloudKey !== null && (pool.has(cloudKey) || connecting.has(cloudKey))) {
-    return await acquireOne(cfg, null, allowPrompt)
+    return stamp(await acquireOne(cfg, null, allowPrompt))
   }
 
   /**
@@ -1270,7 +1286,7 @@ export async function acquire(
       if (conn.transportRelease) dial.release()
       else conn.transportRelease = dial.release
     }
-    return conn
+    return stamp(conn)
   } catch (err) {
     dial?.release()
     throw err

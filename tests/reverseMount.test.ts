@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { duplexPair } from 'node:stream'
+import { execFileSync } from 'node:child_process'
 import ssh2, { type SFTPWrapper } from 'ssh2'
 import {
   MAX_HANDLES,
@@ -274,6 +275,18 @@ describe('reverse mount: what a hostile server cannot make it do', () => {
     const hungUp = new Promise<void>((r) => here.once('finish', () => r()))
     for (let i = 0; i < MAX_PENDING + 50; i++) c.stat('/', () => {})
     await hungUp
+  })
+
+  it.skipIf(process.platform === 'win32')('refuses to open a FIFO, which would block every share', async () => {
+    const dir = fs.mkdtempSync(path.join(tmp, 'fifo-'))
+    execFileSync('mkfifo', [path.join(dir, 'pipe')])
+    fs.writeFileSync(path.join(dir, 'ok.txt'), 'fine')
+    const c = await connect(dir, false)
+    expect(await code((cb) => c.open('/pipe', 'r', cb))).toBe(STATUS_CODE.PERMISSION_DENIED)
+    expect(await code((cb) => c.open('/pipe', 'w', cb))).toBe(STATUS_CODE.PERMISSION_DENIED)
+    // And the queue every share shares is still moving.
+    expect(await code((cb) => c.stat('/ok.txt', cb))).toBe(STATUS_CODE.OK)
+    c.end()
   })
 
   it('re-checks a directory handle on every READDIR, so a swapped-in link leaks nothing', async () => {

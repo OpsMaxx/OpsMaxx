@@ -17,12 +17,14 @@ interface World {
   cmds: string[]
   /** How long the "is it mounted" check takes. */
   checkMs: number
+  /** How long the server takes to open the sshfs channel. */
+  openMs: number
   /** Live sshfs channels, to drop them from the server side. */
   sshfs: Set<EventEmitter & { close: () => void }>
   /** Plays sshfs on the server's end of the channel. Set once the module under test has loaded. */
   speak: (stream: import('node:stream').Duplex) => void
 }
-const world = vi.hoisted((): World => ({ cmds: [], checkMs: 5, sshfs: new Set(), speak: () => {} }))
+const world = vi.hoisted((): World => ({ cmds: [], checkMs: 5, openMs: 2, sshfs: new Set(), speak: () => {} }))
 
 vi.mock('ssh2', async (orig) => {
   const real = await orig<typeof import('ssh2')>()
@@ -49,6 +51,7 @@ vi.mock('ssh2', async (orig) => {
     exec(cmd: string, ...rest: unknown[]): void {
       const cb = rest[rest.length - 1] as (err: Error | undefined, ch: unknown) => void
       world.cmds.push(cmd)
+      const opening = cmd.startsWith('sh -c') ? world.openMs : 2
       setTimeout(() => {
         if (cmd.startsWith('sh -c')) {
           const [mine, theirs] = duplexPair()
@@ -68,7 +71,7 @@ vi.mock('ssh2', async (orig) => {
           },
           cmd.includes('for i in') ? world.checkMs : 3
         )
-      }, 2)
+      }, opening)
     }
     end(): void {
       for (const s of world.sshfs) s.close()
@@ -86,7 +89,7 @@ vi.mock('../src/main/services/knownhosts', async (orig) => ({
   verifyHostKey: () => Promise.resolve(true)
 }))
 
-const { sshConnect, sshClose } = await import('../src/main/services/ssh')
+const { sshConnect, sshClose, poolList } = await import('../src/main/services/ssh')
 const { listMounts, setShares, sftpOverStream, wireFolderShares } = await import('../src/main/services/reverseMount')
 world.speak = (stream) => void sftpOverStream(stream, false)
 const { refreshMcpDataCache } = await import('../src/main/services/mcpDataCache')
@@ -107,6 +110,8 @@ const until = async (pred: () => boolean, what: string): Promise<void> => {
   throw new Error(`timed out waiting for ${what}: ${JSON.stringify(listMounts(SID))}`)
 }
 const isUnmount = (c: string): boolean => !c.startsWith('sh -c') && c.includes('fusermount')
+/** References held on this server's pooled connection: terminals plus mounts. */
+const refs = (): number => poolList().reduce((n, p) => n + p.sessions, 0)
 const states = (): string[] => listMounts(SID).map((m) => m.state)
 
 beforeAll(async () => {
@@ -147,9 +152,12 @@ describe('folder shares follow the terminal', () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(states()).toEqual(['mounted'])
 
+    // Two terminals and the mount.
+    expect(refs()).toBe(2)
     sshClose('t1')
     await until(() => listMounts(SID).length === 0, 'unmounted')
     expect(world.cmds.some(isUnmount)).toBe(true)
+    expect(refs()).toBe(0)
   })
 
   it('mounts again on reconnect after the connection drops', async () => {
@@ -178,6 +186,24 @@ describe('folder shares follow the terminal', () => {
     expect(Date.now() - t).toBeLessThan(2000)
     expect(world.cmds.filter(isUnmount).length).toBe(before + 1)
     expect(world.sshfs.size).toBe(0)
+    expect(refs()).toBe(0)
     world.checkMs = 5
+  })
+
+  it('undoes a mount whose channel is still opening when its terminal closes', async () => {
+    // The window the original bug lived in: the server has been asked to run
+    // sshfs and has not answered yet.
+    world.openMs = 300
+    const before = world.cmds.filter(isUnmount).length
+    await sshConnect(wc, cfg('t6'))
+    await until(() => world.cmds.filter((c) => c.startsWith('sh -c')).length > 0 && states()[0] === 'mounting', 'asked for sshfs')
+    sshClose('t6')
+    await until(() => listMounts(SID).length === 0, 'gone')
+    // The channel that opens after the close is closed as soon as it does.
+    await new Promise((r) => setTimeout(r, 400))
+    expect(world.sshfs.size).toBe(0)
+    expect(refs()).toBe(0)
+    expect(world.cmds.filter(isUnmount).length).toBeGreaterThanOrEqual(before)
+    world.openMs = 2
   })
 })

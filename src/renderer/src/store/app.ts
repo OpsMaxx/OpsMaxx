@@ -822,6 +822,17 @@ type PaneSlice = Pick<AppState, 'tabSession' | 'tabCwd' | 'panes'>
 // and both left their per-tab state behind long before panes existed. Nothing
 // ever prunes these maps otherwise, so a missed call is a leak that lasts as
 // long as the app runs, and one this cheap to route through one place.
+/**
+ * `shares` was briefly a field of the server record. Folder shares are
+ * per-machine now (main's opsmaxx-folder-shares.json), and a copy left in a
+ * data file, a restored backup or a synced record is dropped on the way in so
+ * it is never written back out.
+ */
+function withoutShares(sv: Server): Server {
+  const { shares: _shares, ...rest } = sv as Server & { shares?: unknown }
+  return rest
+}
+
 function prunePaneState(s: PaneSlice, doomed: Set<string>): PaneSlice {
   if (doomed.size === 0) return { tabSession: s.tabSession, tabCwd: s.tabCwd, panes: s.panes }
   const tabSession = { ...s.tabSession }
@@ -2586,7 +2597,7 @@ export const useApp = create<AppState>((set, get) => ({
       // Saves written before a server could name a VPN have no such key at all.
       // Normalising on load rather than defaulting at every read keeps
       // "null means direct" the one representation the rest of the app sees.
-      servers: (data.servers ?? s.servers).map((sv) => ({
+      servers: (data.servers ?? s.servers).map(withoutShares).map((sv) => ({
         ...sv,
         vpnProfileId: sv.vpnProfileId ?? null,
         // Absent in every save written before files-only servers existed, and

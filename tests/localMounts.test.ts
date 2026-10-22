@@ -7,6 +7,7 @@ import { duplexPair } from 'node:stream'
 import {
   autoMount,
   listMounts,
+  needsNewConnection,
   mountScript,
   mountShare,
   reenableShares,
@@ -23,8 +24,10 @@ import {
   defaultMountpoint,
   explainMountFailure,
   mountpointProblem,
+  normalizeMountpoint,
   parseShares,
   serverIdentity,
+  sharesProblem,
   type LocalShare
 } from '../src/shared/localMounts'
 import type { PooledConnection } from '../src/main/services/ssh'
@@ -47,6 +50,8 @@ interface Fake {
   checkMs: number
   /** The live sshfs channel, to drop it from the server side. */
   sshfs: (EventEmitter & { close: () => void }) | null
+  /** sshfs closes during setup with no exit status, as a dropped connection does. */
+  dropWhileMounting: boolean
 }
 
 class Channel extends EventEmitter {
@@ -57,8 +62,15 @@ class Channel extends EventEmitter {
   }
 }
 
-function fakeConn(): Fake {
-  const fake: Fake = { conn: null as unknown as PooledConnection, cmds: [], sshfsExit: null, checkMs: 5, sshfs: null }
+function fakeConn(dialled = 'host-1'): Fake {
+  const fake: Fake = {
+    conn: null as unknown as PooledConnection,
+    cmds: [],
+    sshfsExit: null,
+    checkMs: 5,
+    sshfs: null,
+    dropWhileMounting: false
+  }
   const client = {
     exec(cmd: string, cb: (err: Error | undefined, ch: unknown) => void) {
       fake.cmds.push(cmd)
@@ -68,7 +80,8 @@ function fakeConn(): Fake {
           const ch = Object.assign(mine, { stderr: new EventEmitter(), close: () => void mine.destroy() })
           fake.sshfs = ch
           cb(undefined, ch)
-          if (fake.sshfsExit !== null) {
+          if (fake.dropWhileMounting) setTimeout(() => ch.emit('close', null), 3)
+          else if (fake.sshfsExit !== null) {
             const code = fake.sshfsExit
             setTimeout(() => ch.emit('close', code), 3)
           } else sftpOverStream(theirs, false)
@@ -85,7 +98,15 @@ function fakeConn(): Fake {
       }, 2)
     }
   }
-  fake.conn = { key: 'k', id: 'i', host: 'host-1', username: 'deploy', client, refs: 1 } as unknown as PooledConnection
+  fake.conn = {
+    key: 'k',
+    id: 'i',
+    host: dialled,
+    username: 'deploy',
+    client,
+    refs: 1,
+    dialledAs: { host: dialled, port: 22, username: 'deploy' }
+  } as unknown as PooledConnection
   return fake
 }
 
@@ -229,6 +250,85 @@ describe('the mount manager', () => {
     expect(sharesFor('srv-a')[0].stale).toBe(false)
   })
 
+  it('will not mount over a connection to a different host than the share was given to', async () => {
+    // The record says host-1 and so does the share, but the terminal that is
+    // open was dialled while the record pointed at host-2.
+    const dir = fs.mkdtempSync(path.join(tmp, 'elsewhere-'))
+    await setShares('srv-a', [share(dir)], identity())
+    const fake = fakeConn('host-2')
+    autoMount('srv-a', fake.conn)
+    await settle()
+    expect(fake.cmds).toEqual([])
+    const reply = await mountShare('srv-a', fake.conn, share(dir).id, true)
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toMatch(/different address/)
+    expect(fake.cmds).toEqual([])
+  })
+
+  it('treats a connection lost while mounting as a drop, not a setup failure', async () => {
+    const dir = fs.mkdtempSync(path.join(tmp, 'lostsetup-'))
+    await setShares('srv-a', [share(dir)], identity())
+    const fake = fakeConn()
+    fake.dropWhileMounting = true
+    autoMount('srv-a', fake.conn)
+    await settle()
+    expect(listMounts('srv-a')[0].state).toBe('failed')
+    await unmountServer('srv-a')
+    // Cleared with the session, and the next connect tries again.
+    expect(listMounts('srv-a')).toEqual([])
+    fake.dropWhileMounting = false
+    autoMount('srv-a', fake.conn)
+    await settle()
+    expect(listMounts('srv-a')[0].state).toBe('mounted')
+  })
+
+  it('treats a mount check that ran out of time as a drop', async () => {
+    const dir = fs.mkdtempSync(path.join(tmp, 'slow-'))
+    await setShares('srv-a', [share(dir)], identity())
+    const fake = fakeConn()
+    fake.checkMs = 5
+    // The check "answers" with a failure: the mount did not appear in time.
+    const exec = (fake.conn.client as unknown as { exec: (c: string, cb: (e: undefined, ch: unknown) => void) => void }).exec
+    ;(fake.conn.client as unknown as { exec: typeof exec }).exec = (cmd, cb) =>
+      cmd.includes('for i in')
+        ? exec('true', (e, ch) => {
+            cb(e, ch)
+            setTimeout(() => (ch as EventEmitter).emit('close', 1), 1)
+          })
+        : exec(cmd, cb)
+    autoMount('srv-a', fake.conn)
+    await settle()
+    expect(listMounts('srv-a')[0].state).toBe('failed')
+    await unmountServer('srv-a')
+    expect(listMounts('srv-a')).toEqual([])
+  })
+
+  it('asks for a new connection on Retry after a fuse-group failure, and only then', async () => {
+    const dir = fs.mkdtempSync(path.join(tmp, 'fusegroup-'))
+    await setShares('srv-a', [share(dir)], identity())
+    const fake = fakeConn()
+    fake.sshfsExit = MOUNT_EXIT.fuseDenied
+    autoMount('srv-a', fake.conn)
+    await settle()
+    expect(needsNewConnection('srv-a', share(dir).id)).toBe(true)
+    expect(listMounts('srv-a')[0].fix).toMatch(/press Retry: it opens a new connection/)
+    fake.sshfsExit = MOUNT_EXIT.noSshfs
+    await mountShare('srv-a', fake.conn, share(dir).id, true)
+    expect(needsNewConnection('srv-a', share(dir).id)).toBe(false)
+  })
+
+  it('stores one spelling per mount point, so two spellings cannot stack', async () => {
+    const a = fs.mkdtempSync(path.join(tmp, 'one-'))
+    const b = fs.mkdtempSync(path.join(tmp, 'two-'))
+    const twice = [share(a, { mountpoint: '~/opsmaxx/x' }), share(b, { mountpoint: '$HOME/opsmaxx/x/' })]
+    expect(sharesProblem(twice)?.message).toMatch(/Two folders/)
+    expect((await setShares('srv-a', twice, identity())).ok).toBe(false)
+    await setShares('srv-a', [share(a, { mountpoint: 'opsmaxx//x/.' })], identity())
+    expect(sharesFor('srv-a')[0].mountpoint).toBe('~/opsmaxx/x')
+    for (const p of ['~/x', 'x', '$HOME/x', '${HOME}/x', '~//x/./', './x']) expect(normalizeMountpoint(p), p).toBe('~/x')
+    expect(mountpointProblem('~/../x')).toMatch(/\.\./)
+  })
+
   it('cannot be given a share by a synced or restored server record', async () => {
     // What addy sync and a backup restore write is the data blob. A share in
     // it, on a server record, is inert: shares are read from their own
@@ -309,7 +409,7 @@ describe('shared helpers', () => {
     const denied = explainMountFailure(MOUNT_EXIT.fuseDenied, '', 'deploy').fix
     expect(denied).toMatch(/usermod -aG fuse deploy/)
     expect(denied).toMatch(/not Ubuntu or Debian/)
-    expect(denied).toMatch(/close every tab to this server/)
+    expect(denied).toMatch(/press Retry: it opens a new connection/)
     expect(explainMountFailure(1, 'fusermount3: mount failed: Operation not permitted', 'deploy').fix).toMatch(/containers/)
     expect(explainMountFailure(1, 'something else entirely', 'deploy').error).toBe('something else entirely')
   })

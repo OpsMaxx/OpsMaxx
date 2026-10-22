@@ -17,6 +17,7 @@ import {
   MOUNT_EXIT,
   explainMountFailure,
   mountpointProblem,
+  normalizeMountpoint,
   parseShares,
   serverIdentity,
   sharesProblem,
@@ -208,6 +209,9 @@ function statusFor(err: unknown): number {
   return STATUS_CODE.FAILURE
 }
 
+/** Absent on Windows, where nothing in a folder can block an open this way. */
+const NONBLOCK = (fsc as { O_NONBLOCK?: number }).O_NONBLOCK ?? 0
+
 /** SFTP open flags as the numeric ones `open(2)` takes; ssh2's string table lacks most write combinations. */
 export function openFlags(f: number): number {
   const access =
@@ -368,7 +372,17 @@ export function serveShare(sftp: SFTPWrapper, share: Share): void {
     serial(reqid, async () => {
       if (share.readOnly && flags & WRITE_FLAGS) throw new Denied()
       roomForHandle()
-      const fh = await fs.open(await locate(root, p, true), openFlags(flags), attrs?.mode ?? 0o644)
+      const target = await locate(root, p, true)
+      // Regular files only. A FIFO or a device would block the open, or the
+      // first read, forever — and with ONE queue for every share that stalls
+      // all of them. O_NONBLOCK is the belt to that brace, for anything that
+      // turns into one between the check and the open.
+      // ponytail: a file on a hung network volume inside a share still stalls
+      // every share, because the queue is global; per-root queues with
+      // fd-relative opens are the upgrade if that matters.
+      const st = await fs.lstat(target).catch(() => null)
+      if (st && !st.isFile()) throw new Denied()
+      const fh = await fs.open(target, openFlags(flags) | NONBLOCK, attrs?.mode ?? 0o644)
       sftp.handle(reqid, newHandle({ kind: 'file', fh, append: (flags & OPEN_MODE.APPEND) !== 0 }))
     })
   )
@@ -526,7 +540,7 @@ function loadStore(): Map<string, StoredShare[]> {
         ])
       )
       const shares = parsed
-        .map((s) => ({ ...s, identity: identities.get(s.id) }))
+        .map((s) => ({ ...s, mountpoint: normalizeMountpoint(s.mountpoint), identity: identities.get(s.id) }))
         .filter((s): s is StoredShare => typeof s.identity === 'string')
       if (shares.length) store.set(serverId, shares)
     }
@@ -578,21 +592,21 @@ export async function setShares(serverId: string, next: LocalShare[], identity: 
   const problem = sharesProblem(next)
   if (problem) return { ok: false, error: problem.message }
   const before = sharesOf(serverId)
-  const stamped = next.map((s) => ({ ...s, identity }))
+  const stamped = next.map((s) => ({ ...s, mountpoint: normalizeMountpoint(s.mountpoint), identity }))
   if (stamped.length) loadStore().set(serverId, stamped)
   else loadStore().delete(serverId)
   saveStore()
 
   const byPoint = mounts.get(serverId)
   for (const was of before) {
-    const now = next.find((s) => s.id === was.id)
+    const now = stamped.find((s) => s.id === was.id)
     const m = byPoint?.get(was.mountpoint)
     if (m && (!now || !sameMount(was, now))) await teardown(m)
   }
   // An edit is a fresh decision: a setup failure recorded against the old
   // version of a share does not hold the new one back.
   for (const m of [...(mounts.get(serverId)?.values() ?? [])]) {
-    const now = next.find((s) => s.id === m.share.id)
+    const now = stamped.find((s) => s.id === m.share.id)
     if (m.status.state === 'failed' && (!now || !sameMount(m.share, now))) await teardown(m)
   }
   emit(serverId)
@@ -633,6 +647,8 @@ interface Mount {
   status: MountStatus
   /** Why it failed. A `setup` failure is not retried until someone asks. */
   kind?: FailureKind
+  /** The mount script's exit code, when that is how it failed. */
+  exitCode?: number | null
   conn: PooledConnection | null
   channel: ClientChannel | null
   /** Set by teardown, and checked by mountShare after every await. */
@@ -790,6 +806,15 @@ export function mountShare(
     })
   const problem = mountpointProblem(share.mountpoint)
   if (problem) return Promise.resolve({ ok: false, error: problem })
+  // Against the connection this would ride, not only the record: a terminal
+  // opened while the record named another host is still connected to that
+  // host, whatever the record says now.
+  if (!conn.dialledAs || serverIdentity(conn.dialledAs) !== share.identity)
+    return Promise.resolve({
+      ok: false,
+      error: 'The open terminal is connected to a different address, port or account than this share was given to.',
+      fix: 'Close every tab to this server and connect again, or re-enable the share for the server as it is now.'
+    })
 
   const key = `${serverId}\0${share.mountpoint}`
   return locked(key, async (): Promise<MountReply> => {
@@ -867,17 +892,33 @@ export function mountShare(
     // sshfs sends INIT before it mounts, so being spoken to is not proof of a
     // mount. The kernel's mount table is.
     const check = `mp=${mountpointWord(share.mountpoint)}; for i in $(seq 100); do mountpoint -q -- "$mp" && exit 0; sleep 0.1; done; exit 1`
-    const outcome = await Promise.race([
+    // Only what the server's setup said is a setup failure: the script's own
+    // exit codes, or sshfs refusing the mount. A channel that closed with no
+    // exit status, or a check that ran out of time or lost its connection, is
+    // the connection going away, and a reconnect tries again.
+    type Outcome = MountReply & { kind?: FailureKind; exitCode?: number | null }
+    const dropped = (error: string): Outcome => ({ ok: false, error, kind: 'dropped' })
+    const outcome: Outcome | MountReply = await Promise.race([
       run(conn, check, 15000).then(
-        (r): MountReply =>
-          r.code === 0 ? { ok: true } : { ok: false, error: stderr.trim().slice(0, 400) || `${share.mountpoint} did not appear as a mount.` },
-        (): MountReply => ({ ok: false, error: 'The connection to the server closed.' })
+        (r): Outcome =>
+          r.code === 0
+            ? { ok: true }
+            : dropped(stderr.trim().slice(0, 400) || `${share.mountpoint} did not appear as a mount in time.`),
+        (): Outcome => dropped('The connection to the server closed.')
       ),
-      ended.then((code) => explainMountFailure(code, stderr, conn.username)),
+      ended.then(
+        (code): Outcome =>
+          code === null || code === undefined
+            ? dropped('The connection to the server closed while mounting.')
+            : { ...explainMountFailure(code, stderr, conn.username), kind: 'setup', exitCode: code }
+      ),
       woken.then(() => cancelled)
     ])
     if (m.cancelled) return cancelled
-    if (!outcome.ok) return fail(outcome, outcome.error === 'The connection to the server closed.' ? 'dropped' : 'setup')
+    if (!outcome.ok) {
+      m.exitCode = (outcome as Outcome).exitCode
+      return fail(outcome, (outcome as Outcome).kind ?? 'setup')
+    }
 
     m.status = { ...m.status, state: 'mounted' }
     emit(serverId)
@@ -948,6 +989,16 @@ function teardown(m: Mount, keepSetupFailure = false): Promise<void> {
     } else forget()
     emit(m.serverId)
   })
+}
+
+/**
+ * Whether Retry for this share needs a connection made afresh: a fuse-group
+ * failure, because group membership is read when a connection authenticates
+ * and the pool keeps the old one alive.
+ */
+export function needsNewConnection(serverId: string, shareId: string): boolean {
+  const m = [...(mounts.get(serverId)?.values() ?? [])].find((x) => x.share.id === shareId)
+  return m?.status.state === 'failed' && m.exitCode === MOUNT_EXIT.fuseDenied
 }
 
 export async function unmountShare(serverId: string, mountpoint: string): Promise<boolean> {
