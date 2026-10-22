@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { AlertTriangle, FolderOpen, HardDrive, Loader2 } from 'lucide-react'
+import { forwardRef, useEffect, useState } from 'react'
+import { AlertTriangle, FolderOpen, HardDrive, Loader2, Plus, X } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
@@ -13,14 +13,169 @@ import {
 } from '../../../../shared/localMounts'
 
 /**
- * Folders on this computer, mounted on the server (reverse sshfs).
+ * Folders on this computer, mounted on a server (reverse sshfs).
  *
- * The toolbar button lives in the Files view, and owns the subscription so its
- * count stays live while the dialog is closed. Every share is saved on the
- * server record; mounting is a separate act that main performs over the
- * terminal's connection and reports back through `mounts:changed`.
+ * Shaped like `docker -v host:path:ro`: a share is part of the server's
+ * connection settings (`FolderSharesSection`, in the server editor), and it
+ * mounts when an SSH session to the server opens and unmounts when the last one
+ * closes. Main does that on its own; nothing here has to run after connecting.
+ * `FolderSharesIndicator` is the secondary half, on the tab's view bar: what is
+ * mounted, what failed and why, and a way back to the editor.
  */
-export function LocalMountsButton({ server }: { server: Server }): React.JSX.Element {
+
+/** Why these shares cannot be saved, or null. */
+export function sharesProblem(shares: LocalShare[]): string | null {
+  const seen = new Set<string>()
+  for (const s of shares) {
+    const p = mountpointProblem(s.mountpoint)
+    if (p) return p
+    if (seen.has(s.mountpoint)) return `Two folders are shared at ${s.mountpoint}.`
+    seen.add(s.mountpoint)
+  }
+  return null
+}
+
+/**
+ * Bring the live mounts in line with an edit, when a terminal is open.
+ *
+ * A share that was removed, or whose folder, mount point or access changed, is
+ * unmounted; a new or changed share set to mount on connect is mounted. With no
+ * terminal open, main answers "open a terminal first" without recording a
+ * failure, and the share simply mounts on the next connect.
+ */
+export async function applyShareChanges(serverId: string, before: LocalShare[], after: LocalShare[]): Promise<void> {
+  const api = window.opsmaxx?.mounts
+  if (!api) return
+  const same = (a: LocalShare, b: LocalShare): boolean =>
+    a.localDir === b.localDir && a.mountpoint === b.mountpoint && a.readOnly === b.readOnly
+  const changed = (s: LocalShare): boolean => {
+    const was = before.find((b) => b.id === s.id)
+    return !was || !same(was, s)
+  }
+  for (const was of before) {
+    const now = after.find((a) => a.id === was.id)
+    if (!now || !same(was, now)) await api.unmount(serverId, was.mountpoint)
+  }
+  for (const s of after) if (s.autoMount && changed(s)) await api.mount(serverId, s)
+}
+
+// ------------------------------------------------------------- the editor
+
+export const FolderSharesSection = forwardRef<
+  HTMLDivElement,
+  { shares: LocalShare[]; onChange: (next: LocalShare[]) => void; username: string; unavailable?: string }
+>(function FolderSharesSection({ shares, onChange, username, unavailable }, ref) {
+  const pickFolder = async (): Promise<string | null> => (await window.opsmaxx?.mounts?.pickFolder()) ?? null
+  const update = (id: string, patch: Partial<LocalShare>): void =>
+    onChange(shares.map((s) => (s.id === id ? { ...s, ...patch } : s)))
+  const add = async (): Promise<void> => {
+    const dir = await pickFolder()
+    if (!dir) return
+    onChange([
+      ...shares,
+      { id: crypto.randomUUID(), localDir: dir, mountpoint: defaultMountpoint(dir), readOnly: true, autoMount: true }
+    ])
+  }
+  const problem = sharesProblem(shares)
+  const anyRw = shares.some((s) => !s.readOnly)
+  const who = username || 'this account'
+
+  return (
+    <div className="field" ref={ref} data-testid="folder-shares">
+      <label className="field-label">Folder shares</label>
+      <span className="field-hint" style={{ marginBottom: 6 }}>
+        Folders on this computer, mounted on the server while an SSH session to it is open, like{' '}
+        <span className="mono">docker -v</span>. The server needs sshfs and a usable /dev/fuse; most containers have
+        neither. Read-only is enforced by OpsMaxx, whatever the server does.
+      </span>
+      {unavailable ? (
+        <span className="field-hint">{unavailable}</span>
+      ) : (
+        <>
+          {shares.map((s) => (
+            <div key={s.id} className="row" style={{ gap: 6, marginBottom: 6, alignItems: 'center' }}>
+              <button
+                className="btn sm mono"
+                style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                title={`${s.localDir} — click to choose another folder`}
+                onClick={async () => {
+                  const dir = await pickFolder()
+                  if (dir) update(s.id, { localDir: dir })
+                }}
+              >
+                <FolderOpen size={12} /> {s.localDir}
+              </button>
+              <span className="faint">→</span>
+              <input
+                className="input mono grow"
+                style={{ height: 28 }}
+                aria-label="Mount point on the server"
+                value={s.mountpoint}
+                onChange={(e) => update(s.id, { mountpoint: e.target.value })}
+              />
+              <select
+                className="input"
+                style={{ height: 28, width: 'auto' }}
+                aria-label="Access"
+                value={s.readOnly ? 'ro' : 'rw'}
+                onChange={(e) => update(s.id, { readOnly: e.target.value === 'ro' })}
+              >
+                <option value="ro">Read-only</option>
+                <option value="rw">Read-write</option>
+              </select>
+              <label className="row faint" style={{ gap: 4, cursor: 'pointer', whiteSpace: 'nowrap', fontSize: 'var(--fs-caption)' }}>
+                <input
+                  type="checkbox"
+                  checked={s.autoMount}
+                  onChange={(e) => update(s.id, { autoMount: e.target.checked })}
+                />
+                Mount on connect
+              </label>
+              <button
+                className="icon-btn"
+                aria-label={`Remove the share of ${s.localDir}`}
+                onClick={() => onChange(shares.filter((o) => o.id !== s.id))}
+              >
+                <X size={14} />
+              </button>
+            </div>
+          ))}
+          {problem && <span className="field-hint danger">{problem}</span>}
+          {anyRw && (
+            <span className="field-hint danger">
+              Anyone who can act as {who} or as root on the server can change and delete files in a read-write share.
+            </span>
+          )}
+          {shares.length > 0 && !anyRw && (
+            <span className="field-hint">
+              Anyone who can act as {who} or as root on the server can read every file in these folders.
+            </span>
+          )}
+          <div>
+            <button className="btn sm" onClick={() => void add()}>
+              <Plus size={13} /> Add folder share
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+})
+
+// ---------------------------------------------------------- the indicator
+
+function stateText(s: MountStatus | undefined, share?: LocalShare): string {
+  if (!s) return share?.autoMount === false ? 'Not mounted (mounts on request)' : 'Not mounted'
+  if (s.state === 'mounting') return 'Mounting…'
+  if (s.state === 'mounted') return 'Mounted'
+  return 'Failed'
+}
+
+/**
+ * On the tab's view bar, so it is there whichever view the tab is on. Owns the
+ * `mounts:changed` subscription so the count stays live while closed.
+ */
+export function FolderSharesIndicator({ server }: { server: Server }): React.JSX.Element {
   const [open, setOpen] = useState(false)
   const [statuses, setStatuses] = useState<MountStatus[]>([])
 
@@ -38,29 +193,28 @@ export function LocalMountsButton({ server }: { server: Server }): React.JSX.Ele
 
   const mounted = statuses.filter((s) => s.state === 'mounted').length
   const failed = statuses.some((s) => s.state === 'failed')
+  const title = failed
+    ? 'A folder share failed to mount — click for the reason'
+    : mounted
+      ? `${mounted} folder${mounted === 1 ? '' : 's'} from this computer mounted`
+      : 'Folder shares: folders from this computer, mounted on this server'
   return (
     <>
       <button
-        className={clsx('btn sm', mounted > 0 && 'active')}
-        title="Mount a folder from this computer on the server"
+        className={clsx('icon-btn', mounted > 0 && 'active')}
+        title={title}
+        aria-label="Folder shares"
         onClick={() => setOpen(true)}
       >
-        {failed ? <AlertTriangle size={13} style={{ color: 'var(--warn)' }} /> : <HardDrive size={13} />}
-        {mounted > 0 ? `Local folders · ${mounted}` : 'Local folders'}
+        {failed ? <AlertTriangle size={15} style={{ color: 'var(--warn)' }} /> : <HardDrive size={15} />}
+        {mounted > 0 && <span style={{ fontSize: 'var(--fs-xs)', marginLeft: 2 }}>{mounted}</span>}
       </button>
-      {open && <LocalMountsDialog server={server} statuses={statuses} onClose={() => setOpen(false)} />}
+      {open && <FolderSharesDialog server={server} statuses={statuses} onClose={() => setOpen(false)} />}
     </>
   )
 }
 
-function stateText(s: MountStatus | undefined): string {
-  if (!s) return 'Not mounted'
-  if (s.state === 'mounting') return 'Mounting…'
-  if (s.state === 'mounted') return 'Mounted'
-  return 'Failed'
-}
-
-function LocalMountsDialog({
+function FolderSharesDialog({
   server,
   statuses,
   onClose
@@ -70,83 +224,58 @@ function LocalMountsDialog({
   onClose: () => void
 }): React.JSX.Element {
   const shares = useApp((s) => s.servers.find((sv) => sv.id === server.id)?.shares) ?? []
-  const setServerShares = useApp((s) => s.setServerShares)
+  const openServerEditor = useApp((s) => s.openServerEditor)
   const [busy, setBusy] = useState<string | null>(null)
-  const [replyError, setReplyError] = useState<{ shareId: string; error: string; fix?: string } | null>(null)
-
-  // The add form.
-  const [localDir, setLocalDir] = useState('')
-  const [mountpoint, setMountpoint] = useState('')
-  const [mountpointEdited, setMountpointEdited] = useState(false)
-  const [readOnly, setReadOnly] = useState(true)
-  const [autoMount, setAutoMount] = useState(true)
-
+  const [refused, setRefused] = useState<{ shareId: string; error: string; fix?: string } | null>(null)
   const api = window.opsmaxx?.mounts
   const byShare = new Map(statuses.map((s) => [s.shareId, s]))
   const orphans = statuses.filter((s) => !shares.some((sh) => sh.id === s.shareId))
-  const mpProblem = localDir ? mountpointProblem(mountpoint) : null
-  const taken = shares.some((s) => s.mountpoint === mountpoint)
-
-  const save = (next: LocalShare[]): void => setServerShares(server.id, next)
 
   const mount = async (share: LocalShare): Promise<void> => {
     if (!api) return
     setBusy(share.id)
-    setReplyError(null)
+    setRefused(null)
     const reply = await api.mount(server.id, share)
-    // A failure that main recorded shows on the row already; a refusal before
-    // anything started (no terminal open) has no row state, so it shows here.
+    // A failure main recorded is on the row already. A refusal before anything
+    // started — no terminal open — has no row state, so it is shown here.
     if (!reply.ok && !statuses.some((s) => s.shareId === share.id && s.state === 'failed'))
-      setReplyError({ shareId: share.id, error: reply.error ?? 'Could not mount it.', fix: reply.fix })
+      setRefused({ shareId: share.id, error: reply.error ?? 'Could not mount it.', fix: reply.fix })
     setBusy(null)
   }
-
   const unmount = async (mp: string, id: string): Promise<void> => {
     setBusy(id)
     await api?.unmount(server.id, mp)
     setBusy(null)
   }
 
-  const remove = async (share: LocalShare): Promise<void> => {
-    if (byShare.get(share.id)) await unmount(share.mountpoint, share.id)
-    save(shares.filter((s) => s.id !== share.id))
-  }
-
-  const pick = async (): Promise<void> => {
-    const dir = await api?.pickFolder()
-    if (!dir) return
-    setLocalDir(dir)
-    if (!mountpointEdited) setMountpoint(defaultMountpoint(dir))
-  }
-
-  const add = async (): Promise<void> => {
-    const share: LocalShare = { id: crypto.randomUUID(), localDir, mountpoint, readOnly, autoMount }
-    save([...shares, share])
-    setLocalDir('')
-    setMountpoint('')
-    setMountpointEdited(false)
-    setReadOnly(true)
-    await mount(share)
-  }
-
   return (
     <Modal
-      title="Folders from this computer"
-      subtitle={`Mounted on ${server.name} with sshfs`}
+      title="Folder shares"
+      subtitle={`Folders from this computer, mounted on ${server.name}`}
       size="lg"
       onClose={onClose}
       cancelLabel="Close"
-      footerNote="Mounted while a terminal to this server is open. Closing the last one unmounts them."
+      footerNote="Mounted while an SSH session to this server is open."
+      footer={
+        <button
+          className="btn"
+          onClick={() => {
+            onClose()
+            openServerEditor(server.id, 'shares')
+          }}
+        >
+          {shares.length ? 'Edit shares…' : 'Add a share…'}
+        </button>
+      }
     >
-      <p className="faint" style={{ marginTop: 0 }}>
-        The server needs sshfs and a usable /dev/fuse. Most containers have neither. Read-only is enforced by
-        OpsMaxx: it refuses every change the server asks for, whatever the server does.
-      </p>
-
-      {shares.length === 0 && orphans.length === 0 && <p className="faint">No folders shared with this server yet.</p>}
-
+      {shares.length === 0 && orphans.length === 0 && (
+        <p className="faint" style={{ marginTop: 0 }}>
+          No folders are shared with this server. Add one in the server&apos;s connection settings: it mounts every
+          time an SSH session to the server opens.
+        </p>
+      )}
       {(shares.length > 0 || orphans.length > 0) && (
-        <table className="table" style={{ marginBottom: 16 }}>
+        <table className="table">
           <thead>
             <tr>
               <th>Folder on this computer</th>
@@ -160,7 +289,7 @@ function LocalMountsDialog({
             {shares.map((share) => {
               const st = byShare.get(share.id)
               const live = st && st.state !== 'failed'
-              const err = st?.state === 'failed' ? st : replyError?.shareId === share.id ? replyError : null
+              const err = st?.state === 'failed' ? st : refused?.shareId === share.id ? refused : null
               return (
                 <tr key={share.id}>
                   <td className="mono selectable" style={{ wordBreak: 'break-all' }}>
@@ -171,43 +300,28 @@ function LocalMountsDialog({
                   </td>
                   <td>{share.readOnly ? 'Read-only' : 'Read-write'}</td>
                   <td>
-                    {st?.state === 'mounting' && <Loader2 size={12} className="spin" />} {stateText(st)}
+                    {st?.state === 'mounting' && <Loader2 size={12} className="spin" />} {stateText(st, share)}
                     {err && (
                       <div className="field-hint danger selectable" role="alert">
                         {err.error}
                         {err.fix && <div className="faint">{err.fix}</div>}
                       </div>
                     )}
-                    <label className="field-hint row" style={{ gap: 6, cursor: 'pointer', marginTop: 4 }}>
-                      <input
-                        type="checkbox"
-                        checked={share.autoMount}
-                        onChange={(e) =>
-                          save(shares.map((s) => (s.id === share.id ? { ...s, autoMount: e.target.checked } : s)))
-                        }
-                      />
-                      Mount automatically on connect
-                    </label>
                   </td>
                   <td>
-                    <div className="row" style={{ gap: 6, justifyContent: 'flex-end' }}>
-                      {live ? (
-                        <button
-                          className="btn sm"
-                          disabled={busy === share.id || st.state === 'mounting'}
-                          onClick={() => void unmount(share.mountpoint, share.id)}
-                        >
-                          Unmount
-                        </button>
-                      ) : (
-                        <button className="btn sm" disabled={busy === share.id} onClick={() => void mount(share)}>
-                          {st?.state === 'failed' ? 'Try again' : 'Mount'}
-                        </button>
-                      )}
-                      <button className="btn ghost sm" disabled={busy === share.id} onClick={() => void remove(share)}>
-                        Remove
+                    {live ? (
+                      <button
+                        className="btn sm"
+                        disabled={busy === share.id || st.state === 'mounting'}
+                        onClick={() => void unmount(share.mountpoint, share.id)}
+                      >
+                        Unmount
                       </button>
-                    </div>
+                    ) : (
+                      <button className="btn sm" disabled={busy === share.id} onClick={() => void mount(share)}>
+                        {st?.state === 'failed' ? 'Retry' : 'Mount'}
+                      </button>
+                    )}
                   </td>
                 </tr>
               )
@@ -228,60 +342,6 @@ function LocalMountsDialog({
           </tbody>
         </table>
       )}
-
-      <h4 style={{ margin: '8px 0' }}>Share a folder</h4>
-      <div className="field">
-        <label className="field-label">Folder on this computer</label>
-        <div className="row" style={{ gap: 6 }}>
-          <input className="input mono grow" readOnly value={localDir} placeholder="Choose a folder" />
-          <button className="btn" onClick={() => void pick()}>
-            <FolderOpen size={14} /> Choose…
-          </button>
-        </div>
-      </div>
-      <div className="field">
-        <label className="field-label">Mount point on the server</label>
-        <input
-          className="input mono"
-          value={mountpoint}
-          placeholder="~/opsmaxx/folder"
-          disabled={!localDir}
-          onChange={(e) => {
-            setMountpoint(e.target.value)
-            setMountpointEdited(true)
-          }}
-        />
-        {mpProblem && <span className="field-hint danger">{mpProblem}</span>}
-        {!mpProblem && taken && <span className="field-hint danger">Another folder is already shared there.</span>}
-        {!mpProblem && !taken && (
-          <span className="field-hint">Created if it does not exist. It must be empty: mounting over files hides them.</span>
-        )}
-      </div>
-      <div className="field">
-        <label className="field-label">Access</label>
-        <div className="row" style={{ gap: 16 }}>
-          <label className="row" style={{ gap: 6, cursor: 'pointer' }}>
-            <input type="radio" name="share-access" checked={readOnly} onChange={() => setReadOnly(true)} />
-            Read-only
-          </label>
-          <label className="row" style={{ gap: 6, cursor: 'pointer' }}>
-            <input type="radio" name="share-access" checked={!readOnly} onChange={() => setReadOnly(false)} />
-            Read-write
-          </label>
-        </div>
-        <span className={clsx('field-hint', !readOnly && 'danger')}>
-          {readOnly
-            ? `Anyone who can act as ${server.username || 'this account'} or as root on the server can read every file in this folder.`
-            : `Anyone who can act as ${server.username || 'this account'} or as root on the server can change and delete files in this folder.`}
-        </span>
-      </div>
-      <label className="field-hint row" style={{ gap: 6, cursor: 'pointer', marginBottom: 12 }}>
-        <input type="checkbox" checked={autoMount} onChange={(e) => setAutoMount(e.target.checked)} />
-        Mount automatically when a terminal to this server connects
-      </label>
-      <button className="btn primary" disabled={!localDir || !!mpProblem || taken} onClick={() => void add()}>
-        Share and mount
-      </button>
     </Modal>
   )
 }

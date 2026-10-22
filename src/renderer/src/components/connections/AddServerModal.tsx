@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import {
   KeyRound,
   Lock,
@@ -39,6 +39,7 @@ import { classifyConnectionError, faultAdvice } from '../../lib/connectionError'
 import { MAX_TAGS, parseTags } from '../../lib/serverTags'
 import type { AuthMethod, Hop, UUID } from '../../types'
 import { Switch } from '../common/Switch'
+import { FolderSharesSection, applyShareChanges, sharesProblem } from '../panel/LocalMounts'
 
 // `unavailable` says why rather than hiding the option.
 //
@@ -231,6 +232,16 @@ export function AddServerModal(): React.JSX.Element {
   const [hops, setHops] = useState<Hop[]>(existing?.route ?? [])
   const [vpnProfileId, setVpnProfileId] = useState<UUID | null>(existing?.vpnProfileId ?? null)
   const [sftpOnly, setSftpOnly] = useState(existing?.sftpOnly === true)
+  // Folder shares, saved with the server through setServerShares rather than
+  // in `fields`: addServer builds its record field by field and would drop
+  // them. Live mounts are brought in line by applyShareChanges after the save.
+  const [shares, setShares] = useState(existing?.shares ?? [])
+  const setServerShares = useApp((s) => s.setServerShares)
+  const openOnShares = useApp((s) => s.editServerSection === 'shares')
+  const sharesRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (openOnShares) sharesRef.current?.scrollIntoView({ block: 'center' })
+  }, [openOnShares])
   /**
    * A record saved when one machine could be both, before RDP became a
    * connection type of its own.
@@ -408,7 +419,7 @@ export function AddServerModal(): React.JSX.Element {
     rdpOnly: speaks === 'rdp',
     cloud: cloudProvider ? { provider: cloudProvider, target: cloudTarget } : null
   })
-  const valid = missing === null
+  const valid = missing === null && sharesProblem(shares) === null
 
   /**
    * The key's PEM body, when we could read it, for the file currently in
@@ -631,6 +642,11 @@ export function AddServerModal(): React.JSX.Element {
         : undefined
     }
     const id = editId ? (updateServer(editId, fields), editId) : addServer(fields)
+    const sharesBefore = existing?.shares ?? []
+    if (shares.length || sharesBefore.length) {
+      setServerShares(id, shares)
+      void applyShareChanges(id, sharesBefore, shares)
+    }
 
     // What gets stored against the server is a reference wherever possible.
     // A credential in the vault is one record — reusable across every server
@@ -1382,6 +1398,20 @@ export function AddServerModal(): React.JSX.Element {
 
           <RouteHops hops={hops} onChange={setHops} excludeServerId={editId} />
         </>
+      )}
+
+      {speaks !== 'rdp' && (
+        <FolderSharesSection
+          ref={sharesRef}
+          shares={shares}
+          onChange={setShares}
+          username={username.trim() || 'root'}
+          unavailable={
+            sftpOnly
+              ? 'Not available for a files-only account: mounting runs sshfs on the server, which needs a command, not just SFTP.'
+              : undefined
+          }
+        />
       )}
 
       <div className="disclosure">

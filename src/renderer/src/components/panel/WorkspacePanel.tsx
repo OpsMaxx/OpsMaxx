@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { FolderSharesIndicator } from './LocalMounts'
 import {
   X,
   Plus,
@@ -516,6 +517,10 @@ export function WorkspacePanel(): React.JSX.Element {
             ))}
           </div>
           <span className="spacer" />
+          {/* Folder shares ride the session, so their state belongs where the
+              session is, whichever view the tab is on. A files-only account
+              cannot run sshfs, so it gets no indicator. */}
+          {server && !filesOnly && !server.rdpOnly && <FolderSharesIndicator server={server} />}
           <div className="server-meta mono">
             {server ? `${server.username}@${server.host}:${server.port}` : activeShellPath ?? ''}
           </div>

@@ -595,6 +595,9 @@ interface AppState {
   routeEditorServerId: string | null
   // Server being edited in the add/edit modal; null means "adding new".
   editServerId: string | null
+  // Which part of the editor to open on, when something asked for one: the
+  // Folder shares indicator opens it on its own section.
+  editServerSection: 'shares' | null
   paletteOpen: boolean
   theme: ThemeMode
   settings: AppSettings
@@ -719,7 +722,7 @@ interface AppState {
   toggleSplit: (tabId: string, dir: SplitDirection) => void
   setModal: (m: ModalKind) => void
   openRouteEditor: (serverId: string) => void
-  openServerEditor: (serverId: string) => void
+  openServerEditor: (serverId: string, section?: 'shares') => void
   togglePalette: (open?: boolean) => void
   setTheme: (t: ThemeMode) => void
   setSettings: (patch: Partial<AppSettings>) => void
@@ -1263,6 +1266,7 @@ export const useApp = create<AppState>((set, get) => ({
   modal: null,
   routeEditorServerId: null,
   editServerId: null,
+  editServerSection: null,
   paletteOpen: false,
   theme: 'opsmaxx',
   settings: DEFAULT_SETTINGS,
@@ -1942,8 +1946,9 @@ export const useApp = create<AppState>((set, get) => ({
     })
   },
 
-  setModal: (m) => set({ modal: m, editServerId: null }),
-  openServerEditor: (serverId) => set({ editServerId: serverId, modal: 'add-server' }),
+  setModal: (m) => set({ modal: m, editServerId: null, editServerSection: null }),
+  openServerEditor: (serverId, section) =>
+    set({ editServerId: serverId, editServerSection: section ?? null, modal: 'add-server' }),
 
   openRouteEditor: (serverId) => set({ modal: 'route-editor', routeEditorServerId: serverId }),
   togglePalette: (open) => set((s) => ({ paletteOpen: open ?? !s.paletteOpen })),
