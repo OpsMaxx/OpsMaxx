@@ -249,6 +249,14 @@ documents:
     title: HTTP client
     hash: 64a9b159828bab8e
     lines: 228
+  mount-a-folder-from-this-computer:
+    path: docs/08-user/guides/mount-a-folder-from-this-computer.md
+    type: user.guide
+    authority: audience
+    visibility: public
+    title: Mount a folder from this computer
+    hash: 9753d69d496bc971
+    lines: 97
   packaging-winget-readme:
     path: packaging/winget/README.md
     type: unknown
@@ -272,8 +280,8 @@ documents:
     visibility: internal
     title: Reverse mount spike
     status: draft
-    hash: e98847749d2f54c8
-    lines: 130
+    hash: 9f8162a8de70200a
+    lines: 151
   screenshot-demo:
     path: docs/05-engineering/development/screenshot-demo.md
     type: engineering.development

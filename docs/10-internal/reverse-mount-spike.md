@@ -14,8 +14,12 @@ docgov:
 
 > Internal Note. Historical record. Correct only factual errors. Keep it under 400 lines; 1000 triggers review.
 
-> **Status: spike, 2026-10-22.** Prototype in `src/main/services/reverseMount.ts`, test in
-> `tests/reverseMount.test.ts`. Reachable as `window.api.ssh.mount(sessionId, …)` with no UI.
+> **Status: shipped as a feature, 2026-10-22.** The spike became the Files view's **Local folders**
+> dialog. User guide: [Mount a folder from this computer](../08-user/guides/mount-a-folder-from-this-computer.md).
+> Code: `src/main/services/reverseMount.ts` and `src/shared/localMounts.ts`. Tests: `tests/reverseMount.test.ts`,
+> `tests/localMounts.test.ts`, `tests/localMountsDialog.test.tsx` and `tests/reverseMountNotExposed.test.ts`.
+> The sections below record the spike as it was measured. **What changed after the spike** lists where the
+> feature differs.
 
 **The ask:** mount folders from the user's own machine (where OpsMaxx runs) onto the server a
 session is connected to, each read-only or read-write.
@@ -83,9 +87,9 @@ The unit test drives this with ssh2's SFTP **client** over an in-memory pipe, wh
 "remote skips sshfs" case. It proves the read-only refusals, `..` and symlink escapes, and that
 the files on disk are unchanged afterwards.
 
-**Leaks that remain:** `readlink` hands the server a link's literal target, so a link to an
-absolute local path tells the server where that path is (on macOS that includes the
-username). Rewriting or refusing absolute targets is a small change, and it has not been made.
+**Link targets** (fixed after the spike): the spike's `readlink` handed over a link's literal target, so a
+link to an absolute local path revealed it. `shareLinkTarget` now rewrites a target that lands inside the share
+as a path relative to the link, and refuses one that lands outside.
 
 ## Teardown
 
@@ -120,10 +124,27 @@ sshfs was installed for the run and removed after it.
 - `df` on the mount shows 1000G free, because `statvfs@openssh.com` is not implemented, so
   sshfs makes up a size.
 
+## What changed after the spike
+
+- **Per server, not per terminal.** Mounts are keyed by server id, shared by every pane on that server, and
+  torn down when the last terminal to it closes. `ssh.ts` reports session start and end through
+  `onServerSession`. It does **not** import the manager: the spike's import put `reverseMount.ts` into the MCP
+  bridge's import closure, and `tests/reverseMountNotExposed.test.ts` now forbids that.
+- **Saved shares and auto-mount.** Shares live on the server record (`Server.shares`). They are written by
+  `setServerShares`, which, unlike `updateServer`, does not bump `rev` or retire the connection the mounts run on.
+  Main reads them from the data blob (`syncShares`) and mounts the auto ones when a terminal's shell is ready. A
+  failure is recorded in the mount's status, never raised as a toast.
+- **Only chosen folders.** `mountShare` refuses a local path that came from neither the OS folder dialog in
+  this run nor a saved share.
+- **Agents.** `mcpDataCache` never reads `shares`, and the renderer now applies an `update_server` patch by
+  named field (`agentServerFields`) instead of spreading it.
+- **The script.** `~/` is expanded by the shell without quoting the rest away. A non-empty mount point is
+  refused, because libfuse 3 would mount over it and hide the files. A stale `Transport endpoint is not
+  connected` mount point is cleared first. Each failure it can name has its own exit code, which
+  `explainMountFailure` turns into a sentence and a fix.
+
 ## Not done
 
-- UI: a folder picker, the read-only/read-write choice, and a list of active mounts.
-- Persisting shares per server, so they are mounted again on reconnect.
-- The access-policy question: should an agent session ever be allowed to mount? As written,
-  only the renderer IPC can mount; the MCP bridge cannot.
-- Performance work beyond the serial queue: `posix-rename`, `statvfs` and `fsync` extensions.
+- Performance work beyond the serial queue: the `posix-rename`, `statvfs` and `fsync` extensions.
+- Windows as the local side has not been run. The SFTP server is pure Node, but nothing on Windows has
+  exercised it yet.

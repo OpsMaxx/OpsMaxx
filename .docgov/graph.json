@@ -107,6 +107,19 @@
       "generated": false
     },
     {
+      "id": "mount-a-folder-from-this-computer",
+      "path": "docs/08-user/guides/mount-a-folder-from-this-computer.md",
+      "type": "user.guide",
+      "authority": "audience",
+      "visibility": "public",
+      "domain": null,
+      "status": "active",
+      "kind": "document",
+      "lines": 97,
+      "hash": "9753d69d496bc971",
+      "generated": false
+    },
+    {
       "id": "competitive-ux-review",
       "path": "docs/10-internal/competitive-ux-review.md",
       "type": "note.internal",
@@ -128,8 +141,8 @@
       "domain": null,
       "status": "draft",
       "kind": "document",
-      "lines": 130,
-      "hash": "e98847749d2f54c8",
+      "lines": 151,
+      "hash": "9f8162a8de70200a",
       "generated": false
     },
     {
@@ -816,6 +829,12 @@
       "inferred": true
     },
     {
+      "from": "mount-a-folder-from-this-computer",
+      "to": "reverse-mount-spike",
+      "rel": "references",
+      "inferred": true
+    },
+    {
       "from": "competitive-ux-review",
       "to": "docs-plans-sync-security-protocol",
       "rel": "references",
@@ -830,6 +849,12 @@
     {
       "from": "competitive-ux-review",
       "to": "docs-plans-sync-security-protocol",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "reverse-mount-spike",
+      "to": "mount-a-folder-from-this-computer",
       "rel": "references",
       "inferred": true
     },
