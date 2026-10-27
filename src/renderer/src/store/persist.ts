@@ -3,6 +3,7 @@ import { backfillModules, type ModuleState } from '../../../shared/modules'
 import type { Server, MonitorGroup } from '../types'
 import { hasBackupContent } from '../../../shared/backupContent'
 import { apiSaveFields, applyExternalApi, hydrateApi, subscribeApiPersistence } from './persistHttp'
+import { refreshHeld } from './addy'
 
 // Bump when the seed/shape changes in a way that should discard older on-disk
 // data (e.g. removing the original sample/dummy dataset).
@@ -331,7 +332,10 @@ async function hydrate(): Promise<void> {
    */
   window.opsmaxx?.data?.onExternalChange?.((collections) => {
     void applyExternal(collections)
+    // What arrived may be a record this device now holds until confirmed.
+    refreshHeld()
   })
+  refreshHeld()
 }
 
 /** The store keys an inbound collection can land in. A collection not in here

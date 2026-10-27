@@ -62,7 +62,26 @@ Any device on the account can add the next one. There is no main device.
 - **Send and receive the clipboard with a keystroke** is off until you turn it on. `Cmd/Ctrl+Shift+C` sends this clipboard to your other devices and `Cmd/Ctrl+Shift+V` takes the newest one sent here. These shortcuts are taken from every application while OpsMaxx runs.
 - **Pause sync** stops carrying data without leaving the account. It lasts until OpsMaxx next opens.
 
-### 4. When the same thing changed on two devices
+### 4. Changes that need your confirmation on each device
+
+Another device on your account can change where a saved credential is sent. OpsMaxx does not act on that kind of change until you confirm it on this device. That covers:
+
+- a CI/CD connection whose address, user name, vault entry, certificate settings or route changed, or that arrived new from another device,
+- a server or saved database whose address (or a database's jump host) changed, when this device holds a saved password or key for it,
+- a VPN profile whose connection settings changed, or that arrived new, when it uses a credential from the vault,
+- a server moved to another workspace.
+
+Until you confirm, nothing running in the background uses that item on this device: CI/CD polling, monitoring, database size checks and AI agents skip it, and a VPN profile does not start when OpsMaxx opens. When you use it yourself (open a terminal, start the VPN, run a query), OpsMaxx asks once, says what changed and where it now points, and offers **Allow** or **Deny**. It cannot tell you which of your devices made the change. A server moved to another workspace keeps the AI access rules of its old workspace until you confirm the move, and if the two workspaces have different rules, AI agents get no access to it until then.
+
+Everything waiting is listed at the top of **Sync & devices**, and counted in the **Attention** tile. **Review** shows what changed and asks you to confirm it. The CI/CD panel shows the same notice on the connection, and the server list shows **confirm** beside the server. Confirm only changes you made yourself. If you did not make a change, leave it unconfirmed and check the **Devices** list for a device you do not recognise.
+
+Changes you make on this device, and items that were already here when you updated OpsMaxx, are not held. Storing a password for a server or database on this device also confirms it. A device still running OpsMaxx 0.59.0 holds nothing back, so update every device on the account.
+
+**Trusted SSH host keys** work the same way. A host key that another device added or changed is not trusted here until you accept it. The first time you connect, you see the usual host key question, which says another of your devices shared the key. If this device already trusted a different key for that server, the connection is refused as a changed key. A key both devices agree on needs no question.
+
+A few settings never come from another device at all. Each machine keeps its own choice of whether an HTTP check skips certificate checks. An HTTP check from another device never runs more often than once a minute. And the list of secret environment variables that OpsMaxx hides from AI output only grows through sync. Another device cannot remove an entry from it.
+
+### 5. When the same thing changed on two devices
 
 If two machines changed the same thing before syncing with each other, OpsMaxx keeps both and asks. It is already using the version marked **In use now**; the other is set aside. The first sync on a newly paired machine that already had its own data is the common case: the account's copy is used and this machine's own copy is the one set aside.
 
@@ -72,13 +91,13 @@ If two machines changed the same thing before syncing with each other, OpsMaxx k
 
 The vault is encrypted, so its two versions cannot be shown side by side. Choose by when each was made and by which machine.
 
-### 5. Recovery phrase
+### 6. Recovery phrase
 
 If every device on the account is gone, choose **My other devices are gone** on a new machine, enter the relay address, the twelve words (case and extra spaces do not matter) and a name for this device, and press **Recover this account**. No invite is needed. The screen that follows stays until you press **Done**.
 
 When it finishes it tells you how many devices are on the account. Read that list: anyone who has seen your phrase could have added a device the same way. Remove any you do not recognise.
 
-### 6. Remove a device, or leave
+### 7. Remove a device, or leave
 
 - **Remove** (on another device's row, then **Remove it**) takes that device off the account. Everything OpsMaxx stores on it is deleted the next time it opens and reaches the relay. A device kept offline never hears, and removing a device does not take back data it already has. For a lost or stolen machine, also use **Change the account key**: it needs your recovery phrase and re-seals everything under a new key.
 - **Leave** (then **Leave the account**) on this device stops sync here and forgets the keys this device holds. Your servers, workspaces, tunnels and vault stay on this computer as they are. If your other devices still list this one afterwards, remove it from one of them. If this is the only device on the account, the recovery phrase is the only way back in.
@@ -98,6 +117,7 @@ When it finishes it tells you how many devices are on the account. Read that lis
 | *the other device did not answer in time* | The pairing code ran out, or the code was mistyped. Start a new code on the first machine and type that one. If the first machine already showed emoji and someone pressed **They match** there, another device may have used your code: check the device list on that machine and remove any device you do not recognise. |
 | The showing machine says the pairing failed while the new one is still waiting | The code typed on the new machine was wrong. Press **Cancel** on the new machine, start a new code, and type it again. |
 | *This device is not connected to the relay right now, so nothing was synced.* | **Sync now** could not reach the relay. Check the network, or the sign-in banner. |
+| *… was changed on another of your devices, and its saved credential is not used on this one until you confirm the change* | A CI/CD connection, server, database or VPN profile changed on another device. Review it at the top of **Sync & devices**, or use it from this window to be asked. See step 4. |
 | A link that does nothing but show a message | The link was refused, for example because its relay is not `https`. The message says why. |
 | *That pairing link is for a machine joining an account* | The link was opened on a machine that is already on an account. Open it on the machine you are adding. |
 | *… speaks a different addy protocol version than this copy of OpsMaxx* | OpsMaxx and the relay disagree on the protocol version. Update OpsMaxx; if it is already current, whoever runs the relay needs to update it. |

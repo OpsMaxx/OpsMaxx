@@ -462,6 +462,30 @@
   color: var(--warn);
 }
 
+/* Held records: one row per record, the button at the end of its sentence. */
+.addy-held p {
+  margin: 0 0 var(--sp-2);
+}
+
+.addy-held ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.addy-held li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.addy-held code {
+  overflow-wrap: anywhere;
+}
+
 .addy-h {
   margin: var(--sp-4) 0 var(--sp-2);
 }

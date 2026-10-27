@@ -7,6 +7,7 @@ import { isVaultLocked, withVaultUnlock } from '../../lib/withVaultUnlock'
 import { clsx, duration } from '../../lib/format'
 import { remoteText } from '../../../../shared/remoteText'
 import { useApp } from '../../store/app'
+import { confirmHeldRecord, heldSentence, useAddyUi } from '../../store/addy'
 import { TabStrip } from '../panel/TabStrip'
 import { ContextMenu, type MenuEntry } from '../connections/ContextMenu'
 import { StatusWord } from './Status'
@@ -845,9 +846,10 @@ function Freshness({
   troubleOnly?: boolean
   onUpdateToken: (connection: CicdConnection) => void
 }): React.JSX.Element {
+  const held = useAddyUi((s) => s.held)
   const rows = connections.map((c) => ({
     c,
-    trouble: hasTrouble(states.get(c.id), intervalSec, now)
+    trouble: hasTrouble(states.get(c.id), intervalSec, now) || held.some((h) => h.kind === 'cicd' && h.id === c.id)
   }))
   const shown = troubleOnly ? rows.filter((r) => r.trouble) : rows
   const quiet = rows.length - shown.length
@@ -884,6 +886,10 @@ function Freshness({
         // somewhere else. Checked BEFORE `expired`: a marker-carrying message
         // that happens to contain the word "token" is still a locked vault.
         const vaultShut = isVaultLocked(s?.error)
+        // Held by main until confirmed on this device: its address, user,
+        // vault entry or certificate settings arrived or changed by sync. The
+        // reason no request goes out, so it outranks every other banner.
+        const heldRec = held.find((h) => h.kind === 'cicd' && h.id === c.id)
         return (
           <div key={c.id} className="cicd-fresh-row">
             <div className="row">
@@ -907,7 +913,17 @@ function Freshness({
               )}
             </div>
 
-            {vaultShut ? (
+            {heldRec ? (
+              <div className="panel-note is-watch" data-testid={`cicd-held-${c.id}`}>
+                <span className="grow">
+                  {heldSentence(heldRec)} Its token is not sent until you confirm the change on this
+                  device. Now: {heldRec.destination}
+                </span>
+                <button className="btn secondary size-24" onClick={() => void confirmHeldRecord(heldRec)}>
+                  Review
+                </button>
+              </div>
+            ) : vaultShut ? (
               /**
                * A read already in flight outranks this banner, for the same
                * reason "reading now…" outranks the two complaints in the line
