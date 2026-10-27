@@ -364,7 +364,35 @@ export interface AddyStatusSnapshot {
   accountId?: string
   /** Omitted, not empty, until a roster has been verified on this device. */
   devices?: AddyStatusDevice[]
+  /** The verified roster head as five words: what a machine recovering with
+   *  the phrase shows before it adds itself, so the person can compare the
+   *  two screens. Omitted with `devices`. */
+  fingerprint?: string[]
   sync: AddyStatusSync
+}
+
+/**
+ * What a recovery found, shown BEFORE anything is written.
+ *
+ * The phrase opens epoch 1's escrow and the chain verifies against the head
+ * that escrow carries, but a relay chooses which escrow and how much chain to
+ * serve: epoch 1's escrow and a chain cut back to genesis verify perfectly, and
+ * land the person on the key every removed device still holds. Nothing this
+ * machine holds can tell. So the roster head is shown as words to compare with
+ * another device, alongside what the chain says about itself, and the roster
+ * entry, the keys and sync all wait until the person says they match.
+ */
+export interface AddyRecoveryReview {
+  accountId: string
+  /** Five words from the verified roster head, the same as Sync & devices
+   *  shows on a device looking at the same chain. */
+  fingerprint: string[]
+  /** The account's current epoch, as the chain states it. */
+  epoch: number
+  /** The devices on the chain as served, before this one is added. */
+  devices: { label: string; addedWithPhrase: boolean }[]
+  /** Epoch ms of the chain's last entry, by its author's clock. */
+  lastEntryAt: number
 }
 
 /**

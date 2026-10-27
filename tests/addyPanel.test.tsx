@@ -339,6 +339,21 @@ describe('what it says once main can answer', () => {
     expect(chips[0].closest('tr')?.textContent).toContain('unknown box')
   })
 
+  it('shows the account fingerprint a recovering machine is compared with, and nothing before main sends it', async () => {
+    const s = healthy()
+    stubStatus({ ...s, fingerprint: ['amber', 'canal', 'drift', 'ledger', 'quill'] } as typeof s)
+    const { unmount } = render(<AddyPanel />)
+    const words = await screen.findByRole('list', { name: 'Account fingerprint' })
+    expect(words.textContent).toBe('ambercanaldriftledgerquill')
+    expect(screen.getByText(/recovering this account with the recovery phrase shows five words/)).toBeTruthy()
+    unmount()
+
+    stubStatus(healthy())
+    render(<AddyPanel />)
+    await screen.findByText(/does not report when each device was last seen/)
+    expect(screen.queryByRole('list', { name: 'Account fingerprint' })).toBeNull()
+  })
+
   it('shows when a device was added once main knows, and nothing when it does not', async () => {
     const s = healthy()
     s.devices = [

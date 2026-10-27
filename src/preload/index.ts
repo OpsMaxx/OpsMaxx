@@ -298,6 +298,7 @@ export interface ProviderDetectionResult {
 import type {
   AddyPairingConfirmation,
   ClipboardShortcutState,
+  AddyRecoveryReview,
   AddyStatusSnapshot,
   ArrivedTransfer,
   ConflictCopy
@@ -523,17 +524,24 @@ const api = {
       mnemonic?: string
     ): Promise<{ epoch: number; resealed: number }> =>
       ipcRenderer.invoke('addy:rotate', kind, mnemonic),
-    /** Rejoin an account with the twelve-word phrase and nothing else. Mints
-     *  fresh device keys — the phrase never carried them — and writes a
-     *  root-signed roster entry, which is what marks this device as one added
-     *  with the recovery phrase. */
+    /** Rejoin an account with the twelve-word phrase and nothing else, step
+     *  one: open and verify, and WRITE NOTHING. Resolves with what the person
+     *  must check — the roster head as words, to compare with another device —
+     *  before `confirmRecovery` adds this device or `cancelRecovery` drops it. */
     recover: (
       baseURL: string,
       mnemonic: string,
       label: string,
       insecureTLS?: boolean
-    ): Promise<{ accountId: string; devices: number }> =>
+    ): Promise<AddyRecoveryReview> =>
       ipcRenderer.invoke('addy:recover', baseURL, mnemonic, label, insecureTLS),
+    /** Step two, once the words match: store the keys, write the root-signed
+     *  roster entry that marks this device as added with the phrase, and start
+     *  syncing. */
+    confirmRecovery: (): Promise<{ accountId: string; devices: number }> =>
+      ipcRenderer.invoke('addy:confirmRecovery'),
+    /** The words did not match: forget the recovery. Nothing was written. */
+    cancelRecovery: (): Promise<void> => ipcRenderer.invoke('addy:cancelRecovery'),
     /** Remove another device from the account. Not this one: a device that
      *  revoked itself would wipe on its next launch, which is not undoable
      *  and is almost certainly a misclick. */

@@ -5031,11 +5031,16 @@ ipcMain.handle('addy:rotate', (_e, kind: unknown, mnemonic?: string) => {
 
 // Getting back in with nothing but the twelve words. The path nobody takes
 // until every device is gone, which is why it exists before anyone needs it.
+// Two steps: `recover` opens and verifies and writes nothing; the person
+// compares the fingerprint, then `confirmRecovery` writes or
+// `cancelRecovery` drops it all.
 ipcMain.handle(
   'addy:recover',
   (_e, baseURL: string, mnemonic: string, label: string, insecureTLS?: boolean) =>
     addySession.recoverFromPhrase(baseURL, mnemonic, label, insecureTLS === true)
 )
+ipcMain.handle('addy:confirmRecovery', () => addySession.confirmRecovery())
+ipcMain.handle('addy:cancelRecovery', () => addySession.cancelRecovery())
 
 // Remove another device. The actor side of a revocation, which did not exist:
 // `services/addy/revoke.ts` implemented what a revoked device does to itself
