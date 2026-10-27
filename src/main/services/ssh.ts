@@ -9,6 +9,9 @@ import type { CloudTarget } from '../../shared/cloud'
 import { agentForHop } from '../../shared/sshAgent'
 import { debugRecord } from './debugLog'
 import { askedWithoutWindow, verifyHostKey } from './knownhosts'
+import { getSecret } from './secrets'
+import { resolveSecrets } from './credentialResolver'
+import { askToUse, serverCredentialHeld, serverFieldsNow, SyncHeldError } from './syncTrust'
 // Names only, and only for an error message: a hop is addressed by the
 // friendly name of a saved server, so that is what a failure has to say.
 import { getCachedServer } from './mcpDataCache'
@@ -391,6 +394,26 @@ async function connectClient(
     } catch {
       /* the parent is already gone, and its channel with it */
     }
+  }
+  /**
+   * A saved server's credential goes only to the address THIS device
+   * confirmed. `resolveSecrets` already left it off a record that sync moved
+   * somewhere else; here, before any socket, a person is asked once, and a
+   * background caller stops. Stopping rather than dialling without it matters:
+   * the remembered second-factor answer below is read by id too, and would
+   * still be offered to whoever answers. See services/syncTrust.ts.
+   */
+  const serverId = (hop as SshHop & { serverId?: string }).serverId
+  if (serverId && getSecret(serverId) && serverCredentialHeld(serverId, hop.host)) {
+    const name = getCachedServer(serverId)?.name ?? hop.host
+    const allowed =
+      allowPrompt &&
+      (await askToUse('server', serverId, name, serverFieldsNow(hop.host), `${hop.username}@${hop.host}:${hop.port || 22}`))
+    if (!allowed) {
+      discard(sock)
+      throw new SyncHeldError(name)
+    }
+    resolveSecrets(hop as SshHop & { serverId?: string })
   }
   let auth: ReturnType<typeof authFor>
   try {

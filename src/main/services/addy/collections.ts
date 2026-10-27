@@ -6,6 +6,9 @@ import { dataFileExists, loadData, saveData } from '../store'
 import { AddyError } from './sidecar'
 import { SYNCED_COLLECTIONS, type SyncedCollection } from '../../../shared/addy'
 import { isReverseProxyKind, type VpnKind } from '../../../shared/vpn'
+import { DEFAULT_CHECK } from '../../../shared/httpMonitor'
+import { markArrivals, markHostKeyArrivals, vpnConnectionKey } from '../syncTrust'
+import type { HeldKind } from '../../../shared/addy'
 
 /**
  * Where each synced collection actually lives on this machine.
@@ -335,15 +338,39 @@ function vpnsSource(): CollectionSource {
         inner.write(body)
         return
       }
-      inner.write(Buffer.from(JSON.stringify(value.map(landProfile)), 'utf8'))
+      const before = new Map<string, string>()
+      for (const p of parseList(inner.read())) {
+        if (typeof p.id === 'string') before.set(p.id, vpnConnectionKey(p.spec))
+      }
+      inner.write(Buffer.from(JSON.stringify(value.map((p) => landProfile(p, before))), 'utf8'))
     }
+  }
+}
+
+/** The local copy of a blob collection as records, or nothing. */
+function parseList(buf: Buffer | null): Record<string, unknown>[] {
+  if (!buf) return []
+  try {
+    const v: unknown = JSON.parse(buf.toString('utf8'))
+    return Array.isArray(v) ? v.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object') : []
+  } catch {
+    return []
   }
 }
 
 /** One profile, with this machine's answer to the machine-specific fields.
  *  A shape that is not a profile is passed through untouched: it belongs in
- *  the file where somebody can find it, not quietly reshaped here. */
-function landProfile(raw: unknown): unknown {
+ *  the file where somebody can find it, not quietly reshaped here.
+ *
+ *  `before` is this device's copy of each profile's connection settings, by
+ *  id. A WireGuard or OpenVPN profile whose peers, endpoints or keys arrive
+ *  CHANGED loses `autoStart` here for the reason frp and ngrok always do: an
+ *  auto-start is a decision about what this machine connects to at login, and
+ *  another device rewriting where the tunnel goes — or which DNS it hands
+ *  this machine — is not that decision. A profile that arrives unchanged
+ *  keeps it, so the preference still travels; one arriving for the first
+ *  time keeps it too, and is held by services/syncTrust.ts until confirmed. */
+function landProfile(raw: unknown, before: Map<string, string> = new Map()): unknown {
   if (!raw || typeof raw !== 'object') return raw
   const profile = { ...(raw as Record<string, unknown>) }
   const spec = profile.spec
@@ -359,20 +386,136 @@ function landProfile(raw: unknown): unknown {
   // which is the spelling shared/vpn.ts says goes wrong the moment a third
   // reverse proxy is added.
   if (typeof kind === 'string' && isReverseProxyKind(kind as VpnKind)) profile.autoStart = false
+  const mine = typeof profile.id === 'string' ? before.get(profile.id) : undefined
+  if (mine !== undefined && mine !== vpnConnectionKey(profile.spec)) profile.autoStart = false
   return profile
+}
+
+/**
+ * `env`, never shrinking.
+ *
+ * Each pointer says "this vault entry's value was written into a file on that
+ * server", and its one job on this device is redaction: values an agent reads
+ * back from that host are blanked if they match. Nothing on a device removes
+ * a pointer — `registerEnvSecret` only adds — so the only way one disappeared
+ * was a synced copy without it, and a device on the account could switch off
+ * redaction of AI output everywhere by pushing an empty list. So an inbound
+ * copy is the UNION of what arrived and what is here. Redacting a value that
+ * is no longer written anywhere costs nothing; failing to redact one that is
+ * costs the secret.
+ */
+function envSource(): CollectionSource {
+  const inner = wholeFile('opsmaxx-env-secrets.json')
+  return {
+    read: () => inner.read(),
+    write(body: Buffer): void {
+      const incoming: unknown = JSON.parse(body.toString('utf8'))
+      if (!Array.isArray(incoming)) {
+        inner.write(body)
+        return
+      }
+      const same = (a: Record<string, unknown>, b: Record<string, unknown>): boolean =>
+        a.serverId === b.serverId && a.vaultEntryId === b.vaultEntryId && a.slot === b.slot && a.fieldKey === b.fieldKey
+      const merged = [...incoming]
+      for (const ref of parseList(inner.read())) {
+        if (!merged.some((r) => r && typeof r === 'object' && same(r as Record<string, unknown>, ref))) merged.push(ref)
+      }
+      inner.write(Buffer.from(JSON.stringify(merged), 'utf8'))
+    }
+  }
+}
+
+/**
+ * `httpChecks`, without the two settings that are about THIS machine.
+ *
+ * Every device runs every enabled check, so a synced check is a request this
+ * machine makes on its own, from its own network, on a timer. `intervalSec`
+ * arrives clamped to between the default and a day: nothing this app creates
+ * runs more often than the default, and a value of 1 from another device would
+ * make every machine on the account fetch a URL every second — from inside
+ * whatever network each one is on. `insecureTls` is never taken from another
+ * device at all: whether to skip certificate checks is decided per machine,
+ * and this machine's own answer, by id, is kept (off for a check it has never
+ * had). Write side only, for the reason `serversSource()` gives.
+ */
+function httpChecksSource(): CollectionSource {
+  const inner = blobKey('httpChecks')
+  return {
+    inRendererStore: true,
+    read: () => inner.read(),
+    write(body: Buffer): void {
+      const value: unknown = JSON.parse(body.toString('utf8'))
+      if (!Array.isArray(value)) {
+        inner.write(body)
+        return
+      }
+      const local = new Map(parseList(inner.read()).map((c) => [c.id, c.insecureTls === true]))
+      const landed = value.map((raw) => {
+        if (!raw || typeof raw !== 'object') return raw
+        const check = { ...(raw as Record<string, unknown>) }
+        const n = Number(check.intervalSec)
+        check.intervalSec = Number.isFinite(n) ? Math.min(Math.max(n, DEFAULT_CHECK.intervalSec), 86_400) : DEFAULT_CHECK.intervalSec
+        if (local.get(check.id)) check.insecureTls = true
+        else delete check.insecureTls
+        return check
+      })
+      inner.write(Buffer.from(JSON.stringify(landed), 'utf8'))
+    }
+  }
+}
+
+/**
+ * A collection whose records can steer a credential, marked as it lands.
+ *
+ * Before the inbound copy is written, every destination or credential pointer
+ * that arrives different from this device's copy is recorded in
+ * services/syncTrust.ts, and held there until a person on this device
+ * confirms it. Marked FIRST and by the same call, so a mark that cannot be
+ * saved throws and the copy does not land unmarked — "throws rather than
+ * half-writing", applied to the one half that matters for safety.
+ */
+function marking(kind: HeldKind, inner: CollectionSource): CollectionSource {
+  return {
+    inRendererStore: inner.inRendererStore,
+    read: () => inner.read(),
+    write(body: Buffer): void {
+      const incoming: unknown = JSON.parse(body.toString('utf8'))
+      if (Array.isArray(incoming)) markArrivals(kind, parseList(inner.read()), incoming)
+      inner.write(body)
+    }
+  }
+}
+
+/** `knownHosts`, with every entry sync adds or changes marked the same way. */
+function knownHostsSource(): CollectionSource {
+  const inner = wholeFile('opsmaxx-known-hosts.json')
+  const parse = (b: Buffer | null): unknown => {
+    try {
+      return b ? JSON.parse(b.toString('utf8')) : {}
+    } catch {
+      return {}
+    }
+  }
+  return {
+    read: () => inner.read(),
+    write(body: Buffer): void {
+      markHostKeyArrivals(parse(inner.read()), JSON.parse(body.toString('utf8')))
+      inner.write(body)
+    }
+  }
 }
 
 export const SOURCES: Partial<Record<SyncedCollection, CollectionSource>> = {
   apiCollections: blobKey('apiCollections'),
   apiWorkspace: blobKey('apiWorkspace'),
-  cicdConnections: blobKey('cicdConnections'),
-  databases: blobKey('databases'),
+  cicdConnections: marking('cicd', blobKey('cicdConnections')),
+  databases: marking('database', blobKey('databases')),
   folders: blobKey('folders'),
-  httpChecks: blobKey('httpChecks'),
+  httpChecks: httpChecksSource(),
   monitorGroups: blobKey('monitorGroups'),
-  servers: serversSource(),
+  servers: marking('server', serversSource()),
   tunnels: blobKey('tunnels'),
-  vpns: vpnsSource(),
+  vpns: marking('vpn', vpnsSource()),
   workspaces: blobKey('workspaces'),
 
   // Opaque. Already ciphertext under the master password, and the recovery
@@ -381,12 +524,14 @@ export const SOURCES: Partial<Record<SyncedCollection, CollectionSource>> = {
   vault: wholeFile('opsmaxx-vault.json'),
   // Hostnames and their key fingerprints. Syncing it is what stops a second
   // machine asking about every host in the estate as though it were new,
-  // which is the prompt people learn to click through.
-  knownHosts: wholeFile('opsmaxx-known-hosts.json'),
+  // which is the prompt people learn to click through — for hosts this device
+  // already agrees about. An entry it never accepted is marked as it lands,
+  // and knownhosts.ts asks about it like any other first sighting.
+  knownHosts: knownHostsSource(),
   // WHICH environment variables were registered as secret-bearing and what
   // they point at — not the values, which are in the keychain and machine
   // bound. The pointers are what a second machine needs.
-  env: wholeFile('opsmaxx-env-secrets.json')
+  env: envSource()
 }
 
 /**

@@ -77,6 +77,7 @@ import {
   type CloudTarget
 } from '../../shared/cloud'
 import { knownSecretValuesForServer, resolveDbSecrets } from './credentialResolver'
+import { pendingWorkspace } from './syncTrust'
 import { DockerReader } from './docker'
 import { KubernetesReader } from './kubernetes'
 import {
@@ -477,7 +478,7 @@ function fenceForTarget(
   for (const s of listCachedServers()) {
     if (s.id === excludeId || s.cloud || s.port !== port || s.host.trim().toLowerCase() !== h) continue
     const named = inSession.has(s.workspaceId) ? `"${s.name}"` : 'a server outside this session'
-    if (resolveRestriction(listAssignments(), s.id, s.workspaceId).kind === 'no-ai-access') {
+    if (restrictionOf(s.id, s.workspaceId).kind === 'no-ai-access') {
       return {
         decision: 'deny',
         reason: `That address and port are the same machine as ${named}, which is set to No AI Access.`,
@@ -629,6 +630,15 @@ function modeHeader(session: McpAgentSession, serverId: string | null, workspace
 }
 
 /**
+ * A server's restriction, with a workspace move that arrived by sync and is
+ * not confirmed on this device still counted. Every per-server restriction
+ * read goes through here; see resolveRestriction's `formerWorkspaceId`.
+ */
+function restrictionOf(serverId: string, workspaceId: string): ReturnType<typeof resolveRestriction> {
+  return resolveRestriction(listAssignments(), serverId, workspaceId, pendingWorkspace(serverId, workspaceId))
+}
+
+/**
  * The grant, and the restriction if one was deliberately set.
  *
  * `shut` is the case that is NOT the same as having no assignment: somebody
@@ -640,7 +650,7 @@ function resolveGroups(
 ): { grant: AccessGroup | null; restriction: AccessGroup | null; shut: boolean } {
   const server = getCachedServer(serverId)
   const found = server
-    ? resolveRestriction(listAssignments(), serverId, server.workspaceId)
+    ? restrictionOf(serverId, server.workspaceId)
     : ({ kind: 'none' } as const)
   return {
     grant: sessionGroupFor(session),
@@ -7812,7 +7822,7 @@ function scopeSourcesFor(session: McpAgentSession, serverId: string | null): Sco
   if (serverId) {
     const server = getCachedServer(serverId)
     const found = server
-      ? resolveRestriction(listAssignments(), serverId, server.workspaceId)
+      ? restrictionOf(serverId, server.workspaceId)
       : ({ kind: 'none' } as const)
     return [
       {

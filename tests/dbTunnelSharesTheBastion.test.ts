@@ -143,8 +143,11 @@ describe('who may raise a dialog', () => {
 
   // Somebody clicked. These are the only callers that opt in.
   it('is lifted by the handlers a person drives', () => {
-    expect(MAIN).toContain('dbQuery(withVpnTransportDb(resolveDbSecrets(cfg)), text, true)')
-    expect(MAIN).toContain('dbOps(withVpnTransportDb(resolveDbSecrets(cfg)), true)')
+    // Through `dbForPerson`, which asks about a synced change first and then
+    // resolves exactly as before.
+    expect(MAIN).toContain('return withVpnTransportDb(resolveDbSecrets(cfg))')
+    expect(MAIN).toContain('dbQuery(await dbForPerson(cfg), text, true)')
+    expect(MAIN).toContain('dbOps(await dbForPerson(cfg), true)')
     expect(DB).toContain('const conn = await build(cfg, true)')
   })
 

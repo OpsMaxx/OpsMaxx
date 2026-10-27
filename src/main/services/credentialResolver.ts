@@ -8,6 +8,7 @@ import { VAULT_LOCKED } from '../../shared/vault'
 import type { VaultEntry } from '../../shared/vault'
 import type { VpnProfile, VpnSecretField, VpnSecretRef, VpnSpec } from '../../shared/vpn'
 import type { ResolvedVpnSecrets } from './vpn/driver'
+import { databaseFieldsNow, fieldsOf, heldFields, serverCredentialHeld, SyncHeldError } from './syncTrust'
 
 export interface SecretBlob {
   // A reference to a vault entry, which is where a credential belongs: one
@@ -110,7 +111,16 @@ export function resolveSecrets<T extends SshHop & { serverId?: string }>(cfg: T)
   }
   if (cfg.serverId && !cfg.password && !cfg.privateKey && !cfg.keyPath) {
     const raw = getSecret(cfg.serverId)
-    if (raw) {
+    /**
+     * NOT ATTACHED TO AN ADDRESS THIS DEVICE NEVER CONFIRMED.
+     *
+     * The secret is found by id alone, and the address beside it is whatever
+     * the record says — which another device can change through sync. Bound to
+     * the host this device confirmed, a record redirected elsewhere dials with
+     * no credential, and `connectClient` asks the person (or, for a background
+     * caller, refuses) before anything is sent. See services/syncTrust.ts.
+     */
+    if (raw && !serverCredentialHeld(cfg.serverId, cfg.host)) {
       let blob: SecretBlob | null = null
       try {
         blob = JSON.parse(raw) as SecretBlob
@@ -364,6 +374,13 @@ export function resolveDbSecrets<T extends { id: string; password?: string; uri?
 ): T {
   if (!cfg.password && !cfg.uri) {
     const raw = getSecret(cfg.id)
+    // Refused outright rather than left off, unlike a server's: a database
+    // dialled with no password fails as "authentication failed", which sends
+    // somebody to check a credential that is fine. Bound to the host and the
+    // jump this device confirmed — see resolveSecrets and services/syncTrust.ts.
+    if (raw && heldFields('database', cfg.id, databaseFieldsNow(cfg as never)).length > 0) {
+      throw new SyncHeldError((cfg as { name?: string }).name || cfg.id)
+    }
     if (raw) {
       try {
         const b = JSON.parse(raw) as {
@@ -600,6 +617,14 @@ function resolveVpnSpec(spec: VpnSpec, read: (ref: VpnSecretRef) => string): Res
  *  key the user has since rotated is worse than a clear failure, the same
  *  reasoning `resolveSecrets` above applies to SSH. */
 export async function resolveVpnSecrets(profile: VpnProfile): Promise<ResolvedVpnSecrets> {
+  // A profile whose connection settings arrived or changed by sync is not
+  // started on this device until confirmed here: an auto-start at login, an
+  // agent's set_vpn and a server dialled through it all stop at this line. A
+  // person pressing Start was asked first, in the vpn:start handler.
+  const fields = fieldsOf('vpn', profile as never)
+  if (fields && heldFields('vpn', profile.id, fields).length > 0) {
+    throw new VpnError('config-invalid', new SyncHeldError(profile.name).message)
+  }
   // Opened on first use so a profile that references nothing — an frp profile
   // with no token and no secret proxies — never raises an unlock prompt.
   let entries: Map<string, VaultEntry> | null = null

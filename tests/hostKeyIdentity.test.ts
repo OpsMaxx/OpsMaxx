@@ -65,7 +65,10 @@ describe('the verifier', () => {
   it('still checks the fingerprint, which is the part that is not about naming', () => {
     // The identity decides WHERE the answer is filed. Whether the key matches
     // is a separate question and this change must not have touched it.
-    expect(KNOWN).toMatch(/if \(known\.fingerprint === fp\) return Promise\.resolve\(true\)/)
+    // The fingerprint the file holds, unless sync wrote it and nobody here
+    // accepted it — see hostKeyExpected in services/syncTrust.ts.
+    expect(KNOWN).toMatch(/const trusted = hostKeyExpected\(id, known\?\.fingerprint\)/)
+    expect(KNOWN).toMatch(/if \(trusted === fp\) return Promise\.resolve\(true\)/)
     expect(KNOWN).toMatch(/Host key changed/)
   })
 })

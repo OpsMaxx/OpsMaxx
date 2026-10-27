@@ -13,6 +13,8 @@ import type {
   SessionMode
 } from '../../shared/mcp'
 import { atomicWriteFileSync } from './atomicWrite'
+import { getCachedServer } from './mcpDataCache'
+import { pendingWorkspace } from './syncTrust'
 
 // Access groups, server/workspace assignments and AI aliases. Same
 // temp-then-rename write pattern as store.ts/vault.ts/knownhosts.ts. No
@@ -770,10 +772,21 @@ export function setProtected(scope: PolicyScope, on: boolean): PolicyScope[] {
   return state.protectedScopes
 }
 
-/** Is this server, or the workspace it lives in, Protected? Either id may be empty. */
+/**
+ * Is this server, or the workspace it lives in, Protected? Either id may be empty.
+ *
+ * Also the workspace this device last confirmed the server in, while a move
+ * that arrived by sync is unconfirmed here: moving a server out of a Protected
+ * workspace on another device must not lift the protection on this one. Read
+ * against the server's own saved workspace, not the caller's, so a tunnel's
+ * workspace passed in for its carrier is not mistaken for a move.
+ */
 export function isProtected(serverId: string | null, workspaceId: string | null): boolean {
+  const moved = serverId ? pendingWorkspace(serverId, getCachedServer(serverId)?.workspaceId ?? '') : null
   return listProtected().some((p) =>
-    p.level === 'server' ? !!serverId && p.serverId === serverId : !!workspaceId && p.workspaceId === workspaceId
+    p.level === 'server'
+      ? !!serverId && p.serverId === serverId
+      : (!!workspaceId && p.workspaceId === workspaceId) || (!!moved && p.workspaceId === moved)
   )
 }
 

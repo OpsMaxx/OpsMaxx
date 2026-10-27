@@ -300,7 +300,9 @@ import type {
   ClipboardShortcutState,
   AddyStatusSnapshot,
   ArrivedTransfer,
-  ConflictCopy
+  ConflictCopy,
+  HeldKind,
+  HeldRecord
 } from '../shared/addy'
 import type { ProvisionManifest, ProvisionPlan } from '../shared/provision'
 import type { LocalShare, MountReply, MountsView } from '../shared/localMounts'
@@ -417,6 +419,12 @@ const api = {
      *  the relay cannot open either, so this is the only place they can be
      *  made comparable. Empty when no account is configured. */
     conflicts: (): Promise<ConflictCopy[]> => ipcRenderer.invoke('addy:conflicts'),
+    /** Synced records this device will not use until someone here confirms
+     *  them: a changed address, a new credential pointer, a workspace move. */
+    held: (): Promise<HeldRecord[]> => ipcRenderer.invoke('addy:held'),
+    /** Confirm one, exactly as it is saved now. Answers the list left over. */
+    confirmHeld: (kind: HeldKind, id: string): Promise<HeldRecord[]> =>
+      ipcRenderer.invoke('addy:confirmHeld', kind, id),
     /** Write the chosen contents and drop the copy, in that order: the reverse
      *  loses the losing copy if the write fails. */
     resolveConflict: (id: number, collection: string, chosen: unknown): Promise<void> =>
