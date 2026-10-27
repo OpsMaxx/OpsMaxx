@@ -12,8 +12,8 @@ import type { Server } from '../src/renderer/src/types'
 import { serverIdentity, type LocalShare, type MountsView } from '../src/shared/localMounts'
 
 /**
- * Folder shares in the renderer: defined in the server editor like
- * `docker -v host:path:ro`, shown on the tab's view bar. What has to hold is
+ * Folder shares in the renderer: defined in the server editor, shown on the
+ * tab's view bar. What has to hold is
  * what a person cannot check anywhere else — read-only and mount-on-connect as
  * the defaults, why a mount failed without a toast on every reconnect, what to
  * do when no terminal is open or the server moved, and that a share is saved
@@ -76,11 +76,41 @@ describe('the folder shares indicator', () => {
       ]
     })
     useToasts.setState({ toasts: [] })
-    await openIndicator()
+    render(<FolderSharesIndicator server={server} />)
+    // Readable on the view bar itself, not only as a warning icon.
+    const button = await screen.findByRole('button', { name: /Share failed/ })
+    expect(button.textContent).toBe('Share failed')
+    await act(async () => fireEvent.click(button))
     expect(await screen.findByText('sshfs is not installed on this server.')).toBeTruthy()
     expect(screen.getByText(/sudo apt install sshfs/)).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Retry site' })).toBeTruthy()
     expect(useToasts.getState().toasts).toEqual([])
+  })
+
+  it('counts failures in both the visible text and the name, over any mounted count', async () => {
+    const at = (id: string, mountpoint: string) => ({ ...mounted, shareId: id, mountpoint })
+    stub({
+      shares: [
+        { ...share, stale: false },
+        { ...share, id: 'sh2', mountpoint: '~/opsmaxx/b', stale: false },
+        { ...share, id: 'sh3', mountpoint: '~/opsmaxx/c', stale: false }
+      ],
+      mounts: [
+        { ...mounted, state: 'failed', error: 'x' },
+        { ...at('sh2', '~/opsmaxx/b'), state: 'failed', error: 'y' },
+        { ...at('sh3', '~/opsmaxx/c'), state: 'mounted' }
+      ]
+    })
+    render(<FolderSharesIndicator server={server} />)
+    const button = await screen.findByRole('button', { name: /2 shares failed/ })
+    expect(button.textContent).toBe('2 shares failed')
+    expect(button.className).not.toContain('active')
+  })
+
+  it('calls a failed share that is also paused paused, as its row does', async () => {
+    stub({ shares: [{ ...share, stale: true }], mounts: [{ ...mounted, state: 'failed', error: 'x' }] })
+    render(<FolderSharesIndicator server={server} />)
+    expect(await screen.findByRole('button', { name: /Shares paused/ })).toBeTruthy()
   })
 
   it('says when no terminal is open, and Mount explains instead of doing nothing', async () => {
@@ -104,7 +134,10 @@ describe('the folder shares indicator', () => {
 
   it('pauses shares on a server whose address changed, and re-enables them on request', async () => {
     const api = stub({ shares: [{ ...share, stale: true }] })
-    await openIndicator()
+    render(<FolderSharesIndicator server={server} />)
+    const button = await screen.findByRole('button', { name: /Shares paused/ })
+    expect(button.textContent).toBe('Shares paused')
+    await act(async () => fireEvent.click(button))
     expect(await screen.findByText(/^Paused/)).toBeTruthy()
     await act(async () => fireEvent.click(screen.getByText('Re-enable for this address')))
     expect(api.reenable).toHaveBeenCalledWith('s1')

@@ -1,6 +1,6 @@
 {
   "name": "opsmaxx",
-  "version": "0.58.1",
+  "version": "0.58.3",
   "description": "Free, open-source SSH client, SFTP browser, SSH tunnel manager, multi-engine database GUI and encrypted secrets vault in one cross-platform desktop app. A MobaXterm, PuTTY and Termius alternative for Windows, macOS and Linux.",
   "keywords": [
     "ssh",
@@ -139,7 +139,7 @@
     "@types/ssh2": "^1.15.5",
     "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^5.2.0",
-    "electron": "^43.7.7",
+    "electron": "^43.8.1",
     "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "esbuild": "^0.25.12",
@@ -156,7 +156,8 @@
     "vitest": "^4.1.11"
   },
   "overrides": {
-    "@electron/get": "^5.1.0"
+    "@electron/get": "^5.1.0",
+    "@azure/msal-node": "^7.1.0"
   },
   "productName": "OpsMaxx",
   "engines": {

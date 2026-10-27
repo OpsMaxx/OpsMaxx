@@ -8,7 +8,8 @@ import { join } from 'node:path'
 import type { AddressInfo } from 'node:net'
 import type { TLSSocket } from 'node:tls'
 import { WebSocketServer } from 'ws'
-import { Client, Server, utils } from 'ssh2'
+import { Client, Server } from 'ssh2'
+import { generateEphemeralKey } from '../src/main/services/cloud/providers/shared'
 
 /**
  * wss:// over every route, against a real TLS server.
@@ -73,7 +74,7 @@ beforeAll(async () => {
   // A real sshd answering direct-tcpip, so the wss handshake rides an actual
   // ssh2 channel — a Duplex, not a net.Socket — and every destination is sent
   // to this machine's TLS server whatever name it asked for.
-  sshd = new Server({ hostKeys: [utils.generateKeyPairSync('ed25519').private] }, (conn) => {
+  sshd = new Server({ hostKeys: [generateEphemeralKey().privateKey] }, (conn) => {
     conn.on('error', () => undefined)
     conn.on('authentication', (auth) => auth.accept())
     conn.on('ready', () => {
