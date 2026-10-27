@@ -1736,7 +1736,12 @@ class AddySession {
     if (!this.addyd || !this.relay || !this.account) {
       throw new AddyError('not-paired', 'this device is not attached to an addy account')
     }
-    return { addyd: this.addyd, relay: this.relay, epoch: () => this.account!.epoch }
+    return {
+      addyd: this.addyd,
+      relay: this.relay,
+      epoch: () => this.account!.epoch,
+      floor: counterFloor
+    }
   }
 
   /**
@@ -2819,10 +2824,18 @@ class AddySession {
      * `localChanged` true and turns the next pass into a fresh conflict
      * against their own merge.
      */
+    //
+    // AND TELL EVERY OWNER, not only the renderer's store. The vault and env
+    // keep their own decrypted copies in memory; `vaultExternalChange` is
+    // what makes the vault re-read or relock, and it hangs off this callback
+    // (index.ts). Told only for renderer-store sources, "Replace it with the
+    // other copy" on a vault conflict wrote the chosen file and left the old
+    // cache and key live -- and the next vault save sealed them back over it,
+    // for the following pass to push as the account's winner.
     const source = SOURCES[collection as SyncedCollection]
     if (source) {
       source.write(Buffer.from(JSON.stringify(chosen), 'utf8'))
-      if (source.inRendererStore) this.appliedCb?.([collection as SyncedCollection])
+      this.appliedCb?.([collection as SyncedCollection])
     }
     // The next pass reconciles THIS collection's counter and ETag from scratch
     // rather than from a record written here, which would be a second place

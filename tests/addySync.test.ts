@@ -70,6 +70,8 @@ function fakeSidecar(): { send: (m: string, p?: unknown) => Promise<unknown>; al
     alive: () => true,
     send: async (method: string, params?: unknown) => {
       const p = params as Record<string, unknown>
+      // A conflict copy carries its writer inside the seal; see conflicts.ts.
+      if (method === 'whoami') return { devicePub: 'aa'.repeat(32) }
       if (method === 'seal') {
         return {
           sealed: Buffer.from(
@@ -470,7 +472,9 @@ describe('once the two sides agree', () => {
     const kept = relay.conflicts.find((c) => c.name === 'servers')
     expect(kept).toBeTruthy()
     const inner = JSON.parse(kept!.body.toString('utf8'))
-    expect(JSON.parse(Buffer.from(inner.payload, 'base64').toString('utf8'))).toEqual([
+    // Inside the conflict envelope (writer, time, body) — see conflicts.ts.
+    const envelope = JSON.parse(Buffer.from(inner.payload, 'base64').toString('utf8'))
+    expect(JSON.parse(Buffer.from(envelope.body, 'base64').toString('utf8'))).toEqual([
       { id: 's1', name: 'mine' }
     ])
   })

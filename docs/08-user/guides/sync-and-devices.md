@@ -70,7 +70,9 @@ If two machines changed the same thing before syncing with each other, OpsMaxx k
 - **Keep both** appears when both versions are lists. It joins them, duplicates included, and shows the count first.
 - **Decide later** (or `Esc`) writes nothing. The question comes back the next time OpsMaxx opens, or straight away from **Review now** on Sync & devices. New conflicts found by a later sync are offered as soon as they arrive.
 
-The vault is encrypted, so its two versions cannot be shown side by side. Choose by when each was made and by which machine.
+The vault is encrypted, so its two versions cannot be shown side by side. Choose by when the set-aside copy was made and by which machine. Both are sealed inside the copy by the device that made it, so the relay cannot change them. A copy set aside by OpsMaxx 0.59.0 has no such record: the time and machine shown are the relay's, marked **as reported by the relay, not checked**.
+
+Only copies set aside since the account's key last changed are offered. Removing a device changes the key, so anything set aside before that is not offered, and the relay (addy 0.1.1 or later) deletes it. The relay also deletes a copy nobody has decided on after 90 days.
 
 ### 5. Recovery phrase
 

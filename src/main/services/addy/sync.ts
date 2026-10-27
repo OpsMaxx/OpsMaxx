@@ -7,6 +7,7 @@ import { AddyError, type AddySidecar } from './sidecar'
 import type { RelayClient } from './relay'
 import { SOURCES, type CollectionSource } from './collections'
 import { baseOf, mergeCollections, type Base } from './merge'
+import { sealConflict } from './conflicts'
 import { SYNCED_COLLECTIONS, type SyncedCollection } from '../../../shared/addy'
 
 /**
@@ -737,7 +738,11 @@ async function openObject(
 }
 
 /** Hands the losing copy to the relay, still sealed, before anything
- *  overwrites it. The only moment those bytes exist anywhere but here. */
+ *  overwrites it. The only moment those bytes exist anywhere but here.
+ *
+ *  Sealed under `conflict:<name>` with the writer and time inside, never under
+ *  `<name>` itself: a copy sealed like the real object IS a valid real object,
+ *  and the relay could serve it as one. See `conflictLabel`. */
 async function keepAsConflict(
   deps: SyncDeps,
   name: SyncedCollection,
@@ -745,15 +750,8 @@ async function keepAsConflict(
   counter: number,
   payload: Buffer
 ): Promise<void> {
-  const sealed = await deps.addyd.send<{ sealed: string }>('seal', {
-    collection: name,
-    epoch,
-    schema: SCHEMA,
-    writerVersion: versionString(),
-    counter,
-    payload: payload.toString('base64')
-  })
-  await deps.relay.keepConflict(name, epoch, counter, Buffer.from(sealed.sealed, 'base64'))
+  const sealed = await sealConflict(deps.addyd, name, epoch, counter, payload, versionString())
+  await deps.relay.keepConflict(name, epoch, counter, sealed)
 }
 
 /**
