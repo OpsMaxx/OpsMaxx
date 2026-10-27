@@ -447,7 +447,9 @@ describe('the session says what changed', () => {
     // re-login is signIn — the path that compares the TLS pin — never a bare
     // relay.login() that would skip it.
     const built = session.match(/new RelayClient\(/g)?.length ?? 0
-    const wired = session.match(/this\.signIn\(\)\s*\n?\s*\)/g)?.length ?? 0
+    const wired = session.match(/\(\) => this\.reauth\(\)/g)?.length ?? 0
+    const reauth = session.slice(session.indexOf('private async reauth()'))
+    expect(reauth.slice(0, 300)).toContain('await this.signIn()')
     // recoverFromPhrase builds one without: it is the path that starts over.
     expect(wired).toBe(built - 1)
   })
@@ -536,5 +538,70 @@ describe('pairing writes the roster before it hands the key over', () => {
     const fn = body('async finishJoin(')
     expect(fn.indexOf('await receive<')).toBeLessThan(fn.indexOf('await this.loginAndRecord()'))
     expect(fn).not.toMatch(/pinSeq|pinHead/)
+  })
+})
+
+describe('large bodies stay off the sidecar line', () => {
+  it('signs a hash of the body, never the body', async () => {
+    const seen: Record<string, unknown>[] = []
+    const recording = {
+      alive: () => true,
+      close: async () => undefined,
+      send: async (_m: string, p: Record<string, unknown>) => {
+        seen.push(p)
+        return { nonce: '00'.repeat(32), signature: '00'.repeat(64) }
+      }
+    } as unknown as import('../src/main/services/addy/sidecar').AddySidecar
+    vi.stubGlobal('fetch', async () => json(200, { chain: '' }))
+    const relay = new RelayClient({ baseURL: 'https://r.example', token: 't' }, recording)
+    await relay.request('POST', '/v1/roster', { seq: 1, entry: 'x' })
+    const { createHash } = await import('node:crypto')
+    const expected = createHash('sha256').update(JSON.stringify({ seq: 1, entry: 'x' })).digest('hex')
+    expect(seen[0]).toEqual({ method: 'POST', path: '/v1/roster', bodyHash: expected })
+    // And a request with no body sends no hash: the sidecar signs NoBody.
+    await relay.request('GET', '/v1/roster')
+    expect(seen[1]).toEqual({ method: 'GET', path: '/v1/roster' })
+  })
+
+  it('refuses a body over the relay limit before signing or sending it', async () => {
+    const sign = vi.fn(async () => ({ nonce: '00'.repeat(32), signature: '00'.repeat(64) }))
+    const fetched = vi.fn(async () => json(200, {}))
+    vi.stubGlobal('fetch', fetched)
+    const relay = new RelayClient(
+      { baseURL: 'https://r.example', token: 't' },
+      { alive: () => true, close: async () => undefined, send: sign } as never
+    )
+    const err = (await relay
+      .request('PUT', '/v1/obj/big', { body: 'A'.repeat(MAX_REQUEST_BYTES) })
+      .catch((e: unknown) => e)) as InstanceType<typeof AddyError>
+    expect(err.code).toBe('too-large')
+    expect(sign).not.toHaveBeenCalled()
+    expect(fetched).not.toHaveBeenCalled()
+  })
+
+  it('the parent\'s line limit is the sidecar\'s', async () => {
+    const { MAX_LINE_BYTES } = await import('../src/main/services/addy/sidecar')
+    const go = readFileSync(join(__dirname, '..', 'sidecar', 'addyd', 'main.go'), 'utf8')
+    const m = /const maxRequestBytes = (\d+) << (\d+)/.exec(go)
+    expect(m, 'the parser is wrong, not the code').toBeTruthy()
+    expect(MAX_LINE_BYTES).toBe(Number(m![1]) * 2 ** Number(m![2]))
+    // Big enough for the largest object a request can carry, base64'd again
+    // on its way through `open`.
+    expect(MAX_LINE_BYTES).toBeGreaterThan((MAX_REQUEST_BYTES * 4) / 3 + 1024)
+  })
+})
+
+describe('a re-login that fails is not repeated by every request', () => {
+  it('one failed re-login answers the rest of the pass', async () => {
+    vi.stubGlobal('fetch', async () => json(401, { error: 'unknown or expired session' }))
+    const reauth = vi.fn(async () => {
+      throw new AddyError('relay-unreachable', 'the pin was refused')
+    })
+    const relay = new RelayClient({ baseURL: 'https://r.example', token: 't' }, signer, reauth)
+    for (let i = 0; i < 5; i++) {
+      const err = (await relay.roster().catch((e: unknown) => e)) as InstanceType<typeof AddyError>
+      expect(err.message).toBe('the pin was refused')
+    }
+    expect(reauth).toHaveBeenCalledTimes(1)
   })
 })
