@@ -48,8 +48,8 @@ function healthy(): AddyStatus {
     relayURL: 'https://relay.example',
     accountId: 'acct-1',
     devices: [
-      { id: 'a', label: 'work laptop', self: true, lastSeen: Date.now() - 60_000, addedAt: null },
-      { id: 'b', label: 'desktop', self: false, lastSeen: null, addedAt: null }
+      { id: 'a', label: 'work laptop', self: true, lastSeen: Date.now() - 60_000, addedAt: null, addedWithPhrase: false },
+      { id: 'b', label: 'desktop', self: false, lastSeen: null, addedAt: null, addedWithPhrase: false }
     ],
     sync: working()
   }
@@ -268,8 +268,8 @@ describe('what it says once main can answer', () => {
     // carries a button that wipes a laptop.
     const same = healthy()
     same.devices = [
-      { id: 'aa11bb22cc33', label: 'a paired device', self: true, lastSeen: null, addedAt: null },
-      { id: 'dd44ee55ff66', label: 'a paired device', self: false, lastSeen: null, addedAt: null }
+      { id: 'aa11bb22cc33', label: 'a paired device', self: true, lastSeen: null, addedAt: null, addedWithPhrase: false },
+      { id: 'dd44ee55ff66', label: 'a paired device', self: false, lastSeen: null, addedAt: null, addedWithPhrase: false }
     ]
     stubStatus(same)
     render(<AddyPanel />)
@@ -281,8 +281,8 @@ describe('what it says once main can answer', () => {
     // "Remove a paired device?" names nothing when two rows say that.
     const same = healthy()
     same.devices = [
-      { id: 'aa11bb22cc33', label: 'a paired device', self: true, lastSeen: null, addedAt: null },
-      { id: 'dd44ee55ff66', label: 'a paired device', self: false, lastSeen: null, addedAt: null }
+      { id: 'aa11bb22cc33', label: 'a paired device', self: true, lastSeen: null, addedAt: null, addedWithPhrase: false },
+      { id: 'dd44ee55ff66', label: 'a paired device', self: false, lastSeen: null, addedAt: null, addedWithPhrase: false }
     ]
     stubStatus(same)
     render(<AddyPanel />)
@@ -429,7 +429,7 @@ describe('the clipboard shortcut switch', () => {
     enrolled: true,
     relayURL: 'https://relay.example',
     accountId: 'aad42aad5b51c8d31d31b3f529a312e2',
-    devices: [{ id: 'aa', label: 'laptop', self: true, lastSeen: null, addedAt: null }],
+    devices: [{ id: 'aa', label: 'laptop', self: true, lastSeen: null, addedAt: null, addedWithPhrase: false }],
     sync: { running: true, connected: true, lastSyncAt: Date.now(), conflicts: 0 }
   })
 
@@ -477,7 +477,7 @@ describe('the Sync now button', () => {
     enrolled: true,
     relayURL: 'https://relay.example',
     accountId: 'aad42aad5b51c8d31d31b3f529a312e2',
-    devices: [{ id: 'aa', label: 'laptop', self: true, lastSeen: null, addedAt: null }],
+    devices: [{ id: 'aa', label: 'laptop', self: true, lastSeen: null, addedAt: null, addedWithPhrase: false }],
     sync: { running: true, connected: true, lastSyncAt: Date.now(), conflicts: 0 },
     ...over
   })

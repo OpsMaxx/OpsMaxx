@@ -27,6 +27,6 @@ describe('module gates at boot', () => {
     // no renderer can call before there is a window.
     const calls = early.match(/loadData\(\)/g) ?? []
     expect(early).not.toMatch(/syncAccessModule\(loadData\(\)\)/)
-    expect(calls.length).toBe((early.match(/ipcMain\.handle\('data:load', \(\) => loadData\(\)\)/g) ?? []).length)
+    expect(calls.length).toBe((early.match(/ipcMain\.handle\('data:load',[^]*?loadData\(\)/g) ?? []).length)
   })
 })

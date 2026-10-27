@@ -490,6 +490,24 @@ func handleVerifyRoster(req Request) (any, error) {
 	// the chain, so a revoked device is absent rather than flagged. That makes
 	// "am I still here" the whole question, and it is a stronger one than a
 	// flag -- there is no field a forged entry could set to claim otherwise.
+	// WHEN each live device was added: the TS of its add entry, ms. Read off
+	// the chain that just verified rather than off `protocol.Device`, which
+	// does not carry it and is vendored byte for byte (protocol/VENDORED.md).
+	// A later add of the same key — re-added after a revoke — overwrites the
+	// earlier one, which is the add the live device is actually from. Display
+	// only, as the field itself says: it is the author's clock.
+	addedAt := map[string]uint64{}
+	for rest := chain; len(rest) > 0; {
+		e, next, err := protocol.DecodeEntry(rest)
+		if err != nil {
+			break
+		}
+		if e.Op == protocol.OpAdd {
+			addedAt[hex.EncodeToString(e.PubSign)] = e.TS
+		}
+		rest = next
+	}
+
 	devices := make([]map[string]any, 0, len(v.Devices))
 	for _, d := range v.Devices {
 		row := map[string]any{
@@ -497,6 +515,9 @@ func handleVerifyRoster(req Request) (any, error) {
 			"pubEnc":        hex.EncodeToString(d.PubEnc),
 			"epoch":         d.Epoch,
 			"mnemonicAdded": d.MnemonicAuthored(),
+		}
+		if ts := addedAt[hex.EncodeToString(d.PubSign)]; ts > 0 {
+			row["addedAt"] = ts
 		}
 		// The pseudonym, opened HERE or not at all: it is sealed under the
 		// profile key of the epoch the device was added in, and that key never

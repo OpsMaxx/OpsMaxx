@@ -139,14 +139,31 @@ describe('once a roster has been verified', () => {
   })
 
   it('leaves lastSeen and addedAt null rather than filling them in', async () => {
-    // The relay reports neither. A `Date.now()` here paints every device as
-    // seen just now, which is the single most misleading thing this screen
-    // could say.
+    // The relay reports neither, and this roster carries no add timestamp. A
+    // `Date.now()` here paints every device as seen just now, which is the
+    // single most misleading thing this screen could say.
     const s = await addySession.status()
     for (const d of s.devices!) {
       expect(d.lastSeen).toBeNull()
       expect(d.addedAt).toBeNull()
     }
+  })
+
+  it('carries when each device was added, and whether the recovery phrase added it', async () => {
+    // Both were in the verified roster and dropped on the way to the panel,
+    // so a device added by whoever holds the phrase looked like any other.
+    pretendRosterRead(
+      [
+        { pubSign: ME, pubEnc: 'cc', epoch: 1, mnemonicAdded: false, addedAt: 1_700_000_000_000 },
+        { pubSign: OTHER, pubEnc: 'dd', epoch: 1, mnemonicAdded: true, addedAt: 1_700_000_500_000 }
+      ],
+      ME
+    )
+    const s = await addySession.status()
+    expect(s.devices!.map((d) => [d.addedAt, d.addedWithPhrase])).toEqual([
+      [1_700_000_000_000, false],
+      [1_700_000_500_000, true]
+    ])
   })
 
   it('does not claim a sync engine is running', async () => {

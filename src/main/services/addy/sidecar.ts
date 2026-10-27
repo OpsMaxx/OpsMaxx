@@ -71,7 +71,11 @@ export const ADDYD_BINARY = 'opsmaxx-addyd'
 
 export async function openAddyd(
   role: AddydRole = '--crypto',
-  log?: (line: string) => void
+  log?: (line: string) => void,
+  /** Told when the process goes away WITHOUT `close()` having been called — a
+   *  crash, a kill, an OOM. Never for a stop this side asked for, so a caller
+   *  can treat every call as something the user did not request. */
+  onExit?: (reason: string) => void
 ): Promise<AddySidecar> {
   let resolved
   try {
@@ -164,6 +168,7 @@ export async function openAddyd(
   child.stderr.on('data', (chunk: string) => log?.(chunk.trimEnd()))
 
   child.on('exit', (code, signal) => {
+    const unasked = !closed
     closed = true
     // Every outstanding request fails with a reason. A sidecar that dies
     // leaving promises unsettled is a backup that hangs rather than fails, and
@@ -174,10 +179,13 @@ export async function openAddyd(
         `addyd exited (${signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`})`
       )
     )
+    if (unasked) onExit?.(signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`)
   })
   child.on('error', (err) => {
+    const unasked = !closed
     closed = true
     settleAll(new AddyError('internal', `addyd could not start: ${err.message}`))
+    if (unasked) onExit?.(err.message)
   })
 
   return {

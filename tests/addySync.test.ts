@@ -45,9 +45,11 @@ vi.mock('electron', () => ({
   }
 }))
 
-const { syncOnce, forgetSyncState, SYNC_STATE_FILE } = await import(
+const { syncOnce, forgetSyncState, forgetEpochState, SYNC_STATE_FILE } = await import(
   '../src/main/services/addy/sync'
 )
+const { holdSyncedKeys, rendererReloaded } = await import('../src/main/services/addy/collections')
+const { saveData } = await import('../src/main/services/store')
 const { AddyError } = await import('../src/main/services/addy/sidecar')
 
 // ---------------------------------------------------------------------------
@@ -812,5 +814,109 @@ describe('a lost write is recognised by its code, not its wording', () => {
     const r = await syncOnce(deps(racing as never))
     expect(raced, 'the race was never staged').toBe(true)
     expect(r.outcomes.servers).not.toBe('failed')
+  })
+})
+
+describe('the renderer is told as each copy lands', () => {
+  it('before the pass moves on to the next collection', async () => {
+    // Told once at the end of the pass, the renderer had fifteen more relay
+    // round trips in which its next save wrote the pre-sync copy back.
+    const relay = fakeRelay()
+    seeded(relay, 'databases', [{ id: 'd1' }])
+    seeded(relay, 'servers', [{ id: 's1' }])
+    let toldBeforeServers = false
+    const watching = {
+      ...relay,
+      getObject: async (name: string) => {
+        if (name === 'servers') toldBeforeServers = applied.mock.calls.some((c) => c[0].includes('databases'))
+        return relay.getObject(name)
+      }
+    }
+    await syncOnce(deps(watching as never))
+    expect(toldBeforeServers).toBe(true)
+  })
+
+  it('a save the renderer queued before it reloaded cannot push the old copy', async () => {
+    writeBlob({ servers: [{ id: 's1' }], theme: 'dark' })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+    // Another device adds a server, and this one pulls it.
+    seeded(relay, 'servers', [{ id: 's1' }, { id: 's2' }], 2)
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('pulled')
+
+    // The renderer's debounced save fires before its reload: the pre-sync
+    // servers, plus a change of its own that has nothing to do with them.
+    // This is what main's `data:save` does with it.
+    saveData(holdSyncedKeys({ servers: [{ id: 's1' }], theme: 'light' }))
+    expect((readBlob().servers as unknown[]).length).toBe(2)
+    expect(readBlob().theme).toBe('light')
+
+    const r = await syncOnce(deps(relay))
+    expect(r.outcomes.servers).toBe('unchanged')
+
+    // Once it has read the file back, what it saves is its own again.
+    rendererReloaded()
+    saveData(holdSyncedKeys({ servers: [{ id: 's1' }], theme: 'light' }))
+    expect((readBlob().servers as unknown[]).length).toBe(1)
+  })
+})
+
+describe('a re-key does not revert an edit that was not pushed yet', () => {
+  it('the offline device pushes its edit after following the rotation', async () => {
+    // A laptop edits offline; meanwhile another device re-keys, which
+    // re-seals every object (new ETags, same contents). The rotation used to
+    // forget ALL state, so the laptop's next pass took the first-contact
+    // branch: its edit became a conflict copy and the account's older copy
+    // went back on its screen — for every collection it had touched.
+    const hosts = join(userData, 'opsmaxx-known-hosts.json')
+    writeBlob({ servers: [{ id: 's1' }] })
+    writeFileSync(hosts, '{"h1":"fp1"}')
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+
+    writeBlob({ servers: [{ id: 's1' }, { id: 'edited-offline' }] })
+    writeFileSync(hosts, '{"h1":"fp1","h2":"fp2"}')
+    for (const [name, o] of relay.objects) relay.objects.set(name, { ...o, etag: `resealed-${name}` })
+    forgetEpochState()
+
+    const r = await syncOnce(deps(relay))
+
+    // Both kinds: a list of records, and a whole file the merge cannot open.
+    expect(r.outcomes.servers).toBe('pushed')
+    expect(r.outcomes.knownHosts).toBe('pushed')
+    expect(relay.conflicts).toEqual([])
+    expect(readBlob().servers).toEqual([{ id: 's1' }, { id: 'edited-offline' }])
+    expect(readFileSync(hosts, 'utf8')).toBe('{"h1":"fp1","h2":"fp2"}')
+    rmSync(hosts, { force: true })
+  })
+})
+
+describe('resolving one conflict', () => {
+  it('leaves another collection\'s pending edit alone', async () => {
+    writeBlob({ servers: [{ id: 's1' }], databases: [{ id: 'd1' }] })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+    // An edit to databases this device has not pushed yet.
+    writeBlob({ ...readBlob(), databases: [{ id: 'd1' }, { id: 'd2-pending' }] })
+
+    // `servers` is resolved, as session.resolveConflict does it: the choice
+    // on the relay and on disk, and that collection's agreement forgotten.
+    const chosen = [{ id: 's1' }, { id: 'chosen' }]
+    seeded(relay, 'servers', chosen, 5)
+    writeBlob({ ...readBlob(), servers: chosen })
+    forgetSyncState(['servers'])
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.databases).toBe('pushed')
+    expect(r.outcomes.servers).toBe('unchanged')
+    expect(relay.conflicts).toEqual([])
+    expect(readBlob().databases).toEqual([{ id: 'd1' }, { id: 'd2-pending' }])
+  })
+
+  it('is what session.resolveConflict forgets', () => {
+    const SESSION = readFileSync(join(__dirname, '..', 'src/main/services/addy/session.ts'), 'utf8')
+    const fn = SESSION.slice(SESSION.indexOf('async resolveConflict('))
+    expect(fn.slice(0, fn.indexOf('\n  }\n'))).toMatch(/forgetSyncState\(\[collection\]\)/)
   })
 })

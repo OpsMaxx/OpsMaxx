@@ -235,7 +235,6 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
   const forgetsAtStart = forgetCount
   const state = loadState(deps.accountId())
   const result: SyncResult = { at: startedAt, outcomes: {}, carried: 0, conflicts: [] }
-  const changed: SyncedCollection[] = []
 
   for (const name of SYNCED_COLLECTIONS) {
     const source = SOURCES[name]
@@ -250,30 +249,10 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
       result.outcomes[name] = outcome
       if (outcome === 'pushed' || outcome === 'pulled' || outcome === 'adopted' || outcome === 'merged')
         result.carried++
-      // `conflicted` BELONGS HERE, and leaving it out was deterministic data
-      // loss rather than a race.
-      //
-      // Both conflict paths write the remote copy to disk — that is what
-      // "the remote wins and the local is kept" means. Not naming the
-      // collection meant the renderer was never told, so it went on holding
-      // the losing copy in memory and rewrote it over the file on its next
-      // save, which fires on a theme change or an opened tab. The following
-      // pass then saw a local edit and no remote one, and PUSHED the reverted
-      // copy as the account's winner. The other device's work was gone from
-      // every screen, surviving only as a conflict copy nobody had been told
-      // to look at, and the panel reported success throughout.
-      // `merged` belongs here for the same reason `conflicted` does, and with
-      // the same consequence if it is left out: a merge writes the merged copy
-      // to disk, so a renderer that is not told goes on holding the pre-merge
-      // one and saves it back over the top on its next write.
-      if (
-        outcome === 'pulled' ||
-        outcome === 'adopted' ||
-        outcome === 'merged' ||
-        outcome === 'conflicted'
-      ) {
-        changed.push(name)
-      }
+      // The renderer is told by `writeBack` itself, at the moment each copy
+      // lands — every outcome that writes (`adopted`, `pulled`, `merged` and
+      // both conflict paths) goes through it. See `writeBack` for why that
+      // cannot wait for the end of the pass.
       if (outcome === 'conflicted') result.conflicts.push(name)
     } catch (err) {
       result.outcomes[name] = 'failed'
@@ -291,12 +270,9 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
    * THE STATE WRITE MUST NOT TAKE THE PASS WITH IT.
    *
    * `saveState` throws by design — it writes temp-then-rename — and it sat
-   * outside every try. So a stale temp file or a full disk made the exception
-   * escape `syncOnce` entirely: `applied()` never ran, the renderer was never
-   * told about a single inbound write, and its next save reverted all of them.
-   * The pass after that saw local edits with no remote ones and pushed the
-   * reverts as the account's winners. A failure to write a bookkeeping file
-   * became account-wide data loss.
+   * outside every try. When `applied()` still ran after it, an exception here
+   * meant the renderer was never told about a single inbound write. It is now
+   * told per write, before this, but the pass must still return a result.
    *
    * Reported as the pass's error instead. The consequence of losing the state
    * is bounded and recoverable: the next pass finds collections on disk it has
@@ -322,10 +298,6 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
     }
   }
 
-  // AFTER the state write is attempted, and after every collection: the
-  // renderer reloads once for the whole pass rather than fifteen times, and it
-  // reloads from a file that is already consistent.
-  if (changed.length > 0) deps.applied(changed)
   return result
 }
 
@@ -349,9 +321,25 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
  * Reading back through the source is what makes the record true. It also
  * generalises: any source that transforms on write gets this right without
  * knowing about it, which is the property the next one will need.
+ *
+ * AND THE RENDERER IS TOLD HERE, NOT AT THE END OF THE PASS. It holds eleven
+ * of these collections in memory and writes all of them on its next save, so
+ * every second between this write and `applied()` is a second in which a
+ * theme change or an opened tab writes the PRE-sync copy back over the file —
+ * and the next pass then pushes that revert to every device as a plain local
+ * edit. Announcing once per pass made that window as long as the rest of the
+ * pass: fifteen more collections, each a relay round trip. The renderer's
+ * reload is still asynchronous, so `holdSyncedKeys` in collections.ts closes
+ * what remains on the save side.
  */
-function writeBack(source: CollectionSource, payload: Buffer): Buffer {
+function writeBack(
+  deps: SyncDeps,
+  name: SyncedCollection,
+  source: CollectionSource,
+  payload: Buffer
+): Buffer {
   source.write(payload)
+  deps.applied([name])
   // `?? payload` for a source that cannot read its own writes. Recording the
   // payload is no worse than before, and refusing to sync over it would be.
   return source.read() ?? payload
@@ -375,7 +363,7 @@ async function syncCollection(
   // -- This machine has nothing. Take what the account has. -----------------
   if (!local && remote) {
     const opened = await openObject(deps, name, epoch, remote.body, known?.counter ?? 0)
-    const landed = writeBack(source, opened.payload)
+    const landed = writeBack(deps, name, source, opened.payload)
     state.collections[name] = {
       etag: remote.etag,
       counter: opened.counter,
@@ -433,7 +421,7 @@ async function syncCollection(
     // new device handing the user one chooser per populated collection before
     // the chooser means anything.
     if (isEmptyish(body) && !opened.payload.equals(body)) {
-      const landed = writeBack(source, opened.payload)
+      const landed = writeBack(deps, name, source, opened.payload)
       state.collections[name] = {
         etag: there.etag,
         counter: opened.counter,
@@ -445,7 +433,7 @@ async function syncCollection(
     }
     if (!opened.payload.equals(body)) {
       await keepAsConflict(deps, name, epoch, opened.counter + 1, body)
-      const landed = writeBack(source, opened.payload)
+      const landed = writeBack(deps, name, source, opened.payload)
       state.collections[name] = {
         etag: there.etag,
         counter: opened.counter,
@@ -489,7 +477,7 @@ async function syncCollection(
 
   if (!localChanged && remoteChanged) {
     const opened = await openObject(deps, name, epoch, there.body, known.counter)
-    const landed = writeBack(source, opened.payload)
+    const landed = writeBack(deps, name, source, opened.payload)
     state.collections[name] = {
       etag: there.etag,
       counter: opened.counter,
@@ -566,6 +554,21 @@ async function mergeOrConflict(
     return 'unchanged'
   }
 
+  // THE REMOTE'S ETAG MOVED AND ITS CONTENT DID NOT. Its payload is still
+  // exactly what this device last agreed to, so the only real change is the
+  // local one, and it is pushed. The case that matters is a re-key: every
+  // object is re-sealed under the new epoch, so every ETag changes and
+  // `forgetEpochState` drops them — and without this, an edit made on a
+  // laptop that was offline through the rotation fell to the chooser for any
+  // collection that is not a list of records (the vault, known hosts), with
+  // the account's older copy put on its screen in place of the edit.
+  if (hash(opened.payload) === known.localHash) {
+    const counter = Math.max(opened.counter, known.counter) + 1
+    const etag = await putSealed(deps, name, epoch, counter, body, fresh.etag)
+    state.collections[name] = { etag, counter, localHash: hash(body), base: baseOf(body) ?? undefined, at: Date.now() }
+    return 'pushed'
+  }
+
   const merged = mergeCollections(known.base, body, opened.payload)
   if (!merged) return conflictWithRemote(deps, name, epoch, source, state, body)
 
@@ -577,7 +580,7 @@ async function mergeOrConflict(
   // What landed, not what was pushed: the relay holds `merged.merged` and this
   // disk may hold a transformed copy of it, and the record has to describe the
   // disk it will be compared against next pass.
-  const landed = writeBack(source, merged.merged)
+  const landed = writeBack(deps, name, source, merged.merged)
   state.collections[name] = {
     etag,
     counter,
@@ -653,7 +656,7 @@ async function conflictWithRemote(
       conflictedEtag: fresh.etag
     }
   }
-  const landed = writeBack(source, opened.payload)
+  const landed = writeBack(deps, name, source, opened.payload)
   state.collections[name] = {
     etag: fresh.etag,
     // NEVER BACKWARDS. The floor is a high-water mark; writing a lower number
@@ -738,10 +741,45 @@ export function counterFloor(collection: string): number {
   return loadState().collections[collection]?.counter ?? 0
 }
 
-/** Forget everything this device has agreed to. For a revocation wipe and for
- *  a deliberate "resync everything". */
-export function forgetSyncState(): void {
-  saveState({ version: 1, collections: {} })
+/** Forget what this device has agreed to — everything, for a revocation wipe,
+ *  leaving and a deliberate "resync everything"; or only the named
+ *  collections, for a conflict resolution, which settles one collection and
+ *  says nothing about any other. Forgetting them all there sent every
+ *  collection with an unpushed edit through the `!known` branch: the edit was
+ *  demoted to a conflict copy and the account's older copy put back on the
+ *  screen, and each of those became another conflict to resolve. */
+export function forgetSyncState(only?: string[]): void {
+  if (only) {
+    const state = loadState()
+    for (const name of only) delete state.collections[name]
+    saveState(state)
+  } else {
+    saveState({ version: 1, collections: {} })
+  }
+  forgetCount++
+}
+
+/**
+ * Forget what a re-key invalidates, and nothing else.
+ *
+ * Every object is re-sealed under the new epoch, so every recorded ETag names
+ * an object that is no longer the current one, and the counters are dropped
+ * with them exactly as a full forget dropped them (a write that raced the
+ * re-seal would otherwise be refused as a rollback for good). What the epoch
+ * changes nothing about is what THIS device last agreed to: `localHash` and
+ * `base` describe local bytes and records, not sealed objects. They are what
+ * tell an unpushed edit from an untouched copy, so keeping them is the
+ * difference between an offline laptop's edit being pushed after the rotation
+ * and being reverted on its screen and demoted to a conflict copy.
+ */
+export function forgetEpochState(): void {
+  const state = loadState()
+  for (const entry of Object.values(state.collections)) {
+    entry.etag = ''
+    entry.counter = 0
+    delete entry.conflictedEtag
+  }
+  saveState(state)
   forgetCount++
 }
 
