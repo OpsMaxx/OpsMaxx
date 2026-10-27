@@ -1,4 +1,5 @@
-import { createHash } from 'node:crypto'
+import { createHash, X509Certificate } from 'node:crypto'
+import type { TLSSocket } from 'node:tls'
 import { AddyError, type AddySidecar } from './sidecar'
 
 /**
@@ -35,35 +36,105 @@ export const ADDY_PROTOCOL = 'addy-protocol-v1'
  *  It answers 413 past this rather than truncating. */
 export const MAX_REQUEST_BYTES = 8 * 1024 * 1024
 
-let insecureAgent: unknown = null
+
+/**
+ * A connection whose relay key is not the one this client is pinned to.
+ *
+ * Raised from the TLS handshake of a REQUEST connection, before a byte of the
+ * request is written. `webpki` says whether the new key's certificate is one
+ * the public CA store vouches for: the session decides what that means by
+ * logging in again, where `comparePin` either re-pins (and audits it) or
+ * refuses. A request connection never re-pins on its own.
+ */
+export class RelayPinMismatch extends AddyError {
+  constructor(
+    readonly seen: string,
+    readonly webpki: boolean
+  ) {
+    super('relay-unreachable', 'the relay presented a different TLS key on this connection than the one this device signed in to. Nothing was sent.')
+  }
+}
+
+/** SHA-256 of the leaf certificate's SubjectPublicKeyInfo, hex — exactly as
+ *  `serverPin` and the relay compute it. Empty when there is no certificate. */
+function spkiOf(socket: TLSSocket): string {
+  const der = socket.getPeerCertificate()?.raw
+  if (!der || der.length === 0) return ''
+  const spki = new X509Certificate(der).publicKey.export({ type: 'spki', format: 'der' })
+  return createHash('sha256').update(spki).digest('hex')
+}
+
+const agents = new Map<string, unknown>()
+
+/**
+ * The dispatcher for one (TLS mode, pin) pair, built once and reused.
+ *
+ * THE PIN IS CHECKED ON EVERY CONNECTION, not on a probe beside them. It used
+ * to be compared only on `serverPin`'s own connection, while every request on
+ * a development relay went out with certificate checking off — and the probe
+ * and undici do not even negotiate the same ALPN, so something on the path
+ * could let the probe through untouched and answer every real request with a
+ * certificate of its own, or none. The check now runs inside the handshake of
+ * each connection undici opens, and a mismatch destroys the socket before the
+ * request is written: fail closed.
+ *
+ * TLS session resumption is off for a pinned agent, so every connection
+ * presents its certificate to be checked rather than relying on a ticket.
+ */
+async function dispatcherFor(insecureTLS: boolean, pin: string | undefined): Promise<unknown> {
+  if (!insecureTLS && !pin) return undefined
+  const key = `${insecureTLS ? 'insecure' : 'strict'}:${pin ?? ''}`
+  const held = agents.get(key)
+  if (held) return held
+  const { Agent, buildConnector } = await import('undici')
+  const base = buildConnector({ rejectUnauthorized: !insecureTLS, maxCachedSessions: 0 })
+  const agent = new Agent({
+    connect: (opts, callback) =>
+      base(opts, (err, socket) => {
+        if (err !== null) {
+          callback(err, null)
+          return
+        }
+        if (!pin) {
+          callback(null, socket)
+          return
+        }
+        const tls = socket as TLSSocket
+        const seen = spkiOf(tls)
+        if (seen === pin) {
+          callback(null, socket)
+          return
+        }
+        tls.destroy()
+        callback(new RelayPinMismatch(seen, tls.authorized === true), null)
+      })
+  })
+  agents.set(key, agent)
+  return agent
+}
 
 /**
  * Every HTTP call to a relay, signed or not, goes through here.
  *
  * Four call sites used to build their own `fetch` — login, signed requests,
  * account creation and the pairing rendezvous — and each had its own idea of
- * what a failure meant. Only one of them honoured the development relay's
- * self-signed certificate, so `-dev` worked for login and failed for the two
- * calls a new device makes first. One function means one place for the TLS
- * choice, the protocol header, and the answers that mean the same thing on
- * every route: 426 and 413.
+ * what a failure meant. One function means one place for the TLS choice, the
+ * pin, the protocol header, and the answers that mean the same thing on every
+ * route: 426 and 413.
  *
- * The insecure dispatcher is built once. One per request would open a fresh
- * connection pool for every call and never close any of them.
+ * `pin`, when given, is enforced on the connection the request travels over
+ * (see `dispatcherFor`). The unauthenticated calls a device makes before it has
+ * ever signed in — creating an account, the pairing rendezvous — have none to
+ * give: that is trust on first use, and the pairing frames carry their own
+ * PAKE protection regardless.
  */
 export async function relayFetch(
   url: string,
   init: RequestInit,
-  insecureTLS = false
+  insecureTLS = false,
+  pin?: string
 ): Promise<Response> {
-  let dispatcher: unknown
-  if (insecureTLS) {
-    if (insecureAgent === null) {
-      const { Agent } = await import('undici')
-      insecureAgent = new Agent({ connect: { rejectUnauthorized: false } })
-    }
-    dispatcher = insecureAgent
-  }
+  const dispatcher = await dispatcherFor(insecureTLS, pin)
   const headers = new Headers(init.headers)
   headers.set('x-addy-protocol', ADDY_PROTOCOL)
   let resp: Response
@@ -73,6 +144,9 @@ export async function relayFetch(
     // An abort is the caller's own decision, not a relay failure, and the
     // caller knows what it meant.
     if (init.signal?.aborted) throw err
+    for (let c: unknown = err; c instanceof Error; c = (c as { cause?: unknown }).cause) {
+      if (c instanceof RelayPinMismatch) throw c
+    }
     // A relay that cannot be reached is the commonest failure by a wide
     // margin -- a laptop on a train, a box being restarted -- and it has its
     // own code so a caller can retry rather than alarm.
@@ -246,6 +320,10 @@ export class RelayClient {
     private readonly reauth?: () => Promise<void>
   ) {}
 
+  /** The relay key the current session was signed in over — the SPKI the
+   *  login signature carries. Every request connection must present it. */
+  private pin: string | null = null
+
   /** One re-login shared by every request that found the session gone at the
    *  same moment, rather than one login each. */
   private reauthing: Promise<void> | null = null
@@ -350,10 +428,16 @@ export class RelayClient {
     // wire wants `account` and `device`, so the mapping is explicit rather
     // than a spread that would silently send the wrong field names.
     const me = await this.addyd.send<{ accountId: string; devicePub: string }>('whoami', {})
-    const challenge = await this.raw('POST', '/v1/auth/challenge', {
-      account: me.accountId,
-      device: me.devicePub
-    })
+    // ON THE KEY THAT IS SIGNED. The login signature carries `spki` as its
+    // channel binding and the relay refuses one that is not its own key, so
+    // both calls travel over connections that must present exactly the key
+    // the probe saw: the pin is enforced in their handshakes, not assumed.
+    const challenge = await this.raw(
+      'POST',
+      '/v1/auth/challenge',
+      { account: me.accountId, device: me.devicePub },
+      spki
+    )
     if (!challenge.ok) throw await loginError(challenge, this.cfg.baseURL)
     const { nonce } = (await challenge.json()) as { nonce?: string }
     if (!nonce) {
@@ -376,12 +460,13 @@ export class RelayClient {
       server_spki: spki,
       ts: signed.ts,
       signature: signed.signature
-    })
+    }, spki)
     if (!resp.ok) throw await loginError(resp, this.cfg.baseURL)
     const { token } = (await resp.json()) as { token?: string }
     if (!token) throw new AddyError('relay-unreachable', 'the relay issued no token.')
 
     this.cfg = { ...this.cfg, token }
+    this.pin = spki
     this.reauthFailed = null
     return { token, spki }
   }
@@ -394,11 +479,12 @@ export class RelayClient {
    * an authorization, and necessarily so: the signature they would carry is
    * the thing being established.
    */
-  private async raw(method: string, path: string, body: unknown): Promise<Response> {
+  private async raw(method: string, path: string, body: unknown, pin: string): Promise<Response> {
     return relayFetch(
       `${this.cfg.baseURL}${path}`,
       { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) },
-      this.cfg.insecureTLS
+      this.cfg.insecureTLS,
+      pin
     )
   }
 
@@ -434,8 +520,25 @@ export class RelayClient {
     body?: unknown,
     extraHeaders: Record<string, string> = {}
   ): Promise<Response> {
-    const resp = await this.send(method, pathWithQuery, body, extraHeaders)
+    let resp: Response
+    try {
+      resp = await this.send(method, pathWithQuery, body, extraHeaders)
+    } catch (err) {
+      // A connection that showed a different key goes through a fresh login,
+      // where comparePin decides — re-pin a WebPKI-valid key and audit it, or
+      // refuse. Never re-pinned from here.
+      if (!(err instanceof RelayPinMismatch) || !this.reauth) throw err
+      await this.signInAgain()
+      return this.send(method, pathWithQuery, body, extraHeaders)
+    }
     if (!this.reauth || !(await sessionGone(resp))) return resp
+    await this.signInAgain()
+    return this.send(method, pathWithQuery, body, extraHeaders)
+  }
+
+  /** The shared, once-per-failure re-login behind `request`. */
+  private async signInAgain(): Promise<void> {
+    if (!this.reauth) return
     // ONCE, and then whatever the relay says stands. A login that fails throws
     // its own error, which says more than the 401 it replaces; a retry that
     // still 401s is reported as before rather than looping.
@@ -456,7 +559,6 @@ export class RelayClient {
         this.reauthing = null
       })
     await this.reauthing
-    return this.send(method, pathWithQuery, body, extraHeaders)
   }
 
   private async send(
@@ -510,7 +612,8 @@ export class RelayClient {
     const resp = await relayFetch(
       this.cfg.baseURL + pathWithQuery,
       { method, headers, body: payload ?? undefined },
-      this.cfg.insecureTLS
+      this.cfg.insecureTLS,
+      this.pin ?? undefined
     )
 
     if (resp.status === 503 && resp.headers.get('x-addy-reonboard')) {
