@@ -672,8 +672,10 @@ export class RelayClient {
    * Deletes an object in every epoch. Absent already counts as done: the
    * caller wants it gone, and a retry after a lost response must not fail.
    */
-  async deleteObject(name: string): Promise<void> {
-    const resp = await this.request('DELETE', `/v1/obj/${encodeURIComponent(name)}`)
+  async deleteObject(name: string, epoch?: number): Promise<void> {
+    // One epoch only when asked. Without it every epoch of the name goes.
+    const q = epoch === undefined ? '' : `?epoch=${epoch}`
+    const resp = await this.request('DELETE', `/v1/obj/${encodeURIComponent(name)}${q}`)
     if (resp.status === 404 || resp.ok) return
     throw await relayError(resp, `deleting ${name}`)
   }

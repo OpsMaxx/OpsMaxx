@@ -953,13 +953,29 @@ class AddySession {
       const seed = loadAddySecret('account', `${saved.accountId}:account:${n}`)
       if (seed) epochKeys[n] = seed
     }
+    // A DEVICE THAT RE-KEYED ON 0.59.0 never advanced its enrolment, then
+    // deleted every key up to the old epoch: its record says n and only
+    // n+1's key is left. The newest key found a few epochs above the record
+    // is taken as the epoch to attach at. That is not trusted blindly — the
+    // roster read below refuses a chain behind it as a rollback — so a key
+    // left by a rotation that never landed costs an error, not a wrong key.
+    let epoch = saved.epoch
+    if (!epochKeys[epoch]) {
+      for (let n = saved.epoch + 1; n <= saved.epoch + 8; n++) {
+        const seed = loadAddySecret('account', `${saved.accountId}:account:${n}`)
+        if (seed) {
+          epochKeys[n] = seed
+          epoch = n
+        }
+      }
+    }
     // THE CURRENT EPOCH'S KEY, not epoch 1's. A re-key deliberately deletes
     // every key before the new one — that is the point of it — so demanding
     // the unsuffixed epoch-1 key locked out the very device that performed the
     // re-key, at its next launch, and sent the user to phrase recovery. Epoch
     // 1's key is not needed to verify anything: the chain is checked against
     // `epoch1SignPub`, which the enrolment carries.
-    if (!keys.deviceSignSeed || !keys.deviceEncKey || !epochKeys[saved.epoch]) {
+    if (!keys.deviceSignSeed || !keys.deviceEncKey || !epochKeys[epoch]) {
       this.lastProblem =
         'This machine is enrolled on a relay, but its keys cannot be read from the keychain. ' +
         'On macOS an update can change which signature the keychain trusts; unlocking the ' +
@@ -974,7 +990,7 @@ class AddySession {
           baseURL: saved.baseURL,
           token: '',
           accountId: saved.accountId,
-          epoch: saved.epoch,
+          epoch,
           rootSignPub: saved.rootSignPub,
           epoch1SignPub: saved.epoch1SignPub
         },
@@ -2324,6 +2340,22 @@ class AddySession {
       )
     }
 
+    // A RE-KEY THAT WAS INTERRUPTED CAN BE RUN AGAIN. Nothing reads epoch n+1
+    // until its transition entry lands, so whatever an earlier attempt left
+    // there is this device's own half-finished work; the relay refuses an
+    // unconditional write over it (409), which made a failed re-key — the one
+    // performed after a theft — impossible to retry. That epoch's copy, and
+    // only that epoch's, is deleted and the write made again once.
+    const putAtNewEpoch = async (name: string, counter: number, body: Buffer): Promise<void> => {
+      try {
+        await relay.putObject(name, prepared.epoch, counter, body)
+      } catch (err) {
+        if (!(err instanceof AddyError) || err.code !== 'conflict') throw err
+        await relay.deleteObject(name, prepared.epoch)
+        await relay.putObject(name, prepared.epoch, counter, body)
+      }
+    }
+
     // 1. EVERY COLLECTION, UNDER THE NEW EPOCH, BEFORE ANYTHING ELSE.
     //
     // Read under the old key and written under the new one, object by object.
@@ -2361,12 +2393,7 @@ class AddySession {
         counter: opened.counter + 1,
         payload: opened.payload
       })
-      await relay.putObject(
-        name,
-        prepared.epoch,
-        opened.counter + 1,
-        Buffer.from(sealed.sealed, 'base64')
-      )
+      await putAtNewEpoch(name, opened.counter + 1, Buffer.from(sealed.sealed, 'base64'))
       resealed++
     }
 
@@ -2375,29 +2402,25 @@ class AddySession {
     //    account had moved off, which is a recovery that appears to work and
     //    hands back nothing usable.
     if (prepared.escrow) {
-      await relay.putObject(
-        'escrow',
-        prepared.epoch,
-        1,
-        Buffer.from(prepared.escrow, 'base64'),
-        undefined,
-        prepared.escrowSig
-      )
+      const body = Buffer.from(prepared.escrow, 'base64')
+      await relay.putObject('escrow', prepared.epoch, 1, body, undefined, prepared.escrowSig).catch(async (err: unknown) => {
+        // A retry: an earlier attempt already left an escrow at this epoch.
+        // The relay never deletes an escrow, so it is overwritten in place —
+        // conditionally, and still under the root key's signature.
+        if (!(err instanceof AddyError) || err.code !== 'conflict') throw err
+        const left = await relay.getObject('escrow', prepared.epoch)
+        await relay.putObject('escrow', prepared.epoch, 1, body, left?.etag, prepared.escrowSig)
+      })
     }
 
     // 3. The handoffs: one per surviving device, plus the chained one for a
     //    hygiene rotation. Named by the recipient's key fingerprint, so a
     //    device fetches only its own.
     for (const [fingerprint, sealed] of Object.entries(prepared.handoffs)) {
-      await relay.putObject(
-        `handoff:${fingerprint}`,
-        prepared.epoch,
-        1,
-        Buffer.from(sealed, 'base64')
-      )
+      await putAtNewEpoch(`handoff:${fingerprint}`, 1, Buffer.from(sealed, 'base64'))
     }
     if (prepared.chained) {
-      await relay.putObject('handoff', prepared.epoch, 1, Buffer.from(prepared.chained, 'base64'))
+      await putAtNewEpoch('handoff', 1, Buffer.from(prepared.chained, 'base64'))
     }
 
     // 4. And only now the transition. Everything the new epoch needs is

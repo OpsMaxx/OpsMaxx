@@ -275,6 +275,63 @@ describe('a re-key', () => {
     expect(forgotEpoch).not.toHaveBeenCalled()
   })
 
+  it('brings back a device that re-keyed on 0.59.0: record at the old epoch, only the new key left', async () => {
+    // What 0.59.0 left behind: enrolment still at epoch 1, epoch 1's key
+    // deleted by the revocation, epoch 2's key stored.
+    enrol(1, 4, 'hT')
+    keychain.delete(`account|${ACCT}:account`)
+    keychain.set(`account|${ACCT}:account:2`, 'AK2')
+    const relaunched = sidecar({ chainEpoch: 2, headSeq: 4, head: 'hT' })
+    s.openCrypto = async () => relaunched
+    fakeRelay()
+    try {
+      const resumed = await addySession.resume()
+      expect(resumed.problem).toBeUndefined()
+      expect(resumed.resumed).toBe(true)
+      expect(relaunched.calls.find((c) => c.method === 'load')!.params.epochKeys).toEqual({ 2: 'AK2' })
+      expect((s.account as { epoch: number }).epoch).toBe(2)
+    } finally {
+      delete s.openCrypto
+      await addySession.detach()
+    }
+  })
+
+  it('can be run again after an interrupted attempt left objects at the new epoch', async () => {
+    enrol(1, 3, 'h3')
+    attachFake(1, sidecar({ chainEpoch: 1, headSeq: 3, head: 'h3' }))
+    // What a failed attempt left: its handoffs and escrow at epoch 2. The relay
+    // refuses an unconditional write over an existing object (409).
+    const left = new Set<string>()
+    const deleted: string[] = []
+    const r = relay as Record<string, unknown>
+    const plainGet = r.getObject as (n: unknown, e?: unknown) => Promise<unknown>
+    r.getObject = async (name: unknown, epoch?: unknown) =>
+      name === 'escrow' && epoch === 2 ? { body: Buffer.from('old'), etag: 'left' } : plainGet(name, epoch)
+    r.putObject = async (name: unknown, _e: unknown, _c: unknown, _b: unknown, ifMatch?: unknown) => {
+      const n = String(name)
+      const existed = n === 'escrow' ? ifMatch !== 'left' : n.startsWith('handoff:') && !left.has(n)
+      if (existed) {
+        left.add(n)
+        throw new AddyError('conflict', `${n} exists`)
+      }
+      puts.push(n)
+      return 'etag'
+    }
+    r.deleteObject = async (name: unknown, epoch?: unknown) => {
+      expect(epoch).toBe(2)
+      deleted.push(String(name))
+    }
+
+    const done = await addySession.rotateEpoch('revocation', 'twelve words')
+
+    expect(done.epoch).toBe(2)
+    // The leftover handoffs went (epoch 2 only); the escrow is never deleted,
+    // it is overwritten in place under its etag.
+    expect(deleted.length).toBeGreaterThan(0)
+    expect(deleted.every((n) => n.startsWith('handoff:'))).toBe(true)
+    expect(puts).toContain('escrow')
+  })
+
   it('survives a restart: the device that re-keyed resumes on the new epoch', async () => {
     enrol(1, 3, 'h3')
     attachFake(1, sidecar({ chainEpoch: 1, headSeq: 3, head: 'h3' }))
