@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { addyPairLink } from '../../../../shared/addyLink'
 import { AlertTriangle, Check, Copy, Loader2, Smartphone, X } from 'lucide-react'
 import { toast } from '../../store/toast'
+import { useApp } from '../../store/app'
+import { useNav } from '../../store/nav'
 import { errorText } from '../../lib/connectionError'
 import type { AddyPairingConfirmation } from '../../../../shared/addy'
 
@@ -70,8 +72,8 @@ const cleanedSeparator = '.'
  */
 export const PAIRING_WINDOW_MS = 180_000
 
-/** `m:ss` until `deadline`, ticking once a second; `null` with no deadline. */
-function useTimeLeft(deadline: number | null): string | null {
+/** Seconds until `deadline`, ticking once a second; `null` with no deadline. */
+function useSecondsLeft(deadline: number | null): number | null {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     if (deadline === null) return undefined
@@ -80,8 +82,27 @@ function useTimeLeft(deadline: number | null): string | null {
     return () => clearInterval(id)
   }, [deadline])
   if (deadline === null) return null
-  const s = Math.max(0, Math.ceil((deadline - now) / 1000))
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+  // Clamped: on the render that sets a deadline, `now` is still whenever the
+  // last one stopped ticking.
+  return Math.min(PAIRING_WINDOW_MS / 1000, Math.max(0, Math.ceil((deadline - now) / 1000)))
+}
+
+function mss(s: number | null): string {
+  return s === null ? '' : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
+/**
+ * Whether Sync & devices is the view in front.
+ *
+ * The panel is never unmounted when somebody goes elsewhere — FleetMonitor
+ * keeps it, hidden — so "leaving the screen" has to be read from navigation.
+ * Settings needs no rule: its copy unmounts when it is left, and unmounting
+ * cancels.
+ */
+function useOnScreen(): boolean {
+  const activity = useApp((s) => s.activity)
+  const onPanel = useNav((s) => s.fleetRail === 'monitor' && s.monitorTab === 'addy')
+  return activity === 'settings' || (activity === 'monitor' && onPanel)
 }
 
 export function PairingPanel({
@@ -106,7 +127,18 @@ export function PairingPanel({
   const [newLabel, setNewLabel] = useState('')
   // One string, split again by `splitTicket` on the other machine.
   const ticket = `${code}.${pairingId}`
-  const pairLink = addyPairLink(baseURL, code, pairingId)
+  // GUARDED, and only built once there is a code. `baseURL` is whatever is in
+  // the relay field, keystroke by keystroke, and `new URL('h')` throws — which
+  // during render took the whole app down to the root error boundary the
+  // moment somebody started typing an address.
+  const pairLink = (() => {
+    if (!code) return ''
+    try {
+      return addyPairLink(baseURL, code, pairingId)
+    } catch {
+      return ''
+    }
+  })()
   const [confirmation, setConfirmation] = useState<AddyPairingConfirmation | null>(null)
   const [error, setError] = useState<string | null>(null)
   // The handoff is a round trip to the relay, so "They match" is not instant.
@@ -125,9 +157,11 @@ export function PairingPanel({
    * on the screen of the attempt that had just begun.
    */
   const attempt = useRef(0)
-  /** When the code on screen, or the one being joined, stops working. */
+  /** When the code on screen, the one being joined, or the handover after
+   *  "They match" stops being waited for. */
   const [deadline, setDeadline] = useState<number | null>(null)
-  const timeLeft = useTimeLeft(deadline)
+  const secondsLeft = useSecondsLeft(deadline)
+  const timeLeft = mss(secondsLeft)
   // The joiner is waiting from Join until the emoji arrive or it fails.
   const waiting = stage === 'joining' && deadline !== null
 
@@ -186,9 +220,50 @@ export function PairingPanel({
     attempt.current++
     active.current = false
     setDeadline(null)
+    setBusy(false)
     void window.opsmaxx?.addy.cancelPairing()
     setStage(stage === 'showing' ? 'choose' : 'joining')
   }
+
+  /** Stop, and say why. Main is told too, so nothing is left listening. */
+  const stopWith = (why: string): void => {
+    attempt.current++
+    active.current = false
+    setDeadline(null)
+    setBusy(false)
+    void window.opsmaxx?.addy.cancelPairing()
+    setError(why)
+    setStage('failed')
+  }
+
+  // THE CLOCK ON SCREEN IS THE CLOCK. Main's own deadline can run later than
+  // this one — the joiner's second wait starts its own three minutes — so a
+  // countdown left at 0:00 while main kept waiting was a countdown that lied.
+  useEffect(() => {
+    if (secondsLeft !== 0) return
+    stopWith(
+      stage === 'showing'
+        ? 'The code ran out before the other device used it. Start again for a new one.'
+        : 'The other device did not answer in time. Start again with a new code.'
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [secondsLeft])
+
+  // LEAVING THE SCREEN ENDS IT, as the screen says. The panel stays mounted
+  // while hidden, so without this a code went on working behind another view
+  // and the emoji could arrive on a screen nobody was looking at. Only a
+  // change from on screen to off counts: a panel that was never in front has
+  // started nothing.
+  const onScreen = useOnScreen()
+  const wasOnScreen = useRef(onScreen)
+  useEffect(() => {
+    const left = wasOnScreen.current && !onScreen
+    wasOnScreen.current = onScreen
+    if (left && (stage === 'showing' || waiting)) {
+      stopWith('Pairing stopped because you left Sync & devices. Start again when both devices are ready.')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onScreen])
 
   /** Back to the start, with nothing left over from the last exchange. A
    *  stale code in a field is a code somebody will try to use. */
@@ -255,9 +330,13 @@ export function PairingPanel({
    */
   const accept = async (): Promise<void> => {
     if (!confirmation) return
+    const mine = ++attempt.current
     setBusy(true)
+    const joining = !!confirmation.self
+    // The joiner now waits for the other device's "They match", which can be
+    // as long as the code itself — so it gets the same clock and a way out.
+    if (joining) setDeadline(Date.now() + PAIRING_WINDOW_MS)
     try {
-      const joining = !!confirmation.self
       if (joining) {
         // This device typed the code: take the key, store it, attach.
         await window.opsmaxx!.addy.finishJoin()
@@ -266,16 +345,18 @@ export function PairingPanel({
         // roster.
         await window.opsmaxx!.addy.completePairing(confirmation, newLabel)
       }
+      if (mine !== attempt.current) return
       active.current = false
+      setDeadline(null)
       setStage('done')
       toast(joining ? 'This device joined the account' : 'Device added to your account', 'ok')
     } catch (err) {
       // Said plainly and left on this screen. A failure here means the two
       // devices agreed and the account does not know it, which is exactly the
       // state the old toast concealed.
-      fail(err)
+      if (mine === attempt.current) fail(err)
     } finally {
-      setBusy(false)
+      if (mine === attempt.current) setBusy(false)
     }
   }
 
@@ -338,9 +419,19 @@ export function PairingPanel({
           </button>
           <button className="btn" disabled={busy} onClick={() => void accept()}>
             {busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
-            {busy ? ' Adding the device…' : ' They match'}
+            {busy ? (confirmation.self ? ' Joining…' : ' Adding the device…') : ' They match'}
           </button>
         </div>
+        {busy && confirmation.self && deadline !== null && (
+          <>
+            <p className="fine">
+              Waiting for the other device to press <strong>They match</strong> ({timeLeft} left).
+            </p>
+            <button className="btn" onClick={() => stopWith('Joining stopped. Nothing was added.')}>
+              Cancel
+            </button>
+          </>
+        )}
       </div>
     )
   }
@@ -395,25 +486,30 @@ export function PairingPanel({
               PAIRING had nothing to use. It carries the relay address too,
               which is the other thing the second machine does not know.
               It fills the form on arrival; it never joins by itself. */}
+          {pairLink && (
+            <>
+              <p className="fine">Or send this link to the other machine — it fills both in:</p>
+              <div className="pair-code">
+                <code className="pair-link">{pairLink}</code>
+                <button
+                  className="btn"
+                  aria-label="Copy the pairing link"
+                  onClick={() => {
+                    void navigator.clipboard.writeText(pairLink)
+                    toast('Pairing link copied')
+                  }}
+                >
+                  <Copy size={14} />
+                </button>
+              </div>
+            </>
+          )}
+          {/* Not a live region: a countdown inside one is read aloud every
+              second. The stage changes are what a screen reader hears — the
+              failure below is an alert. */}
           <p className="fine">
-            Or send this link to the other machine — it fills both in:
-          </p>
-          <div className="pair-code">
-            <code className="pair-link">{pairLink}</code>
-            <button
-              className="btn"
-              aria-label="Copy the pairing link"
-              onClick={() => {
-                void navigator.clipboard.writeText(pairLink)
-                toast('Pairing link copied')
-              }}
-            >
-              <Copy size={14} />
-            </button>
-          </div>
-          <p className="fine" role="status">
             <Loader2 size={13} className="spin" /> Waiting for the other device. This code stops
-            working in {timeLeft}, or as soon as you leave this screen.
+            working in {timeLeft}, or as soon as you leave Sync &amp; devices.
           </p>
           <button className="btn" onClick={cancel}>
             Cancel
@@ -439,7 +535,7 @@ export function PairingPanel({
               {/* WHAT A WRONG CODE LOOKS LIKE FROM HERE: nothing. The other
                   device is the one that finds out, and this side waits out the
                   clock — so the clock is on screen, and so is the way out. */}
-              <p className="fine" role="status">
+              <p className="fine">
                 <Loader2 size={13} className="spin" /> Waiting for the other device… ({timeLeft} left).
                 If the other device says the code was wrong, start a new code there, cancel here,
                 and type the new one.
@@ -458,7 +554,11 @@ export function PairingPanel({
 
       {stage === 'done' && (
         <>
-          <div className="setting-desc">This device is now on the account.</div>
+          <div className="setting-desc">
+            {confirmation?.self
+              ? 'This device is now on the account.'
+              : 'The other device is now on the account.'}
+          </div>
           {/* A TERMINAL STATE WITH NO WAY BACK MEANT NO THIRD DEVICE. After a
               successful pairing the panel sat here, and the only route to
               another one was restarting the app — on the very screen whose job

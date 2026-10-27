@@ -76,6 +76,15 @@ export function undeferConflicts(): void {
   useAddyUi.setState({ deferredConflicts: [] })
 }
 
+/** Forget deferrals for conflicts that no longer exist — resolved on another
+ *  device, most likely — so "you left some for later" stops counting them. */
+export function pruneDeferred(existing: number[]): void {
+  useAddyUi.setState((s) => {
+    const kept = s.deferredConflicts.filter((id) => existing.includes(id))
+    return kept.length === s.deferredConflicts.length ? s : { deferredConflicts: kept }
+  })
+}
+
 /**
  * Collect `opsmaxx://` links for the life of the window. Returns the stop.
  *

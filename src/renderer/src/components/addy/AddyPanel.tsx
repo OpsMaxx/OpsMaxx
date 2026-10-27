@@ -546,7 +546,9 @@ function LeaveRow({
             : r.removedFromRoster === true
               ? 'This device has left the account and removed itself from your device list.'
               : `This device has left the account, but could not remove itself from your device list${r.rosterProblem ? ` (${r.rosterProblem})` : ''} — remove it from one of your other devices.`,
-          'ok'
+          // Not a success colour on a sentence that asks for something to be
+          // done on another machine.
+          r?.left && r.removedFromRoster !== true ? 'error' : 'ok'
         )
         setOpen(false)
       })

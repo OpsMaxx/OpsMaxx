@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { GitMerge, AlertTriangle } from 'lucide-react'
 import type { AddyStatusDevice, ConflictCopy } from '../../../../shared/addy'
 import { approvalShowing } from '../../hooks/useClickOutside'
-import { deferConflict, useAddyUi } from '../../store/addy'
+import { deferConflict, pruneDeferred, useAddyUi } from '../../store/addy'
+import { errorText } from '../../lib/connectionError'
 import { collectionName as nameOf } from './collectionNames'
 
 /**
@@ -80,8 +81,14 @@ export function ConflictChooser(): React.JSX.Element | null {
   // is reading.
   const refresh = async (): Promise<void> => {
     const list = await window.opsmaxx?.addy.conflicts().catch(() => undefined)
-    if (list !== undefined) setConflicts(list)
+    if (list === undefined) return
+    setConflicts(list)
+    pruneDeferred(list.map((c) => c.id))
   }
+  /** Why the last button press did not work. It used to fail silently. */
+  const [actError, setActError] = useState<string | null>(null)
+  const dialog = useRef<HTMLDivElement>(null)
+  const later = useRef<HTMLButtonElement>(null)
 
   /**
    * READ ON EVERY STATUS PUSH AND EVERY RETURN TO THE WINDOW, not once.
@@ -136,12 +143,50 @@ export function ConflictChooser(): React.JSX.Element | null {
     return () => document.removeEventListener('keydown', onKey)
   }, [currentId])
 
+  /**
+   * FOCUS GOES IN, STAYS IN, AND COMES BACK. `aria-modal` promises all three
+   * and the dialog did none: focus stayed on whatever was behind it, so Tab
+   * walked the app underneath a modal that covered it.
+   *
+   * It lands on Decide later, the one button that writes nothing.
+   */
+  const open = currentId !== undefined
+  useEffect(() => {
+    if (!open) return undefined
+    const before = document.activeElement as HTMLElement | null
+    return () => before?.focus?.()
+  }, [open])
+  useEffect(() => {
+    if (currentId === undefined) return undefined
+    setActError(null)
+    later.current?.focus()
+    const onTab = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab' || !dialog.current) return
+      const all = [...dialog.current.querySelectorAll<HTMLElement>('button:not([disabled])')]
+      if (all.length === 0) return
+      const first = all[0]
+      const last = all[all.length - 1]
+      const at = document.activeElement
+      const inside = at instanceof Node && dialog.current.contains(at)
+      if (!inside || (e.shiftKey && at === first)) {
+        e.preventDefault()
+        ;(e.shiftKey ? last : first).focus()
+      } else if (!e.shiftKey && at === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onTab)
+    return () => document.removeEventListener('keydown', onTab)
+  }, [currentId])
+
   if (!current) return null
 
   const act = (run: () => Promise<unknown>): void => {
     setBusy(true)
+    setActError(null)
     void run()
-      .then(refresh)
+      .then(refresh, (err: unknown) => setActError(errorText(err)))
       .finally(() => setBusy(false))
   }
 
@@ -159,7 +204,7 @@ export function ConflictChooser(): React.JSX.Element | null {
       aria-modal="true"
       aria-labelledby="conflict-title"
     >
-      <div className="conflict">
+      <div className="conflict" ref={dialog}>
         <GitMerge size={26} aria-hidden className="conflict-icon" />
         <h2 id="conflict-title">Two versions of {nameOf(current.collection)}</h2>
         {/* WHAT HAPPENED, FOR SOMEBODY WHO HAS NEVER HEARD THE WORD CONFLICT.
@@ -265,10 +310,21 @@ export function ConflictChooser(): React.JSX.Element | null {
           )}
           {/* The way out. Nothing is written and nothing is lost: the copy
               stays on the relay and this comes back. */}
-          <button className="btn ghost" disabled={busy} onClick={() => deferConflict(current.id)}>
+          <button
+            ref={later}
+            className="btn ghost"
+            disabled={busy}
+            onClick={() => deferConflict(current.id)}
+          >
             Decide later
           </button>
         </div>
+        {actError !== null && (
+          <div className="conflict-problem" role="alert">
+            <AlertTriangle size={15} aria-hidden />
+            <span>That did not finish: {actError}</span>
+          </div>
+        )}
 
         {/* What is still waiting, not how many there ever were. Counting the
             ones already deferred told somebody who had put two off that there
