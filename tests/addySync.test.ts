@@ -45,9 +45,12 @@ vi.mock('electron', () => ({
   }
 }))
 
-const { syncOnce, forgetSyncState, SYNC_STATE_FILE } = await import(
+const { syncOnce, forgetSyncState, forgetEpochState, SYNC_STATE_FILE } = await import(
   '../src/main/services/addy/sync'
 )
+const { holdSyncedKeys, rendererReloaded } = await import('../src/main/services/addy/collections')
+const { saveData } = await import('../src/main/services/store')
+const { AddyError } = await import('../src/main/services/addy/sidecar')
 
 // ---------------------------------------------------------------------------
 // The fakes
@@ -116,9 +119,9 @@ function fakeRelay(): {
     putObject: async (name, _epoch, counter, body, ifMatch) => {
       const existing = objects.get(name)
       if (ifMatch !== undefined && existing && existing.etag !== ifMatch) {
-        const err = new Error(`${name} was written by another device first`)
-        ;(err as { code?: string }).code = 'internal'
-        throw err
+        // What RelayClient.putObject throws on a 409: its own code, which the
+        // engine asks for instead of matching the message.
+        throw new AddyError('conflict', `${name} was written by another device first`)
       }
       const etag = `etag-${++tag}`
       objects.set(name, { body, etag, counter })
@@ -161,6 +164,14 @@ const readBlob = (): Record<string, unknown> => {
 }
 
 /** What the relay would be holding if another device had pushed this. */
+/** What the relay holds for one collection, unwrapped from the fake seal. */
+function relayPayload(relay: ReturnType<typeof fakeRelay>, name: string): any {
+  const o = relay.objects.get(name)
+  if (!o) return undefined
+  const inner = JSON.parse(o.body.toString('utf8'))
+  return JSON.parse(Buffer.from(inner.payload, 'base64').toString('utf8'))
+}
+
 function seeded(relay: ReturnType<typeof fakeRelay>, name: string, value: unknown, counter = 1): void {
   relay.objects.set(name, {
     body: Buffer.from(
@@ -213,9 +224,11 @@ describe('a machine with nothing', () => {
     // in memory and rewrites it over the file on its next save — which fires
     // on a theme change or an opened tab — and the next pass pushes that
     // revert as the account's winner.
-    writeBlob({ servers: [{ id: 's1' }, { id: 'added-here' }] })
+    // One record, two different contents: the one thing a first-contact
+    // union will not decide.
+    writeBlob({ servers: [{ id: 's1', name: 'edited-here' }] })
     const relay = fakeRelay()
-    seeded(relay, 'servers', [{ id: 's1' }, { id: 'added-there' }])
+    seeded(relay, 'servers', [{ id: 's1', name: 'edited-there' }])
 
     const r = await syncOnce(deps(relay))
 
@@ -300,18 +313,73 @@ describe('a machine with data and an empty account', () => {
 })
 
 describe('both sides have a copy and this device has never synced', () => {
-  it('adopts the account and keeps its own copy rather than choosing for the user', async () => {
+  it('unions the two lists by id: a joining machine keeps its own servers and gains the account\'s', async () => {
     writeBlob({ servers: [{ id: 'local-only' }] })
     const relay = fakeRelay()
     seeded(relay, 'servers', [{ id: 'from-the-account' }])
 
     const r = await syncOnce(deps(relay))
 
+    expect(r.outcomes.servers).toBe('merged')
+    expect(readBlob().servers).toEqual([
+      { id: 'local-only', status: 'offline' },
+      { id: 'from-the-account', status: 'offline' }
+    ])
+    // On the relay too, so every other device gets this machine's servers.
+    expect(relayPayload(relay, 'servers').map((x: { id: string }) => x.id)).toEqual([
+      'local-only',
+      'from-the-account'
+    ])
+    expect(relay.conflicts).toEqual([])
+    // And the next pass agrees with it rather than merging again.
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('unchanged')
+  })
+
+  it('keeps both copies when one id holds different records on each side', async () => {
+    writeBlob({ servers: [{ id: 's1', name: 'here' }, { id: 'local-only' }] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 's1', name: 'there' }])
+
+    const r = await syncOnce(deps(relay))
+
     expect(r.outcomes.servers).toBe('conflicted')
     // The account wins, because it is the copy the rest of the devices agree
     // on — one story rather than two.
-    expect(readBlob().servers).toEqual([{ id: 'from-the-account', status: 'offline' }])
+    expect(readBlob().servers).toEqual([{ id: 's1', name: 'there', status: 'offline' }])
     // And nothing was destroyed. These bytes existed nowhere else.
+    expect(relay.conflicts.map((c) => c.name)).toContain('servers')
+  })
+
+  it('keeps both copies of a collection that is not a list of records', async () => {
+    writeBlob({ apiWorkspace: { activeTab: 'here' } })
+    const relay = fakeRelay()
+    seeded(relay, 'apiWorkspace', { activeTab: 'there' })
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.apiWorkspace).toBe('conflicted')
+    expect(relay.conflicts.map((c) => c.name)).toContain('apiWorkspace')
+  })
+
+  it('keeps both copies when another device writes between the read and the union', async () => {
+    writeBlob({ servers: [{ id: 'local-only' }] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'from-the-account' }])
+    const racing = {
+      ...relay,
+      putObject: async (n: string, e: number, c: number, b: Buffer, ifMatch?: string) => {
+        if (n === 'servers' && ifMatch !== undefined) {
+          seeded(relay, 'servers', [{ id: 'later' }], 2)
+          relay.objects.get('servers')!.etag = 'written-meanwhile'
+        }
+        return relay.putObject(n, e, c, b, ifMatch)
+      }
+    }
+
+    const r = await syncOnce(deps(racing as never))
+
+    expect(r.outcomes.servers).toBe('conflicted')
+    expect(readBlob().servers).toEqual([{ id: 'later', status: 'offline' }])
     expect(relay.conflicts.map((c) => c.name)).toContain('servers')
   })
 
@@ -503,9 +571,7 @@ describe('a relay that serves an old copy back', () => {
     const hostile = {
       ...relay,
       putObject: async () => {
-        throw Object.assign(new Error('servers was written by another device first'), {
-          code: 'internal'
-        })
+        throw new AddyError('conflict', 'servers was written by another device first')
       },
       getObject: async (name: string) => {
         if (name !== 'servers') return relay.getObject(name)
@@ -617,10 +683,10 @@ describe('a state agreed with a different account', () => {
 
     const r = await syncOnce(elsewhere)
 
-    // A conflict, not a silent pull: the local estate survives on the relay
-    // as a copy the user can choose.
-    expect(r.outcomes.servers).toBe('conflicted')
-    expect(other.conflicts.map((c) => c.name)).toContain('servers')
+    // Not a silent pull: the local estate survives, merged into the new
+    // account's as a machine that joins it with its own servers does.
+    expect(r.outcomes.servers).toBe('merged')
+    expect((readBlob().servers as { id: string }[]).map((x) => x.id)).toEqual(['mine', 'theirs'])
   })
 })
 
@@ -716,11 +782,12 @@ describe('when something goes wrong', () => {
 
     const r = await syncOnce(deps(relay))
 
-    // With no memory of an agreement, a difference is a question for the user
-    // rather than an overwrite in either direction. That is what makes
-    // "resync everything" safe to offer at all.
-    expect(r.outcomes.servers).toBe('conflicted')
-    expect(relay.conflicts.length).toBeGreaterThan(0)
+    // With no memory of an agreement, a difference is never an overwrite in
+    // either direction: the lists are unioned, and only a record both sides
+    // hold differently goes to the user. That is what makes "resync
+    // everything" safe to offer at all.
+    expect(r.outcomes.servers).toBe('merged')
+    expect((readBlob().servers as { id: string }[]).map((x) => x.id)).toEqual(['s1', 'local-since'])
   })
 })
 
@@ -787,5 +854,135 @@ describe('a collection whose source rewrites what it is given', () => {
 
     writeBlob({ ...readBlob(), servers: [{ id: 's1', name: 'Renamed Here', status: 'offline' }] })
     expect((await syncOnce(deps(relay))).outcomes.servers).toBe('pushed')
+  })
+})
+
+describe('a lost write is recognised by its code, not its wording', () => {
+  // The engine used to regex the message for "written by another device", so
+  // rewording the sentence in relay.ts would have turned every create race
+  // into a failed collection. The refusal now carries `conflict`.
+  it('routes a conflict-coded refusal into the conflict path whatever it says', async () => {
+    writeBlob({ servers: [{ id: 'mine' }] })
+    const relay = fakeRelay()
+    let raced = false
+    const racing = {
+      ...relay,
+      putObject: async (name: string, e: number, c: number, b: Buffer, ifMatch?: string) => {
+        if (name === 'servers' && !raced) {
+          // Another device created it between this pass's GET and its PUT.
+          raced = true
+          seeded(relay, 'servers', [{ id: 'theirs' }])
+          throw new AddyError('conflict', 'the relay answered 409')
+        }
+        return relay.putObject(name, e, c, b, ifMatch)
+      }
+    }
+    const r = await syncOnce(deps(racing as never))
+    expect(raced, 'the race was never staged').toBe(true)
+    expect(r.outcomes.servers).not.toBe('failed')
+  })
+})
+
+describe('the renderer is told as each copy lands', () => {
+  it('before the pass moves on to the next collection', async () => {
+    // Told once at the end of the pass, the renderer had fifteen more relay
+    // round trips in which its next save wrote the pre-sync copy back.
+    const relay = fakeRelay()
+    seeded(relay, 'databases', [{ id: 'd1' }])
+    seeded(relay, 'servers', [{ id: 's1' }])
+    let toldBeforeServers = false
+    const watching = {
+      ...relay,
+      getObject: async (name: string) => {
+        if (name === 'servers') toldBeforeServers = applied.mock.calls.some((c) => c[0].includes('databases'))
+        return relay.getObject(name)
+      }
+    }
+    await syncOnce(deps(watching as never))
+    expect(toldBeforeServers).toBe(true)
+  })
+
+  it('a save the renderer queued before it reloaded cannot push the old copy', async () => {
+    writeBlob({ servers: [{ id: 's1' }], theme: 'dark' })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+    // Another device adds a server, and this one pulls it.
+    seeded(relay, 'servers', [{ id: 's1' }, { id: 's2' }], 2)
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('pulled')
+
+    // The renderer's debounced save fires before its reload: the pre-sync
+    // servers, plus a change of its own that has nothing to do with them.
+    // This is what main's `data:save` does with it.
+    saveData(holdSyncedKeys({ servers: [{ id: 's1' }], theme: 'light' }))
+    expect((readBlob().servers as unknown[]).length).toBe(2)
+    expect(readBlob().theme).toBe('light')
+
+    const r = await syncOnce(deps(relay))
+    expect(r.outcomes.servers).toBe('unchanged')
+
+    // Once it has read the file back, what it saves is its own again.
+    rendererReloaded()
+    saveData(holdSyncedKeys({ servers: [{ id: 's1' }], theme: 'light' }))
+    expect((readBlob().servers as unknown[]).length).toBe(1)
+  })
+})
+
+describe('a re-key does not revert an edit that was not pushed yet', () => {
+  it('the offline device pushes its edit after following the rotation', async () => {
+    // A laptop edits offline; meanwhile another device re-keys, which
+    // re-seals every object (new ETags, same contents). The rotation used to
+    // forget ALL state, so the laptop's next pass took the first-contact
+    // branch: its edit became a conflict copy and the account's older copy
+    // went back on its screen — for every collection it had touched.
+    const hosts = join(userData, 'opsmaxx-known-hosts.json')
+    writeBlob({ servers: [{ id: 's1' }] })
+    writeFileSync(hosts, '{"h1":"fp1"}')
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+
+    writeBlob({ servers: [{ id: 's1' }, { id: 'edited-offline' }] })
+    writeFileSync(hosts, '{"h1":"fp1","h2":"fp2"}')
+    for (const [name, o] of relay.objects) relay.objects.set(name, { ...o, etag: `resealed-${name}` })
+    forgetEpochState()
+
+    const r = await syncOnce(deps(relay))
+
+    // Both kinds: a list of records, and a whole file the merge cannot open.
+    expect(r.outcomes.servers).toBe('pushed')
+    expect(r.outcomes.knownHosts).toBe('pushed')
+    expect(relay.conflicts).toEqual([])
+    expect(readBlob().servers).toEqual([{ id: 's1' }, { id: 'edited-offline' }])
+    expect(readFileSync(hosts, 'utf8')).toBe('{"h1":"fp1","h2":"fp2"}')
+    rmSync(hosts, { force: true })
+  })
+})
+
+describe('resolving one conflict', () => {
+  it('leaves another collection\'s pending edit alone', async () => {
+    writeBlob({ servers: [{ id: 's1' }], databases: [{ id: 'd1' }] })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+    // An edit to databases this device has not pushed yet.
+    writeBlob({ ...readBlob(), databases: [{ id: 'd1' }, { id: 'd2-pending' }] })
+
+    // `servers` is resolved, as session.resolveConflict does it: the choice
+    // on the relay and on disk, and that collection's agreement forgotten.
+    const chosen = [{ id: 's1' }, { id: 'chosen' }]
+    seeded(relay, 'servers', chosen, 5)
+    writeBlob({ ...readBlob(), servers: chosen })
+    forgetSyncState(['servers'])
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.databases).toBe('pushed')
+    expect(r.outcomes.servers).toBe('unchanged')
+    expect(relay.conflicts).toEqual([])
+    expect(readBlob().databases).toEqual([{ id: 'd1' }, { id: 'd2-pending' }])
+  })
+
+  it('is what session.resolveConflict forgets', () => {
+    const SESSION = readFileSync(join(__dirname, '..', 'src/main/services/addy/session.ts'), 'utf8')
+    const fn = SESSION.slice(SESSION.indexOf('async resolveConflict('))
+    expect(fn.slice(0, fn.indexOf('\n  }\n'))).toMatch(/forgetSyncState\(\[collection\]\)/)
   })
 })

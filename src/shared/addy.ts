@@ -240,6 +240,13 @@ export type AddyErrorCode =
   | 'relay-unreachable'
   | 'peer-unreachable'
   | 'internal'
+  // Raised by main, never by addyd. A conditional write lost to another
+  // device's (409): the remedy is the conflict path, not a retry.
+  | 'conflict'
+  // The relay speaks a different protocol version (426). Update one side.
+  | 'version-mismatch'
+  // A request or file larger than the relay accepts (413).
+  | 'too-large'
 
 /**
  * One conflict copy, as the chooser sees it.
@@ -303,8 +310,13 @@ export interface AddyStatusDevice {
   self: boolean
   /** Epoch ms the relay last saw it. `null` when it does not report that. */
   lastSeen: number | null
-  /** Epoch ms it joined the account. `null` when unknown. */
+  /** Epoch ms it joined the account, from the timestamp in the verified roster
+   *  entry that added it (the adding device's clock). `null` when unknown. */
   addedAt: number | null
+  /** The verified roster's add entry for it was signed with the recovery-phrase
+   *  (root) key — "added with the recovery phrase", which every other device
+   *  should be told about loudly in case it was not the owner. */
+  addedWithPhrase: boolean
   revoked?: boolean
 }
 

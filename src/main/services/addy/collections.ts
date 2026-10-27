@@ -127,8 +127,49 @@ function blobKey(key: string): CollectionSource {
           `${key} could not be written to the local data file`
         )
       }
+      awaitingReload.set(key, Date.now())
     }
   }
+}
+
+/**
+ * Keys sync wrote into `opsmaxx-data.json` that the renderer has not read back
+ * yet, with when.
+ *
+ * THE RENDERER'S RELOAD IS ASYNCHRONOUS, so being told is not the same as
+ * being up to date. `applied()` sends an event; the renderer answers by asking
+ * for the file and only then replaces its copy. A save already queued in that
+ * window — the 400 ms debounce after any change — carries the PRE-sync value,
+ * lands first, and the reload then reads the revert back as the truth. The
+ * next pass pushes it to every device as an ordinary local edit.
+ */
+const awaitingReload = new Map<string, number>()
+/** ponytail: a fixed bound, so a renderer that never reloads (no window, a
+ *  listener not yet attached) cannot pin a key to the synced copy for the rest
+ *  of the session; an acknowledgement from the renderer would make it exact. */
+const RELOAD_GRACE_MS = 10_000
+
+/**
+ * A renderer save, with every key sync wrote since the renderer last read the
+ * file put back to what is on disk. Called by main's `data:save` before it
+ * writes: whatever the renderer sent for those keys predates the sync write.
+ * Everything else in the save is the renderer's, untouched.
+ */
+export function holdSyncedKeys(incoming: unknown): unknown {
+  const now = Date.now()
+  for (const [key, at] of awaitingReload) if (now - at > RELOAD_GRACE_MS) awaitingReload.delete(key)
+  if (awaitingReload.size === 0 || !incoming || typeof incoming !== 'object') return incoming
+  const disk = loadData() as Record<string, unknown> | null
+  if (!disk) return incoming
+  const held: Record<string, unknown> = { ...(incoming as Record<string, unknown>) }
+  for (const key of awaitingReload.keys()) if (key in disk) held[key] = disk[key]
+  return held
+}
+
+/** The renderer read the file (`data:load`), so what it holds from here on is
+ *  at least as new as anything sync wrote. */
+export function rendererReloaded(): void {
+  awaitingReload.clear()
 }
 
 /** A whole file in userData, carried verbatim. */

@@ -5,6 +5,7 @@ import (
 	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -598,6 +599,10 @@ func TestRecoveringAnAccountFromThePhraseAlone(t *testing.T) {
 	if added, _ := recoveredRow["mnemonicAdded"].(bool); !added {
 		t.Fatal("the recovered device is not marked as added with the recovery phrase")
 	}
+	// The panel's "added on" and the new-device alert read this; it was never sent.
+	if at, _ := recoveredRow["addedAt"].(uint64); at == 0 {
+		t.Fatalf("the recovered device carries no addedAt (row: %v)", recoveredRow)
+	}
 
 	// And it can read the account's data, which is the point of all of it.
 	if _, err := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{
@@ -774,6 +779,20 @@ func TestRotatingTheEpoch(t *testing.T) {
 	// moved off.
 	if rev["escrow"] == nil {
 		t.Fatal("a revocation rotation did not re-seal the escrow")
+	}
+	// And signs the write with the root key, which is the only signature the
+	// relay takes for an escrow.
+	escrowBytes, _ := base64.StdEncoding.DecodeString(rev["escrow"].(string))
+	escrowSig, _ := base64.StdEncoding.DecodeString(rev["escrowSig"].(string))
+	rootPub, _ := hex.DecodeString(acct["rootSignPub"].(string))
+	idBytes, _ := hex.DecodeString(acct["accountId"].(string))
+	var acctID protocol.AccountID
+	copy(acctID[:], idBytes)
+	sum := sha256.Sum256(escrowBytes)
+	if err := protocol.Verify(ed25519.PublicKey(rootPub), protocol.EscrowWrite{
+		AccountID: acctID, Epoch: rev["epoch"].(uint64), Counter: 1, BodyHash: sum[:],
+	}, escrowSig); err != nil {
+		t.Fatalf("the escrow write is not signed by the root key: %v", err)
 	}
 
 	genesisWire, _ = base64.StdEncoding.DecodeString(genesis)
@@ -1385,4 +1404,353 @@ func TestASignalIsBoundToItsCertificate(t *testing.T) {
 		t.Fatal("a signal verified against a different roster head")
 	}
 	_ = minted
+}
+
+// LEAVE REMOVES THIS DEVICE, AND revokeDevice STILL WILL NOT.
+//
+// Leaving used to call revokeDevice on itself, which the sidecar refuses by
+// design, so no device that left was ever taken off the account. `leave` is
+// the explicit path: it names this machine from the loaded key, and the
+// chain it produces verifies with this device absent. The misclick guard on
+// the device list's Remove button is asserted in the same test, so the fix
+// cannot pass by deleting it.
+func TestLeaveRemovesThisDeviceAndRevokeStillRefusesSelf(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	run := func(h func(Request) (any, error), m string, p map[string]any) (map[string]any, error) {
+		t.Helper()
+		v, err := h(Request{Method: m, Params: params(t, p)})
+		if err != nil {
+			return nil, err
+		}
+		return v.(map[string]any), nil
+	}
+
+	minted, err := run(handleCreateAccount, "createAccount", map[string]any{"label": "laptop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	genesis := minted["genesis"].(string)
+	verify := func(chain string) map[string]any {
+		t.Helper()
+		v, err := run(handleVerifyRoster, "verifyRoster", map[string]any{
+			"chain": chain, "rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"],
+		})
+		if err != nil {
+			t.Fatalf("verifyRoster: %v", err)
+		}
+		return v
+	}
+	one := verify(genesis)
+	if one["selfListed"] != true {
+		t.Fatal("the minting device is not listed in its own genesis; the test is not set up")
+	}
+	me, _ := run(handleWhoami, "whoami", map[string]any{})
+	self := one["devices"].([]map[string]any)[0]
+
+	if _, err := run(handleRevokeDevice, "revokeDevice", map[string]any{
+		"headEntry": one["headEntry"], "headSeq": one["headSeq"], "epoch": uint64(1),
+		"pubSign": me["devicePub"], "pubEnc": self["pubEnc"],
+	}); err == nil || !strings.Contains(err.Error(), "cannot revoke itself") {
+		t.Fatalf("revokeDevice no longer refuses this device: %v", err)
+	}
+
+	left, err := run(handleLeave, "leave", map[string]any{
+		"headEntry": one["headEntry"], "headSeq": one["headSeq"], "epoch": uint64(1),
+	})
+	if err != nil {
+		t.Fatalf("leave was refused: %v", err)
+	}
+	gw, _ := base64.StdEncoding.DecodeString(genesis)
+	lw, _ := base64.StdEncoding.DecodeString(left["entry"].(string))
+	after := verify(base64.StdEncoding.EncodeToString(append(gw, lw...)))
+	if after["selfListed"] != false {
+		t.Fatal("after leave this device is still listed")
+	}
+	if after["selfRevoked"] != true {
+		t.Fatal("a chain that revokes this device does not say so")
+	}
+	if one["selfRevoked"] != false {
+		t.Fatal("a listed device is reported revoked")
+	}
+}
+
+// ABSENT IS NOT REVOKED. A joiner that reads the chain before its pairer's
+// append lands is missing from a valid chain; reporting that as revoked is
+// what made it wipe itself.
+func TestAnAbsentDeviceIsNotReportedRevoked(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "first"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := minted.(map[string]any)
+	genesis := m["genesis"].(string)
+
+	// A second identity on the same account that was never added: load the
+	// same account keys under a fresh device key.
+	other, err := protocol.NewDeviceKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys.mu.Lock()
+	keys.device = other
+	keys.mu.Unlock()
+
+	v, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+		"chain": genesis, "rootSignPub": m["rootSignPub"], "epoch1Sign": m["epoch1SignPub"],
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := v.(map[string]any)
+	if got["selfListed"] != false || got["selfRevoked"] != false {
+		t.Fatalf("an unadded device: selfListed=%v selfRevoked=%v", got["selfListed"], got["selfRevoked"])
+	}
+}
+
+// The client caps a file transfer so the sealed, base64-encoded PUT fits the
+// relay's 8 MiB request limit, and it does that arithmetic with a constant:
+// TRANSFER_SEAL_OVERHEAD in src/main/services/addy/transfer.ts. This is the
+// check that the constant is what sealing a transfer actually adds. If the
+// object layout changes, this fails before a user's file starts failing with
+// 413 at 99% of the limit.
+func TestTransferSealOverhead(t *testing.T) {
+	_, epoch := loadTestAccount(t)
+	for _, n := range []int{0, 1, 4096} {
+		out, err := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{
+			"collection": "transfer:00112233445566778899aabb", "epoch": epoch, "schema": 1,
+			"writerVersion": "transfer", "counter": 1,
+			"payload": base64.StdEncoding.EncodeToString(make([]byte, n)),
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed, err := base64.StdEncoding.DecodeString(out.(map[string]any)["sealed"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := len(sealed) - n; got != 98 {
+			t.Fatalf("sealing %d bytes added %d; transfer.ts assumes 98", n, got)
+		}
+	}
+}
+
+// THE FORM --rtc HANDS OUT IS THE FORM THAT IS SIGNED.
+//
+// The parent passes rtcOffer's `sdp` straight to signSignal and on to the
+// peer, and that string is rtc.go's encodeSDP: base64 of the JSON session
+// description. The test above only ever used hand-written raw SDP, so signing
+// refused every real description ("carries no SHA-256 DTLS fingerprint") and
+// every clipboard silently took the mailbox. This pushes a real one through
+// sign and verify, and checks the fingerprint signed is pion's own.
+func TestARealRtcDescriptionSignsAndVerifies(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+	if _, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "caller"})}); err != nil {
+		t.Fatal(err)
+	}
+	meV, _ := handleWhoami(Request{Method: "whoami", Params: params(t, map[string]any{})})
+	me := meV.(map[string]any)
+
+	offerV, err := handleRtcOffer(Request{Method: "rtcOffer", Params: params(t, map[string]any{"sessionId": "sig-real"})})
+	if err != nil {
+		t.Fatalf("rtcOffer: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = handleRtcClose(Request{Method: "rtcClose", Params: params(t, map[string]any{"sessionId": "sig-real"})})
+	})
+	encoded := offerV.(map[string]any)["sdp"].(string)
+
+	fp, err := fingerprintFromSDP(encoded)
+	if err != nil {
+		t.Fatalf("the description rtcOffer returns has no readable fingerprint: %v", err)
+	}
+	desc, err := decodeSDP(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := fingerprintFromSDP(desc.SDP); !bytes.Equal(fp, want) {
+		t.Fatal("the fingerprint read from the encoded form is not the one in the description pion uses")
+	}
+
+	peerPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	head := hex.EncodeToString(make([]byte, 32))
+	sV, err := handleSignSignal(Request{Method: "signSignal", Params: params(t, map[string]any{
+		"epoch": uint64(1), "peerPubSign": hex.EncodeToString(peerPub), "sdp": encoded, "rosterHead": head,
+	})})
+	if err != nil {
+		t.Fatalf("signing a real rtc description: %v", err)
+	}
+	signed := sV.(map[string]any)
+	if _, err := handleVerifySignal(Request{Method: "verifySignal", Params: params(t, map[string]any{
+		"epoch": uint64(1), "peerPubSign": hex.EncodeToString(peerPub), "signerPubSign": me["devicePub"],
+		"sdp": encoded, "rosterHead": head, "deviceNonce": signed["deviceNonce"],
+		"peerNonce": hex.EncodeToString(make([]byte, 32)), "ts": signed["ts"], "signature": signed["signature"],
+	})}); err != nil {
+		t.Fatalf("verifying a real rtc description: %v", err)
+	}
+}
+
+// signRequest over a parent-computed hash signs exactly what signing the body
+// would, so the relay's Authz (BodyHash = protocol.HashBody(body)) verifies.
+func TestSignRequestOverABodyHashIsTheBodySignature(t *testing.T) {
+	_, _ = loadTestAccount(t)
+	body := []byte(`{"epoch":1,"counter":2,"body":"QUFB"}`)
+	sum := sha256.Sum256(body)
+
+	sign := func(p map[string]any) map[string]any {
+		t.Helper()
+		v, err := handleSignRequest(Request{Method: "signRequest", Params: params(t, p)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v.(map[string]any)
+	}
+	byHash := sign(map[string]any{"method": "PUT", "path": "/v1/obj/servers", "bodyHash": hex.EncodeToString(sum[:])})
+
+	keys.mu.RLock()
+	acct, pub := keys.account, keys.device.Sign.Public().(ed25519.PublicKey)
+	keys.mu.RUnlock()
+	nonce, _ := hex.DecodeString(byHash["nonce"].(string))
+	sig, _ := hex.DecodeString(byHash["signature"].(string))
+	authz := protocol.Authz{AccountID: acct, DeviceNonce: nonce, Method: "PUT", Path: "/v1/obj/servers", BodyHash: protocol.HashBody(body)}
+	if err := protocol.Verify(pub, authz, sig); err != nil {
+		t.Fatalf("a signature over the hash does not verify as the server rebuilds it: %v", err)
+	}
+
+	if _, err := handleSignRequest(Request{Method: "signRequest", Params: params(t, map[string]any{
+		"method": "PUT", "path": "/v1/obj/servers", "bodyHash": "abcd",
+	})}); err == nil {
+		t.Fatal("a short body hash was signed")
+	}
+}
+
+// A request line over the limit stops the scanner for good. That has to come
+// back as an error — the process then exits non-zero — and not as the clean
+// "parent closed" exit it used to look like.
+func TestAnOverlongRequestLineIsAnErrorNotAShutdown(t *testing.T) {
+	var out bytes.Buffer
+	line := bytes.Repeat([]byte("a"), maxRequestBytes+1)
+	if err := serve(t.Context(), NewWriter(&out), "crypto", bytes.NewReader(line)); err == nil {
+		t.Fatal("an overlong line ended serve without an error")
+	}
+	if err := serve(t.Context(), NewWriter(&out), "crypto", bytes.NewReader(nil)); err != nil {
+		t.Fatalf("a clean EOF is an error: %v", err)
+	}
+}
+
+// RECOVERY'S ROLLBACK CHECK OPENS WHAT IT IS SHOWN. An escrow past the
+// roster's end used to count by existing, so junk at that name -- a member's or
+// the relay's own -- made recovery refuse for good. Only one sealed to this
+// account's RK_enc, at that epoch, says the account was rolled back.
+func TestTheRecoveryProbeCountsOnlyAnEscrowTheAccountSealed(t *testing.T) {
+	keys.reset()
+	t.Cleanup(func() {
+		keys.reset()
+		_, _ = handleRecoverForget(Request{Method: "recoverForget"})
+	})
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "laptop"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct := minted.(map[string]any)
+	other, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "elsewhere"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys.reset()
+	if _, err := handleRecoverIdentity(Request{Method: "recoverIdentity", Params: params(t, map[string]any{
+		"mnemonic": acct["mnemonic"], "label": "the replacement",
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	probe := func(escrow string, epoch uint64) bool {
+		t.Helper()
+		out, err := handleRecoverProbe(Request{Method: "recoverProbe", Params: params(t, map[string]any{
+			"escrow": escrow, "epoch": epoch,
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.(map[string]any)["sealed"].(bool)
+	}
+	if !probe(acct["escrow"].(string), 1) {
+		t.Error("the account's own escrow did not count")
+	}
+	for name, c := range map[string]struct {
+		escrow string
+		epoch  uint64
+	}{
+		"junk":                 {base64.StdEncoding.EncodeToString([]byte("junk a member put there")), 2},
+		"not base64":           {"%%%", 2},
+		"another account's":    {other.(map[string]any)["escrow"].(string), 1},
+		"its own, wrong epoch": {acct["escrow"].(string), 2},
+	} {
+		if probe(c.escrow, c.epoch) {
+			t.Errorf("%s escrow counted as one this account sealed", name)
+		}
+	}
+}
+
+// RECOVERING A RE-KEYED ACCOUNT reports epoch 1's key as epoch 1's. It
+// reported the epoch just opened instead; the parent stored that as the
+// genesis key and every roster check afterwards failed on entry 0, so a
+// re-keyed account could not be recovered onto a working device at all.
+func TestRecoveringAReKeyedAccountKeepsEpoch1sKey(t *testing.T) {
+	keys.reset()
+	t.Cleanup(func() {
+		keys.reset()
+		_, _ = handleRecoverForget(Request{Method: "recoverForget"})
+	})
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "laptop"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct := minted.(map[string]any)
+	v, err := handleRotateEpoch(Request{Method: "rotateEpoch", Params: params(t, map[string]any{
+		"kind": "revocation", "chain": acct["genesis"], "mnemonic": acct["mnemonic"],
+		"rootSignPub": acct["rootSignPub"], "epoch1Sign": acct["epoch1SignPub"],
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := v.(map[string]any)
+	genesisWire, _ := base64.StdEncoding.DecodeString(acct["genesis"].(string))
+	revWire, _ := base64.StdEncoding.DecodeString(rev["entry"].(string))
+	chain := base64.StdEncoding.EncodeToString(append(genesisWire, revWire...))
+
+	keys.reset()
+	if _, err := handleRecoverIdentity(Request{Method: "recoverIdentity", Params: params(t, map[string]any{
+		"mnemonic": acct["mnemonic"], "label": "the replacement",
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := handleRecoverOpen(Request{Method: "recoverOpen", Params: params(t, map[string]any{
+		"escrow": acct["escrow"], "epoch": 1, "chain": chain,
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.(map[string]any)["needEpoch"] != uint64(2) {
+		t.Fatalf("epoch 1's escrow did not send recovery on to epoch 2: %v", first)
+	}
+	second, err := handleRecoverOpen(Request{Method: "recoverOpen", Params: params(t, map[string]any{
+		"escrow": rev["escrow"], "epoch": 2, "chain": chain,
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := second.(map[string]any)
+	if opened["epoch1SignPub"] != acct["epoch1SignPub"] {
+		t.Fatalf("recovery reported %v as epoch 1's key, want %v", opened["epoch1SignPub"], acct["epoch1SignPub"])
+	}
+	// What the parent does next with it: verify the chain from genesis.
+	if _, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+		"chain": chain, "rootSignPub": opened["rootSignPub"], "epoch1Sign": opened["epoch1SignPub"],
+	})}); err != nil {
+		t.Fatalf("the recovered device cannot verify its own account's roster: %v", err)
+	}
 }

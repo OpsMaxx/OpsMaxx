@@ -1,4 +1,5 @@
 import { AddyError, type AddySidecar } from './sidecar'
+import { relayDetail, relayFetch } from './relay'
 
 /**
  * Driving a pairing from main.
@@ -46,15 +47,39 @@ export interface PairingDeps {
    *  device has no account yet, which is the whole point -- so this takes a
    *  bare URL rather than a signed client. */
   baseURL: string
+  /** A development relay's self-signed certificate. See `relayFetch`. */
+  insecureTLS?: boolean
+}
+
+/**
+ * The relay's explicit "this pairing does not exist": it finished, expired, or
+ * the relay restarted and the rendezvous — which lives in memory — went with it.
+ *
+ * Its own outcome rather than a failure to retry, because no amount of asking
+ * brings it back. Before this, a restarted relay held the joiner for the whole
+ * 180 seconds and then said the other device "did not answer".
+ */
+async function gone(resp: Response): Promise<AddyError> {
+  const detail = await relayDetail(resp)
+  return new AddyError(
+    'pairing-expired',
+    detail ||
+      'this pairing is no longer open on the relay — it finished, expired, or the relay restarted. Start again on the device showing the code.'
+  )
 }
 
 /** Posts a frame into the peer's mailbox. */
 export async function publish(deps: PairingDeps, id: string, role: string, frame: unknown): Promise<void> {
-  const resp = await fetch(`${deps.baseURL}/v1/pair/${id}?as=${role}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ frame: Buffer.from(JSON.stringify(frame), 'utf8').toString('base64') })
-  })
+  const resp = await relayFetch(
+    `${deps.baseURL}/v1/pair/${id}?as=${role}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ frame: Buffer.from(JSON.stringify(frame), 'utf8').toString('base64') })
+    },
+    deps.insecureTLS
+  )
+  if (resp.status === 404) throw await gone(resp)
   if (!resp.ok) {
     throw new AddyError('relay-unreachable', `the relay would not carry the frame (${resp.status})`)
   }
@@ -67,20 +92,56 @@ export async function publish(deps: PairingDeps, id: string, role: string, frame
  * this loops. An implementation that treated 204 as an error would give up the
  * first time the other person took more than twenty seconds to type.
  */
-export async function receive<T>(deps: PairingDeps, id: string, role: string, signal: AbortSignal): Promise<T> {
-  const deadline = Date.now() + RENDEZVOUS_TIMEOUT_MS
+export async function receive<T>(
+  deps: PairingDeps,
+  id: string,
+  role: string,
+  signal: AbortSignal,
+  timeoutMs = RENDEZVOUS_TIMEOUT_MS
+): Promise<T> {
+  const deadline = Date.now() + timeoutMs
+  // ONE FAILED POLL USED TO END THE PAIRING. A dropped Wi-Fi packet, a relay
+  // that blinked, a laptop lid half-closed — and two people who were halfway
+  // through reading a code to each other were told it had failed. So a
+  // transport failure or a 5xx waits and asks again, backing off to 8 s,
+  // until the same 180-second window the person was promised runs out.
+  // What does NOT retry: an abort (the user cancelled), the relay saying the
+  // pairing does not exist (404 — nothing will bring it back), and any other
+  // refusal (4xx), which is the relay deciding rather than failing.
+  let backoff = 500
+  let lastFailure = ''
   while (Date.now() < deadline) {
     if (signal.aborted) throw new AddyError('pairing-expired', 'the pairing was cancelled')
-    const resp = await fetch(`${deps.baseURL}/v1/pair/${id}?as=${role}`, { signal }).catch(() => null)
-    if (!resp) throw new AddyError('relay-unreachable', 'the relay stopped answering')
-    if (resp.status === 204) continue
-    if (!resp.ok) {
+    let resp: Response | null = null
+    try {
+      resp = await relayFetch(`${deps.baseURL}/v1/pair/${id}?as=${role}`, { signal }, deps.insecureTLS)
+    } catch (err) {
+      if (signal.aborted) throw new AddyError('pairing-expired', 'the pairing was cancelled')
+      if (err instanceof AddyError && err.code !== 'relay-unreachable') throw err
+      lastFailure = err instanceof Error ? err.message : String(err)
+    }
+    if (resp?.status === 204) {
+      backoff = 500
+      continue
+    }
+    if (resp?.status === 404) throw await gone(resp)
+    if (resp?.ok) {
+      const { frame } = (await resp.json()) as { frame: string }
+      return JSON.parse(Buffer.from(frame, 'base64').toString('utf8')) as T
+    }
+    if (resp && resp.status < 500) {
       throw new AddyError('relay-unreachable', `the relay refused the rendezvous (${resp.status})`)
     }
-    const { frame } = (await resp.json()) as { frame: string }
-    return JSON.parse(Buffer.from(frame, 'base64').toString('utf8')) as T
+    if (resp) lastFailure = `the relay answered ${resp.status}`
+    await new Promise((r) => setTimeout(r, Math.min(backoff, Math.max(0, deadline - Date.now()))))
+    backoff = Math.min(backoff * 2, 8_000)
   }
-  throw new AddyError('pairing-expired', 'the other device did not answer in time')
+  throw new AddyError(
+    'pairing-expired',
+    lastFailure
+      ? `the relay could not be reached reliably enough to finish pairing (${lastFailure})`
+      : 'the other device did not answer in time'
+  )
 }
 
 /**

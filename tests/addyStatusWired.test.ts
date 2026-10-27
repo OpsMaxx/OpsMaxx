@@ -357,13 +357,16 @@ describe('the account key can be changed', () => {
     const rotate = SESSION.slice(SESSION.indexOf('async rotateEpoch('))
     const body = rotate.slice(0, rotate.indexOf('\n  /**', 10))
     const reseal = body.indexOf('for (const name of SYNCED_COLLECTIONS)')
-    const escrow = body.indexOf("putObject('escrow'")
+    const escrow = body.search(/putObject\(\s*'escrow'/)
     const handoff = body.indexOf('handoff:')
     const transition = body.indexOf('appendRoster(')
     expect(reseal, 'collections are not re-sealed').toBeGreaterThan(-1)
     expect(escrow, 'the escrow is not re-sealed').toBeGreaterThan(reseal)
     expect(handoff, 'no handoffs are published').toBeGreaterThan(escrow)
     expect(transition, 'the transition is not appended last').toBeGreaterThan(handoff)
+    // With the root key's signature, the only one the relay takes for an
+    // escrow: a member that could write one could make recovery refuse.
+    expect(body).toMatch(/putObject\(\s*'escrow',[\s\S]{0,200}?prepared\.escrowSig\s*\)/)
   })
 
   it('re-seals the escrow, or recovery silently stops working', () => {
@@ -485,7 +488,7 @@ describe('a file can be sent to another device', () => {
     // The AEAD proves nobody without the key altered the bytes. The digest
     // proves they are all of them.
     const T = read('src/main/services/addy/transfer.ts')
-    const check = T.indexOf('arrived incomplete')
+    const check = T.indexOf('digest !== notice.sha256')
     const write = T.indexOf('writeFileSync(')
     expect(check).toBeGreaterThan(-1)
     expect(check).toBeLessThan(write)
@@ -573,7 +576,7 @@ describe('a removed device wipes itself', () => {
     // `selfListed` is a cryptographic result, not a flag: the verifier applies
     // revocations as it walks the chain, so there is no field a forged entry
     // could set to claim otherwise.
-    expect(SESSION).toMatch(/if \(!verified\.selfListed && this\.account\)/)
+    expect(SESSION).toMatch(/if \(!verified\.selfListed && verified\.selfRevoked === true && this\.account\)/)
   })
 
   it('asks the question on every launch', () => {
@@ -637,6 +640,19 @@ describe('recovery lands on the current epoch or refuses', () => {
     expect(SESSION).toMatch(/roster-rewound/)
   })
 
+  it('counts that escrow only if it opens under the recovery phrase\'s key', () => {
+    // Existence was the test, so junk a member PUT at that name, or a blob
+    // the relay made up, made recovery refuse for good.
+    const recover = SESSION.slice(SESSION.indexOf("getObject('escrow', opened.epoch + 1)"))
+    const probe = recover.indexOf("'recoverProbe'")
+    const refuse = recover.indexOf("'roster-rewound'")
+    expect(probe).toBeGreaterThan(-1)
+    expect(probe).toBeLessThan(refuse)
+    expect(recover.slice(0, refuse)).toMatch(/if \(sealedByAccount\) \{\s*throw new AddyError\(\s*$/)
+    const mainGo = readFileSync(join(ROOT, 'sidecar/addyd/main.go'), 'utf8')
+    expect(mainGo).toMatch(/"recoverProbe":\s+handleRecoverProbe/)
+  })
+
   it('will not fall back to the older key when the current escrow is missing', () => {
     // Falling back would re-seal the estate under exactly what the re-key was
     // performed to retire.
@@ -693,8 +709,12 @@ describe('the relay is checked, not just written down', () => {
     // so a login overwrote the stored pin with whatever the server presented
     // and a changed key was adopted in silence. A pin that is only ever
     // written is a note, not a pin.
-    expect(SESSION).toMatch(/known\?\.spki && known\.spki !== spki/)
-    expect(SESSION).toMatch(/presenting a different TLS key/)
+    //
+    // The comparison itself now lives in relay.ts's `comparePin`, and its
+    // decisions are exercised in addyRelayContract.test.ts. What this pins is
+    // that the login path still asks it, against the RECORDED pin.
+    expect(SESSION).toMatch(/comparePin\(known\?\.spki, pin,/)
+    expect(SESSION).toMatch(/recordAudit\(/)
   })
 
   it('inbound mail has to come from a device still on the roster', () => {

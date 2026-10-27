@@ -29,10 +29,11 @@ import (
 //     signing device, fresh per signature. The server never chooses all of the
 //     bytes that get signed.
 const (
-	DomainLogin  = "addy-login-v1"
-	DomainAuthz  = "addy-authz-v1"
-	DomainRoster = "addy-roster-v1"
-	DomainSignal = "addy-signal-v1"
+	DomainLogin       = "addy-login-v1"
+	DomainAuthz       = "addy-authz-v1"
+	DomainRoster      = "addy-roster-v1"
+	DomainSignal      = "addy-signal-v1"
+	DomainEscrowWrite = "addy-escrow-write-v1"
 )
 
 // NonceLen is 32 bytes, drawn fresh for every signature.
@@ -177,6 +178,43 @@ func (s Signal) Encode() ([]byte, error) {
 		Fixed(s.DTLSFingerprint).
 		Fixed(s.RosterHead).
 		U64(s.TS).
+		Out(), nil
+}
+
+// EscrowWrite is what the root key signs to put an escrow on the relay.
+//
+// THE ESCROW IS THE ONE OBJECT A DEVICE MUST NOT BE ABLE TO WRITE. Every other
+// object is the account's, and a member overwriting one is a member editing its
+// own data. The escrow is what the recovery phrase opens, and recovery treats
+// one sealed past the roster's end as proof the relay rolled the account back
+// -- so a member that could PUT one could make recovery refuse for good, and
+// one that could overwrite an existing epoch's could decide what the phrase
+// recovers. Only RK holders seal escrows (account creation and a revocation
+// rotation), so only RK signs this, and the relay checks it against the
+// root_sign_pub it was given at registration.
+//
+// NO DEVICE NONCE, unlike the four purposes above. Rule 2 exists so that a key
+// never signs bytes a server chose; nothing here is chosen by anyone but the
+// signer, and the root key signs nothing a server can ask for. A replay re-PUTs
+// the same sealed escrow at the same epoch and counter, which is exactly the
+// write this authorised.
+type EscrowWrite struct {
+	AccountID AccountID
+	Epoch     uint64
+	Counter   uint64
+	BodyHash  []byte // fixed[32]; SHA-256 of the sealed escrow as stored
+}
+
+// Encode produces the exact bytes that get signed.
+func (w EscrowWrite) Encode() ([]byte, error) {
+	if err := fixed("body_hash", w.BodyHash, 32); err != nil {
+		return nil, err
+	}
+	return NewEncoder(DomainEscrowWrite).
+		Fixed(w.AccountID[:]).
+		U64(w.Epoch).
+		U64(w.Counter).
+		Fixed(w.BodyHash).
 		Out(), nil
 }
 

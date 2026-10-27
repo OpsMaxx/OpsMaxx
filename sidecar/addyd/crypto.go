@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ecdh"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -490,6 +491,24 @@ func handleVerifyRoster(req Request) (any, error) {
 	// the chain, so a revoked device is absent rather than flagged. That makes
 	// "am I still here" the whole question, and it is a stronger one than a
 	// flag -- there is no field a forged entry could set to claim otherwise.
+	// WHEN each live device was added: the TS of its add entry, ms. Read off
+	// the chain that just verified rather than off `protocol.Device`, which
+	// does not carry it and is vendored byte for byte (protocol/VENDORED.md).
+	// A later add of the same key — re-added after a revoke — overwrites the
+	// earlier one, which is the add the live device is actually from. Display
+	// only, as the field itself says: it is the author's clock.
+	addedAt := map[string]uint64{}
+	for rest := chain; len(rest) > 0; {
+		e, next, err := protocol.DecodeEntry(rest)
+		if err != nil {
+			break
+		}
+		if e.Op == protocol.OpAdd {
+			addedAt[hex.EncodeToString(e.PubSign)] = e.TS
+		}
+		rest = next
+	}
+
 	devices := make([]map[string]any, 0, len(v.Devices))
 	for _, d := range v.Devices {
 		row := map[string]any{
@@ -497,6 +516,9 @@ func handleVerifyRoster(req Request) (any, error) {
 			"pubEnc":        hex.EncodeToString(d.PubEnc),
 			"epoch":         d.Epoch,
 			"mnemonicAdded": d.MnemonicAuthored(),
+		}
+		if ts := addedAt[hex.EncodeToString(d.PubSign)]; ts > 0 {
+			row["addedAt"] = ts
 		}
 		// The pseudonym, opened HERE or not at all: it is sealed under the
 		// profile key of the epoch the device was added in, and that key never
@@ -545,12 +567,42 @@ func handleVerifyRoster(req Request) (any, error) {
 		// the emoji matched -- the worst place for it, because by then the
 		// user has been told the two devices agree.
 		"head":       hex.EncodeToString(v.Head),
-		"headEntry":  base64.StdEncoding.EncodeToString(v.HeadEntry),
+		"headEntry":  base64.StdEncoding.EncodeToString(lastEntryWire(chain)),
 		"headSeq":    v.HeadSeq,
 		"epoch":      v.Epoch,
 		"entries":    v.Entries,
 		"selfListed": stillListed,
+		// ABSENT IS NOT THE SAME AS REMOVED, and only the second is a reason
+		// to wipe. A device whose add has not landed yet — a joiner that read
+		// the chain before its pairer appended it — is absent from a perfectly
+		// valid chain, and wiping it destroyed a machine that had done nothing
+		// but be quick. Revoked means the verified chain carries a revoke
+		// entry naming this key after its last add; nothing else removes a
+		// device, so that is the only proof there is.
+		"selfRevoked": !stillListed && self != nil && revokes(chain, self.Sign.Public().(ed25519.PublicKey)),
 	}, nil
+}
+
+// revokes reports whether a VERIFIED chain's last word on this key is a
+// revoke. Called only after VerifyChain accepted the same bytes.
+func revokes(chain []byte, key ed25519.PublicKey) bool {
+	revoked := false
+	for rest := chain; len(rest) > 0; {
+		e, next, err := protocol.DecodeEntry(rest)
+		if err != nil {
+			return false
+		}
+		if key.Equal(ed25519.PublicKey(e.PubSign)) {
+			switch e.Op {
+			case protocol.OpRevoke:
+				revoked = true
+			case protocol.OpAdd:
+				revoked = false
+			}
+		}
+		rest = next
+	}
+	return revoked
 }
 
 // --- fingerprint ---
@@ -606,6 +658,11 @@ type signRequestParams struct {
 	Path string `json:"path"`
 	// Base64 of the request body, or empty for none.
 	Body string `json:"body"`
+	// OR hex of protocol.HashBody(body), computed by the parent. Preferred:
+	// the body itself can be megabytes, and carrying it base64'd inside a JSON
+	// line was what pushed a 4.5 MB file transfer past this process's line
+	// limit and took it down. The hash is all the signature covers anyway.
+	BodyHash string `json:"bodyHash"`
 }
 
 type signLoginParams struct {
@@ -708,13 +765,22 @@ func handleSignRequest(req Request) (any, error) {
 		return nil, codedf(ErrConfigInvalid, "path carries a query string; sign the path alone")
 	}
 
-	var body []byte
-	if in.Body != "" {
+	var bodyHash []byte
+	switch {
+	case in.BodyHash != "":
+		h, err := hex.DecodeString(in.BodyHash)
+		if err != nil || len(h) != len(protocol.NoBody) {
+			return nil, codedf(ErrConfigInvalid, "bodyHash is 32 bytes of hex")
+		}
+		bodyHash = h
+	case in.Body != "":
 		decoded, err := base64.StdEncoding.DecodeString(in.Body)
 		if err != nil {
 			return nil, codedf(ErrConfigInvalid, "body is not base64")
 		}
-		body = decoded
+		bodyHash = protocol.HashBody(decoded)
+	default:
+		bodyHash = protocol.HashBody(nil)
 	}
 
 	keys.mu.RLock()
@@ -735,7 +801,7 @@ func handleSignRequest(req Request) (any, error) {
 		DeviceNonce: nonce,
 		Method:      in.Method,
 		Path:        in.Path,
-		BodyHash:    protocol.HashBody(body),
+		BodyHash:    bodyHash,
 	}
 	sig, err := protocol.Sign(device.Sign, authz)
 	if err != nil {
@@ -921,6 +987,59 @@ func handleRevokeDevice(req Request) (any, error) {
 		)
 	}
 
+	return authorRevoke(acct, in.Epoch, in.HeadSeq, headWire, epoch.Sign, pubSign, pubEnc)
+}
+
+type leaveRequest struct {
+	HeadEntry string `json:"headEntry"`
+	HeadSeq   uint64 `json:"headSeq"`
+	Epoch     uint64 `json:"epoch"`
+}
+
+// handleLeave authors the entry that removes THIS device, and nothing else.
+//
+// LEAVING NEEDS THE ONE THING revokeDevice REFUSES, and the refusal is right
+// for the list it guards: a self-row on a list of devices is a misclick away
+// from wiping the machine it is on. Leave called revokeDevice(self) anyway, so
+// the sidecar refused every time, the parent swallowed it, and the device was
+// never taken off the account while the panel blamed the relay.
+//
+// So leaving is its own method rather than a flag on the other one. It takes
+// no key from the caller at all — both halves come from the device key that
+// is loaded — so it can only ever name this machine, and a caller that wanted
+// to remove another device cannot reach that through here. The guard on
+// revokeDevice stays exactly as it was.
+func handleLeave(req Request) (any, error) {
+	var in leaveRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	headWire, err := base64.StdEncoding.DecodeString(in.HeadEntry)
+	if err != nil || len(headWire) == 0 {
+		return nil, codedf(ErrConfigInvalid, "headEntry is base64 of the chain head")
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	epoch, haveEpoch := keys.epochs[in.Epoch]
+	device := keys.device
+	loaded := keys.loaded
+	keys.mu.RUnlock()
+	if !loaded || !haveEpoch || device == nil {
+		return nil, codedf(ErrNotPaired, "no account is loaded for that epoch")
+	}
+	return authorRevoke(
+		acct, in.Epoch, in.HeadSeq, headWire, epoch.Sign,
+		device.Sign.Public().(ed25519.PublicKey), device.Enc.PublicKey().Bytes(),
+	)
+}
+
+// authorRevoke builds and signs one revoke entry chained to headWire. Shared
+// by revokeDevice and leave, which differ only in whom they may name.
+func authorRevoke(
+	acct protocol.AccountID, epochN, headSeq uint64, headWire []byte,
+	signer ed25519.PrivateKey, pubSign, pubEnc []byte,
+) (any, error) {
 	head, _, err := protocol.DecodeEntry(headWire)
 	if err != nil {
 		return nil, wrapCoded(ErrRosterInvalid, err, "reading the chain head")
@@ -936,8 +1055,8 @@ func handleRevokeDevice(req Request) (any, error) {
 
 	e := protocol.Entry{
 		AccountID: acct,
-		Epoch:     in.Epoch,
-		Seq:       in.HeadSeq + 1,
+		Epoch:     epochN,
+		Seq:       headSeq + 1,
 		PrevHash:  prev,
 		Op:        protocol.OpRevoke,
 		Signer:    protocol.SignerAK,
@@ -954,7 +1073,7 @@ func handleRevokeDevice(req Request) (any, error) {
 	if err != nil {
 		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
 	}
-	e.Sig = ed25519.Sign(epoch.Sign, body)
+	e.Sig = ed25519.Sign(signer, body)
 	wire, err := e.Wire()
 	if err != nil {
 		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
@@ -1078,6 +1197,40 @@ type recoverOpenRequest struct {
 	Epoch uint64 `json:"epoch"`
 	// The roster chain, base64, as the relay serves it.
 	Chain string `json:"chain"`
+}
+
+// recoverProbeRequest is an escrow the relay holds past the roster's end.
+type recoverProbeRequest struct {
+	Escrow string `json:"escrow"`
+	Epoch  uint64 `json:"epoch"`
+}
+
+// handleRecoverProbe says whether an escrow is one the account sealed.
+//
+// Recovery reads an escrow one epoch past the roster's end as proof the relay
+// rolled the account back, and it used to take the object's mere EXISTENCE as
+// that proof -- so anything at that name, written by a member or made up by the
+// relay, made recovery refuse for good. Only a blob sealed to RK_enc for this
+// account and epoch counts: RK_enc's public half never leaves this process, so
+// nobody without the phrase can make one that opens. Read-only; nothing is
+// kept.
+func handleRecoverProbe(req Request) (any, error) {
+	var in recoverProbeRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	recovery.mu.Lock()
+	root := recovery.root
+	recovery.mu.Unlock()
+	if root == nil {
+		return nil, codedf(ErrConfigInvalid, "no recovery is in progress; start with the phrase")
+	}
+	sealed, err := base64.StdEncoding.DecodeString(in.Escrow)
+	if err != nil {
+		return map[string]any{"sealed": false}, nil
+	}
+	_, err = protocol.OpenEscrow(sealed, root.AccountID, in.Epoch, 1, root.Enc, 0)
+	return map[string]any{"sealed": err == nil}, nil
 }
 
 // handleRecoverOpen opens the escrow and authors this device's way back in.
@@ -1232,10 +1385,15 @@ func handleRecoverOpen(req Request) (any, error) {
 	}
 
 	return map[string]any{
-		"accountId":     root.AccountID.String(),
-		"epoch":         verified.Epoch,
-		"rootSignPub":   hex.EncodeToString(root.Sign.Public().(ed25519.PublicKey)),
-		"epoch1SignPub": hex.EncodeToString(epochKeys.Sign.Public().(ed25519.PublicKey)),
+		"accountId":   root.AccountID.String(),
+		"epoch":       verified.Epoch,
+		"rootSignPub": hex.EncodeToString(root.Sign.Public().(ed25519.PublicKey)),
+		// EPOCH 1'S, remembered from the first escrow -- not the one just
+		// opened. On an account that had been re-keyed this reported the
+		// current epoch's key as epoch 1's, the parent stored it, and every
+		// roster check after that failed on the genesis entry: recovering a
+		// re-keyed account ended in "entry 0 does not verify".
+		"epoch1SignPub": hex.EncodeToString(epoch1Sign),
 		// What the user has to look at before this is over. Recovery is the one
 		// path where the honest next question is "is everything on this list
 		// still yours", because whoever else read the card is on it too.
@@ -1462,7 +1620,18 @@ func handleRotateEpoch(req Request) (any, error) {
 		if err != nil {
 			return nil, wrapCoded(ErrInternal, err, "re-sealing the escrow")
 		}
+		// And the root key's signature over the write, which the relay asks
+		// for before it will store an escrow: a member that could PUT one
+		// could make recovery refuse for good. See protocol.EscrowWrite.
+		sum := sha256.Sum256(escrow)
+		sig, err := protocol.Sign(root.Sign, protocol.EscrowWrite{
+			AccountID: acct, Epoch: rot.NewKeys.Epoch, Counter: 1, BodyHash: sum[:],
+		})
+		if err != nil {
+			return nil, wrapCoded(ErrInternal, err, "signing the escrow write")
+		}
 		out["escrow"] = base64.StdEncoding.EncodeToString(escrow)
+		out["escrowSig"] = base64.StdEncoding.EncodeToString(sig)
 	}
 
 	// HELD, so the caller can re-seal every collection under it before the
@@ -1780,7 +1949,24 @@ func handleFingerprintSelf(Request) (any, error) {
 // fingerprintFromSDP pulls the SHA-256 DTLS fingerprint out of a session
 // description. `a=fingerprint:sha-256 AB:CD:...` -- colon-separated hex, and
 // the case is not guaranteed.
+//
+// The description is read in the form `--rtc` hands out and takes back --
+// base64 of the JSON SessionDescription (rtc.go encodeSDP) -- because that is
+// the string the parent signs, sends, and passes to rtcAccept/rtcAnswer, and
+// the fingerprint signed has to be the one pion will use. Signing was given
+// that encoded form and looked for `a=fingerprint` lines in base64, found
+// none, and refused every direct connection; the parent swallowed it and fell
+// back to the mailbox. A raw SDP is still read as one, for callers that have
+// it; it cannot be mistaken for the encoded form, which decodes to JSON.
 func fingerprintFromSDP(sdp string) ([]byte, error) {
+	if raw, err := base64.StdEncoding.DecodeString(sdp); err == nil {
+		var desc struct {
+			SDP string `json:"sdp"`
+		}
+		if json.Unmarshal(raw, &desc) == nil && desc.SDP != "" {
+			sdp = desc.SDP
+		}
+	}
 	for _, line := range strings.Split(sdp, "\n") {
 		line = strings.TrimSpace(line)
 		const prefix = "a=fingerprint:sha-256 "
@@ -1947,4 +2133,28 @@ func handleVerifySignal(req Request) (any, error) {
 		)
 	}
 	return map[string]any{"ok": true, "fingerprint": hex.EncodeToString(signal.DTLSFingerprint)}, nil
+}
+
+// lastEntryWire is the chain's final entry exactly as it arrived, body || sig.
+//
+// Taken from the bytes rather than re-encoded, because a handoff and an escrow
+// carry the head entry VERBATIM and a re-encoding would make them depend on
+// this encoder agreeing byte for byte with whichever one wrote the chain.
+//
+// Here rather than as a field on protocol.Verified, which is where it used to
+// be: that put an edit into the vendored package that upstream does not have,
+// and VENDORED.md's whole rule is that nothing in there is edited in place.
+// Called only after VerifyChain accepted the same bytes, so the decode cannot
+// fail; a nil return would surface as an empty headEntry the next caller
+// refuses, not as a guess.
+func lastEntryWire(chain []byte) []byte {
+	var last []byte
+	for rest := chain; len(rest) > 0; {
+		_, next, err := protocol.DecodeEntry(rest)
+		if err != nil {
+			return nil
+		}
+		last, rest = rest[:len(rest)-len(next)], next
+	}
+	return last
 }

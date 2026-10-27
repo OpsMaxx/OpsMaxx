@@ -1,7 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { GitMerge, AlertTriangle } from 'lucide-react'
 import type { AddyStatusDevice, ConflictCopy } from '../../../../shared/addy'
 import { approvalShowing } from '../../hooks/useClickOutside'
+import { deferConflict, pruneDeferred, useAddyUi } from '../../store/addy'
+import { errorText } from '../../lib/connectionError'
+import { collectionName as nameOf } from './collectionNames'
 
 /**
  * Two versions of the same thing, and a person deciding.
@@ -16,37 +19,6 @@ import { approvalShowing } from '../../hooks/useClickOutside'
  * what they do not want afterwards, which is a worse outcome than a real merge
  * and a much better one than silently losing an entry.
  */
-/**
- * What each collection is, in the words the app uses elsewhere.
- *
- * The heading printed the raw protocol id, so a user was asked about
- * `knownHosts`, `apiWorkspace` or `cicdConnections` — names from
- * `SYNCED_COLLECTIONS`, which exist so two implementations agree with each
- * other and not so anybody reads them.
- */
-const COLLECTION_NAMES: Record<string, string> = {
-  apiCollections: 'your HTTP collections',
-  apiWorkspace: 'your HTTP environments and variables',
-  cicdConnections: 'your CI/CD connections',
-  databases: 'your saved databases',
-  deviceNames: 'what you call your devices',
-  env: 'your environment variables',
-  folders: 'your folders',
-  httpChecks: 'your HTTP checks',
-  knownHosts: 'your trusted SSH host keys',
-  manifest: 'your provisioning manifest',
-  monitorGroups: 'your monitor groups',
-  servers: 'your servers',
-  tunnels: 'your tunnels',
-  vault: 'your vault',
-  vpns: 'your VPN profiles',
-  workspaces: 'your workspaces'
-}
-
-function nameOf(collection: string): string {
-  return COLLECTION_NAMES[collection] ?? collection
-}
-
 /**
  * Which machine made the copy that was set aside.
  *
@@ -94,19 +66,42 @@ export function ConflictChooser(): React.JSX.Element | null {
    * app. That is not a choice, it is a toll.
    *
    * Deferring changes nothing on the relay: the copy stays, the panel's
-   * attention tile keeps counting it, and the dialog comes back next launch.
+   * attention tile keeps counting it, and the dialog comes back next launch —
+   * or sooner, from "Review now" on Sync & devices, which is why this lives in
+   * a store the panel can reach rather than in this component.
    */
-  const [deferred, setDeferred] = useState<number[]>([])
+  const deferred = useAddyUi((s) => s.deferredConflicts)
   /** The roster, so the copy that was set aside can be named by the machine
    *  that made it. `undefined` until it arrives, and on a preload that has no
    *  `status` call at all — see `madeBy`. */
   const [devices, setDevices] = useState<AddyStatusDevice[] | undefined>(undefined)
 
+  // Kept as it was when the read fails. `conflicts()` reaches the relay, and a
+  // relay that is down for a minute is not a reason to close a dialog somebody
+  // is reading.
   const refresh = async (): Promise<void> => {
-    const list = await window.opsmaxx?.addy.conflicts()
-    setConflicts(list ?? [])
+    const list = await window.opsmaxx?.addy.conflicts().catch(() => undefined)
+    if (list === undefined) return
+    setConflicts(list)
+    pruneDeferred(list.map((c) => c.id))
   }
+  /** Why the last button press did not work. It used to fail silently. */
+  const [actError, setActError] = useState<string | null>(null)
+  /** The master password the set-aside vault was made with. Held only while
+   *  this dialog is on that conflict. */
+  const [otherPassword, setOtherPassword] = useState('')
+  const dialog = useRef<HTMLDivElement>(null)
+  const later = useRef<HTMLButtonElement>(null)
 
+  /**
+   * READ ON EVERY STATUS PUSH AND EVERY RETURN TO THE WINDOW, not once.
+   *
+   * It used to fetch when the app opened and never again, so a conflict that
+   * a sync pass found an hour later was counted by the panel's attention tile
+   * and never offered here until the next launch. Every pass ends with a
+   * status push, which is exactly when a new one can have appeared; focus
+   * covers somebody who went to the other machine and came back.
+   */
   useEffect(() => {
     void refresh()
     // Optional, like every other bridge read on this screen: a window whose
@@ -116,6 +111,16 @@ export function ConflictChooser(): React.JSX.Element | null {
       (s) => setDevices(s.devices),
       () => undefined
     )
+    const off = window.opsmaxx?.addy?.onStatus?.((s) => {
+      if (s.devices !== undefined) setDevices(s.devices)
+      void refresh()
+    })
+    const onFocus = (): void => void refresh()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      off?.()
+      window.removeEventListener('focus', onFocus)
+    }
   }, [])
 
   const current = conflicts.find((c) => !deferred.includes(c.id))
@@ -135,18 +140,58 @@ export function ConflictChooser(): React.JSX.Element | null {
     const onKey = (e: KeyboardEvent): void => {
       // An approval paints above this chooser, so an Escape then was meant for
       // it; see useClickOutside.
-      if (e.key === 'Escape' && !approvalShowing()) setDeferred((d) => [...d, currentId])
+      if (e.key === 'Escape' && !approvalShowing()) deferConflict(currentId)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
   }, [currentId])
 
+  /**
+   * FOCUS GOES IN, STAYS IN, AND COMES BACK. `aria-modal` promises all three
+   * and the dialog did none: focus stayed on whatever was behind it, so Tab
+   * walked the app underneath a modal that covered it.
+   *
+   * It lands on Decide later, the one button that writes nothing.
+   */
+  const open = currentId !== undefined
+  useEffect(() => {
+    if (!open) return undefined
+    const before = document.activeElement as HTMLElement | null
+    return () => before?.focus?.()
+  }, [open])
+  useEffect(() => {
+    if (currentId === undefined) return undefined
+    setActError(null)
+    later.current?.focus()
+    const onTab = (e: KeyboardEvent): void => {
+      if (e.key !== 'Tab' || !dialog.current) return
+      const all = [...dialog.current.querySelectorAll<HTMLElement>('button:not([disabled])')]
+      if (all.length === 0) return
+      const first = all[0]
+      const last = all[all.length - 1]
+      const at = document.activeElement
+      const inside = at instanceof Node && dialog.current.contains(at)
+      if (!inside || (e.shiftKey && at === first)) {
+        e.preventDefault()
+        ;(e.shiftKey ? last : first).focus()
+      } else if (!e.shiftKey && at === last) {
+        e.preventDefault()
+        first.focus()
+      }
+    }
+    document.addEventListener('keydown', onTab)
+    return () => document.removeEventListener('keydown', onTab)
+  }, [currentId])
+
+  useEffect(() => setOtherPassword(''), [currentId])
+
   if (!current) return null
 
   const act = (run: () => Promise<unknown>): void => {
     setBusy(true)
+    setActError(null)
     void run()
-      .then(refresh)
+      .then(refresh, (err: unknown) => setActError(errorText(err)))
       .finally(() => setBusy(false))
   }
 
@@ -164,7 +209,7 @@ export function ConflictChooser(): React.JSX.Element | null {
       aria-modal="true"
       aria-labelledby="conflict-title"
     >
-      <div className="conflict">
+      <div className="conflict" ref={dialog}>
         <GitMerge size={26} aria-hidden className="conflict-icon" />
         <h2 id="conflict-title">Two versions of {nameOf(current.collection)}</h2>
         {/* WHAT HAPPENED, FOR SOMEBODY WHO HAS NEVER HEARD THE WORD CONFLICT.
@@ -181,8 +226,9 @@ export function ConflictChooser(): React.JSX.Element | null {
             Whichever version you keep, the other is deleted from the relay and cannot be brought
             back.
           </strong>{' '}
-          If you are not sure, <strong>Decide later</strong> leaves both exactly where they are and
-          brings this back next time.
+          If you are not sure, <strong>Decide later</strong> leaves both exactly where they are.
+          It comes back the next time OpsMaxx opens, or sooner from <strong>Review now</strong> on
+          Sync &amp; devices.
         </p>
 
         {current.problem && (
@@ -267,12 +313,59 @@ export function ConflictChooser(): React.JSX.Element | null {
               Keep both ({combined} entries, duplicates and all)
             </button>
           )}
+          {/* The vault cannot be shown or concatenated — it is ciphertext under
+              a master password — so choosing a whole copy was the only offer,
+              and on the evening a machine joined that meant throwing away one
+              machine's credentials. Opened with the password it was made
+              with, its entries can be added to the vault in use by id. */}
+          {current.collection === 'vault' && current.losing !== undefined && (
+            <form
+              className="conflict-vault-merge"
+              onSubmit={(e) => {
+                e.preventDefault()
+                act(() =>
+                  window.opsmaxx!.addy.mergeVaultCopy(current.id, otherPassword).then((r) => {
+                    if (!r.ok) throw new Error(r.error)
+                  })
+                )
+              }}
+            >
+              <label className="fine" htmlFor="conflict-vault-password">
+                Or add the set-aside copy&apos;s entries to the vault in use. Enter the master
+                password that copy was made with (if both machines used the same one, it is that
+                one). Nothing in use is replaced: identical entries are skipped, and one that
+                differs is added as &ldquo;(other copy)&rdquo;. The vault in use must be unlocked.
+              </label>
+              <input
+                id="conflict-vault-password"
+                type="password"
+                autoComplete="off"
+                value={otherPassword}
+                onChange={(e) => setOtherPassword(e.target.value)}
+                disabled={busy}
+              />
+              <button className="btn" type="submit" disabled={busy || otherPassword === ''}>
+                Add its entries to this vault
+              </button>
+            </form>
+          )}
           {/* The way out. Nothing is written and nothing is lost: the copy
               stays on the relay and this comes back. */}
-          <button className="btn ghost" disabled={busy} onClick={() => setDeferred((d) => [...d, current.id])}>
+          <button
+            ref={later}
+            className="btn ghost"
+            disabled={busy}
+            onClick={() => deferConflict(current.id)}
+          >
             Decide later
           </button>
         </div>
+        {actError !== null && (
+          <div className="conflict-problem" role="alert">
+            <AlertTriangle size={15} aria-hidden />
+            <span>That did not finish: {actError}</span>
+          </div>
+        )}
 
         {/* What is still waiting, not how many there ever were. Counting the
             ones already deferred told somebody who had put two off that there

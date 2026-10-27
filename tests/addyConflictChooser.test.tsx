@@ -201,9 +201,10 @@ describe('the words it uses', () => {
 
   it('has a name for every collection the protocol carries', () => {
     // A missing one falls back to the raw id, which is the state this fixes —
-    // so a new collection must not reintroduce it silently.
+    // so a new collection must not reintroduce it silently. The table is
+    // shared with the panel's error band now, so it is read where it lives.
     const PANEL = require('node:fs').readFileSync(
-      require('node:path').join(__dirname, '..', 'src/renderer/src/components/addy/ConflictChooser.tsx'),
+      require('node:path').join(__dirname, '..', 'src/renderer/src/components/addy/collectionNames.ts'),
       'utf8'
     )
     for (const name of SYNCED_COLLECTIONS) {
@@ -220,5 +221,50 @@ describe('the words it uses', () => {
     // Both panes say it — the winner and the loser are both ciphertext.
     expect((await screen.findAllByText(/cannot be shown here/)).length).toBe(2)
     expect(screen.queryByText(/AAAA/)).toBeNull()
+  })
+})
+
+describe('a vault set aside on the first sync', () => {
+  const vaultConflict = conflict({ collection: 'vault', winning: { data: 'aa' }, losing: { data: 'bb' } })
+
+  it('offers to add its entries with the password it was made with', async () => {
+    const mergeVaultCopy = vi.fn().mockResolvedValue({ ok: true, added: 3 })
+    const conflicts = vi.fn().mockResolvedValueOnce([vaultConflict]).mockResolvedValue([])
+    stubBridge({ addy: { conflicts, resolveConflict, discardConflict, mergeVaultCopy } })
+    render(<ConflictChooser />)
+
+    const field = await screen.findByLabelText(/master password that copy was made with/)
+    const add = screen.getByRole('button', { name: 'Add its entries to this vault' })
+    expect((add as HTMLButtonElement).disabled).toBe(true)
+    fireEvent.change(field, { target: { value: 'old-master' } })
+    fireEvent.click(add)
+
+    await waitFor(() => expect(mergeVaultCopy).toHaveBeenCalledWith(1, 'old-master'))
+    expect(resolveConflict).not.toHaveBeenCalled()
+  })
+
+  it('says why when the password does not open it, and keeps the copy', async () => {
+    const mergeVaultCopy = vi
+      .fn()
+      .mockResolvedValue({ ok: false, error: 'That master password does not open the other copy.' })
+    stubBridge({
+      addy: { conflicts: vi.fn().mockResolvedValue([vaultConflict]), resolveConflict, discardConflict, mergeVaultCopy }
+    })
+    render(<ConflictChooser />)
+
+    fireEvent.change(await screen.findByLabelText(/master password that copy was made with/), {
+      target: { value: 'wrong' }
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Add its entries to this vault' }))
+
+    expect((await screen.findByText(/does not open the other copy/)).textContent).toMatch(/That did not finish/)
+    expect(discardConflict).not.toHaveBeenCalled()
+  })
+
+  it('is not offered for anything but the vault', async () => {
+    withConflicts([conflict()])
+    render(<ConflictChooser />)
+    await screen.findByRole('button', { name: /Keep the version in use/ })
+    expect(screen.queryByRole('button', { name: 'Add its entries to this vault' })).toBeNull()
   })
 })

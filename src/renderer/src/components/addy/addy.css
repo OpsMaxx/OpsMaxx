@@ -214,6 +214,31 @@
   cursor: default;
 }
 
+/* Its own row: a password field squeezed between the buttons reads as one more
+   choice of equal weight, and it is the one that needs explaining. */
+.conflict-vault-merge {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.conflict-vault-merge label {
+  flex-basis: 100%;
+}
+
+.conflict-vault-merge input {
+  flex: 1;
+  min-width: 180px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: inherit;
+  font: inherit;
+}
+
 /* Pairing. */
 .pair-panel,
 .pair-compare {
@@ -405,14 +430,6 @@
   width: 22px;
   color: var(--text-faint);
   user-select: none;
-}
-
-.addy-confirm {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 14px 0;
-  font-size: 13px;
 }
 
 /* ---------------------------------------------------------------------------
@@ -689,7 +706,7 @@
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text);
   word-break: break-all;
@@ -699,14 +716,17 @@
 .addy-phrase-input {
   width: 100%;
   resize: vertical;
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  /* The app's own field tokens. `--input-bg` and `--mono` were never defined,
+     so this fell back to near-black in the light theme too. */
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   padding: 8px;
   border-radius: 6px;
-  border: 1px solid var(--border, #2a2f3a);
-  background: var(--input-bg, #12151c);
-  color: inherit;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  user-select: text;
 }
 
 /* Files that have arrived, listed rather than opened. */

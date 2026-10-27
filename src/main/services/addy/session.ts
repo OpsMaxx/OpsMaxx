@@ -9,7 +9,8 @@ import {
   receive,
   type PairingConfirmation
 } from './pairing'
-import { RelayClient, whyFetchFailed} from './relay'
+import { DeviceRemovedError, RelayClient, comparePin, relayDetail, relayFetch } from './relay'
+import { recordAudit } from '../auditLog'
 import {
   discardConflict,
   listConflicts,
@@ -23,7 +24,7 @@ import {
   type SyncedCollection
 } from '../../../shared/addy'
 import { app } from 'electron'
-import { counterFloor, forgetSyncState, syncOnce, type SyncResult } from './sync'
+import { counterFloor, forgetEpochState, forgetSyncState, syncOnce, type SyncResult } from './sync'
 import { SOURCES } from './collections'
 import { revocationState, runRevocationWipe } from './revoke'
 import { deleteAllData } from '../backup'
@@ -61,6 +62,8 @@ export interface AddyRoster {
     pubEnc: string
     epoch: number
     mnemonicAdded: boolean
+    /** Epoch ms from the add entry's own timestamp. Absent from an older addyd. */
+    addedAt?: number
     /** The pseudonym, opened in the sidecar. Absent when this device does not
      *  hold the profile key of the epoch that device was added in — the
      *  ordinary state for one that joined after a rotation, not an error. */
@@ -140,6 +143,21 @@ class AddySession {
    *  copies neither user caused. */
   private syncing = false
   private syncTimer: NodeJS.Timeout | null = null
+  /** The user pressed Pause. Kept across a re-attach — a laptop lid closing
+   *  and opening is not the user changing their mind. */
+  private paused = false
+  /** Down because the vault locked, so the vault coming back is what brings
+   *  this back. Never set by a detach the user asked for. */
+  private lockedOut = false
+  /** Bumped by anything that means "stay down", so a re-attach loop already
+   *  waiting out its back-off gives up instead of undoing it. */
+  private reattachGen = 0
+  /** When the sidecar last died on its own, for the restart budget. */
+  private crashes: number[] = []
+  /** Back-off between automatic re-attach attempts: bounded, and the last one
+   *  is the end of it — the banner and its Try again take over from there. */
+  private reattachDelays = [0, 2_000, 10_000, 30_000, 120_000]
+  private deviceAddedCb: ((d: { id: string; label: string; addedWithPhrase: boolean }) => void) | null = null
 
   /** True once a device is attached to an account and the sidecar is up. */
   get attached(): boolean {
@@ -158,7 +176,7 @@ class AddySession {
     log?: (line: string) => void
   ): Promise<void> {
     await this.detach()
-    const addyd = await openAddyd('--crypto', log)
+    const addyd = await this.openCrypto(log)
     // ROOTSIGNPUB IS REQUIRED AND WAS NEVER SENT, and it cost every relaunch.
     //
     // `handleLoad` in the sidecar (crypto.go:160) refuses a load without it —
@@ -190,7 +208,8 @@ class AddySession {
     this.addyd = addyd
     this.relay = new RelayClient(
       { baseURL: account.baseURL, token: account.token, insecureTLS: this.insecureTLS },
-      addyd
+      addyd,
+      () => this.reauth()
     )
     this.account = account
   }
@@ -222,6 +241,82 @@ class AddySession {
     await held?.close()
   }
 
+  /** `addyd --crypto`, watched: a process that exits without being asked to
+   *  takes the session with it, and that must be said and repaired rather
+   *  than leave every sync, clipboard and roster call failing in silence. */
+  private async openCrypto(log?: (line: string) => void): Promise<AddySidecar> {
+    const addyd: AddySidecar = await openAddyd('--crypto', log, (reason) => void this.sidecarExited(addyd, reason))
+    return addyd
+  }
+
+  /**
+   * The sidecar went away and nobody asked it to.
+   *
+   * IT USED TO BE SILENT. The account object stayed, `attached` turned false,
+   * and every pass, clipboard hotkey and roster read failed against a dead
+   * pipe with no banner and nothing that would ever start it again. Now the
+   * panel says so and the session is rebuilt — a bounded number of times, so a
+   * binary that dies on every start is reported rather than respawned for ever.
+   */
+  private async sidecarExited(which: AddySidecar, reason: string): Promise<void> {
+    if (which !== this.addyd || this.account === null) return
+    const now = Date.now()
+    this.crashes = [...this.crashes.filter((t) => now - t < 10 * 60_000), now]
+    const giveUp = this.crashes.length > 3
+    this.lastProblem = giveUp
+      ? `The sync helper (addyd) keeps stopping (${reason}; ${this.crashes.length} times in ten minutes). Sync is off until you press Try again.`
+      : `The sync helper (addyd) stopped unexpectedly (${reason}). Reconnecting…`
+    await this.detach()
+    this.announce()
+    if (!giveUp) void this.reattach()
+  }
+
+  /**
+   * Bring the session back after a detach nobody asked for, with back-off.
+   *
+   * The whole path, via `reconnect`, for the reason that gives. Stops as soon
+   * as something else attached it, the enrolment is gone, or anything bumped
+   * `reattachGen` — the vault locking again, or the user leaving.
+   */
+  private async reattach(): Promise<void> {
+    const gen = ++this.reattachGen
+    for (const delay of this.reattachDelays) {
+      if (delay > 0) await new Promise((r) => setTimeout(r, delay).unref?.())
+      if (gen !== this.reattachGen || loadEnrolment() === null) return
+      if (this.attached && this.account?.token) return
+      if ((await this.reconnect()).ok) return
+      this.announce()
+    }
+  }
+
+  /**
+   * The vault is locking: stop holding the account key, and SAY so.
+   *
+   * The detach is the point — the sidecar holds the account key in memory and
+   * locking is exactly when it should stop. What was missing was everything
+   * after it: no banner, and nothing that ever attached again, so closing the
+   * lid (suspend locks the vault) turned sync, received files, the clipboard
+   * hotkeys and revocation detection off until OpsMaxx was restarted, while
+   * the panel's Resume answered "not signed in yet".
+   */
+  async detachForVaultLock(): Promise<void> {
+    this.reattachGen++
+    const enrolled = this.account !== null || loadEnrolment() !== null
+    await this.detach()
+    if (!enrolled) return
+    this.lockedOut = true
+    this.lastProblem = 'Sync is paused while the vault is locked — unlock to resume.'
+    this.announce()
+  }
+
+  /** The vault is usable again — unlocked, or (on wake) there is none to wait
+   *  for. Only undoes a lock: a session the user paused or left stays so. */
+  resumeAfterVaultLock(): void {
+    if (!this.lockedOut) return
+    this.lockedOut = false
+    void this.reattach()
+  }
+
   /**
    * Try again, without quitting the app.
    *
@@ -239,6 +334,10 @@ class AddySession {
    * account's state.
    */
   async reconnect(): Promise<{ ok: boolean; problem?: string }> {
+    // Not past a vault lock. The panel offers Try again beside the paused
+    // banner, and pressing it would load the account key the lock is keeping
+    // out of memory; the unlock is what lifts this.
+    if (this.lockedOut) return { ok: false, problem: this.lastProblem ?? undefined }
     // Torn down first. Reconnecting on top of a half-open sidecar is how you
     // get two of them and a port that never closes.
     await this.detach()
@@ -268,7 +367,12 @@ class AddySession {
    * forget they flipped, and the symptom is silence.
    */
   pauseSync(): void {
+    this.paused = true
     this.stopSync()
+    // Said, not just done. `sync.running` is read from the timer, and nothing
+    // pushed the change, so the panel went on reading "syncing" over a paused
+    // engine until something unrelated announced.
+    this.announce()
   }
 
   /** Start carrying data again after a pause. Refuses when there is no
@@ -278,6 +382,7 @@ class AddySession {
     if (this.account === null || this.account.token === '') {
       return { ok: false, problem: 'This device is not signed in to the relay yet.' }
     }
+    this.paused = false
     this.startSync()
     return { ok: true }
   }
@@ -313,9 +418,12 @@ class AddySession {
     left: boolean
     accountId: string | null
     /** Whether this device also removed its own entry from the signed device
-     *  list. False when the relay could not be reached — the entry is then
-     *  stale and another device can remove it. */
+     *  list. False when that could not be done — the entry is then stale and
+     *  another device can remove it. */
     removedFromRoster?: boolean
+    /** Why it was not removed, when `removedFromRoster` is false on an account
+     *  this device was attached to: the relay's or the sidecar's own words. */
+    rosterProblem?: string
   }> {
     // TAKE WHATEVER IS ACTUALLY HERE, FROM EITHER SOURCE.
     //
@@ -331,32 +439,49 @@ class AddySession {
 
     // TAKE THIS DEVICE OUT OF THE ROSTER WHILE IT STILL CAN.
     //
-    // Leaving is local, so nothing used to be published — and the entry for
-    // this machine stayed in the signed device list for ever. Leave and
-    // re-join by pairing a few times and the account accumulates a dead entry
-    // per cycle, each one a device the other machines still believe is on the
-    // account and will seal data to.
-    //
     // This device holds its own signing key right up to the moment it forgets
     // it, so removing itself is something it can do and only it can do
-    // cheaply: anyone else would need a working machine and a deliberate act.
-    // Done BEFORE the detach, because it needs the sidecar and the session.
+    // cheaply. Done BEFORE the detach, because it needs the sidecar and the
+    // session.
     //
-    // Best effort, and quiet about failing. The relay may be down, and leaving
-    // must work offline — that is half of what it is for. The entry is then
-    // stale and another device can remove it, which is exactly the situation
-    // that existed before this and is no worse for having tried.
+    // THROUGH `leave`, NOT `revokeDevice`. It used to revoke itself through the device-list call — which
+    // the sidecar refuses by design, because on the device list a self-row is
+    // a misclick away from wiping this machine — and swallowed the refusal. So
+    // no device that ever left was removed, and the panel told the user the
+    // relay was to blame. `leave` takes no key from here at all: the sidecar
+    // names this device from the key it holds, so it cannot be pointed at
+    // another one, and the list's Remove button keeps its guard.
+    //
+    // And the roster is NOT read again afterwards. A verified chain that no
+    // longer lists this device is the revocation signal, and `refreshRoster`
+    // answers it with the full wipe — servers, vault, known hosts. Leaving
+    // destroys key material, never data.
+    //
+    // Best effort. The relay may be down, and leaving must work offline —
+    // that is half of what it is for. The reason is returned rather than
+    // thrown, so the screen can say what actually happened.
     let removedFromRoster = false
+    let rosterProblem: string | undefined
+    // A pass already in flight would read the chain after the entry lands and
+    // take this device for revoked. `leaving` makes the wipe stand down until
+    // the detach below, after which there is no account for it to fire on.
+    this.leaving = true
+    this.reattachGen++
+    this.lockedOut = false
+    this.paused = false
+    this.stopSync()
     if (this.account !== null && this.addyd !== null && this.relay !== null) {
       try {
-        const self = this.lastRoster?.self ?? (await this.refreshRoster()).self
-        if (typeof self === 'string' && self !== '') {
-          await this.revokeDevice(self)
-          removedFromRoster = true
-        }
-      } catch {
-        // Reported through the return value, not thrown: a device that cannot
-        // reach the relay must still be able to leave.
+        const before = await this.refreshRoster()
+        const entry = await this.addyd.send<{ seq: number; entry: string }>('leave', {
+          headEntry: before.headEntry ?? '',
+          headSeq: before.headSeq ?? 0,
+          epoch: this.account.epoch
+        })
+        await this.relay.appendRoster(entry.seq, entry.entry)
+        removedFromRoster = true
+      } catch (err) {
+        rosterProblem = err instanceof Error ? err.message : String(err)
       }
     }
 
@@ -364,6 +489,7 @@ class AddySession {
     // keys is the thing being left, whether or not a file on disk agrees that
     // it exists.
     await this.detach()
+    this.leaving = false
 
     if (accountId === null) {
       // Genuinely nothing here: no record, no session. Reported rather than
@@ -394,7 +520,7 @@ class AddySession {
     forgetEnrolment()
     this.lastProblem = null
 
-    return { left: wasHere, accountId, removedFromRoster }
+    return { left: wasHere, accountId, removedFromRoster, ...(rosterProblem ? { rosterProblem } : {}) }
   }
 
   /**
@@ -414,7 +540,9 @@ class AddySession {
   async createAccount(
     baseURL: string,
     invite: string,
-    label: string
+    label: string,
+    /** A development relay, as for `recoverFromPhrase`. */
+    insecureTLS = false
   ): Promise<{ accountId: string; mnemonic: string }> {
     const relay = baseURL.replace(/\/+$/, '')
     if (!relay.startsWith('https://')) {
@@ -425,7 +553,8 @@ class AddySession {
     }
 
     await this.detach()
-    const addyd = await openAddyd('--crypto')
+    this.insecureTLS = insecureTLS
+    const addyd = await this.openCrypto()
     this.addyd = addyd
 
     const minted = await addyd.send<{
@@ -443,31 +572,56 @@ class AddySession {
     // account the relay rejected would look attached and be able to do
     // nothing, and the user would have a recovery phrase for an account that
     // does not exist.
-    const resp = await fetch(`${relay}/v1/account`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        account: minted.accountId,
-        root_sign_pub: minted.rootSignPub,
-        genesis: minted.genesis,
-        escrow: minted.escrow,
-        invite
-      })
-    }).catch((err: unknown) => {
-      throw new AddyError(
-        'relay-unreachable',
-        `could not reach ${relay}: ${whyFetchFailed(err)}`
-      )
+    // Through the same dispatcher as every other relay call, so a development
+    // relay's self-signed certificate is honoured here too — it was not, and
+    // the first call a new account makes failed on exactly the relay `-dev`
+    // exists for.
+    const resp = await relayFetch(
+      `${relay}/v1/account`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          account: minted.accountId,
+          root_sign_pub: minted.rootSignPub,
+          // So the relay can check every roster append by signature, not
+          // just by shape. It refuses the registration if this does not
+          // sign the genesis entry, which it always does from here.
+          epoch1_sign_pub: minted.epoch1SignPub,
+          genesis: minted.genesis,
+          escrow: minted.escrow,
+          invite
+        })
+      },
+      this.insecureTLS
+    ).catch(async (err: unknown) => {
+      await this.detach()
+      throw err
     })
 
     if (!resp.ok) {
-      const detail = await resp.text().catch(() => resp.statusText)
+      const detail = await relayDetail(resp)
       await this.detach()
+      if (resp.status === 403) {
+        throw new AddyError(
+          'pairing-refused',
+          'that invite has been used, has expired, or is not one this relay issued'
+        )
+      }
+      if (resp.status === 409) {
+        // The relay's own words were shown raw — `{"error":"store: that user
+        // already has a sync group"}` under `config-invalid` — for the one
+        // refusal a person can do something specific about.
+        throw new AddyError(
+          'conflict',
+          /already has a sync group/.test(detail)
+            ? 'the person this invite belongs to already has a sync group on this relay. Join it by pairing from a device that is already on it (Sync & devices), rather than creating a second one.'
+            : 'this relay already has that sync group. Nothing was created; try again.'
+        )
+      }
       throw new AddyError(
-        resp.status === 403 ? 'pairing-refused' : 'config-invalid',
-        resp.status === 403
-          ? 'that invite has been used, has expired, or is not one this relay issued'
-          : `the relay refused the account (${resp.status}): ${detail.slice(0, 200)}`
+        resp.status === 507 ? 'quota-exceeded' : resp.status >= 500 ? 'relay-unreachable' : 'config-invalid',
+        `the relay refused the sync group (${resp.status})${detail ? `: ${detail.slice(0, 200)}` : ''}`
       )
     }
 
@@ -493,7 +647,11 @@ class AddySession {
       rootSignPub: minted.rootSignPub,
       epoch1SignPub: minted.epoch1SignPub
     }
-    this.relay = new RelayClient({ baseURL: relay, token: '', insecureTLS: this.insecureTLS }, addyd)
+    this.relay = new RelayClient(
+      { baseURL: relay, token: '', insecureTLS: this.insecureTLS },
+      addyd,
+      () => this.reauth()
+    )
 
     // LOG IN, which is the step that used to be missing entirely.
     //
@@ -557,33 +715,103 @@ class AddySession {
    * to invalidate rather than a thing to use.
    */
   private async loginAndRecord(): Promise<void> {
+    await this.signIn()
+    // A token is exactly what the engine was waiting for. Started here rather
+    // than at each call site, because every path that ends with this device
+    // authenticated — launch, minting, joining — should end with it syncing,
+    // and three call sites is three chances to forget one. Unless the user
+    // paused it: this also runs when a lock or a crash is repaired.
+    if (!this.paused) this.startSync()
+  }
+
+  /**
+   * The login itself, with every check a first login makes.
+   *
+   * Split from `loginAndRecord` because the relay client calls this on its
+   * own when the relay has forgotten the session (12 hours, or any restart),
+   * and that re-login must neither skip the pin below nor restart a sync the
+   * user paused.
+   */
+  private async signIn(): Promise<void> {
     const account = this.account
     const relay = this.relay
     if (!account || !relay) return
-    const { token, spki } = await relay.login()
+    const known = loadEnrolment()
 
     /**
-     * AND THE PIN IS COMPARED, which is what it was recorded for.
+     * AND THE PIN IS COMPARED, which is what it was recorded for — but a
+     * changed key is no longer, on its own, a reason to lock the device out.
      *
-     * `LoginResult.spki` is documented as "kept so a later reconnect can
-     * notice it changed". Nothing compared it. Every hit on `spki` in this
-     * codebase was a computation or a WRITE — so a login simply overwrote the
-     * stored pin with whatever the server presented that morning, and a
-     * changed key was adopted in silence. A pin that is only ever written is
-     * not a pin, it is a note.
+     * It was: any change refused the login with a MITM warning, and the only
+     * way back was the recovery phrase. The relay's certificate manager made a
+     * new key at every renewal, so every device on every relay was due that
+     * warning about every sixty days. Relays now reuse their key, but existing
+     * ones do not yet, and a CA-forced re-issue or a moved relay changes it
+     * anyway.
      *
-     * Refused rather than warned. The login signature is bound to this value,
-     * so a different one means either the operator replaced the relay's
-     * certificate or somebody is between this device and it, and a client
-     * cannot tell those apart. The remedy for the first is the same either
-     * way: forget the enrolment and join again deliberately.
+     * WHY ACCEPTING A WEBPKI-VALID KEY DOES NOT WEAKEN ANYTHING THE DESIGN
+     * RELIES ON. The relay's own docs (internal/server/join.go) say the pin is
+     * "NOT a long-lived certificate pin" and "NOT what secures the account":
+     * every object is sealed, the roster is a signed chain verified here
+     * against keys the relay never held, and the login signature binds the
+     * SPKI this connection observed. That last one is the part the pin feeds,
+     * and it holds with the new key too — something terminating TLS with a
+     * certificate of its own gets a signature bound to ITS key, which the real
+     * relay refuses, so it cannot turn this login into a session. What a
+     * changed-but-valid key can still mean is somebody holding a publicly
+     * trusted certificate for this hostname, which is the threat every HTTPS
+     * client accepts and which buys them ciphertext and denial of service, not
+     * the account. So: valid for this hostname under the public CA store →
+     * re-pin, and write it to the audit log so a change is never silent. Not
+     * valid — a development relay reached with `insecureTLS`, where nothing
+     * checked the chain — → refused exactly as before, because there the pin
+     * is the ONLY thing that identifies the relay.
      */
-    const known = loadEnrolment()
-    if (known?.spki && known.spki !== spki) {
+    const repinned = { from: '' }
+    let signedIn: { token: string; spki: string }
+    try {
+      signedIn = await relay.login((pin) => {
+        if (comparePin(known?.spki, pin, account.baseURL)) repinned.from = known?.spki ?? ''
+      })
+    } catch (err) {
+      if (!(err instanceof DeviceRemovedError)) throw err
+      /**
+       * THE RELAY SAYS THIS DEVICE WAS REMOVED, AND SENT THE CHAIN.
+       *
+       * Verified through the same path as any roster read — the sidecar,
+       * under the root and epoch keys this device holds, against the pin it
+       * recorded — and the wipe starts only if that chain really revokes this
+       * key. Anything less is a hard refusal and nothing more: a relay that
+       * could wipe a device by saying so is a relay that can wipe every
+       * device it serves.
+       */
+      const roster = await this.refreshRoster(err.chain).catch((verr: unknown) => {
+        throw new AddyError(
+          'not-paired',
+          `${err.message} The device list it sent did not verify (${verr instanceof Error ? verr.message : String(verr)}), so nothing on this machine was changed.`
+        )
+      })
       throw new AddyError(
-        'relay-unreachable',
-        `the relay at ${account.baseURL} is presenting a different TLS key than the one this device recorded when it joined. Either its certificate was replaced, or something is between you and it. Nothing was sent.`
+        'not-paired',
+        roster.stillListed
+          ? `${err.message} The device list it sent still includes this device, so nothing on this machine was changed.`
+          : `${err.message} The verified device list confirms it.`
       )
+    }
+    const { token, spki } = signedIn
+    if (repinned.from !== '') {
+      recordAudit({
+        agentName: 'OpsMaxx',
+        sessionId: 'addy',
+        workspaceId: null,
+        workspaceName: null,
+        serverId: null,
+        serverName: null,
+        action: `addy: the relay at ${account.baseURL} presented a new TLS key (${repinned.from.slice(0, 16)}… → ${spki.slice(0, 16)}…). Its certificate validated for that hostname, so the new key was pinned.`,
+        capability: null,
+        approval: 'not-required',
+        result: 'success'
+      })
     }
 
     // Attached. Whatever stopped it last time no longer applies.
@@ -597,13 +825,70 @@ class AddySession {
       epoch1SignPub: account.epoch1SignPub ?? '',
       spki,
       insecureTLS: this.insecureTLS,
-      ...(known?.pinSeq !== undefined ? { pinSeq: known.pinSeq, pinHead: known.pinHead } : {})
+      ...(known?.pinSeq !== undefined ? { pinSeq: known.pinSeq, pinHead: known.pinHead } : {}),
+      ...(known?.epoch1SentTo ? { epoch1SentTo: known.epoch1SentTo } : {})
     })
-    // A token is exactly what the engine was waiting for. Started here rather
-    // than at each call site, because every path that ends with this device
-    // authenticated — launch, minting, joining — should end with it syncing,
-    // and three call sites is three chances to forget one.
-    this.startSync()
+    // Not awaited: it is a request of its own, and this may be running as the
+    // re-login another request is waiting on.
+    void this.sendEpoch1()
+  }
+
+  /**
+   * The re-login a RelayClient runs when the relay has forgotten the session.
+   * A failure is said on the panel, not only in whichever sync error happens
+   * to carry it: a refused pin or a removed device is a reason the person
+   * has to see, and the banner is where reasons go.
+   */
+  private async reauth(): Promise<void> {
+    try {
+      await this.signIn()
+    } catch (err) {
+      this.lastProblem = `This device could not sign back in to ${this.account?.baseURL ?? 'the relay'}: ${err instanceof Error ? err.message : String(err)}`
+      this.announce()
+      throw err
+    }
+  }
+
+  /**
+   * Hands the relay this account's epoch-1 signing key, once per relay.
+   *
+   * WITH IT the relay checks each roster append's signature before storing
+   * it; without it, structure only — and a member could append an entry that
+   * no client accepts, leaving every device on a head nobody can verify. An
+   * account registered before the relay asked for the key never sent it, so
+   * it is sent after a login. The relay accepts it only if the whole stored
+   * chain verifies under it, so who sends it does not matter.
+   *
+   * Never fatal to sync. 400 (the stored chain does not verify under it) and
+   * 409 (the relay already holds a DIFFERENT key — which no honest relay
+   * should) are surfaced as a problem, and asked again on the next login.
+   */
+  private async sendEpoch1(): Promise<void> {
+    const account = this.account
+    const relay = this.relay
+    const key = account?.epoch1SignPub
+    if (!account || !relay || !key) return
+    if (loadEnrolment()?.epoch1SentTo === account.baseURL) return
+    let resp: Response
+    try {
+      resp = await relay.request('POST', '/v1/roster/epoch1', { epoch1_sign_pub: key })
+    } catch {
+      return // asked again at the next login
+    }
+    if (resp.ok) {
+      const saved = loadEnrolment()
+      if (saved && saved.accountId === account.accountId) {
+        saveEnrolment({ ...saved, epoch1SentTo: account.baseURL })
+      }
+      return
+    }
+    if (resp.status !== 400 && resp.status !== 409) return // a relay that predates the route
+    const detail = await relayDetail(resp)
+    this.lastProblem =
+      resp.status === 409
+        ? `${account.baseURL} already holds a different signing key for this account's device list than the one this device has. That should never happen on an honest relay; tell whoever runs it.${detail ? ` (${detail})` : ''}`
+        : `${account.baseURL} says this account's stored device list does not verify under the key this device has${detail ? ` (${detail})` : ''}. Sync continues, but the relay cannot check new entries.`
+    this.announce()
   }
 
   /**
@@ -721,11 +1006,14 @@ class AddySession {
 
   async beginPairing(baseURL: string): Promise<{ code: string; pairingId: string }> {
     await this.cancelPairing()
-    const addyd = this.addyd ?? (await openAddyd('--crypto'))
+    const addyd = this.addyd ?? (await this.openCrypto())
     this.addyd ??= addyd
 
     const abort = new AbortController()
-    const { handle, confirmed } = await beginPairing({ addyd, baseURL }, abort.signal)
+    const { handle, confirmed } = await beginPairing(
+      { addyd, baseURL, insecureTLS: this.insecureTLS },
+      abort.signal
+    )
     this.pairing = { id: handle.pairingId, abort }
 
     // The confirmation resolves later, when the other device answers. Held
@@ -745,14 +1033,22 @@ class AddySession {
     return this.pendingConfirmation
   }
 
-  async joinPairing(baseURL: string, code: string, pairingId: string): Promise<PairingConfirmation> {
+  async joinPairing(
+    baseURL: string,
+    code: string,
+    pairingId: string,
+    /** A development relay. Same flag, same meaning as `recoverFromPhrase`'s:
+     *  this device has no enrolment yet to carry it. */
+    insecureTLS = this.insecureTLS
+  ): Promise<PairingConfirmation> {
     await this.cancelPairing()
-    const addyd = this.addyd ?? (await openAddyd('--crypto'))
+    this.insecureTLS = insecureTLS
+    const addyd = this.addyd ?? (await this.openCrypto())
     this.addyd ??= addyd
     const abort = new AbortController()
     this.pairing = { id: pairingId, abort }
     this.joinContext = { baseURL, pairingId, abort }
-    return joinPairing({ addyd, baseURL }, code, pairingId, abort.signal)
+    return joinPairing({ addyd, baseURL, insecureTLS }, code, pairingId, abort.signal)
   }
 
   private joinContext: { baseURL: string; pairingId: string; abort: AbortController } | null = null
@@ -767,18 +1063,21 @@ class AddySession {
    *
    * Three things have to happen, in this order, and the order is the point:
    *
-   *  1. Seal the account key to the peer, BOUND TO THE SPAKE2 SECRET. That
-   *     binding is what stops the relay — which carries every frame —
-   *     substituting a handoff of its own; it never learns the secret.
-   *  2. Write the roster entry that says the device is on the account, signed
+   *  1. Write the roster entry that says the device is on the account, signed
    *     with the epoch key and chained to the head THIS device verified.
+   *  2. Seal the account key to the peer, BOUND TO THE SPAKE2 SECRET, and
+   *     publish it. That binding is what stops the relay — which carries
+   *     every frame — substituting a handoff of its own; it never learns the
+   *     secret.
    *  3. Only then forget the pairing.
    *
-   * If the roster append fails the handoff has already gone, which is the
-   * safe direction: the joiner holds a key to an account that does not list
-   * it, so it can read nothing and is refused everywhere until the entry
-   * lands. The reverse — listed but keyless — would be a device the account
-   * vouches for that cannot prove anything.
+   * The roster comes first because the joiner acts the moment the handoff
+   * arrives: it logs in and reads the chain. Handoff first meant it could
+   * read a chain that did not list it yet — which the relay now answers with
+   * a session that reaches nothing but the roster, and which this client used
+   * to answer by wiping the machine. If the handoff then fails, the account
+   * lists a device that holds no key: it can read nothing, and removing it
+   * from the device list is the remedy.
    */
   async completePairing(
     confirmation: PairingConfirmation,
@@ -829,6 +1128,36 @@ class AddySession {
       throw new AddyError('config-invalid', 'this device cannot read its own account key')
     }
 
+    // THE ROSTER ENTRY FIRST, THEN THE HANDOFF. It was the other way round,
+    // and the joiner logs in and reads the chain the moment the handoff
+    // arrives — so it could find itself missing, and a device missing from a
+    // verified chain was wiped. The relay now also gives an unlisted key a
+    // session that reaches nothing but the roster. Listed-but-keyless for a
+    // moment is the harmless order: the joiner cannot read anything until the
+    // handoff lands, and the handoff is bound to the pairing secret either way.
+    const entry = await addyd.send<{ seq: number; entry: string }>('addDevice', {
+      headEntry: before.headEntry ?? '',
+      headSeq: before.headSeq ?? 0,
+      epoch: account.epoch,
+      pubSign: peerPubSign,
+      pubEnc: peerPubEnc,
+      // The pseudonym the joining device chose for itself, sealed into the
+      // entry so only devices holding this epoch's profile key can read it.
+      // THE FALLBACK IS UNIQUE, not a constant. If nobody types a name the
+      // device is still distinguishable from its siblings by the first bytes
+      // of its own signing key — which is what the panel shows beside it and
+      // what the revoke confirmation names. A shared name is not a name.
+      label: label?.trim() || confirmation.self?.label || `device ${peerPubSign.slice(0, 8)}`
+    })
+    await relay.appendRoster(entry.seq, entry.entry)
+    // THIS MACHINE ADDED IT, so it is not news here. Recorded on disk at once
+    // rather than left to the roster read below, which may fail and leave the
+    // next launch alerting the person about the device they just paired.
+    const seen = loadEnrolment()
+    if (seen?.seenDevices && !seen.seenDevices.includes(peerPubSign)) {
+      saveEnrolment({ ...seen, seenDevices: [...seen.seenDevices, peerPubSign] })
+    }
+
     // The counter is chosen HERE and travels beside the blob, because the
     // joiner has to pass it back to open one: it is bound into the sealed
     // handoff, so a relay that alters it in the frame produces a refusal
@@ -844,7 +1173,7 @@ class AddySession {
       peerPubEnc,
       counter
     })
-    await publish({ addyd, baseURL: relay.baseURL }, pairing.id, 'initiator', {
+    await publish({ addyd, baseURL: relay.baseURL, insecureTLS: this.insecureTLS }, pairing.id, 'initiator', {
       handoff: sealed.handoff,
       epoch: account.epoch,
       counter,
@@ -865,22 +1194,6 @@ class AddySession {
        */
       epoch1SignPub: account.epoch1SignPub ?? ''
     })
-
-    const entry = await addyd.send<{ seq: number; entry: string }>('addDevice', {
-      headEntry: before.headEntry ?? '',
-      headSeq: before.headSeq ?? 0,
-      epoch: account.epoch,
-      pubSign: peerPubSign,
-      pubEnc: peerPubEnc,
-      // The pseudonym the joining device chose for itself, sealed into the
-      // entry so only devices holding this epoch's profile key can read it.
-      // THE FALLBACK IS UNIQUE, not a constant. If nobody types a name the
-      // device is still distinguishable from its siblings by the first bytes
-      // of its own signing key — which is what the panel shows beside it and
-      // what the revoke confirmation names. A shared name is not a name.
-      label: label?.trim() || confirmation.self?.label || `device ${peerPubSign.slice(0, 8)}`
-    })
-    await relay.appendRoster(entry.seq, entry.entry)
 
     await this.cancelPairing()
     const after = await this.refreshRoster()
@@ -917,7 +1230,7 @@ class AddySession {
       accountId: string
       epoch1SignPub?: string
     }>(
-      { addyd, baseURL: ctx.baseURL },
+      { addyd, baseURL: ctx.baseURL, insecureTLS: this.insecureTLS },
       ctx.pairingId,
       'joiner',
       ctx.abort.signal
@@ -967,7 +1280,8 @@ class AddySession {
     }
     this.relay = new RelayClient(
       { baseURL: ctx.baseURL, token: '', insecureTLS: this.insecureTLS },
-      addyd
+      addyd,
+      () => this.reauth()
     )
     await this.loginAndRecord()
     /**
@@ -1044,7 +1358,11 @@ class AddySession {
    * yourself is not continuity, and the echo suppression downstream should
    * never have to think about it.
    */
-  async refreshRoster(): Promise<AddyRoster> {
+  async refreshRoster(
+    /** A chain the relay handed over some other way — the one a refused
+     *  login carries. Verified exactly as a fetched one is; never trusted more. */
+    supplied?: string
+  ): Promise<AddyRoster> {
     const relay = this.relay
     const addyd = this.addyd
     const account = this.account
@@ -1057,7 +1375,7 @@ class AddySession {
         ? { seq: saved.pinSeq, head: saved.pinHead }
         : null
 
-    const bytes = await relay.roster()
+    const bytes = supplied ?? (await relay.roster())
     // `selfListed`, not `stillListed`: the sidecar's name for it. Getting this
     // wrong reads as `undefined`, which is falsy — and a falsy answer here is
     // "this device has been revoked", which is the one conclusion that must
@@ -1068,9 +1386,12 @@ class AddySession {
         pubEnc: string
         epoch: number
         mnemonicAdded: boolean
+        addedAt?: number
         label?: string
       }[]
       selfListed: boolean
+      /** Absent AND revoked by a verified entry. See the condition below. */
+      selfRevoked?: boolean
       head: string
       headEntry: string
       headSeq: number
@@ -1093,8 +1414,13 @@ class AddySession {
     // device has not; everything it reads from now on is sealed under a key it
     // does not hold unless it follows. Walked one step at a time, because each
     // handoff is bound to the key of the epoch before it.
+    //
+    // Not for a SUPPLIED chain. That one arrives with a refused login, from
+    // inside the re-login a request is waiting on; following a rotation makes
+    // requests of its own, and each would wait on that same re-login for ever.
+    // Whether this device was revoked does not depend on which epoch it holds.
     let chainEpoch = verified.epoch
-    while (chainEpoch > (this.account?.epoch ?? 0)) {
+    while (supplied === undefined && chainEpoch > (this.account?.epoch ?? 0)) {
       if (!(await this.followRotation(chainEpoch).catch(() => false))) break
     }
     chainEpoch = verified.epoch
@@ -1121,7 +1447,13 @@ class AddySession {
      * The tombstone is written before the first file goes, so a crash midway
      * still leaves the device blocked on its next launch.
      */
-    if (!verified.selfListed && this.account) {
+    //
+    // ON A REVOKE, NOT ON ABSENCE. A device whose add has not landed yet is
+    // absent from a valid chain too — a joiner that read the roster before its
+    // pairer appended it did exactly that, and wiped itself. `selfRevoked` is
+    // the sidecar finding a revoke entry naming this key in the chain it just
+    // verified, which is the only thing that removes a device.
+    if (!verified.selfListed && verified.selfRevoked === true && this.account) {
       this.beginRevocationWipe(me.devicePub)
     }
 
@@ -1147,9 +1479,50 @@ class AddySession {
     if (saved && verified.headSeq > (saved.pinSeq ?? -1)) {
       saveEnrolment({ ...saved, pinSeq: verified.headSeq, pinHead: verified.head })
     }
+    this.noticeNewDevices(verified.devices, me.devicePub)
 
     this.announce()
     return roster
+  }
+
+  /**
+   * Say so when the account gains a device this machine did not add.
+   *
+   * DESIGN.md asks for "a notification naming the device", and nothing ever
+   * raised one: a stranger holding the recovery phrase could add a machine
+   * that then read everything, and every other device showed one more row in
+   * a list nobody was looking at. The roster had the fact all along —
+   * `mnemonicAdded` was computed and dropped.
+   *
+   * Measured against the set on disk, not the last in-memory roster, so a
+   * device added while this machine was off is reported at its next launch.
+   * No set on disk is a baseline, not news. This device and any device it
+   * added itself (`completePairing` records those) are never reported.
+   */
+  private noticeNewDevices(devices: AddyRoster['devices'], self: string): void {
+    const saved = loadEnrolment()
+    if (!saved || saved.accountId !== this.account?.accountId) return
+    const ids = devices.map((d) => d.pubSign)
+    const before = saved.seenDevices
+    if (before) {
+      for (const d of devices) {
+        if (d.pubSign === self || before.includes(d.pubSign)) continue
+        this.deviceAddedCb?.({
+          id: d.pubSign,
+          label: d.label ?? `device ${d.pubSign.slice(0, 8)}`,
+          addedWithPhrase: d.mnemonicAdded
+        })
+      }
+    }
+    if (!before || ids.length !== before.length || ids.some((id) => !before.includes(id))) {
+      saveEnrolment({ ...saved, seenDevices: ids })
+    }
+  }
+
+  /** Told about each device that appears on the account without this machine
+   *  having added it. Registered once, by main, which raises the alert. */
+  onDeviceAdded(cb: (d: { id: string; label: string; addedWithPhrase: boolean }) => void): void {
+    this.deviceAddedCb = cb
   }
 
   /**
@@ -1278,11 +1651,15 @@ class AddySession {
           } finally {
             await closeSession(deps, session)
           }
-        } catch {
+        } catch (err) {
           // A failed answer is the ordinary case — two symmetric NATs, a peer
           // that gave up, a relay blip. Waiting before the next attempt is
-          // what stops a broken relay becoming a hot loop.
-          await new Promise((r) => setTimeout(r, 2_000))
+          // what stops a broken relay becoming a hot loop. Longer when the
+          // relay refused this device outright: every poll now tries one
+          // re-login first, and a removed device would otherwise ask for a
+          // login every two seconds.
+          const refused = err instanceof AddyError && err.code === 'not-paired'
+          await new Promise((r) => setTimeout(r, refused ? 60_000 : 2_000))
         }
       }
       this.answering = false
@@ -1389,10 +1766,13 @@ class AddySession {
               // least true -- unlike a made-up "Device 2".
               label: d.label ?? `device ${d.pubSign.slice(0, 8)}`,
               self: d.pubSign === roster.self,
-              // Neither is reported by the relay. `null`, so the panel says
-              // "not reported" instead of drawing 1970 or "just now".
+              // Not reported by the relay. `null`, so the panel says "not
+              // reported" instead of drawing 1970 or "just now".
               lastSeen: null,
-              addedAt: null
+              // From the verified add entry: the time the ADDING device wrote
+              // on it. `null` from a sidecar too old to send it.
+              addedAt: d.addedAt ?? null,
+              addedWithPhrase: d.mnemonicAdded
             }))
           }
         : {}),
@@ -1490,12 +1870,31 @@ class AddySession {
       // not a document two devices both own — but "has anything arrived for
       // me" is the same question at the same moment, and giving it its own
       // timer would be a second schedule to reason about.
-      await this.collectFiles().catch(() => undefined)
-      sweepQuarantine()
       // AND THE ROSTER, every pass. A machine that is left running for a week
       // would otherwise never ask again after launch — and "the laptop is
       // open on a desk somewhere" is the case removing a device is for.
-      await this.refreshRoster().catch(() => undefined)
+      //
+      // NOT SWALLOWED. It was `.catch(() => undefined)`, so a roster that
+      // stopped verifying — forked, rewound, or simply unreadable — stopped
+      // revocation detection without one word on the screen. It lands in the
+      // pass's error when the collections themselves had none.
+      //
+      // Before the files, because collecting acknowledges mail from devices
+      // that are not members, and "not a member" has to mean not a member
+      // NOW rather than a device that joined since the last pass.
+      const rosterRead = await this.refreshRoster().then(
+        () => true,
+        (err: unknown) => {
+          result.error ??= failure('device list', err)
+          return false
+        }
+      )
+      if (rosterRead) {
+        await this.collectFiles().catch((err: unknown) => {
+          result.error ??= failure('files', err)
+        })
+      }
+      sweepQuarantine()
       return result
     } finally {
       this.syncing = false
@@ -1513,13 +1912,25 @@ class AddySession {
    */
   startSync(): void {
     if (this.syncTimer) return
-    this.syncTimer = setInterval(() => {
-      void this.syncNow().catch(() => undefined)
-    }, AddySession.SYNC_EVERY_MS)
+    this.syncTimer = setInterval(() => void this.syncInBackground(), AddySession.SYNC_EVERY_MS)
     // Unref'd: a sync timer must never be the reason the process stays alive
     // through a quit.
     this.syncTimer.unref?.()
-    void this.syncNow().catch(() => undefined)
+    void this.syncInBackground()
+  }
+
+  /** A pass nobody is waiting on. Its failure is kept for the panel instead
+   *  of being dropped: the timer is the one caller that cannot show it. */
+  private async syncInBackground(): Promise<void> {
+    try {
+      await this.syncNow()
+    } catch (err) {
+      this.lastSync = {
+        ...(this.lastSync ?? { at: Date.now(), outcomes: {}, carried: 0, conflicts: [] }),
+        error: failure('sync', err)
+      }
+      this.announce()
+    }
   }
 
   stopSync(): void {
@@ -1554,6 +1965,9 @@ class AddySession {
   /** True while a wipe is running, so a second roster read does not start
    *  another one on top of it. */
   private wiping = false
+  /** Set while this device is leaving on purpose: its own removal is not a
+   *  revocation, and must not be answered with one. */
+  private leaving = false
   private revokedCb: ((t: unknown) => void) | null = null
 
   /** Told when this device has been removed and wiped, so the window can put
@@ -1576,7 +1990,7 @@ class AddySession {
    * and changing the account key are two separate operations.
    */
   private beginRevocationWipe(deviceId: string): void {
-    if (this.wiping) return
+    if (this.wiping || this.leaving) return
     const account = this.account
     if (!account) return
     this.wiping = true
@@ -1732,9 +2146,10 @@ class AddySession {
       spki: loadEnrolment()?.spki ?? '',
       insecureTLS: this.insecureTLS
     })
-    // Every pinned ETag and counter was against the old epoch's objects. The
-    // next pass reconciles from scratch, which is what should happen.
-    forgetSyncState()
+    // Every pinned ETag and counter was against the old epoch's objects, so
+    // those go. What this device last agreed to does not, or an edit it has
+    // not pushed yet is reverted on the next pass — see `forgetEpochState`.
+    forgetEpochState()
     return true
   }
 
@@ -1780,6 +2195,7 @@ class AddySession {
       handoffs: Record<string, string>
       chained?: string
       escrow?: string
+      escrowSig?: string
       secrets: { akSeed: string }
       seq: number
       entry: string
@@ -1858,7 +2274,14 @@ class AddySession {
     //    account had moved off, which is a recovery that appears to work and
     //    hands back nothing usable.
     if (prepared.escrow) {
-      await relay.putObject('escrow', prepared.epoch, 1, Buffer.from(prepared.escrow, 'base64'))
+      await relay.putObject(
+        'escrow',
+        prepared.epoch,
+        1,
+        Buffer.from(prepared.escrow, 'base64'),
+        undefined,
+        prepared.escrowSig
+      )
     }
 
     // 3. The handoffs: one per surviving device, plus the chained one for a
@@ -1911,9 +2334,9 @@ class AddySession {
       }
     }
     // The sync state pins per-collection ETags and counters against the old
-    // epoch's objects, none of which apply now. Forgetting it makes the next
-    // pass reconcile from scratch, which is exactly what should happen.
-    forgetSyncState()
+    // epoch's objects, none of which apply now. Only those go — see
+    // `forgetEpochState` for what an edit not yet pushed needs kept.
+    forgetEpochState()
     void this.syncNow().catch(() => undefined)
 
     return { epoch: prepared.epoch, resealed }
@@ -1952,7 +2375,7 @@ class AddySession {
 
     await this.detach()
     this.insecureTLS = insecureTLS
-    const addyd = await openAddyd('--crypto')
+    const addyd = await this.openCrypto()
     this.addyd = addyd
 
     try {
@@ -2086,8 +2509,39 @@ class AddySession {
        * card carries the roster head and the device count: the person is the
        * last check, and §6 of the review screen is where they make it.
        */
+      //
+      // ONLY ONE THE ACCOUNT SEALED COUNTS. Existence alone was the test, so
+      // anything at that name -- junk a paired device PUT there, or a blob
+      // the relay made up -- made recovery refuse for good, on the one path
+      // with no second chance. The relay now refuses escrow writes the root
+      // key did not sign, and this asks the sidecar whether the blob opens
+      // under RK_enc, whose public half never leaves it: nobody without the
+      // phrase can make one that does. One that does not is reported in the
+      // audit log and otherwise ignored.
       const ahead = await this.relay.getObject('escrow', opened.epoch + 1).catch(() => null)
-      if (ahead) {
+      const sealedByAccount =
+        ahead !== null &&
+        (
+          await addyd.send<{ sealed: boolean }>('recoverProbe', {
+            escrow: ahead.body.toString('base64'),
+            epoch: opened.epoch + 1
+          })
+        ).sealed
+      if (ahead && !sealedByAccount) {
+        recordAudit({
+          agentName: 'OpsMaxx',
+          sessionId: 'addy',
+          workspaceId: null,
+          workspaceName: null,
+          serverId: null,
+          serverName: null,
+          action: `addy: the relay at ${relay} holds an escrow for epoch ${opened.epoch + 1} that this account did not seal. It was ignored and recovery went ahead.`,
+          capability: null,
+          approval: 'not-required',
+          result: 'success'
+        })
+      }
+      if (sealedByAccount) {
         throw new AddyError(
           'roster-rewound',
           `this relay served a roster ending at epoch ${opened.epoch} while holding an escrow for epoch ${opened.epoch + 1}. That is a rolled-back account, not a recovery, and nothing was changed.`
@@ -2281,15 +2735,26 @@ class AddySession {
       source.write(Buffer.from(JSON.stringify(chosen), 'utf8'))
       if (source.inRendererStore) this.appliedCb?.([collection as SyncedCollection])
     }
-    // The next pass reconciles the counters and the ETag from scratch rather
-    // than from a record written here, which would be a second place the
-    // bookkeeping is done and a second place to get it wrong.
-    forgetSyncState()
+    // The next pass reconciles THIS collection's counter and ETag from scratch
+    // rather than from a record written here, which would be a second place
+    // the bookkeeping is done and a second place to get it wrong. Only this
+    // one: every other collection's agreement is still true, and forgetting it
+    // turned each unpushed edit elsewhere into a fresh conflict.
+    forgetSyncState([collection])
     void this.syncNow().catch(() => undefined)
   }
 
   async discardConflict(id: number): Promise<void> {
     await discardConflict(this.deps(), id)
+  }
+}
+
+/** One failure as the panel's sync band carries it. */
+function failure(collection: string, err: unknown): { collection: string; message: string; code?: string } {
+  return {
+    collection,
+    message: err instanceof Error ? err.message : String(err),
+    ...(err instanceof AddyError ? { code: err.code } : {})
   }
 }
 

@@ -1,7 +1,7 @@
 import { clipboard } from 'electron'
 import { EchoSuppressor, identifyText, type ClipboardIdentity } from '../../../shared/clipboardIdentity'
 import { AddyError, type AddySidecar } from './sidecar'
-import type { RelayClient } from './relay'
+import { relayError, type RelayClient } from './relay'
 
 /**
  * Sending the clipboard to another device, and receiving one.
@@ -134,6 +134,7 @@ export async function sendClipboard(deps: ClipboardDeps): Promise<{ sent: number
   const plaintext = Buffer.from(JSON.stringify(payload), 'utf8')
 
   let sent = 0
+  const failed: string[] = []
   for (const peer of deps.peers()) {
     // Sealed TO THAT DEVICE. The relay routes on the recipient's public key,
     // which it can compare and cannot use.
@@ -159,14 +160,30 @@ export async function sendClipboard(deps: ClipboardDeps): Promise<{ sent: number
       continue
     }
 
-    const resp = await deps.relay.request('POST', '/v1/mail', {
-      toDevice: peer,
-      kind: CLIPBOARD_KIND,
-      sealed
-    })
-    if (resp.ok) sent++
+    // A REFUSAL IS SAID, not counted silently as "not sent". A full mailbox
+    // (507) was the ordinary way this failed, and the notification read
+    // "Clipboard sent to 0 devices" with no reason — or, with two devices and
+    // one refused, "sent to 1" as though that were all of them. Reported in
+    // `skipped`, because the shortcut that calls this shows that field and
+    // has nowhere to show an exception.
+    try {
+      const resp = await deps.relay.request('POST', '/v1/mail', {
+        toDevice: peer,
+        kind: CLIPBOARD_KIND,
+        sealed
+      })
+      if (resp.ok) sent++
+      else failed.push((await relayError(resp, `device ${peer.slice(0, 8)}`)).message)
+    } catch (err) {
+      failed.push(`device ${peer.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`)
+    }
   }
-  return { sent }
+  if (failed.length === 0) return { sent }
+  return {
+    sent,
+    skipped:
+      (sent > 0 ? `Sent to ${sent}, but not to ${failed.length}. ` : 'Not sent. ') + failed.join('; ')
+  }
 }
 
 /**
@@ -182,9 +199,7 @@ export async function receiveClipboard(
   deps: ClipboardDeps
 ): Promise<{ applied: boolean; from?: string; reason?: string }> {
   const resp = await deps.relay.request('GET', '/v1/mail')
-  if (!resp.ok) {
-    throw new AddyError('relay-unreachable', `collecting mail: ${resp.status}`)
-  }
+  if (!resp.ok) throw await relayError(resp, 'collecting mail')
   const { messages } = (await resp.json()) as {
     messages: { id: number; fromDevice: string; kind: string; sealed: string }[]
   }

@@ -22,6 +22,9 @@ import { Sparkline } from '../common/Sparkline'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
+import { errorText } from '../../lib/connectionError'
+import { undeferConflicts, useAddyUi } from '../../store/addy'
+import { syncErrorText } from './collectionNames'
 import type { ArrivedTransfer, ClipboardShortcutState } from '../../../../shared/addy'
 import { AddySetup } from './AddySetup'
 import {
@@ -100,7 +103,7 @@ export function AddyPanel(): React.JSX.Element {
         toast('This device is not connected to the relay right now, so nothing was synced.', 'error')
       }
     } catch (err) {
-      toast(err instanceof Error ? err.message : String(err), 'error')
+      toast(errorText(err), 'error')
     } finally {
       setSyncing(false)
       refresh()
@@ -113,13 +116,13 @@ export function AddyPanel(): React.JSX.Element {
   return (
     <PanelShell
       icon={<Satellite size={16} />}
-      // "Account", not the module's own name again. A promoted module already
-      // gets a page header built from its registry label -- see the `promoted`
-      // branch in FleetMonitor -- so a card titled "Sync & devices" under a page
-      // titled "Sync & devices" is the same words twice and names nothing. The
-      // convention is DockerPanel's: the page is the subject, the card is what
-      // is in it.
-      title="Account"
+      // THE FEATURE'S ONE NAME. This card said "Account" so as not to repeat
+      // the page header, and that made four names for one feature — Sync on the
+      // rail, Sync & devices on the page, Account here, addy in Settings — while
+      // every instruction elsewhere told people to "open Account", which is
+      // nothing they could find. Saying the same words twice is the cheaper
+      // mistake.
+      title="Sync & devices"
       about={
         <>
           Your own machines, and what has reached them. OpsMaxx carries servers, workspaces,
@@ -165,8 +168,8 @@ export function AddyPanel(): React.JSX.Element {
             <NoteWhy summary="What still works, and what does not">
               Creating an account and pairing a second device work — they talk to the relay
               directly. What is missing is the engine that carries data afterwards and the state it
-              would report: how many devices are on the account, when each was last seen, and when
-              anything last synced. Those tiles say so rather than showing a zero.
+              would report: how many devices are on the account, and when anything last synced.
+              Those tiles say so rather than showing a zero.
             </NoteWhy>
           </div>
         </div>
@@ -176,6 +179,18 @@ export function AddyPanel(): React.JSX.Element {
         <div className="addy-problem" role="alert">
           <AlertTriangle size={15} aria-hidden />
           <span>Could not read the sync status: {error}</span>
+        </div>
+      )}
+
+      {/* THE REASON THIS DEVICE IS NOT ATTACHED, AT THE TOP. It used to reach
+          a console log and nowhere else, and then the bottom of the panel,
+          under six rows — so a machine that was enrolled and could not sign in
+          showed ACCOUNT On and SYNC Off first, and the reason last. */}
+      {status?.problem !== undefined && (
+        <div className="addy-problem" role="alert">
+          <AlertTriangle size={15} aria-hidden />
+          <span>{status.problem}</span>
+          <ReconnectButton />
         </div>
       )}
 
@@ -267,7 +282,7 @@ function Transfers({ devices }: { devices?: AddyDevice[] }): React.JSX.Element |
         toast(`Sent ${r.name}`, 'ok')
       }
     } catch (err) {
-      toast(err instanceof Error ? err.message : String(err), 'error')
+      toast(errorText(err), 'error')
     } finally {
       setBusy(false)
     }
@@ -369,7 +384,7 @@ function RekeyRow(): React.JSX.Element {
           setPhrase('')
           setOpen(false)
         },
-        (err: unknown) => toast(err instanceof Error ? err.message : String(err), 'error')
+        (err: unknown) => toast(errorText(err), 'error')
       )
       .finally(() => setBusy(false))
   }
@@ -394,6 +409,7 @@ function RekeyRow(): React.JSX.Element {
         {open && (
           <textarea
             className="addy-phrase-input"
+            aria-label="Recovery phrase"
             value={phrase}
             onChange={(e) => setPhrase(e.target.value)}
             spellCheck={false}
@@ -481,7 +497,7 @@ function PauseRow({ running }: { running: boolean }): React.JSX.Element {
           okay ? 'ok' : 'error'
         )
       })
-      .catch((err: unknown) => toast(err instanceof Error ? err.message : String(err), 'error'))
+      .catch((err: unknown) => toast(errorText(err), 'error'))
       .finally(() => setBusy(false))
   }
   return (
@@ -525,16 +541,18 @@ function LeaveRow({
         // a person who left offline is still listed on their other machines
         // and should hear that from here rather than discover it there.
         toast(
-          !r.left
+          !r?.left
             ? 'This device was not on an account.'
             : r.removedFromRoster === true
               ? 'This device has left the account and removed itself from your device list.'
-              : 'This device has left the account. It could not reach the relay to remove itself, so your other devices still list it — remove it from one of them.',
-          'ok'
+              : `This device has left the account, but could not remove itself from your device list${r.rosterProblem ? ` (${r.rosterProblem})` : ''} — remove it from one of your other devices.`,
+          // Not a success colour on a sentence that asks for something to be
+          // done on another machine.
+          r?.left && r.removedFromRoster !== true ? 'error' : 'ok'
         )
         setOpen(false)
       })
-      .catch((err: unknown) => toast(err instanceof Error ? err.message : String(err), 'error'))
+      .catch((err: unknown) => toast(errorText(err), 'error'))
       .finally(() => setBusy(false))
   }
 
@@ -549,8 +567,8 @@ function LeaveRow({
           {open && (
             <>
               <br />
-              This does not remove the device from the account: the other machines are not told, and
-              this one stays in their device list until somebody there removes it.
+              It also removes this device from your device list, if it can reach the relay. If it
+              cannot, the other machines keep listing it until somebody there removes it.
               <br />
               {alone ? (
                 <strong>
@@ -845,6 +863,22 @@ function fingerprint(id: string): string {
   return id.slice(0, 8)
 }
 
+const PHRASE_ADDED_WHY =
+  'This device was added with the recovery phrase, not by pairing. Whoever holds the phrase can add devices. If you do not recognise this one, remove it.'
+
+/** The roster entry that added it was signed with the recovery-phrase key.
+ *  Read loosely: main fills the field from the verified chain, and a build
+ *  that does not send it has no phrase-added devices to show. */
+function addedWithPhrase(d: AddyDevice): boolean {
+  return (d as { addedWithPhrase?: boolean }).addedWithPhrase === true
+}
+
+/** The date in the signed add entry. A date, not a time: it is for spotting a
+ *  machine that turned up recently, not for an audit trail. */
+function addedOn(ms: number): string {
+  return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 /**
  * The roster.
  *
@@ -908,10 +942,21 @@ function AddyDevices({
               <span className="addy-device-name">{d.label}</span>
               {d.self && <span className="chip info">This device</span>}
               {d.revoked === true && <span className="chip danger">Revoked</span>}
+              {/* NOT EVERY ADD IS A PAIRING. The recovery phrase can add a
+                  device with no other machine present and nobody comparing
+                  emoji, so a row added that way is the one to look at twice.
+                  The chip says it in words; the explanation is the hover text
+                  and the screen-reader description. */}
+              {addedWithPhrase(d) && (
+                <span className="chip warn" title={PHRASE_ADDED_WHY} aria-description={PHRASE_ADDED_WHY}>
+                  Added with recovery phrase
+                </span>
+              )}
               {/* Under the name rather than beside it: it is what you read
                   when the name did not settle it, and a row that leads with
                   a key is a row nobody scans. */}
               <div className="addy-device-fp">{fingerprint(d.id)}</div>
+              {d.addedAt !== null && <div className="fine">Added {addedOn(d.addedAt)}</div>}
             </td>
             <td className="right">
               {/* Never on this device's own row. A device that revoked itself
@@ -926,9 +971,10 @@ function AddyDevices({
         ))}
       </tbody>
       {/* SAID ONCE, rather than printed as a falsehood on every row.
-          `lastSeen` and `addedAt` are `null` because the relay reports
-          neither — the shared contract says so in as many words — and the
-          columns rendered that null as "never". So every device on every
+          `lastSeen` is `null` because the relay does not report it — the
+          shared contract says so in as many words — and the column rendered
+          that null as "never". (`addedAt` comes from the signed add entry and
+          is shown on the row when present.) So every device on every
           account, including the one being looked at, read "Last seen: never".
           That is the column a sysadmin scans to spot a machine that should not
           be there, and it was uniformly false. */}
@@ -1023,7 +1069,7 @@ function RevokeButton({
               onDone()
             },
             (err: unknown) => {
-              toast(err instanceof Error ? err.message : String(err), 'error')
+              toast(errorText(err), 'error')
               setBusy(false)
             }
           )
@@ -1054,7 +1100,7 @@ function ReconnectButton(): React.JSX.Element {
         void window.opsmaxx?.addy
           ?.reconnect()
           .then((r) => toast(r.ok ? 'Connected.' : (r.problem ?? 'Still not connected.'), r.ok ? 'ok' : 'error'))
-          .catch((err: unknown) => toast(err instanceof Error ? err.message : String(err), 'error'))
+          .catch((err: unknown) => toast(errorText(err), 'error'))
           .finally(() => setBusy(false))
       }}
     >
@@ -1067,39 +1113,45 @@ function AddyProblems({ status }: { status: AddyStatus | null }): React.JSX.Elem
   const sync = status?.sync
   if (sync === undefined) return null
   const conflicts = sync.conflicts
-  // THE REASON THIS DEVICE IS NOT ATTACHED BELONGS AT THE TOP OF THE PANEL.
-  // It used to reach a console log and nowhere else, so a machine that was
-  // enrolled and could not sign in showed ACCOUNT On, SYNC Off, and a line
-  // telling the person to wait for something that was never coming.
-  const problem = status?.problem
-  if (sync.error === undefined && conflicts === 0 && problem === undefined) return null
+  if (sync.error === undefined && conflicts === 0) return null
   return (
     <div className="addy-problems">
-      {problem !== undefined && (
-        <div className="addy-problem" role="alert">
-          <AlertTriangle size={15} aria-hidden />
-          <span>{problem}</span>
-          <ReconnectButton />
-        </div>
-      )}
       {sync.error !== undefined && (
         <div className="addy-problem" role="alert">
           <AlertTriangle size={15} aria-hidden />
-          <span>
-            Sync last failed {ago(sync.error.at)} ago: {sync.error.message}
-            {sync.error.code !== undefined && ` (${sync.error.code})`}
+          {/* The code is for a bug report, not for reading: on hover, not in
+              the sentence. */}
+          <span title={sync.error.code}>
+            Sync last failed {ago(sync.error.at)} ago: {syncErrorText(sync.error.message)}
           </span>
         </div>
       )}
-      {conflicts > 0 && (
-        <div className="addy-note" role="status">
-          <AlertTriangle size={15} aria-hidden />
-          <span>
-            {conflicts} {conflicts === 1 ? 'change was' : 'changes were'} made on two devices at
-            once. OpsMaxx opens both versions over the app and asks which to keep — it cannot do
-            that in the background, because only you know which one is right.
-          </span>
-        </div>
+      {conflicts > 0 && <ConflictsNote conflicts={conflicts} />}
+    </div>
+  )
+}
+
+/**
+ * Conflicts waiting, and the way back to them.
+ *
+ * "Decide later" used to last until the next launch with no way to change your
+ * mind in between, while this line went on saying the app "opens both versions
+ * and asks" — which it had just been told not to do.
+ */
+function ConflictsNote({ conflicts }: { conflicts: number }): React.JSX.Element {
+  const deferred = useAddyUi((s) => s.deferredConflicts.length)
+  return (
+    <div className="addy-note" role="status">
+      <AlertTriangle size={15} aria-hidden />
+      <span>
+        {conflicts} {conflicts === 1 ? 'change was' : 'changes were'} made on two devices at once.
+        Only you know which version is right, so OpsMaxx shows both and asks which to keep.
+        {deferred > 0 && ' You left some of them for later.'}
+      </span>
+      {deferred > 0 && (
+        <button className="btn ghost size-24" onClick={undeferConflicts}>
+          Review now
+        </button>
       )}
     </div>
   )

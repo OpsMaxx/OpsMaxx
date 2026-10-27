@@ -25,9 +25,24 @@ both repositories asserts its implementation reproduces the same encodings,
 signatures and chain hashes from the same fixed inputs, and
 `version_test.go` asserts the file's `_meta.version` matches the
 `ProtocolVersion` constant. A protocol change that is not carried across
-therefore forces a version bump, and a sidecar still announcing the old
-version is refused by the server at connect time — before anything is sealed,
-rather than after.
+therefore forces a version bump. The bump reaches the wire through the
+`X-Addy-Protocol` header the parent (`src/main/services/addy/relay.ts`) sends on
+every request, whose value is pinned to `ProtocolVersion` here by
+`tests/addyRelayContract.test.ts`. A relay speaking a different version answers
+426 and the app says "update OpsMaxx or the relay" instead of failing an AEAD
+check later. Two limits, stated rather than implied: the refusal happens per
+request, not at some earlier handshake, and a relay older than the header
+ignores it and accepts the request.
+
+This was previously described as a refusal "at connect time". No such check
+existed on either side until the header was added; the sentence described an
+intent, not the code.
+
+**`roster.go` diverged once and was brought back.** It had gained a
+`Verified.HeadEntry` field upstream does not have. That value is now computed
+in `../crypto.go` (`lastEntryWire`) and every file here matches upstream
+byte for byte below its provenance header. A file that has to differ is not a
+vendored file: it moves out of this directory and says `// NOT VENDORED.`
 
 The one failure this cannot catch is a change made identically in both copies
 and wrong in both. Nothing catches that.

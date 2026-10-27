@@ -3,7 +3,8 @@ import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync }
 import { basename, join } from 'node:path'
 import { app } from 'electron'
 import { AddyError, type AddySidecar } from './sidecar'
-import type { RelayClient } from './relay'
+import { MAX_REQUEST_BYTES, relayError, type RelayClient } from './relay'
+import { CLIPBOARD_KIND } from './clipboard'
 
 /**
  * Sending a file to another of your own devices.
@@ -36,14 +37,36 @@ import type { RelayClient } from './relay'
 export const TRANSFER_DIR = 'addy-transfers'
 
 /**
- * The largest file this will send.
+ * What sealing adds to a transfer's bytes, exactly.
  *
- * Not a technical limit — the object store would take more — but a limit on
- * what one keystroke should be able to put on somebody's tethered connection
- * without a second thought. Above it the honest answer is a real file-transfer
- * tool, and saying so beats a progress bar that stalls for an hour.
+ * The sealed object is the ACE encoding in `protocol/object.go`:
+ * "addy-obj-v1\0" (12) + suite (1) + nonce (24) + a u32 length (4), around a
+ * ciphertext that is the plaintext plus a 16-byte tag. The plaintext is
+ * "addy-coll-v1\0" (13) + schema u32 (4) + writer version as a u32-prefixed
+ * string (4 + 8 for "transfer") + counter u64 (8) + the payload's own u32
+ * length (4). 41 + 57 = 98. `TestTransferSealOverhead` in the sidecar seals a
+ * transfer and fails if this number is wrong.
  */
-export const MAX_TRANSFER_BYTES = 100 * 1024 * 1024
+export const TRANSFER_SEAL_OVERHEAD = 98
+
+/** Room for `{"epoch":…,"counter":1,"body":"…"}` around the base64. The real
+ *  envelope is 33 bytes plus the epoch's digits. */
+const PUT_ENVELOPE_BYTES = 64
+
+/**
+ * The largest file this will send: whatever still fits in ONE request once it
+ * is sealed, base64-encoded and wrapped in JSON.
+ *
+ * It was 100 MB, and the relay reads at most 8 MiB of a request. Above that it
+ * truncated the body, the body hash no longer matched the signature, and the
+ * relay answered 401 — so every file over about 6 MB failed as "this device is
+ * not paired". It now answers 413 instead, and this keeps a send from getting
+ * that far. Derived rather than written down, so a change to the relay's limit
+ * or the seal's layout moves it with them. A bigger file is a job for a real
+ * file-transfer tool, and saying so beats a request the relay will refuse.
+ */
+export const MAX_TRANSFER_BYTES =
+  Math.floor((MAX_REQUEST_BYTES - PUT_ENVELOPE_BYTES) / 4) * 3 - TRANSFER_SEAL_OVERHEAD
 
 /** How long an arrived file is kept before it is swept. */
 export const QUARANTINE_MS = 7 * 24 * 60 * 60 * 1000
@@ -120,8 +143,8 @@ export async function sendFile(
   }
   if (info.size > MAX_TRANSFER_BYTES) {
     throw new AddyError(
-      'quota-exceeded',
-      `that file is ${Math.round(info.size / 1024 / 1024)} MB and the limit is ${MAX_TRANSFER_BYTES / 1024 / 1024} MB. Use a file-transfer tool for something that size.`
+      'too-large',
+      `that file is ${(info.size / 1024 / 1024).toFixed(1)} MB and the limit is ${(MAX_TRANSFER_BYTES / 1024 / 1024).toFixed(1)} MB. Use a file-transfer tool for something that size.`
     )
   }
 
@@ -165,7 +188,12 @@ export async function sendFile(
     sealed: sealedNotice.sealed
   })
   if (!resp.ok) {
-    throw new AddyError('relay-unreachable', `the relay would not carry the notice (${resp.status})`)
+    // The bytes are already on the relay and now nothing will ever point at
+    // them. Deleted, or every refused notice — a full mailbox above all —
+    // leaves up to 6 MB counted against the account's quota for good.
+    const err = await relayError(resp, 'the relay would not carry the notice')
+    await deps.relay.deleteObject(objectName(id)).catch(() => undefined)
+    throw err
   }
 
   return { id, name, size: bytes.length }
@@ -189,7 +217,7 @@ export interface ArrivedFile {
  */
 export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
   const resp = await deps.relay.request('GET', '/v1/mail')
-  if (!resp.ok) throw new AddyError('relay-unreachable', `collecting mail: ${resp.status}`)
+  if (!resp.ok) throw await relayError(resp, 'collecting mail')
   const { messages } = (await resp.json()) as {
     messages: { id: number; fromDevice: string; kind: string; sealed: string }[]
   }
@@ -211,7 +239,32 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
    */
   const peers = new Set(deps.peers())
   const notices = messages.filter((m) => m.kind === TRANSFER_KIND && peers.has(m.fromDevice))
-  if (notices.length === 0) return []
+
+  /**
+   * AND WHAT CANNOT BE USED IS ACKNOWLEDGED, not left to pile up.
+   *
+   * Mail from a device that is not on the roster, of a kind this build does
+   * not know, or that does not open, was skipped and never acknowledged — so
+   * it was offered again on every pass until the relay's 48-hour expiry, and
+   * it counted against the 256-message cap the whole time. Fill that and
+   * every sender gets 507, with nothing on either screen saying why.
+   *
+   * Clipboard mail from a member is NOT touched here: it is collected by a
+   * keystroke, and dropping it on a timer would empty the clipboard queue
+   * before the person pressed receive. The caller refreshes the roster before
+   * this runs, so "not a member" means not a member now, rather than a
+   * device that joined since the last pass.
+   */
+  const unusable = messages
+    .filter(
+      (m) =>
+        !peers.has(m.fromDevice) || (m.kind !== TRANSFER_KIND && m.kind !== CLIPBOARD_KIND)
+    )
+    .map((m) => m.id)
+  if (notices.length === 0) {
+    if (unusable.length > 0) await ack(deps, unusable)
+    return []
+  }
 
   const { devicePub } = await deps.addyd.send<{ devicePub: string }>('whoami')
   const dir = quarantine()
@@ -219,7 +272,10 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
 
   const arrived: ArrivedFile[] = []
   const done: number[] = []
+  /** Objects to delete once their notice is acknowledged. */
+  const finished: string[] = []
   for (const m of notices) {
+    let notice: TransferNotice
     try {
       const opened = await deps.addyd.send<{ payload: string }>('open', {
         collection: `${TRANSFER_KIND}:${devicePub}`,
@@ -228,17 +284,25 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
         knownSchema: 1,
         seenCounter: 0
       })
-      const notice = JSON.parse(
-        Buffer.from(opened.payload, 'base64').toString('utf8')
-      ) as TransferNotice
+      notice = JSON.parse(Buffer.from(opened.payload, 'base64').toString('utf8')) as TransferNotice
+    } catch {
+      // A notice that does not open will not open next time either: sealed
+      // under an epoch this device no longer holds, or to another device.
+      unusable.push(m.id)
+      continue
+    }
 
-      // BEFORE THE ID IS USED FOR ANYTHING. It addresses both a relay object
-      // and a local directory, and the local one is the dangerous half — see
-      // TRANSFER_ID. Refused rather than sanitised, because there is no
-      // legitimate id this rejects: every one this code mints is hex.
-      if (typeof notice.id !== 'string' || !TRANSFER_ID.test(notice.id)) {
-        throw new AddyError('config-invalid', 'a transfer arrived with an id this build will not use')
-      }
+    // BEFORE THE ID IS USED FOR ANYTHING. It addresses both a relay object
+    // and a local directory, and the local one is the dangerous half — see
+    // TRANSFER_ID. Refused rather than sanitised, because there is no
+    // legitimate id this rejects: every one this code mints is hex. Dropped
+    // with it, because it is the same notice every time it is offered.
+    if (typeof notice.id !== 'string' || !TRANSFER_ID.test(notice.id)) {
+      unusable.push(m.id)
+      continue
+    }
+
+    try {
 
       const object = await deps.relay.getObject(objectName(notice.id), deps.epoch())
       if (!object) {
@@ -258,9 +322,14 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
 
       // CHECKED BEFORE IT IS WRITTEN. The AEAD proves nobody without the key
       // altered these bytes; the digest proves they are all of them.
+      // Dropped when it fails: the AEAD has already proved these are the
+      // bytes the sender sealed, so a mismatch is the sender's mistake and
+      // fetching them again would get the same ones.
       const digest = createHash('sha256').update(bytes).digest('hex')
       if (digest !== notice.sha256) {
-        throw new AddyError('internal', `${notice.name} arrived incomplete`)
+        unusable.push(m.id)
+        finished.push(objectName(notice.id))
+        continue
       }
 
       // Named by the transfer, not by the sender's filename alone: a file
@@ -284,6 +353,7 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
         at: notice.sentAt
       })
       done.push(m.id)
+      finished.push(objectName(notice.id))
     } catch {
       // One bad transfer does not stop the rest, and it is NOT acknowledged —
       // so a failure that was transient is retried rather than silently
@@ -291,10 +361,23 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
     }
   }
 
-  if (done.length > 0) {
-    await deps.relay.request('POST', '/v1/mail/ack', { ids: done })
+  if (done.length + unusable.length > 0) {
+    // Acknowledged FIRST, deleted after. Deleting an object whose notice is
+    // still in the mailbox would turn the next collection into a 404 it
+    // retries for two days.
+    if (await ack(deps, [...done, ...unusable])) {
+      // AND THE BYTES GO, which they never did. Nothing deleted a transfer
+      // object, so every file ever sent sat in the account's quota until
+      // sync itself started failing with 507.
+      for (const name of finished) await deps.relay.deleteObject(name).catch(() => undefined)
+    }
   }
   return arrived
+}
+
+async function ack(deps: TransferDeps, ids: number[]): Promise<boolean> {
+  const resp = await deps.relay.request('POST', '/v1/mail/ack', { ids })
+  return resp.ok
 }
 
 /** What is sitting in quarantine now, newest first. */

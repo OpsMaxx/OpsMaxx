@@ -13,6 +13,7 @@ import { installDemo } from './demo'
 import { parseAddyLink, ADDY_LINK_SCHEME, type AddyLink } from '../shared/addyLink'
 import { app, shell, BrowserWindow, clipboard, globalShortcut, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
 import { join, resolve} from 'node:path'
+import { hostname } from 'node:os'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -233,6 +234,7 @@ import {
   vaultList,
   vaultEntriesForResolve,
   vaultSave,
+  vaultMergeFrom,
   vaultChangePassword,
   vaultDestroy,
   vaultDispose,
@@ -393,6 +395,7 @@ import { vaultWaiting } from './services/vaultWaiting'
 import { clearRevocation, revocationState } from './services/addy/revoke'
 import { sshAgent } from './services/sshAgent/service'
 import { addySession } from './services/addy/session'
+import { holdSyncedKeys, rendererReloaded } from './services/addy/collections'
 import { discardTransfer, pendingFiles } from './services/addy/transfer'
 import type { PairingConfirmation } from './services/addy/pairing'
 import { previewBitwardenImport } from './services/import/bitwarden'
@@ -903,6 +906,10 @@ ipcMain.handle('window:control', (_e, action: unknown) => {
 ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false)
 
 ipcMain.handle('app:platform', () => process.platform)
+// What the user already calls this machine, for the one form that names it.
+// The renderer cannot ask: under `loadFile` its `location.hostname` is empty,
+// which is how every first device came to be called "this device" for ever.
+ipcMain.handle('app:hostname', () => hostname())
 ipcMain.handle('app:version', () => app.getVersion())
 
 // Autostart. `app.setLoginItemSettings` is a no-op on Linux, so this reports
@@ -4959,17 +4966,36 @@ ipcMain.handle('addy:resolveConflict', (_e, id: number, collection: string, chos
   addySession.resolveConflict(id, collection, chosen)
 )
 ipcMain.handle('addy:discardConflict', (_e, id: number) => addySession.discardConflict(id))
+// A vault set aside on first sync — this machine's own, most often — folded
+// into the one in use. Sync never opens a vault; this needs the master password
+// the other copy was made with, which only the person has.
+ipcMain.handle('addy:mergeVaultCopy', async (_e, id: number, password: string) => {
+  const copy = (await addySession.conflicts()).find((c) => c.id === id && c.collection === 'vault')
+  if (!copy || copy.losing === undefined) {
+    return { ok: false, error: copy?.problem ?? 'That copy is no longer on the relay.' }
+  }
+  const r = await vaultMergeFrom(JSON.stringify(copy.losing), String(password))
+  if (r.ok) {
+    await addySession.discardConflict(id)
+    void addySession.syncNow().catch(() => undefined)
+  }
+  return r
+})
 
 // Pairing. Three calls rather than one, because the user has to be able to
 // read the code aloud while the other device is still being found -- a single
 // call that resolved only on completion would have nothing to show them.
-ipcMain.handle('addy:createAccount', (_e, baseURL: string, invite: string, label: string) =>
-  addySession.createAccount(baseURL, invite, label)
+ipcMain.handle(
+  'addy:createAccount',
+  (_e, baseURL: string, invite: string, label: string, insecureTLS?: boolean) =>
+    addySession.createAccount(baseURL, invite, label, insecureTLS === true)
 )
 ipcMain.handle('addy:beginPairing', (_e, baseURL: string) => addySession.beginPairing(baseURL))
 ipcMain.handle('addy:awaitPairing', () => addySession.awaitPairing())
-ipcMain.handle('addy:joinPairing', (_e, baseURL: string, code: string, pairingId: string) =>
-  addySession.joinPairing(baseURL, code, pairingId)
+ipcMain.handle(
+  'addy:joinPairing',
+  (_e, baseURL: string, code: string, pairingId: string, insecureTLS?: boolean) =>
+    addySession.joinPairing(baseURL, code, pairingId, insecureTLS === true)
 )
 ipcMain.handle('addy:cancelPairing', () => addySession.cancelPairing())
 // The two calls that make a pairing real. Until these existed, "They match"
@@ -5080,6 +5106,28 @@ addySession.onApplied((collections) => {
 // which is the same shape every other broadcast in this file uses.
 addySession.watch((snapshot) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('addy:status', snapshot)
+})
+// A DEVICE JOINED THAT THIS MACHINE DID NOT ADD. DESIGN.md asks for a
+// notification naming it, and it is the only way somebody learns that a
+// stranger with their recovery phrase now reads everything they sync. An OS
+// notification rather than the panel: nobody is looking at the panel.
+addySession.onDeviceAdded((d) => {
+  if (!Notification.isSupported()) return
+  const n = new Notification({
+    title: d.addedWithPhrase ? 'A device was added with your recovery phrase' : 'A new device was added',
+    body: d.addedWithPhrase
+      ? `“${d.label}” can now read everything you sync. If this was not you, your recovery phrase is exposed: remove it in Sync & devices and change the account key.`
+      : `“${d.label}” can now read everything you sync. If you do not recognise it, remove it in Sync & devices.`,
+    icon: appIcon()
+  })
+  n.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+  n.show()
 })
 
 // Files, to one of your own devices. The bytes go into the object store
@@ -5691,6 +5739,9 @@ const resumeChecksAfterUnlock = (r: { ok: boolean }): { ok: boolean } => {
     // the user has already done the one thing that clears it, which reads as
     // the unlock not having worked.
     backupResumeAfterUnlock()
+    // And sync, which the lock took down on purpose and nothing brought back:
+    // closing the lid turned it off until OpsMaxx was restarted.
+    addySession.resumeAfterVaultLock()
   }
   return r
 }
@@ -5724,8 +5775,9 @@ const lockVaultFully = (): VaultResult => {
   // must not diverge.
   sshAgent.onVaultLocked()
   // The addy sidecar holds the account key in memory; the vault locking is
-  // exactly the moment it should stop holding it.
-  void addySession.detach()
+  // exactly the moment it should stop holding it. The panel says why sync
+  // stopped, and the unlock path above brings it back.
+  void addySession.detachForVaultLock()
   // A global shortcut outliving the process would be a key combination nothing
   // answers, held until the OS notices we are gone.
   globalShortcut.unregisterAll()
@@ -5767,7 +5819,11 @@ ipcMain.handle('vault:destroy', () => {
   // A stored biometric key opens a vault that no longer exists; leaving it
   // behind is dead material on disk.
   disableBiometricUnlock()
-  return vaultDestroy()
+  const r = vaultDestroy()
+  // Sync paused for this vault would otherwise wait for an unlock that can no
+  // longer happen, until the next launch.
+  if (r.ok) addySession.resumeAfterVaultLock()
+  return r
 })
 
 // ---- Vault: biometric unlock ----
@@ -5854,8 +5910,17 @@ ipcMain.on('debug:event', (_e, kind: unknown, message: unknown, stack: unknown) 
 })
 
 // ---- Data persistence ----
-ipcMain.handle('data:load', () => loadData())
-ipcMain.handle('data:save', (_e, data: unknown) => {
+ipcMain.handle('data:load', () => {
+  // The renderer reads the file to reload what sync wrote, so from here what
+  // it saves is no older than that write. See `holdSyncedKeys`.
+  rendererReloaded()
+  return loadData()
+})
+ipcMain.handle('data:save', (_e, incoming: unknown) => {
+  // A save queued before the renderer heard about a sync write carries the
+  // pre-sync copy of that collection; written as sent, it reverts the pull and
+  // the next pass pushes the revert to every device.
+  const data = holdSyncedKeys(incoming)
   saveData(data)
   // The local terminal's kill switch is a renderer setting, but a renderer-side
   // flag stops only the honest UI — a compromised renderer would call
@@ -6313,7 +6378,23 @@ function installMenu(): void {
  * token — the check is in `parseAddyLink`, and this file's job is only to
  * deliver what survived it.
  */
+/**
+ * HELD UNTIL ASKED FOR, and this used to be written and never read.
+ *
+ * A link that arrived before the window existed was parked here and nothing
+ * ever came back for it, and one that arrived while the window was loading was
+ * sent to a renderer with no listener yet. Either way the person clicked a link
+ * and watched the app open on the wrong screen. Now every link is kept here,
+ * latest wins, and the renderer takes it with `addy:takeLink` — once when it is
+ * ready, and again whenever it is nudged.
+ */
 const pendingLink: { link: AddyLink | null } = { link: null }
+
+ipcMain.handle('addy:takeLink', () => {
+  const link = pendingLink.link
+  pendingLink.link = null
+  return link
+})
 
 function deliverLink(raw: string): void {
   const parsed = parseAddyLink(raw)
@@ -6324,15 +6405,12 @@ function deliverLink(raw: string): void {
     mainWindow?.webContents.send('addy:linkRefused', parsed.reason)
     return
   }
-  // Held if the window is not up yet: on a cold start the OS hands us the URL
-  // before there is anything to show it in, and dropping it means the person
-  // clicks a link and watches the app open on the wrong screen.
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    pendingLink.link = parsed.link
-    return
-  }
+  pendingLink.link = parsed.link
+  if (!mainWindow || mainWindow.isDestroyed()) return
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.focus()
+  // A nudge. The renderer answers it by taking the link above, so a window
+  // that is still loading loses nothing: it takes it when it is ready.
   mainWindow.webContents.send('addy:link', parsed.link)
 }
 
@@ -6388,6 +6466,10 @@ app.whenReady().then(() => {
   ruleEngine.start()
   createWindow()
   installMenu()
+  // A COLD START FROM A LINK on Windows and Linux: the URL is in this
+  // process's own argv, and only `second-instance` was ever looking at argv.
+  const coldLink = linkInArgv(process.argv)
+  if (coldLink) deliverLink(coldLink)
   // Read, unsealed and parsed once for every consumer below, the way the
   // data:save handler hands one blob to the same consumers. Each used to call
   // loadData() itself: six reads of the file and six decryptions of the whole
@@ -6474,6 +6556,11 @@ app.whenReady().then(() => {
   powerMonitor.on('resume', () => {
     historyStore?.recordEvent(SAMPLING_RESUMED, null, { reason: 'wake' })
     void fleetSampler.sampleNow()
+    // Suspend detached sync with the vault lock. With no vault there is
+    // nothing to unlock, so nothing else would ever bring it back; with one,
+    // the unlock does, and waking alone must not undo the lock.
+    const vault = vaultStatus()
+    if (!vault.exists || vault.unlocked) addySession.resumeAfterVaultLock()
   })
 
   /**
@@ -6525,13 +6612,22 @@ app.whenReady().then(() => {
   //
   // Not awaited. It starts a sidecar and makes a network round trip, and a
   // relay that is down must not hold up the window.
-  void addySession
-    .resume((line) => console.log('[addy]', line))
-    .then((r) => {
-      if (r.problem) console.error('[addy] resume:', r.problem)
-      else if (r.resumed) console.log(`[addy] resumed on ${r.baseURL}`)
-    })
-    .catch((e) => console.error('[addy] resume failed:', e))
+  //
+  // Not while the vault is locked, which it routinely is at launch. Suspend
+  // takes sync down with the vault so the account key is not held in memory
+  // while the vault is shut; launching straight into that state must not hand
+  // the key back. Same pause as a lock, so the panel says why and the unlock
+  // brings it up.
+  const launchVault = vaultStatus()
+  if (launchVault.exists && !launchVault.unlocked) void addySession.detachForVaultLock()
+  else
+    void addySession
+      .resume((line) => console.log('[addy]', line))
+      .then((r) => {
+        if (r.problem) console.error('[addy] resume:', r.problem)
+        else if (r.resumed) console.log(`[addy] resumed on ${r.baseURL}`)
+      })
+      .catch((e) => console.error('[addy] resume failed:', e))
 
   void vpnInit()
     .catch((e) => console.error('[vpn] init failed:', e))

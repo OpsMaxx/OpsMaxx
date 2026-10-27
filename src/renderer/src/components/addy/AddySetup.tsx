@@ -3,6 +3,8 @@ import { AlertTriangle, Check, Copy, KeyRound, Loader2, Server } from 'lucide-re
 import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
+import { errorText } from '../../lib/connectionError'
+import { clearLink, forgetPhrase, holdPhrase, useAddyUi } from '../../store/addy'
 import { PairingPanel } from './PairingPanel'
 import { useAddyStatus } from './addyStatus'
 
@@ -41,18 +43,53 @@ export function AddySetup(): React.JSX.Element | null {
   // it a second door to minting an account on a machine that already has one,
   // and `createAccount` overwrites the enrolment, so that silently took the
   // device off the first account.
-  const { status } = useAddyStatus()
+  const { status, supported, error: statusError } = useAddyStatus()
   const relayURL = useApp((s) => s.settings.addyRelayURL ?? '')
   const setSettings = useApp((s) => s.setSettings)
 
   const [url, setUrl] = useState(relayURL)
   const [invite, setInvite] = useState('')
-  const [label, setLabel] = useState(defaultLabel())
+  // Empty until the hostname arrives, and left empty if it does not: the
+  // Create button waits for a name, which is better than the constant "this
+  // device" that every first device used to be called for ever.
+  const [label, setLabel] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [phrase, setPhrase] = useState<string | null>(null)
-  const [wroteItDown, setWroteItDown] = useState(false)
-  const [done, setDone] = useState(false)
+  // In a store, not here: see store/addy.ts for how it used to be lost.
+  const phrase = useAddyUi((s) => s.phrase)
+  const checkWords = useAddyUi((s) => s.checkWords)
+  /** On the phrase screen: false while the words are shown, true while the
+   *  user types some of them back with the list hidden. */
+  const [checking, setChecking] = useState(false)
+  const [typedWords, setTypedWords] = useState<Record<number, string>>({})
+  /** Words the user has moved on from, so a half-typed one is not called wrong. */
+  const [leftWords, setLeftWords] = useState<number[]>([])
+  /**
+   * The join-mode pairing panel is mid-exchange, so this screen must not swap
+   * it out.
+   *
+   * `finishJoin` enrols the device and the engine pushes `enrolled: true`
+   * BEFORE the call returns — the same race the phrase had. The enrolled
+   * branch below then replaced this screen, unmounting the panel, whose
+   * cleanup cancelled the pairing and whose error, if the join failed after
+   * that point, had nowhere left to appear. Held until the panel has settled
+   * and the person has read the outcome.
+   */
+  const [joinHeld, setJoinHeld] = useState(false)
+  /** A pairing code from a link, for the join panel to fill in. */
+  const [linkTicket, setLinkTicket] = useState<string | undefined>(undefined)
+
+  useEffect(() => {
+    void window.opsmaxx?.hostname?.().then(
+      (h) => {
+        // macOS reports "Somebodys-MacBook-Pro.local"; the suffix is the
+        // network's, not the machine's.
+        const name = h.replace(/\.local$/i, '').trim()
+        if (name) setLabel((l) => (l === '' ? name : l))
+      },
+      () => undefined
+    )
+  }, [])
   /**
    * WHICH OF THE THREE THINGS THIS MACHINE IS, and it starts as none of them.
    *
@@ -80,14 +117,41 @@ export function AddySetup(): React.JSX.Element | null {
    * credential; it is in the browser's URL bar on the other machine.
    *
    * It FILLS FIELDS AND NOTHING ELSE. An invite in the link fills the invite
-   * box; it is not spent. No mode is chosen for the reader either, because
-   * which of the three things this machine is remains theirs to say — and
-   * choosing `create` for somebody holding a second machine is the exact
+   * box; it is not spent. A `sync` link chooses no mode for the reader,
+   * because which of the three things this machine is remains theirs to say —
+   * and choosing `create` for somebody holding a second machine is the exact
    * mistake this fork exists to prevent.
+   *
+   * A `pair` link is the exception, because it has already answered that
+   * question: only a machine joining an existing account is sent a pairing
+   * code. It used to be honoured only after the reader had picked "join" and
+   * typed the relay, which on a fresh machine is everything the link was for.
+   * Now it opens the join path with both filled in. It still never joins: the
+   * person presses Join and compares the emoji.
+   *
+   * Taken from the store atomically, so one link fills one screen — and NOT
+   * before this device's status is known. On first mount `status` is null,
+   * which read as "not on an account": a pair link on an enrolled machine
+   * filled the join form, said "press Join", and then the screen flipped to
+   * the enrolled view underneath the person reading it.
    */
+  const pendingLink = useAddyUi((s) => s.link)
+  const statusKnown = !supported || status !== null || statusError !== null
   useEffect(() => {
-    const off = window.opsmaxx?.addy?.onLink?.((l) => {
-      if (l.action !== 'sync') return
+    if (!statusKnown) return
+    const l = useAddyUi.getState().link
+    if (!l) return
+    clearLink()
+    if (status?.enrolled === true) {
+      toast(
+        l.action === 'pair'
+          ? 'That pairing link is for a machine joining an account. This one is already on one, so it shows a code instead of typing one.'
+          : 'That link is for setting up a machine that has no account. This one is already on one, so nothing was changed.',
+        'error'
+      )
+      return
+    }
+    if (l.action === 'sync') {
       setUrl(l.relay)
       if (l.invite !== undefined) setInvite(l.invite)
       toast(
@@ -95,9 +159,14 @@ export function AddySetup(): React.JSX.Element | null {
           ? `Relay address filled in: ${l.relay}. Choose how this machine joins.`
           : `Invite and relay filled in from the link.`
       )
-    })
-    return () => off?.()
-  }, [])
+      return
+    }
+    if (l.code === undefined || l.pairingId === undefined) return
+    setUrl(l.relay)
+    setMode('join')
+    setLinkTicket(`${l.code}.${l.pairingId}`)
+    toast('Relay and pairing code filled in from the link. Press Join, then check the emoji before you confirm.')
+  }, [pendingLink, statusKnown, status?.enrolled])
   const [mnemonic, setMnemonic] = useState('')
 
   /**
@@ -140,7 +209,7 @@ export function AddySetup(): React.JSX.Element | null {
    * clause of `midFlow` is state this component owns, which is the whole point
    * — no outside signal can close this screen while it is mid-flow.
    */
-  const midFlow = busy || phrase !== null || recovered !== null
+  const midFlow = busy || phrase !== null || recovered !== null || joinHeld
   if (status?.enrolled === true && !midFlow) {
     // The relay this device actually attached to, not what happens to be in
     // settings: a machine that joined by pairing was enrolled by the sidecar,
@@ -201,9 +270,13 @@ export function AddySetup(): React.JSX.Element | null {
           // nothing to offer — and offering it anyway would start a pairing
           // against an empty URL and fail on a screen that had promised it
           // would work.
+          // There is no setting that holds the address: it is recorded when
+          // the device joins. So the honest remedy is the other devices, any
+          // of which can show a code.
           <div className="setting-desc">
             This device is on an account but has no relay address recorded, so it cannot start a
-            pairing. Open <strong>Sync now</strong> above, or set the address in Settings.
+            pairing. Start it from another of your devices instead — any device on the account can
+            show a code.
           </div>
         )}
       </div>
@@ -216,10 +289,12 @@ export function AddySetup(): React.JSX.Element | null {
     try {
       const result = await window.opsmaxx!.addy.createAccount(url.trim(), invite.trim(), label.trim())
       setSettings({ addyRelayURL: url.trim() })
-      setPhrase(result.mnemonic)
+      holdPhrase(result.mnemonic)
+      setChecking(false)
+      setTypedWords({})
       toast('Account created')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorText(err))
     } finally {
       setBusy(false)
     }
@@ -243,7 +318,7 @@ export function AddySetup(): React.JSX.Element | null {
       setRecovered({ devices: result.devices })
       toast('This device is back on the account', 'ok')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setError(errorText(err))
     } finally {
       setBusy(false)
     }
@@ -275,20 +350,99 @@ export function AddySetup(): React.JSX.Element | null {
             </div>
           </div>
         </div>
+        {/* THE WAY OUT. `recovered` keeps this screen mid-flow on purpose, so
+            the enrolment push cannot replace the review before it is read —
+            and without this button nothing ever ended it. */}
+        <button className="btn" onClick={() => setRecovered(null)}>
+          <Check size={14} /> Done
+        </button>
       </div>
     )
   }
 
-  // Step 2: the phrase. Nothing else is on screen, because anything else is
-  // something to look at instead.
-  if (phrase && !done) {
+  // Step 2: the phrase. The rest of the setup card gives way to it — the
+  // panel around it is still there, but nothing else in this flow is, because
+  // anything else is something to look at instead.
+  //
+  // PROVED, NOT TICKED. The confirmation was a checkbox, which is a question
+  // everybody answers yes to on the way past. Typing three of the words back
+  // with the list hidden is the cheapest check that they are actually written
+  // down somewhere — and the only one that catches a word copied wrongly while
+  // it can still be fixed.
+  if (phrase && checking) {
+    const words = phrase.trim().split(/\s+/)
+    const matches = (i: number): boolean =>
+      (typedWords[i] ?? '').trim().toLowerCase() === words[i]?.toLowerCase()
+    const right = checkWords.every(matches)
+    return (
+      <div className="addy-setup">
+        <h3>Type three of the words back</h3>
+        <div className="setting-desc">
+          From what you wrote down, not from the screen — the list is hidden while you do this.
+        </div>
+        {checkWords.map((i, n) => {
+          // Called wrong only once the person has moved on from it, so a word
+          // half typed is not an error.
+          const wrong = leftWords.includes(i) && (typedWords[i] ?? '').trim() !== '' && !matches(i)
+          return (
+            <label className="addy-field" key={i}>
+              <span>Word {i + 1}</span>
+              <input
+                value={typedWords[i] ?? ''}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setTypedWords((t) => ({ ...t, [i]: v }))
+                }}
+                onBlur={() => setLeftWords((l) => (l.includes(i) ? l : [...l, i]))}
+                autoFocus={n === 0}
+                aria-invalid={wrong}
+                aria-describedby={wrong ? `addy-word-${i}-wrong` : undefined}
+                spellCheck={false}
+                autoComplete="off"
+              />
+              {wrong && (
+                <small id={`addy-word-${i}-wrong`} role="alert">
+                  That is not word {i + 1}. Check what you wrote down.
+                </small>
+              )}
+            </label>
+          )
+        })}
+        <div className="pair-actions">
+          <button className="btn" onClick={() => setChecking(false)}>
+            Show the words again
+          </button>
+          {/* Disabled until they match. Not a nag: this is the one screen in
+              the product where clicking past it loses something that cannot
+              be recovered. */}
+          <button
+            className="btn"
+            disabled={!right}
+            aria-describedby={right ? undefined : 'addy-words-why'}
+            onClick={() => forgetPhrase()}
+          >
+            <Check size={14} /> Done — I have them
+          </button>
+        </div>
+        {!right && (
+          <small className="fine" id="addy-words-why">
+            Done is available once all three words match what you wrote down.
+          </small>
+        )}
+      </div>
+    )
+  }
+
+  if (phrase) {
     return (
       <div className="addy-setup">
         <h3>Write this down before you go on</h3>
         <div className="setting-desc">
           These twelve words are the only way back into this account if you lose every device on
-          it. OpsMaxx cannot show them to you again — not because it will not, but because nothing
-          on this machine keeps a copy.
+          it. OpsMaxx cannot show them to you again — it keeps no copy. <strong>Copy</strong> puts
+          them on this computer&apos;s clipboard, where anything that reads the clipboard can see
+          them — including the clipboard shortcut, which sends it to your other devices. OpsMaxx
+          clears them from the clipboard after a minute if nothing else has been copied since.
         </div>
         <ol className="addy-phrase">
           {phrase.split(/\s+/).map((word, i) => (
@@ -300,60 +454,22 @@ export function AddySetup(): React.JSX.Element | null {
         </ol>
         <button
           className="btn"
-          onClick={() => {
-            void navigator.clipboard.writeText(phrase)
-            toast('Copied — paste it somewhere safe, then clear your clipboard')
-          }}
+          onClick={() => copyPhrase(phrase)}
         >
           <Copy size={14} /> Copy
         </button>
-        <label className="addy-confirm">
-          <input
-            type="checkbox"
-            checked={wroteItDown}
-            onChange={(e) => setWroteItDown(e.target.checked)}
-          />
-          <span>I have written these down somewhere that is not this computer</span>
-        </label>
-        {/* Disabled until they say so. Not a nag: this is the one screen in the
-            product where clicking past it loses something that cannot be
-            recovered. */}
-        <button className="btn" disabled={!wroteItDown} onClick={() => setDone(true)}>
-          <Check size={14} /> Done — I have them
+        {/* Once the words are typed back the phrase is forgotten, and the
+            enrolled screen — the relay address and "Add another device" —
+            takes over. That is the screen this one used to duplicate. */}
+        <button
+          className="btn"
+          onClick={() => {
+            setLeftWords([])
+            setChecking(true)
+          }}
+        >
+          <Check size={14} /> I have written them down
         </button>
-      </div>
-    )
-  }
-
-  if (done) {
-    return (
-      <div className="addy-setup">
-        <h3>Add another device</h3>
-        {/* PairingPanel says the "both machines open" part itself, beside the
-            two buttons it belongs to. What it cannot say is the relay
-            address, which the other machine needs before it can be reached at
-            all — and this is the last moment the address is certainly on
-            screen. */}
-        <div className="addy-handoff">
-          <span>
-            On the other machine, pick <strong>I already use OpsMaxx on another machine</strong>,
-            and give it this relay address:
-          </span>
-          <div className="addy-handoff-row">
-            <code>{url.trim()}</code>
-            <button
-              className="btn"
-              aria-label="Copy the relay address"
-              onClick={() => {
-                void navigator.clipboard.writeText(url.trim())
-                toast('Relay address copied')
-              }}
-            >
-              <Copy size={14} />
-            </button>
-          </div>
-        </div>
-        <PairingPanel baseURL={url.trim()} />
       </div>
     )
   }
@@ -361,8 +477,9 @@ export function AddySetup(): React.JSX.Element | null {
   return (
     <div className="addy-setup">
       <div className="setting-desc">
-        addy is a relay you run yourself. It carries your data between your devices and cannot read
-        any of it — every object is sealed before it leaves, and the server holds no key.
+        Sync &amp; devices carries your data between your devices through a relay you run yourself
+        (addy). The relay cannot read any of it — every object is sealed before it leaves, and the
+        server holds no key.
       </div>
 
       {/* THE FORK, FIRST AND BEFORE ANY FIELD.
@@ -439,7 +556,7 @@ export function AddySetup(): React.JSX.Element | null {
           {mode === 'join' && (
             <small>
               The same address the other machine uses. It is shown there, under{' '}
-              <strong>Account → Add another device</strong>, with a button to copy it.
+              <strong>Sync &amp; devices → Add another device</strong>, with a button to copy it.
             </small>
           )}
         </label>
@@ -454,16 +571,16 @@ export function AddySetup(): React.JSX.Element | null {
           <strong>Start on the machine you already use.</strong>
           <ol>
             <li>
-              Open <strong>Account</strong> in OpsMaxx there and find <strong>Add another
+              Open <strong>Sync &amp; devices</strong> in OpsMaxx there and find <strong>Add another
               device</strong>.
             </li>
             <li>
-              Choose <strong>Show a code on this device</strong>. It shows a code and a pairing id
-              and keeps them on screen while it waits.
+              Choose <strong>Show a code on this device</strong>. It shows a pairing code and keeps it
+              on screen while it waits.
             </li>
             <li>
-              Type both of them in below, then compare the seven emoji. Leave both machines open —
-              the code only works while that window is.
+              Type the pairing code in below, then compare the seven emoji. Leave both machines open —
+              the code stops working after three minutes, or when that screen is closed.
             </li>
           </ol>
           {url.trim() ? (
@@ -471,7 +588,12 @@ export function AddySetup(): React.JSX.Element | null {
             // the code — `beginPairing` loads the account's keys to mint a
             // rendezvous and answers "no account is loaded" without them. The
             // button was offered on the one screen where it could only fail.
-            <PairingPanel baseURL={url.trim()} canShow={false} />
+            <PairingPanel
+              baseURL={url.trim()}
+              canShow={false}
+              ticket={linkTicket}
+              onHold={setJoinHeld}
+            />
           ) : (
             <div className="setting-desc">Fill in the relay address above to go on.</div>
           )}
@@ -585,9 +707,32 @@ export function AddySetup(): React.JSX.Element | null {
   )
 }
 
-/** A first guess at the device name, so the field is not empty. The hostname
- *  is what the user already calls this machine. */
-function defaultLabel(): string {
-  const guess = (globalThis as { location?: Location }).location?.hostname
-  return guess && guess !== 'localhost' ? guess : 'this device'
+/** How long the phrase may sit on the clipboard. */
+export const PHRASE_CLIPBOARD_MS = 60_000
+
+/**
+ * Copy the phrase, and take it back off the clipboard a minute later.
+ *
+ * Through main's clipboard, not `navigator.clipboard`: the clear has to run
+ * whether or not this window is in front, and only main can read the
+ * clipboard then. Cleared only if it still holds the phrase — whatever the
+ * person copied since is theirs.
+ */
+export function copyPhrase(phrase: string): void {
+  const clip = window.opsmaxx?.clipboard
+  if (!clip) {
+    void navigator.clipboard.writeText(phrase)
+    toast('Copied. Paste it somewhere safe, then copy something else over it.')
+    return
+  }
+  clip.write(phrase)
+  toast('Copied. OpsMaxx takes it off the clipboard in a minute.')
+  setTimeout(() => {
+    void clip.read().then(
+      (now) => {
+        if (now === phrase) clip.write('')
+      },
+      () => undefined
+    )
+  }, PHRASE_CLIPBOARD_MS)
 }

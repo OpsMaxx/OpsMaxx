@@ -5,6 +5,7 @@ import { AgentApprovalWatcher } from './components/sshAgent/AgentApprovalWatcher
 import { ConflictChooser } from './components/addy/ConflictChooser'
 import type { AddyRevocation } from '../../preload'
 import { startBackupRunWatch } from './store/backupRuns'
+import { startAddyLinkWatch } from './store/addy'
 import { clsx } from './lib/format'
 import { deferredView } from './lib/deferredView'
 import { initPersistence } from './store/persist'
@@ -189,6 +190,10 @@ export default function App(): React.JSX.Element {
   // somebody is looking at the Backup page, and a run nobody heard about leaves
   // the warning up. See startBackupRunWatch.
   useEffect(() => startBackupRunWatch(), [])
+  // App level for the same reason: an `opsmaxx://` link can arrive whatever is
+  // on screen, and the setup flow it fills may not be mounted. See
+  // startAddyLinkWatch.
+  useEffect(() => startAddyLinkWatch(), [])
 
   // Density is a root attribute so it can tighten every surface from CSS
   // rather than threading a prop through every component.

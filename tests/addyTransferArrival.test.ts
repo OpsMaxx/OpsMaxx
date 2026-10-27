@@ -62,7 +62,8 @@ function relayWith(notice: unknown, bytes: Buffer): unknown {
     },
     // The bytes themselves: `collectFiles` base64s this for the sidecar and
     // the fake sidecar hands it straight back, so a round trip returns these.
-    getObject: async () => ({ body: bytes, etag: 'e1' })
+    getObject: async () => ({ body: bytes, etag: 'e1' }),
+    deleteObject: async () => undefined
   }
 }
 

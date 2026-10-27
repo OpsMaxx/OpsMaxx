@@ -71,6 +71,7 @@ Most terminal tools do one thing. A typical DevOps task needs four: open a shell
 | **Containers** | Docker and Kubernetes on a server or on this machine — containers, images, logs and a shell inside one |
 | **CI/CD** | Jenkins, GitLab and GitHub Actions read beside the server a run changed — pipelines, run history, and the log of the step that failed. Reading only, and off until you turn it on: enabling it polls somebody else's API on a timer with a token you supply |
 | **Vault** | AES-256-GCM secrets store, with credentials in your OS keychain rather than a config file |
+| **Sync & devices** | Servers, workspaces, tunnels, VPN profiles and the vault carried between your own machines through [addy](https://github.com/OpsMaxx/addy), a relay you run — sealed on your machine before it leaves, so the relay stores what it cannot read |
 | **AI agent gateway** | Claude Code, Claude Desktop and Codex can work through it without ever seeing a password, key, IP or username |
 
 → **[The full feature list, what it replaces, and the work it was built for](docs/features.md)**
@@ -113,6 +114,7 @@ Already keep hosts in `~/.ssh/config`? Import them instead of retyping — `Prox
 | **[Databases](docs/databases.md)** | Five engines, direct or through a bastion |
 | **[Tunnels and VPN](docs/tunnels.md)** | Forwards, SOCKS5, WireGuard, OpenVPN and frp |
 | **[Vault and settings](docs/vault.md)** | The secrets store, backups, and the settings worth knowing |
+| **[Sync and devices](docs/08-user/guides/sync-and-devices.md)** | Setting up a relay, pairing your machines, the recovery phrase, and removing a lost one |
 | **[Security](docs/security.md)** | How credentials are stored and kept out of plaintext on disk |
 | **[FAQ](docs/faq.md)** | The questions that come up most |
 
@@ -124,6 +126,7 @@ Already keep hosts in `~/.ssh/config`? Import them instead of retyping — `Prox
 - Workspace passwords are stored as **scrypt verifiers** compared in constant time. They gate the UI — they do not encrypt that workspace's servers separately
 - **Host keys are verified**: unknown servers prompt with a SHA-256 fingerprint, and a changed key is refused outright
 - **Remote desktop certificates are pinned** the same way — RDP servers are self-signed by default, so a first sighting asks and a change is refused
+- **Sync is end-to-end encrypted**: every object is sealed on the device before it reaches the addy relay, and the vault travels still encrypted under your master password. The relay sees how many devices an account has, when they sync, and the name and size of each sealed collection — never what is inside. Credentials kept only in the OS keychain never leave the machine
 - Shell input is **parsed, never evaluated** — no `eval` on anything you type
 - The renderer runs with `contextIsolation` on and `nodeIntegration` off, behind a strict Content-Security-Policy
 

@@ -5,6 +5,8 @@ import type {
   AddyStatusSync
 } from '../../../../shared/addy'
 import { bridgeHas, bridgeOn } from '../../lib/bridge'
+import { errorText } from '../../lib/connectionError'
+import { syncErrorText } from './collectionNames'
 import { duration } from '../../lib/format'
 
 /**
@@ -101,7 +103,7 @@ export function useAddyStatus(): AddyStatusRead {
         setStatus(s)
         setError(null)
       },
-      (e: unknown) => setError(e instanceof Error ? e.message : String(e))
+      (e: unknown) => setError(errorText(e))
     )
   }, [])
 
@@ -292,8 +294,16 @@ export function addyJourney(
       ? {
           key: 'sync',
           title: 'Sync runs',
-          detail: 'The sync engine is not running. Pairing and the account are unaffected; nothing is moving between devices.',
-          state: 'unknown'
+          // NOT "the account is unaffected" when there is a sign-in problem.
+          // The engine starts only after this device signs in, so a `problem`
+          // is the very reason it is not running — and the line used to
+          // reassure the reader directly under a banner saying it could not
+          // sign in.
+          detail:
+            status?.problem !== undefined
+              ? 'Not running, because this device could not sign in to the relay. The reason is at the top of this page.'
+              : 'The sync engine is not running, so nothing is moving between devices.',
+          state: status?.problem !== undefined ? 'now' : 'unknown'
         }
       : sync.connected
         ? { key: 'sync', title: 'Sync runs', detail: 'Connected to the relay.', state: 'done' }
@@ -301,7 +311,7 @@ export function addyJourney(
             key: 'sync',
             title: 'Sync runs',
             detail: sync.error
-              ? `Running, but not connected: ${sync.error.message}`
+              ? `Running, but not connected: ${syncErrorText(sync.error.message)}`
               : 'Running, and not connected to the relay right now.',
             state: 'now'
           }
