@@ -63,12 +63,20 @@ describe('the pairing panel is not a dead end and the link is consumed', () => {
 
   it('listens for a link from the OS', () => {
     // The handler was wired from the scheme to the renderer and no further, so
-    // a clicked link brought the app to the front and did nothing.
-    expect(panel, 'nothing subscribes to addy:link').toContain('onLink')
-    expect(panel, 'a refused link is not surfaced').toContain('onLinkRefused')
+    // a clicked link brought the app to the front and did nothing. It is
+    // collected at the app root now (store/addy.ts), so it is heard whatever
+    // is on screen, and handed to the panel as a prop.
+    const watch = readFileSync(
+      join(__dirname, '..', 'src', 'renderer', 'src', 'store', 'addy.ts'),
+      'utf8'
+    )
+    expect(watch, 'nothing subscribes to addy:link').toContain('onLink')
+    expect(watch, 'a refused link is not surfaced').toContain('onLinkRefused')
+    expect(watch, 'a link held by main is never taken').toContain('takeLink()')
     // It fills the field. It must not join.
-    const effect = panel.slice(panel.indexOf('onLink?.('))
-    expect(effect.slice(0, 500), 'the link handler joins by itself').not.toMatch(/joinPairing\(/)
+    const effect = panel.slice(panel.indexOf('if (!linkedTicket) return'))
+    expect(effect.length, 'the parser is wrong, not the code').toBeGreaterThan(100)
+    expect(effect.slice(0, 300), 'the link handler joins by itself').not.toMatch(/join\(|joinPairing\(/)
   })
 })
 

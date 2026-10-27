@@ -201,9 +201,10 @@ describe('the words it uses', () => {
 
   it('has a name for every collection the protocol carries', () => {
     // A missing one falls back to the raw id, which is the state this fixes —
-    // so a new collection must not reintroduce it silently.
+    // so a new collection must not reintroduce it silently. The table is
+    // shared with the panel's error band now, so it is read where it lives.
     const PANEL = require('node:fs').readFileSync(
-      require('node:path').join(__dirname, '..', 'src/renderer/src/components/addy/ConflictChooser.tsx'),
+      require('node:path').join(__dirname, '..', 'src/renderer/src/components/addy/collectionNames.ts'),
       'utf8'
     )
     for (const name of SYNCED_COLLECTIONS) {

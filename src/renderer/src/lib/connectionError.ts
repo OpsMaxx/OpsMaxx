@@ -16,13 +16,15 @@ import { classifyConnectionError, type ConnectionFault } from '../../../shared/c
  *
  * Electron prefixes a rejected handler's message with "Error invoking remote
  * method 'sftp:connect':", which describes how the failure travelled rather
- * than what failed.
+ * than what failed. The class name after it goes too: Sync & devices throws
+ * `AddyError`, and "AddyError: the other device did not answer in time" put a
+ * type name in front of every sentence that screen ever said.
  */
 export function errorText(err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err)
   return raw
     .replace(/^Error invoking remote method '[^']*':\s*/, '')
-    .replace(/^Error:\s*/, '')
+    .replace(/^[A-Za-z]*Error:\s*/, '')
     .trim()
 }
 

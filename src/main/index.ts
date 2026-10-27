@@ -13,6 +13,7 @@ import { installDemo } from './demo'
 import { parseAddyLink, ADDY_LINK_SCHEME, type AddyLink } from '../shared/addyLink'
 import { app, shell, BrowserWindow, clipboard, globalShortcut, ipcMain, nativeTheme, dialog, session, Menu, Notification, powerMonitor, webContents } from 'electron'
 import { join, resolve} from 'node:path'
+import { hostname } from 'node:os'
 import { readFileSync, existsSync, writeFileSync } from 'node:fs'
 import { readFile, writeFile } from 'node:fs/promises'
 import { randomBytes, randomUUID } from 'node:crypto'
@@ -903,6 +904,10 @@ ipcMain.handle('window:control', (_e, action: unknown) => {
 ipcMain.handle('window:isMaximized', () => mainWindow?.isMaximized() ?? false)
 
 ipcMain.handle('app:platform', () => process.platform)
+// What the user already calls this machine, for the one form that names it.
+// The renderer cannot ask: under `loadFile` its `location.hostname` is empty,
+// which is how every first device came to be called "this device" for ever.
+ipcMain.handle('app:hostname', () => hostname())
 ipcMain.handle('app:version', () => app.getVersion())
 
 // Autostart. `app.setLoginItemSettings` is a no-op on Linux, so this reports
@@ -6313,7 +6318,23 @@ function installMenu(): void {
  * token — the check is in `parseAddyLink`, and this file's job is only to
  * deliver what survived it.
  */
+/**
+ * HELD UNTIL ASKED FOR, and this used to be written and never read.
+ *
+ * A link that arrived before the window existed was parked here and nothing
+ * ever came back for it, and one that arrived while the window was loading was
+ * sent to a renderer with no listener yet. Either way the person clicked a link
+ * and watched the app open on the wrong screen. Now every link is kept here,
+ * latest wins, and the renderer takes it with `addy:takeLink` — once when it is
+ * ready, and again whenever it is nudged.
+ */
 const pendingLink: { link: AddyLink | null } = { link: null }
+
+ipcMain.handle('addy:takeLink', () => {
+  const link = pendingLink.link
+  pendingLink.link = null
+  return link
+})
 
 function deliverLink(raw: string): void {
   const parsed = parseAddyLink(raw)
@@ -6324,15 +6345,12 @@ function deliverLink(raw: string): void {
     mainWindow?.webContents.send('addy:linkRefused', parsed.reason)
     return
   }
-  // Held if the window is not up yet: on a cold start the OS hands us the URL
-  // before there is anything to show it in, and dropping it means the person
-  // clicks a link and watches the app open on the wrong screen.
-  if (!mainWindow || mainWindow.isDestroyed()) {
-    pendingLink.link = parsed.link
-    return
-  }
+  pendingLink.link = parsed.link
+  if (!mainWindow || mainWindow.isDestroyed()) return
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.focus()
+  // A nudge. The renderer answers it by taking the link above, so a window
+  // that is still loading loses nothing: it takes it when it is ready.
   mainWindow.webContents.send('addy:link', parsed.link)
 }
 
@@ -6388,6 +6406,10 @@ app.whenReady().then(() => {
   ruleEngine.start()
   createWindow()
   installMenu()
+  // A COLD START FROM A LINK on Windows and Linux: the URL is in this
+  // process's own argv, and only `second-instance` was ever looking at argv.
+  const coldLink = linkInArgv(process.argv)
+  if (coldLink) deliverLink(coldLink)
   // Read, unsealed and parsed once for every consumer below, the way the
   // data:save handler hands one blob to the same consumers. Each used to call
   // loadData() itself: six reads of the file and six decryptions of the whole

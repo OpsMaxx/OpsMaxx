@@ -49,11 +49,13 @@ describe('the addy session has a way out of every state', () => {
   it('the panel offers the retry, and only when there is something to retry', () => {
     expect(panel, 'nothing calls reconnect').toContain('reconnect()')
     // Rendered from `status.problem`, which is the field that used to be a
-    // console log. A retry button with no stated reason is a shrug.
-    const problems = panel.slice(panel.indexOf('function AddyProblems('))
-    const body = problems.slice(0, problems.indexOf('\nfunction '))
+    // console log. A retry button with no stated reason is a shrug. It sits
+    // in the panel body now, at the top, rather than in AddyProblems at the
+    // bottom — see addyPanel.test.tsx for the order.
+    const main = panel.slice(panel.indexOf('export function AddyPanel('))
+    const body = main.slice(0, main.indexOf('\nfunction '))
     expect(body, 'the banner does not read the problem').toContain('status?.problem')
-    expect(body, 'the banner has no way to act on the problem').toContain('ReconnectButton')
+    expect(body, 'the banner has no way to act on the problem').toContain('<ReconnectButton')
   })
 
   it('pausing is offered above leaving, so the quiet answer is read first', () => {

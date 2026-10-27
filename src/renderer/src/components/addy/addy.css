@@ -407,14 +407,6 @@
   user-select: none;
 }
 
-.addy-confirm {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 14px 0;
-  font-size: 13px;
-}
-
 /* ---------------------------------------------------------------------------
    Sync & devices — the panel behind the rail button.
 
@@ -689,7 +681,7 @@
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text);
   word-break: break-all;
@@ -699,14 +691,17 @@
 .addy-phrase-input {
   width: 100%;
   resize: vertical;
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  /* The app's own field tokens. `--input-bg` and `--mono` were never defined,
+     so this fell back to near-black in the light theme too. */
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   padding: 8px;
   border-radius: 6px;
-  border: 1px solid var(--border, #2a2f3a);
-  background: var(--input-bg, #12151c);
-  color: inherit;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  user-select: text;
 }
 
 /* Files that have arrived, listed rather than opened. */

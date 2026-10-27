@@ -19,7 +19,7 @@ import {
   DatabaseBackup, Compass, Lock, LockOpen, Blocks } from 'lucide-react'
 import { useApp } from '../../store/app'
 import type { ThemeMode } from '../../store/app'
-import { useNav, SETTINGS_SECTIONS, SETTINGS_SECTION_LABELS } from '../../store/nav'
+import { useNav, openMonitor, SETTINGS_SECTIONS, SETTINGS_SECTION_LABELS } from '../../store/nav'
 import { isLoopbackHostKeyId } from '../../../../shared/ssh'
 import type { SettingsSection } from '../../store/nav'
 import { useVault } from '../../store/vault'
@@ -1494,15 +1494,22 @@ export function Settings(): React.JSX.Element {
               </div>
               <CredProxyPanel />
 
-              <h3>addy</h3>
+              {/* The feature's one name. This heading said "addy" — the relay's
+                  name — so the same feature was Sync on the rail, Sync &
+                  devices on its page and addy here. */}
+              <h3>Sync &amp; devices</h3>
               <div className="sub">
-                A relay you run yourself, which carries your data between your devices and cannot
-                read any of it.
+                Carries your data between your devices through a relay you run yourself, which
+                cannot read any of it.
+                {moduleEnabled(settings.modules, 'addy') && (
+                  <>
+                    {' '}
+                    <button className="linklike" onClick={() => openMonitor('addy')}>
+                      Open Sync &amp; devices
+                    </button>
+                  </>
+                )}
               </div>
-              {/* GUARDED, like the panel's. Unguarded, this was a second door
-                  to minting an account on a machine that already has one —
-                  and `createAccount` overwrites the account and the enrolment
-                  file, so it silently takes the device off the first one. */}
               {/* Guards itself now. Unguarded, this was a second door to
                   minting an account on a machine that already has one — and
                   `createAccount` overwrites the account and the enrolment

@@ -503,7 +503,7 @@ export const MODULES: ModuleDef[] = [
     surface: 'read',
     label: 'Sync & devices',
     detail:
-      'Your own machines, and what has reached them. OpsMaxx can carry servers, workspaces, tunnels and the vault between your devices through an addy relay you run yourself — every object sealed before it leaves, and the relay holding no key. This panel is the readout and the way in: which relay this device is enrolled on, which devices are on the account, when each was last seen, and when anything last synced. It reads only, and it touches no server in the estate.',
+      'Your own machines, and what has reached them. OpsMaxx can carry servers, workspaces, tunnels and the vault between your devices through an addy relay you run yourself — every object sealed before it leaves, and the relay holding no key. This panel is the readout and the way in: which relay this device is enrolled on, which devices are on the account, and when anything last synced. It reads only, and it touches no server in the estate.',
     // ON for a fresh install, and the argument is discoverability rather than
     // appetite. The panel is a READOUT plus the existing setup flow: it mints
     // no account, joins nothing and sends nothing anywhere until a person
