@@ -510,7 +510,7 @@ class AddySession {
       // Genuinely nothing here: no record, no session. Reported rather than
       // thrown, because a second press must not produce an error dialog for
       // the state the user was asking for.
-      forgetSyncState()
+      forgetSyncState(undefined, { floors: 'clear' })
       forgetEnrolment()
       return { left: false, accountId: null, removedFromRoster: false }
     }
@@ -531,7 +531,10 @@ class AddySession {
     }
     forgetAddySecret('root', `${accountId}:root`)
 
-    forgetSyncState()
+    // The floors go too, and only here: leaving and pairing again is the way
+    // out for a device whose relay was restored from a backup older than what
+    // it has already seen. A resync keeps them (see forgetSyncState).
+    forgetSyncState(undefined, { floors: 'clear' })
     forgetEnrolment()
     this.lastProblem = null
 
@@ -1350,6 +1353,10 @@ class AddySession {
     if (!this.attached) {
       return { applied: false, reason: 'This device is not attached to an addy account yet.' }
     }
+    // The device list first: mail is checked against it, and a clipboard from
+    // a machine paired since the last pass would otherwise fail the signer
+    // check and be acknowledged away.
+    await this.refreshRoster().catch(() => undefined)
     return receiveClipboard(this.clipboardDeps())
   }
 
@@ -2347,13 +2354,17 @@ class AddySession {
         epoch: prepared.epoch,
         schema: 1,
         writerVersion: `opsmaxx/${app.getVersion?.() ?? '0'}`,
-        counter: opened.counter,
+        // ONE ABOVE what was read. Rollback floors survive a re-key now, so a
+        // device that wrote counter+1 at the old epoch just before the switch
+        // would refuse a re-seal at the same number until somebody wrote the
+        // collection again — the vault, possibly for weeks.
+        counter: opened.counter + 1,
         payload: opened.payload
       })
       await relay.putObject(
         name,
         prepared.epoch,
-        opened.counter,
+        opened.counter + 1,
         Buffer.from(sealed.sealed, 'base64')
       )
       resealed++
@@ -2890,6 +2901,7 @@ class AddySession {
   /** Collects whatever has been sent to this device, into quarantine. */
   async collectFiles(): Promise<ArrivedFile[]> {
     if (!this.attached || !this.relay?.token) return []
+    await this.refreshRoster().catch(() => undefined)
     const arrived = await collectFiles(this.transferDeps())
     if (arrived.length > 0) this.announce()
     return arrived

@@ -814,6 +814,24 @@ describe('when something goes wrong', () => {
     expect(readBlob().servers).toEqual([{ id: 'current', status: 'offline' }])
   })
 
+  it('names a refused older copy plainly, and leaving clears the floor so pairing again works', async () => {
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'current' }], 7)
+    await syncOnce(deps(relay))
+    forgetSyncState()
+    seeded(relay, 'servers', [{ id: 'restored' }], 3)
+
+    const refused = await syncOnce(deps(relay))
+    expect(refused.error?.code).toBe('rolled-back')
+    expect(refused.error?.message).toMatch(/leave the account on this device and pair it again/)
+
+    // Leaving: the floors go with the agreement, and the restored relay's copy
+    // is adopted on the next join.
+    forgetSyncState(undefined, { floors: 'clear' })
+    expect((await syncOnce(deps(relay))).outcomes.servers).not.toBe('failed')
+  })
+
   it('keeps the floor through a re-key, so the relay cannot serve an older copy after it', async () => {
     writeBlob({ servers: [] })
     const relay = fakeRelay()

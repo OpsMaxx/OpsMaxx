@@ -771,13 +771,28 @@ async function openObject(
   sealed: Buffer,
   seenCounter: number
 ): Promise<{ payload: Buffer; counter: number }> {
-  const opened = await deps.addyd.send<{ payload: string; counter: number }>('open', {
-    collection: name,
-    epoch,
-    sealed: sealed.toString('base64'),
-    knownSchema: SCHEMA,
-    seenCounter
-  })
+  const opened = await deps.addyd
+    .send<{ payload: string; counter: number }>('open', {
+      collection: name,
+      epoch,
+      sealed: sealed.toString('base64'),
+      knownSchema: SCHEMA,
+      seenCounter
+    })
+    .catch((err: unknown) => {
+      // The sidecar codes an object rollback as roster-rewound, with the
+      // protocol's "counter is behind" in the message.
+      const rolledBack =
+        (err instanceof AddyError && err.code === 'roster-rewound') ||
+        (err instanceof Error && /counter is behind|went backwards/.test(err.message))
+      if (rolledBack) {
+        throw new AddyError(
+          'rolled-back',
+          `the relay served an older copy of ${name} than this device has already seen, so it was not used. If the relay was restored from a backup, leave the account on this device and pair it again; otherwise the relay is serving stale data.`
+        )
+      }
+      throw err
+    })
   return { payload: Buffer.from(opened.payload, 'base64'), counter: opened.counter }
 }
 
@@ -820,8 +835,16 @@ export function counterFloor(collection: string): number {
  *  collection with an unpushed edit through the `!known` branch: the edit was
  *  demoted to a conflict copy and the account's older copy put back on the
  *  screen, and each of those became another conflict to resolve. */
-export function forgetSyncState(only?: string[]): void {
+export function forgetSyncState(only?: string[], opts?: { floors?: 'clear' }): void {
   const state = loadState()
+  if (opts?.floors === 'clear') {
+    // Leaving the account. Nothing this device saw binds it any more, and
+    // keeping the floors would make a relay restored from a backup refuse
+    // this device for good, with no way out short of deleting the file.
+    saveState({ version: 1, collections: {} })
+    forgetCount++
+    return
+  }
   // Before anything is deleted, for the same reason as in forgetEpochState.
   state.floors = floorsOf(state)
   if (only) {

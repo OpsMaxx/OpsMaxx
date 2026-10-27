@@ -369,6 +369,22 @@ function RekeyRow(): React.JSX.Element {
   const [phrase, setPhrase] = useState('')
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Copies set aside and not decided yet. A re-key drops every one of them
+  // (OpsMaxx offers only the current key's, and the relay deletes the rest),
+  // and one of them may be the only place a set-aside vault exists — so the
+  // number is said before the button, not discovered after.
+  const [waiting, setWaiting] = useState(0)
+  useEffect(() => {
+    if (!open) return
+    let live = true
+    void window.opsmaxx?.addy
+      ?.conflicts?.()
+      ?.then((list) => live && setWaiting(list.length))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [open])
 
   const run = (): void => {
     setBusy(true)
@@ -405,6 +421,16 @@ function RekeyRow(): React.JSX.Element {
               <br />
               It needs your recovery phrase. The key being replaced is the one the removed device is
               holding, so it cannot be the one that signs the replacement.
+              {waiting > 0 && (
+                <>
+                  <br />
+                  <strong>
+                    {waiting} set-aside {waiting === 1 ? 'copy is' : 'copies are'} still waiting
+                    for a decision, and re-keying deletes {waiting === 1 ? 'it' : 'them'}.
+                  </strong>{' '}
+                  Decide on {waiting === 1 ? 'it' : 'them'} first with <strong>Review now</strong>.
+                </>
+              )}
             </>
           )}
         </div>

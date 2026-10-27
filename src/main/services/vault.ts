@@ -382,10 +382,11 @@ export function vaultLock(): VaultResult {
  * Unannounced, that was two defects rather than one:
  *
  *   The read. `vaultList` and `vaultEntriesForResolve` both serve `cache`, so
- *   the pulled credentials were invisible for the rest of the session. The
- *   second device imported an estate it could log in to nothing on, and its
- *   monitoring stayed empty because the sampler skips a target whose
- *   credential it cannot resolve.
+ *   the pulled entries were invisible for the rest of the session, and every
+ *   synced record that points at one (CI connections, VPN profiles, secret
+ *   environment variables) stayed unresolved. Servers and databases are a
+ *   separate gap: their link to a vault entry is device-local and does not
+ *   sync at all (see NOT_SYNCED.secrets).
  *
  *   The write, which is worse. `vaultSave` re-encrypts `cache` under the key
  *   and salt still held and replaces the file — so ONE edit after a pull put
