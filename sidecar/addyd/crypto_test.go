@@ -1449,6 +1449,47 @@ func TestLeaveRemovesThisDeviceAndRevokeStillRefusesSelf(t *testing.T) {
 	if after["selfListed"] != false {
 		t.Fatal("after leave this device is still listed")
 	}
+	if after["selfRevoked"] != true {
+		t.Fatal("a chain that revokes this device does not say so")
+	}
+	if one["selfRevoked"] != false {
+		t.Fatal("a listed device is reported revoked")
+	}
+}
+
+// ABSENT IS NOT REVOKED. A joiner that reads the chain before its pairer's
+// append lands is missing from a valid chain; reporting that as revoked is
+// what made it wipe itself.
+func TestAnAbsentDeviceIsNotReportedRevoked(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "first"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := minted.(map[string]any)
+	genesis := m["genesis"].(string)
+
+	// A second identity on the same account that was never added: load the
+	// same account keys under a fresh device key.
+	other, err := protocol.NewDeviceKeys()
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys.mu.Lock()
+	keys.device = other
+	keys.mu.Unlock()
+
+	v, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+		"chain": genesis, "rootSignPub": m["rootSignPub"], "epoch1Sign": m["epoch1SignPub"],
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := v.(map[string]any)
+	if got["selfListed"] != false || got["selfRevoked"] != false {
+		t.Fatalf("an unadded device: selfListed=%v selfRevoked=%v", got["selfListed"], got["selfRevoked"])
+	}
 }
 
 // The client caps a file transfer so the sealed, base64-encoded PUT fits the

@@ -131,7 +131,34 @@ async function sessionGone(resp: Response): Promise<boolean> {
     return true
   }
   if (typeof error !== 'string') return true
-  return error.startsWith('unknown or expired session') || error.startsWith('no bearer token')
+  return (
+    error.startsWith('unknown or expired session') ||
+    error.startsWith('no bearer token') ||
+    // A live session whose device was revoked. Logging in again does not
+    // restore it — the relay answers that login with 403 and the chain, which
+    // is how this device gets something it can VERIFY rather than a sentence.
+    // Bounded like the others: one login, one retry.
+    error.startsWith('this device has been removed from its sync group')
+  )
+}
+
+/**
+ * The relay refused a login because the roster revokes this device, and sent
+ * the chain that says so.
+ *
+ * Carried rather than acted on here. The chain is the relay's to choose, so it
+ * is evidence for the session to verify under keys this device holds — never a
+ * reason to wipe on its own. A relay that could say "you were removed" and be
+ * believed could wipe any device it serves.
+ */
+export class DeviceRemovedError extends AddyError {
+  constructor(
+    message: string,
+    /** Base64 of the whole chain, exactly as GET /v1/roster returns it. */
+    readonly chain: string
+  ) {
+    super('not-paired', message)
+  }
 }
 
 /**
@@ -574,6 +601,15 @@ export async function relayError(resp: Response, what: string): Promise<AddyErro
  */
 async function loginError(resp: Response, baseURL: string): Promise<AddyError> {
   const detail = await relayDetail(resp)
+  if (resp.status === 403) {
+    const chain = await resp
+      .clone()
+      .json()
+      .then((b: { roster?: { chain?: unknown } }) => b.roster?.chain, () => undefined)
+    if (typeof chain === 'string' && chain !== '') {
+      return new DeviceRemovedError(`${baseURL} says this device was removed from the account.`, chain)
+    }
+  }
   if (resp.status === 401 || resp.status === 403) {
     return new AddyError(
       'not-paired',
