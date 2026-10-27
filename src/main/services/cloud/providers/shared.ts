@@ -26,8 +26,17 @@ export interface EphemeralKeyPair {
 }
 
 export function generateEphemeralKey(): EphemeralKeyPair {
-  const pair = utils.generateKeyPairSync('ed25519')
-  return { publicKey: pair.public.toString(), privateKey: pair.private.toString() }
+  // ssh2 1.17's keygen strips EVERY leading zero byte from the public key's
+  // BIT STRING, not just the padding byte, so a key whose first byte is 0x00
+  // (1 in 256) comes out 31 bytes long and its own parser rejects it:
+  // "Malformed OpenSSH private key", and that cloud connection fails. Drawing
+  // again until ssh2 can read the key costs nothing and loses 1/256 of the
+  // keyspace.
+  for (;;) {
+    const pair = utils.generateKeyPairSync('ed25519')
+    if (!(utils.parseKey(pair.private) instanceof Error))
+      return { publicKey: pair.public.toString(), privateKey: pair.private.toString() }
+  }
 }
 
 /**
