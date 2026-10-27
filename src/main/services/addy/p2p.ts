@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { AddyError, type AddySidecar } from './sidecar'
-import type { RelayClient } from './relay'
+import { relayError, type RelayClient } from './relay'
 
 /**
  * A direct connection to another device, negotiated over the relay.
@@ -256,46 +256,96 @@ async function verifySignal(deps: P2PDeps, envelope: SignalEnvelope, selfNonce: 
 }
 
 async function publishSignal(deps: P2PDeps, to: string, envelope: SignalEnvelope): Promise<void> {
-  const resp = await deps.relay.request('GET', `/v1/signal?to=${encodeURIComponent(to)}`, {
+  // POST. This was a GET with a body, which Node's fetch refuses before it
+  // leaves the machine — and the throw was swallowed by the caller's fallback,
+  // so no direct connection was ever attempted and every clipboard quietly
+  // went through the mailbox.
+  const resp = await deps.relay.request('POST', `/v1/signal?to=${encodeURIComponent(to)}`, {
     frame: Buffer.from(JSON.stringify(envelope), 'utf8').toString('base64')
   })
-  if (!resp.ok && resp.status !== 204) {
-    throw new AddyError('relay-unreachable', `the relay would not carry a signal (${resp.status})`)
-  }
+  if (!resp.ok) throw await relayError(resp, 'the relay would not carry a signal')
 }
 
 /**
  * Waits for a frame this device cares about.
  *
- * The relay's mailbox is per-device and not per-session, so a frame for
- * another negotiation can arrive while this one is waiting. Frames that do not
- * match are DROPPED rather than re-queued: re-queuing would need a queue this
- * layer does not have, and the sender retries -- whereas a frame held for a
- * negotiation that has already given up is a frame that confuses the next one.
+ * ONE READER PER RELAY CLIENT, and every waiter is fed from it.
+ *
+ * The relay's mailbox is per-device, not per-session, and it hands each frame
+ * to whichever poll is waiting first. Each caller used to run its own poll and
+ * drop whatever did not match — so with the answering loop running (it runs
+ * whenever the clipboard shortcuts are on, which is exactly when a clipboard
+ * gets sent), the answer to this device's own offer usually landed in the
+ * answering loop's poll, failed its "is this an offer?" test, and was thrown
+ * away. The dial then timed out and the send fell back to the mailbox.
+ *
+ * Now the first waiter starts one poll loop, frames go to the first waiter
+ * whose predicate matches, and the loop stops once nobody is waiting. A frame
+ * nobody wants is still dropped — re-queuing it would need a queue this layer
+ * does not have, and a stale frame would confuse the next negotiation.
  */
-async function waitForSignal(
+interface SignalWaiter {
+  matches(e: SignalEnvelope): boolean
+  settle(e: SignalEnvelope | null, err?: unknown): void
+}
+const signalWaiters = new WeakMap<RelayClient, Set<SignalWaiter>>()
+
+function waitForSignal(
   deps: P2PDeps,
   matches: (e: SignalEnvelope) => boolean,
   timeoutMs: number
 ): Promise<SignalEnvelope | null> {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const resp = await deps.relay.request('GET', '/v1/signal')
-    if (resp.status === 204) continue
-    if (!resp.ok) {
-      throw new AddyError('relay-unreachable', `the relay refused signalling (${resp.status})`)
-    }
-    const { frame } = (await resp.json()) as { frame?: string }
-    if (!frame) continue
-    try {
-      const envelope = JSON.parse(Buffer.from(frame, 'base64').toString('utf8')) as SignalEnvelope
-      if (matches(envelope)) return envelope
-    } catch {
-      // A frame that does not parse is one this build does not understand --
-      // a newer peer, most likely. Ignored rather than fatal: refusing to
-      // negotiate because somebody sent something unfamiliar would make every
-      // upgrade a network partition.
-    }
+  let waiters = signalWaiters.get(deps.relay)
+  const startReader = waiters === undefined
+  if (!waiters) {
+    waiters = new Set()
+    signalWaiters.set(deps.relay, waiters)
   }
-  return null
+  const set = waiters
+  return new Promise((resolve, reject) => {
+    const waiter: SignalWaiter = {
+      matches,
+      settle: (e, err) => {
+        clearTimeout(timer)
+        set.delete(waiter)
+        if (err !== undefined) reject(err)
+        else resolve(e)
+      }
+    }
+    const timer = setTimeout(() => waiter.settle(null), timeoutMs)
+    set.add(waiter)
+    if (startReader) void readSignals(deps.relay, set)
+  })
+}
+
+async function readSignals(relay: RelayClient, waiters: Set<SignalWaiter>): Promise<void> {
+  try {
+    while (waiters.size > 0) {
+      const resp = await relay.request('GET', '/v1/signal')
+      if (resp.status === 204) continue
+      if (!resp.ok) throw await relayError(resp, 'the relay refused signalling')
+      const { frame } = (await resp.json()) as { frame?: string }
+      if (!frame) continue
+      let envelope: SignalEnvelope
+      try {
+        envelope = JSON.parse(Buffer.from(frame, 'base64').toString('utf8')) as SignalEnvelope
+      } catch {
+        // A frame that does not parse is one this build does not understand --
+        // a newer peer, most likely. Ignored rather than fatal: refusing to
+        // negotiate because somebody sent something unfamiliar would make every
+        // upgrade a network partition.
+        continue
+      }
+      for (const w of waiters) {
+        if (w.matches(envelope)) {
+          w.settle(envelope)
+          break
+        }
+      }
+    }
+  } catch (err) {
+    for (const w of [...waiters]) w.settle(null, err)
+  } finally {
+    signalWaiters.delete(relay)
+  }
 }

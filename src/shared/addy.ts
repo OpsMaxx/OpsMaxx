@@ -240,6 +240,13 @@ export type AddyErrorCode =
   | 'relay-unreachable'
   | 'peer-unreachable'
   | 'internal'
+  // Raised by main, never by addyd. A conditional write lost to another
+  // device's (409): the remedy is the conflict path, not a retry.
+  | 'conflict'
+  // The relay speaks a different protocol version (426). Update one side.
+  | 'version-mismatch'
+  // A request or file larger than the relay accepts (413).
+  | 'too-large'
 
 /**
  * One conflict copy, as the chooser sees it.

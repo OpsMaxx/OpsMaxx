@@ -48,6 +48,7 @@ vi.mock('electron', () => ({
 const { syncOnce, forgetSyncState, SYNC_STATE_FILE } = await import(
   '../src/main/services/addy/sync'
 )
+const { AddyError } = await import('../src/main/services/addy/sidecar')
 
 // ---------------------------------------------------------------------------
 // The fakes
@@ -116,9 +117,9 @@ function fakeRelay(): {
     putObject: async (name, _epoch, counter, body, ifMatch) => {
       const existing = objects.get(name)
       if (ifMatch !== undefined && existing && existing.etag !== ifMatch) {
-        const err = new Error(`${name} was written by another device first`)
-        ;(err as { code?: string }).code = 'internal'
-        throw err
+        // What RelayClient.putObject throws on a 409: its own code, which the
+        // engine asks for instead of matching the message.
+        throw new AddyError('conflict', `${name} was written by another device first`)
       }
       const etag = `etag-${++tag}`
       objects.set(name, { body, etag, counter })
@@ -503,9 +504,7 @@ describe('a relay that serves an old copy back', () => {
     const hostile = {
       ...relay,
       putObject: async () => {
-        throw Object.assign(new Error('servers was written by another device first'), {
-          code: 'internal'
-        })
+        throw new AddyError('conflict', 'servers was written by another device first')
       },
       getObject: async (name: string) => {
         if (name !== 'servers') return relay.getObject(name)
@@ -787,5 +786,31 @@ describe('a collection whose source rewrites what it is given', () => {
 
     writeBlob({ ...readBlob(), servers: [{ id: 's1', name: 'Renamed Here', status: 'offline' }] })
     expect((await syncOnce(deps(relay))).outcomes.servers).toBe('pushed')
+  })
+})
+
+describe('a lost write is recognised by its code, not its wording', () => {
+  // The engine used to regex the message for "written by another device", so
+  // rewording the sentence in relay.ts would have turned every create race
+  // into a failed collection. The refusal now carries `conflict`.
+  it('routes a conflict-coded refusal into the conflict path whatever it says', async () => {
+    writeBlob({ servers: [{ id: 'mine' }] })
+    const relay = fakeRelay()
+    let raced = false
+    const racing = {
+      ...relay,
+      putObject: async (name: string, e: number, c: number, b: Buffer, ifMatch?: string) => {
+        if (name === 'servers' && !raced) {
+          // Another device created it between this pass's GET and its PUT.
+          raced = true
+          seeded(relay, 'servers', [{ id: 'theirs' }])
+          throw new AddyError('conflict', 'the relay answered 409')
+        }
+        return relay.putObject(name, e, c, b, ifMatch)
+      }
+    }
+    const r = await syncOnce(deps(racing as never))
+    expect(raced, 'the race was never staged').toBe(true)
+    expect(r.outcomes.servers).not.toBe('failed')
   })
 })

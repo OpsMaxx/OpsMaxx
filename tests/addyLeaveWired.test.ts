@@ -62,18 +62,35 @@ describe('leaving an account is wired end to end', () => {
     // machines the others still believe are on the account and will seal data
     // to. This device holds its own signing key right up to the moment it
     // forgets it, so it is the one that can remove itself cheaply.
-    expect(fn, 'leaving never removes this device from the roster').toContain('revokeDevice(')
+    //
+    // THROUGH THE SIDECAR'S `leave`, never `revokeDevice`: the sidecar refuses
+    // a device revoking itself (the device list's misclick guard), so a leave
+    // built on revokeDevice removed nothing, every time, in silence.
+    expect(fn, 'leaving never removes this device from the roster').toContain("send<{ seq: number; entry: string }>('leave'")
+    expect(fn, 'leaving goes through revokeDevice, which the sidecar refuses for self').not.toContain(
+      'revokeDevice('
+    )
+    expect(fn, 'the entry is authored and never published').toContain('appendRoster(')
 
     // Before the detach, because it needs the sidecar and the session.
     expect(
-      fn.indexOf('revokeDevice('),
+      fn.indexOf("'leave'"),
       'the removal is attempted after detach(), when the keys it needs are gone'
     ).toBeLessThan(fn.indexOf('await this.detach()'))
+
+    // And the roster is not read back after the entry lands: a chain without
+    // this device is the revocation signal, and refreshRoster answers it with
+    // the full data wipe. Leaving forgets keys, never data.
+    const after = fn.slice(fn.indexOf('appendRoster('), fn.indexOf('await this.detach()'))
+    expect(after, 'the roster is re-read after leaving, which triggers the revocation wipe').not.toContain(
+      'refreshRoster('
+    )
+    expect(fn, 'a sync pass in flight could still read the chain and wipe').toContain('this.leaving = true')
 
     // And it must not stop somebody leaving while the relay is down, which is
     // half of what leaving is for.
     expect(fn, 'a failed removal is not caught, so leaving fails when the relay is down').toMatch(
-      /catch\s*\{/
+      /catch\s*(?:\(\w+\)\s*)?\{/
     )
   })
 

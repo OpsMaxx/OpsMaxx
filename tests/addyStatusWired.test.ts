@@ -485,7 +485,7 @@ describe('a file can be sent to another device', () => {
     // The AEAD proves nobody without the key altered the bytes. The digest
     // proves they are all of them.
     const T = read('src/main/services/addy/transfer.ts')
-    const check = T.indexOf('arrived incomplete')
+    const check = T.indexOf('digest !== notice.sha256')
     const write = T.indexOf('writeFileSync(')
     expect(check).toBeGreaterThan(-1)
     expect(check).toBeLessThan(write)
@@ -693,8 +693,12 @@ describe('the relay is checked, not just written down', () => {
     // so a login overwrote the stored pin with whatever the server presented
     // and a changed key was adopted in silence. A pin that is only ever
     // written is a note, not a pin.
-    expect(SESSION).toMatch(/known\?\.spki && known\.spki !== spki/)
-    expect(SESSION).toMatch(/presenting a different TLS key/)
+    //
+    // The comparison itself now lives in relay.ts's `comparePin`, and its
+    // decisions are exercised in addyRelayContract.test.ts. What this pins is
+    // that the login path still asks it, against the RECORDED pin.
+    expect(SESSION).toMatch(/comparePin\(known\?\.spki, pin,/)
+    expect(SESSION).toMatch(/recordAudit\(/)
   })
 
   it('inbound mail has to come from a device still on the roster', () => {

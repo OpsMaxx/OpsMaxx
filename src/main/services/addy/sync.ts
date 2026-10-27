@@ -411,7 +411,7 @@ async function syncCollection(
       // once means the second is told, rather than silently overwriting the
       // first. Routed into the conflict path so this pass resolves it, instead
       // of failing the collection and healing on the next one.
-      if (!(err instanceof AddyError) || !/written by another device/.test(err.message)) throw err
+      if (!(err instanceof AddyError) || err.code !== 'conflict') throw err
       return conflictWithRemote(deps, name, epoch, source, state, local)
     }
   }
@@ -482,7 +482,7 @@ async function syncCollection(
       // Somebody wrote between the GET above and this PUT. The conditional
       // write is what caught it; the remedy is the same as the both-changed
       // case below, so fall into it rather than losing the edit.
-      if (!(err instanceof AddyError) || !/written by another device/.test(err.message)) throw err
+      if (!(err instanceof AddyError) || err.code !== 'conflict') throw err
       return mergeOrConflict(deps, name, epoch, source, state, body, known)
     }
   }
