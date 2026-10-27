@@ -5,6 +5,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { readOpenSshKnownHosts, lookupInKnownHosts, canonicalHostname } from './opensshKnownHosts'
 import { atomicWriteFileSync } from './atomicWrite'
+import { clearHostKeyMark, hostKeyExpected } from './syncTrust'
 
 // Trust-on-first-use host key checking. Without this, ssh2 accepts any host
 // key presented, so a machine-in-the-middle on the path to a server can
@@ -43,6 +44,8 @@ export function knownHostList(): KnownHost[] {
 }
 
 export function knownHostForget(id: string): void {
+  // A synced-change mark goes too: forgetting is a decision made here.
+  clearHostKeyMark(id)
   const map = read()
   if (!map[id]) return
   delete map[id]
@@ -88,9 +91,28 @@ export function verifyHostKey(
   const fp = fingerprint(key)
   const map = read()
   const known = map[id]
+  /**
+   * WHAT THIS DEVICE ACCEPTED, NOT WHAT THE FILE SAYS.
+   *
+   * The known-hosts file syncs, so an entry in it may have been written by any
+   * device on the account — including one that has also just pointed a server
+   * at its own machine and planted that machine's key here, which turned a
+   * redirect into a password captured with no prompt at all. Or it changes
+   * only the fingerprint for the real host, and every device trusts a
+   * machine-in-the-middle silently.
+   *
+   * So an entry that sync added or changed, and nobody here has accepted, is
+   * held to what this device had before (services/syncTrust.ts marks it as it
+   * lands). A host whose key this device already agreed with keeps working; a
+   * synced entry for a host it never trusted is a first sighting and goes
+   * through the normal prompt — which says another device shared it — and a
+   * background caller refuses, as it would for any unknown host.
+   */
+  const trusted = hostKeyExpected(id, known?.fingerprint)
+  if (trusted === fp) return Promise.resolve(true)
+  const expected = trusted ?? (known && known.fingerprint !== fp ? known.fingerprint : undefined)
 
-  if (known) {
-    if (known.fingerprint === fp) return Promise.resolve(true)
+  if (expected) {
     // A changed key is either a rebuilt server or an interception. Never decide
     // this silently — refuse and make the user act.
     return askInWindow({
@@ -98,7 +120,7 @@ export function verifyHostKey(
         title: 'Host key changed',
         message: `The host key for ${id} does not match the one previously trusted.`,
         detail:
-          `Expected: ${known.fingerprint}\nReceived: ${fp}\n\n` +
+          `Expected: ${expected}\nReceived: ${fp}\n\n` +
           'This happens when a server is rebuilt — but it is also what an interception looks like. ' +
           'The connection has been refused. If you are certain the server changed, forget the saved key in Settings → Security and reconnect.',
         buttons: ['OK'],
@@ -145,6 +167,10 @@ export function verifyHostKey(
   }
 
   const recognised = openssh.trusted
+  // The same key, written into the synced file by another of the user's
+  // devices. Said, because it is true and worth knowing; never trusted on its
+  // own, because a device on the account is exactly who could have written it.
+  const shared = known?.fingerprint === fp
   const prompt: Promise<boolean> = askInWindow({
       type: recognised ? 'question' : 'warning',
       title: recognised ? 'Confirm server' : 'Unknown server',
@@ -158,7 +184,11 @@ export function verifyHostKey(
           ? `Fingerprint: ${fp}\n\nWarning: ~/.ssh/known_hosts has an entry for this server under a different key. ` +
             'That can mean the server was rebuilt, or that this connection is being intercepted. ' +
             'Check the fingerprint before trusting it.'
-          : `Fingerprint: ${fp}\n\nTrust this server and remember it for future connections?`,
+          : shared
+            ? `Fingerprint: ${fp}\n\nAnother of your devices trusted this key and shared it through Sync. ` +
+              'OpsMaxx still asks once on each device, because a shared entry is not something this one can check. ' +
+              'Trust this server on this device?'
+            : `Fingerprint: ${fp}\n\nTrust this server and remember it for future connections?`,
       buttons: ['Trust and connect', 'Cancel'],
       // Pre-selecting Trust is only defensible when we have independent
       // evidence for this exact key; anything else keeps Cancel as the default.
@@ -172,6 +202,7 @@ export function verifyHostKey(
       const current = read()
       current[id] = { id, fingerprint: fp, addedAt: new Date().toISOString() }
       write(current)
+      clearHostKeyMark(id)
       return true
     })
     .finally(() => pending.delete(id))

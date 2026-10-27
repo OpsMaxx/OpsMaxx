@@ -83,6 +83,7 @@ const WRITES_TO_USERDATA = [
   'opsmaxx-spec-files.json',
   'opsmaxx-spec-files.seeded',
   'opsmaxx-startup.json',
+  'opsmaxx-sync-trust.json',
   'opsmaxx-vault-bio.json',
   'opsmaxx-vault.json',
   'opsmaxx-wslocks.json',

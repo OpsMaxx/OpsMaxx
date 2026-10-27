@@ -179,6 +179,14 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
     'device-local: plaintext request and response bodies spilled by the traffic inspector. Swept on every inspector start, and the last thing that should acquire a second copy on another machine',
   specFiles:
     'device-local: a list of local OpenAPI file paths, and its marker, left behind by older versions. Nothing writes or reads them now; "delete all data" removes them, and a path to this machine\'s files means nothing on another',
+  // WHAT THIS DEVICE'S USER HAS CONFIRMED about records that steer a
+  // credential: per record, a hash of its destination and credential pointer as
+  // last confirmed here, plus the host keys this device itself accepted. It is
+  // the answer to "did a person on THIS machine agree to send that credential
+  // there", and syncing it would let the device being guarded against answer
+  // for every other one. See services/syncTrust.ts.
+  syncTrust:
+    'device-local: what this device\'s user confirmed about synced records and host keys; syncing it would let another device confirm on their behalf',
   httpSession:
     'per-device open tabs and unsaved drafts; drafts can hold values the user has not decided to share',
   apiWorkspaceLegacy:
@@ -276,6 +284,27 @@ export interface ConflictCopy {
   /** The copy that won, as it stands on the relay now. */
   winning?: unknown
   problem?: string
+}
+
+/**
+ * A synced record this device will not use without asking, as the Sync &
+ * devices panel and the badges show it.
+ *
+ * Declared here for the reason `ConflictCopy` is: the renderer names it and
+ * must not import a main module. See services/syncTrust.ts for what holds one.
+ */
+export type HeldKind = 'server' | 'database' | 'cicd' | 'vpn'
+
+export interface HeldRecord {
+  kind: HeldKind
+  id: string
+  name: string
+  /** What changed, in words: "address", "saved credential", "workspace". */
+  changed: string[]
+  /** It arrived from another device and has never been confirmed here. */
+  arrived: boolean
+  /** Where it points now, for the person to check. */
+  destination: string
 }
 
 /** What both devices show once a pairing has been confirmed.

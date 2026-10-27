@@ -25,6 +25,7 @@ import { clsx } from '../../lib/format'
 import { distroIcon } from '../../lib/distroIcon'
 import { cloudTargetSubtitle } from '../../../../shared/cloud'
 import { toast } from '../../store/toast'
+import { confirmHeldRecord, heldSentence, useAddyUi } from '../../store/addy'
 import { ContextMenu, MenuEntry } from './ContextMenu'
 import { Modal } from '../common/Modal'
 import type { Folder as FolderRecord, Server, ServerStatus } from '../../types'
@@ -152,6 +153,8 @@ export function ConnectionTree(): React.JSX.Element {
   // The distribution each host reported, from the hourly facts sweep. Absent
   // until that has run, and then the row simply has no icon.
   const fleetFacts = useFleet((s) => s.facts)
+  // Servers another device changed, held here until confirmed. See store/addy.
+  const held = useAddyUi((s) => s.held)
 
   const [query, setQuery] = useState('')
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({})
@@ -438,6 +441,25 @@ export function ConnectionTree(): React.JSX.Element {
         <span className="label">{labels.get(s.id) ?? s.name}</span>
         {s.cloud && <Cloud size={12} className="faint" />}
         {s.route.length > 0 && <Route size={12} className="faint" />}
+        {(() => {
+          const h = held.find((r) => r.kind === 'server' && r.id === s.id)
+          if (!h) return null
+          // Its own button, kept out of the row's click and double-click: those
+          // open and connect, and this is a question to answer first.
+          return (
+            <button
+              className="chip warn"
+              title={`${heldSentence(h)} Click to review.`}
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                void confirmHeldRecord(h)
+              }}
+            >
+              confirm
+            </button>
+          )
+        })()}
         {s.tags.slice(0, ROW_TAGS).map((t, i) => (
           // By position: a tag list saved before normalisation can repeat one.
           <span key={i} className="chip" title={t} aria-hidden="true">

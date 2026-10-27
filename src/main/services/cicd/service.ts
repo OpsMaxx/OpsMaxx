@@ -17,6 +17,7 @@ import { createGithubAdapter } from './github'
 import { createGitlabAdapter, GITLAB_AUTH_HEADER } from './gitlab'
 import { createJenkinsAdapter } from './jenkins'
 import { resolveVaultField } from '../credentialResolver'
+import { fieldsOf, heldFields, SyncHeldError } from '../syncTrust'
 import { httpRequest } from '../httpClient'
 import { getCachedServer, type CachedServer } from '../mcpDataCache'
 import { preparedSshTarget } from '../vpn/transport'
@@ -52,6 +53,18 @@ const REDIRECT_HOPS = 3
  * ends up in, which is `authHeaders` below.
  */
 export function resolveSecret(connection: CicdConnection): string {
+  /**
+   * THE ONE PLACE A CI TOKEN IS READ, so the one place a synced record is
+   * stopped from choosing where it goes. A connection names a vault entry AND
+   * the URL the token is sent to, and both arrive by sync; a device on the
+   * account could otherwise pair any entry with its own URL and have every
+   * other device post that secret to it on the next poll. Held until the
+   * person confirms it on this device — discovery and polling fail closed here,
+   * and the CI panel and Sync & devices show what is waiting. See
+   * services/syncTrust.ts.
+   */
+  const fields = fieldsOf('cicd', connection as never)
+  if (fields && heldFields('cicd', connection.id, fields).length > 0) throw new SyncHeldError(connection.name)
   const secret = resolveVaultField({ vaultEntryId: connection.vaultEntryId, slot: 'password' })
   if (secret === null) {
     throw new Error(

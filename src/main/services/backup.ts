@@ -21,6 +21,7 @@ import {
   MACHINE_ONLY_SECRET_PREFIX
 } from './secrets'
 import { removeHistoryFiles } from './history'
+import { clearAllMarks } from './syncTrust'
 import { clearHistory as clearHttpHistory } from './httpHistory'
 import { CRED_PROXY_AUDIT_FILE } from './credProxy'
 import { RULES_FILE } from '../../shared/rules'
@@ -323,6 +324,11 @@ export async function backupImport(
     if (payload.vault !== null) writeJson('opsmaxx-vault.json', payload.vault)
     if (payload.workspaceLocks !== null) writeJson('opsmaxx-wslocks.json', payload.workspaceLocks)
     if (payload.knownHosts !== null) writeJson('opsmaxx-known-hosts.json', payload.knownHosts)
+    // A bundle the person chose and opened with its passphrase is theirs, so
+    // nothing in it is waiting on a confirmation of a change from another
+    // device: the marks in services/syncTrust.ts were about the estate this
+    // restore just replaced.
+    clearAllMarks()
 
     // The bundle carries connections, credentials and vault. It does not carry
     // history, and the history already on this machine belongs to a different
@@ -448,6 +454,12 @@ export const ALL_DATA_FILES = [
   'opsmaxx-spec-files.json',
   'opsmaxx-spec-files.seeded',
   'opsmaxx-known-hosts.json',
+  // What this device's user confirmed about records that arrived by sync, and
+  // the host keys it accepted itself (services/syncTrust.ts). Hashes and ids,
+  // never a credential — but a record of what this person trusted, and a
+  // revocation wipe that left it would leave the next account on this machine
+  // inheriting the last one's confirmations.
+  'opsmaxx-sync-trust.json',
   // Folder shares: which folders on THIS machine are mounted on which server.
   // Per-machine by design and never in a backup bundle or a sync (a share
   // restored elsewhere would mount that machine's folder), but it is a record

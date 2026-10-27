@@ -23,7 +23,7 @@ import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { errorText } from '../../lib/connectionError'
-import { undeferConflicts, useAddyUi } from '../../store/addy'
+import { confirmHeldRecord, heldSentence, refreshHeld, undeferConflicts, useAddyUi } from '../../store/addy'
 import { syncErrorText } from './collectionNames'
 import type { ArrivedTransfer, ClipboardShortcutState } from '../../../../shared/addy'
 import { AddySetup } from './AddySetup'
@@ -195,6 +195,7 @@ export function AddyPanel(): React.JSX.Element {
       )}
 
       <AddyKpis status={status} supported={supported} relay={relay} />
+      <HeldRecords lastSyncAt={status?.sync?.lastSyncAt ?? null} />
 
       <h3 className="ui-section-title addy-h">Where you are</h3>
       <ol className="addy-journey">
@@ -692,7 +693,8 @@ function AddyKpis({
   const devices = status?.devices
   const enrolled = status?.enrolled === true
   const conflicts = sync?.conflicts ?? 0
-  const attention = conflicts > 0 || sync?.error !== undefined
+  const held = useAddyUi((s) => s.held.length)
+  const attention = conflicts > 0 || held > 0 || sync?.error !== undefined
 
   return (
     <section className="kpi-band" aria-label="Sync summary">
@@ -797,9 +799,9 @@ function AddyKpis({
             </span>
             <span className="kpi-label">Attention</span>
           </div>
-          <div className="kpi-value">{conflicts > 0 ? conflicts : 1}</div>
+          <div className="kpi-value">{conflicts + held > 0 ? conflicts + held : 1}</div>
           <div className="kpi-sub">
-            {conflicts > 0 ? 'waiting for a choice' : 'sync is failing'}
+            {conflicts + held > 0 ? 'waiting for a choice' : 'sync is failing'}
           </div>
         </div>
       )}
@@ -1156,6 +1158,47 @@ function AddyProblems({ status }: { status: AddyStatus | null }): React.JSX.Elem
         </div>
       )}
       {conflicts > 0 && <ConflictsNote conflicts={conflicts} />}
+    </div>
+  )
+}
+
+/**
+ * Synced records this device will not use until somebody here says so.
+ *
+ * Another device on the account can change where a credential goes — a CI
+ * connection's URL, the vault entry it sends, a server's address — and this
+ * device holds any such change until it is confirmed here (see
+ * services/syncTrust.ts in main). Listed at the top rather than with the
+ * problems, because until each is confirmed something the person relies on
+ * has quietly stopped: CI polling, monitoring, a VPN that starts at login.
+ */
+function HeldRecords({ lastSyncAt }: { lastSyncAt: number | null }): React.JSX.Element | null {
+  const held = useAddyUi((s) => s.held)
+  // Asked again whenever a sync lands; the badges elsewhere read the same list.
+  useEffect(() => refreshHeld(), [lastSyncAt])
+  if (held.length === 0) return null
+  return (
+    <div className="addy-note addy-held" role="status">
+      <AlertTriangle size={15} aria-hidden />
+      <div>
+        <p>
+          {held.length === 1 ? 'One synced change is' : `${held.length} synced changes are`} waiting for you to confirm
+          them on this device. Until you do, OpsMaxx does not send their saved credentials anywhere new, and
+          background checks skip them.
+        </p>
+        <ul>
+          {held.map((r) => (
+            <li key={`${r.kind}:${r.id}`}>
+              <span>
+                <strong>{r.name}</strong> — {heldSentence(r)} Now: <code>{r.destination}</code>
+              </span>
+              <button className="btn ghost size-24" onClick={() => void confirmHeldRecord(r)}>
+                Review
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
     </div>
   )
 }
