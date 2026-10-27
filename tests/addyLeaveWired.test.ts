@@ -116,8 +116,11 @@ describe('leaving an account is wired end to end', () => {
     expect(row.length, 'the parser is wrong, not the code').toBeGreaterThan(400)
     const body = row.slice(0, row.indexOf('\nfunction '))
     expect(body, 'no open/confirm state, so Leave acts on the first press').toContain('setOpen')
-    expect(body, 'the confirmation does not say leaving is not removal').toMatch(
-      /does not remove the device/i
+    // Leaving now removes the device from the list when the relay is reachable
+    // (the sidecar's `leave` op); the confirmation has to say what happens when
+    // it is not, because that is the case a person discovers on another machine.
+    expect(body, 'the confirmation does not say an offline leave stays listed').toMatch(
+      /keep listing it until somebody there removes it/i
     )
     expect(body, 'the last-device case is not called out, and it is the unrecoverable one').toMatch(
       /only device/i
