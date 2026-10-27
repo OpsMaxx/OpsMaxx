@@ -545,7 +545,7 @@ func handleVerifyRoster(req Request) (any, error) {
 		// the emoji matched -- the worst place for it, because by then the
 		// user has been told the two devices agree.
 		"head":       hex.EncodeToString(v.Head),
-		"headEntry":  base64.StdEncoding.EncodeToString(v.HeadEntry),
+		"headEntry":  base64.StdEncoding.EncodeToString(lastEntryWire(chain)),
 		"headSeq":    v.HeadSeq,
 		"epoch":      v.Epoch,
 		"entries":    v.Entries,
@@ -921,6 +921,59 @@ func handleRevokeDevice(req Request) (any, error) {
 		)
 	}
 
+	return authorRevoke(acct, in.Epoch, in.HeadSeq, headWire, epoch.Sign, pubSign, pubEnc)
+}
+
+type leaveRequest struct {
+	HeadEntry string `json:"headEntry"`
+	HeadSeq   uint64 `json:"headSeq"`
+	Epoch     uint64 `json:"epoch"`
+}
+
+// handleLeave authors the entry that removes THIS device, and nothing else.
+//
+// LEAVING NEEDS THE ONE THING revokeDevice REFUSES, and the refusal is right
+// for the list it guards: a self-row on a list of devices is a misclick away
+// from wiping the machine it is on. Leave called revokeDevice(self) anyway, so
+// the sidecar refused every time, the parent swallowed it, and the device was
+// never taken off the account while the panel blamed the relay.
+//
+// So leaving is its own method rather than a flag on the other one. It takes
+// no key from the caller at all — both halves come from the device key that
+// is loaded — so it can only ever name this machine, and a caller that wanted
+// to remove another device cannot reach that through here. The guard on
+// revokeDevice stays exactly as it was.
+func handleLeave(req Request) (any, error) {
+	var in leaveRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	headWire, err := base64.StdEncoding.DecodeString(in.HeadEntry)
+	if err != nil || len(headWire) == 0 {
+		return nil, codedf(ErrConfigInvalid, "headEntry is base64 of the chain head")
+	}
+
+	keys.mu.RLock()
+	acct := keys.account
+	epoch, haveEpoch := keys.epochs[in.Epoch]
+	device := keys.device
+	loaded := keys.loaded
+	keys.mu.RUnlock()
+	if !loaded || !haveEpoch || device == nil {
+		return nil, codedf(ErrNotPaired, "no account is loaded for that epoch")
+	}
+	return authorRevoke(
+		acct, in.Epoch, in.HeadSeq, headWire, epoch.Sign,
+		device.Sign.Public().(ed25519.PublicKey), device.Enc.PublicKey().Bytes(),
+	)
+}
+
+// authorRevoke builds and signs one revoke entry chained to headWire. Shared
+// by revokeDevice and leave, which differ only in whom they may name.
+func authorRevoke(
+	acct protocol.AccountID, epochN, headSeq uint64, headWire []byte,
+	signer ed25519.PrivateKey, pubSign, pubEnc []byte,
+) (any, error) {
 	head, _, err := protocol.DecodeEntry(headWire)
 	if err != nil {
 		return nil, wrapCoded(ErrRosterInvalid, err, "reading the chain head")
@@ -936,8 +989,8 @@ func handleRevokeDevice(req Request) (any, error) {
 
 	e := protocol.Entry{
 		AccountID: acct,
-		Epoch:     in.Epoch,
-		Seq:       in.HeadSeq + 1,
+		Epoch:     epochN,
+		Seq:       headSeq + 1,
 		PrevHash:  prev,
 		Op:        protocol.OpRevoke,
 		Signer:    protocol.SignerAK,
@@ -954,7 +1007,7 @@ func handleRevokeDevice(req Request) (any, error) {
 	if err != nil {
 		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
 	}
-	e.Sig = ed25519.Sign(epoch.Sign, body)
+	e.Sig = ed25519.Sign(signer, body)
 	wire, err := e.Wire()
 	if err != nil {
 		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
@@ -1947,4 +2000,28 @@ func handleVerifySignal(req Request) (any, error) {
 		)
 	}
 	return map[string]any{"ok": true, "fingerprint": hex.EncodeToString(signal.DTLSFingerprint)}, nil
+}
+
+// lastEntryWire is the chain's final entry exactly as it arrived, body || sig.
+//
+// Taken from the bytes rather than re-encoded, because a handoff and an escrow
+// carry the head entry VERBATIM and a re-encoding would make them depend on
+// this encoder agreeing byte for byte with whichever one wrote the chain.
+//
+// Here rather than as a field on protocol.Verified, which is where it used to
+// be: that put an edit into the vendored package that upstream does not have,
+// and VENDORED.md's whole rule is that nothing in there is edited in place.
+// Called only after VerifyChain accepted the same bytes, so the decode cannot
+// fail; a nil return would surface as an empty headEntry the next caller
+// refuses, not as a guess.
+func lastEntryWire(chain []byte) []byte {
+	var last []byte
+	for rest := chain; len(rest) > 0; {
+		_, next, err := protocol.DecodeEntry(rest)
+		if err != nil {
+			return nil
+		}
+		last, rest = rest[:len(rest)-len(next)], next
+	}
+	return last
 }

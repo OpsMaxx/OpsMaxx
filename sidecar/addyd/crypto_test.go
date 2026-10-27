@@ -1386,3 +1386,94 @@ func TestASignalIsBoundToItsCertificate(t *testing.T) {
 	}
 	_ = minted
 }
+
+// LEAVE REMOVES THIS DEVICE, AND revokeDevice STILL WILL NOT.
+//
+// Leaving used to call revokeDevice on itself, which the sidecar refuses by
+// design, so no device that left was ever taken off the account. `leave` is
+// the explicit path: it names this machine from the loaded key, and the
+// chain it produces verifies with this device absent. The misclick guard on
+// the device list's Remove button is asserted in the same test, so the fix
+// cannot pass by deleting it.
+func TestLeaveRemovesThisDeviceAndRevokeStillRefusesSelf(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	run := func(h func(Request) (any, error), m string, p map[string]any) (map[string]any, error) {
+		t.Helper()
+		v, err := h(Request{Method: m, Params: params(t, p)})
+		if err != nil {
+			return nil, err
+		}
+		return v.(map[string]any), nil
+	}
+
+	minted, err := run(handleCreateAccount, "createAccount", map[string]any{"label": "laptop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	genesis := minted["genesis"].(string)
+	verify := func(chain string) map[string]any {
+		t.Helper()
+		v, err := run(handleVerifyRoster, "verifyRoster", map[string]any{
+			"chain": chain, "rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"],
+		})
+		if err != nil {
+			t.Fatalf("verifyRoster: %v", err)
+		}
+		return v
+	}
+	one := verify(genesis)
+	if one["selfListed"] != true {
+		t.Fatal("the minting device is not listed in its own genesis; the test is not set up")
+	}
+	me, _ := run(handleWhoami, "whoami", map[string]any{})
+	self := one["devices"].([]map[string]any)[0]
+
+	if _, err := run(handleRevokeDevice, "revokeDevice", map[string]any{
+		"headEntry": one["headEntry"], "headSeq": one["headSeq"], "epoch": uint64(1),
+		"pubSign": me["devicePub"], "pubEnc": self["pubEnc"],
+	}); err == nil || !strings.Contains(err.Error(), "cannot revoke itself") {
+		t.Fatalf("revokeDevice no longer refuses this device: %v", err)
+	}
+
+	left, err := run(handleLeave, "leave", map[string]any{
+		"headEntry": one["headEntry"], "headSeq": one["headSeq"], "epoch": uint64(1),
+	})
+	if err != nil {
+		t.Fatalf("leave was refused: %v", err)
+	}
+	gw, _ := base64.StdEncoding.DecodeString(genesis)
+	lw, _ := base64.StdEncoding.DecodeString(left["entry"].(string))
+	after := verify(base64.StdEncoding.EncodeToString(append(gw, lw...)))
+	if after["selfListed"] != false {
+		t.Fatal("after leave this device is still listed")
+	}
+}
+
+// The client caps a file transfer so the sealed, base64-encoded PUT fits the
+// relay's 8 MiB request limit, and it does that arithmetic with a constant:
+// TRANSFER_SEAL_OVERHEAD in src/main/services/addy/transfer.ts. This is the
+// check that the constant is what sealing a transfer actually adds. If the
+// object layout changes, this fails before a user's file starts failing with
+// 413 at 99% of the limit.
+func TestTransferSealOverhead(t *testing.T) {
+	_, epoch := loadTestAccount(t)
+	for _, n := range []int{0, 1, 4096} {
+		out, err := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{
+			"collection": "transfer:00112233445566778899aabb", "epoch": epoch, "schema": 1,
+			"writerVersion": "transfer", "counter": 1,
+			"payload": base64.StdEncoding.EncodeToString(make([]byte, n)),
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sealed, err := base64.StdEncoding.DecodeString(out.(map[string]any)["sealed"].(string))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := len(sealed) - n; got != 98 {
+			t.Fatalf("sealing %d bytes added %d; transfer.ts assumes 98", n, got)
+		}
+	}
+}

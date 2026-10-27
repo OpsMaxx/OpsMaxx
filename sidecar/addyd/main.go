@@ -197,6 +197,7 @@ var cryptoMethods = map[string]func(Request) (any, error){
 	"verifyRoster":    handleVerifyRoster,
 	"addDevice":       handleAddDevice,
 	"revokeDevice":    handleRevokeDevice,
+	"leave":           handleLeave,
 	"recoverIdentity": handleRecoverIdentity,
 	"recoverOpen":     handleRecoverOpen,
 	"recoverForget":   handleRecoverForget,
