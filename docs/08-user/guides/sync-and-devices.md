@@ -35,18 +35,18 @@ You need the relay's address and one **invite** from whoever runs the relay. If 
 1. Open **Sync & devices**. Under **Which of these is this machine?**, choose **This is my first device**.
 2. Fill in **Relay address**, **Invite**, and **What to call this device**. The name starts as this computer's hostname; change it if you call the machine something else. It is shown in the device list on every device, and it cannot be changed later.
 3. Press **Create an account on this relay**.
-4. **Write down the twelve-word recovery phrase.** It is shown once, and nothing on this computer keeps a copy. Press **I have written them down**, then type back the three words it asks for, from what you wrote, not from the screen. **Done — I have them** stays disabled until they match. If you click away to another part of the app before finishing, the phrase is still there when you come back, until you quit OpsMaxx.
+4. **Write down the twelve-word recovery phrase.** It is shown once, and OpsMaxx keeps no copy. **Copy** puts it on this computer's clipboard, where anything that reads the clipboard can see it, including the clipboard shortcut, which would send it to your other devices; OpsMaxx takes it off the clipboard after a minute if nothing else has been copied since. Press **I have written them down**, then type back the three words it asks for, from what you wrote, not from the screen. **Done — I have them** stays disabled until they match. If you click away to another part of the app before finishing, the phrase is still there when you come back, until you quit OpsMaxx.
 
 ### 2. Pair another device
 
 Both machines have to be open at the same time.
 
-1. **On the machine you already use**, open **Sync & devices**, find **Add another device**, and press **Show a code on this device**. It shows a pairing code, a pairing link, and how long the code has left. A code stops working after three minutes, or as soon as you leave that screen. **Cancel** stops it.
+1. **On the machine you already use**, open **Sync & devices**, find **Add another device**, and press **Show a code on this device**. It shows a pairing code, a pairing link, and how long the code has left. A code stops working after three minutes, or as soon as you leave Sync & devices for another view. **Cancel** stops it.
 2. **On the new machine**, either:
    - open the pairing link there. OpsMaxx opens **Sync & devices** with the relay address and the pairing code already filled in, or
    - open **Sync & devices**, choose **I already use OpsMaxx on another machine**, type the relay address (shown on the first machine under *Add another device*, with a copy button), press **Type a code from another device**, and paste the pairing code.
 3. Press **Join** on the new machine. It shows how long it will wait, and a **Cancel** button.
-4. **Compare the seven emoji on both screens.** The same emoji are also written out as words, so you can compare them over the phone. If they match, press **They match** on both. If they do not, press **They do not match**: something is between the two devices, so try again on a network you trust.
+4. **Compare the seven emoji on both screens.** The same emoji are also written out as words, so you can compare them over the phone. If they match, press **They match** on both. The new machine then waits, with a countdown and a **Cancel** button, until the other one has pressed it too. If they do not, press **They do not match**: something is between the two devices, so try again on a network you trust.
 5. On the machine that showed the code, give the new machine a name under **What is the other machine called?** before pressing **They match**. That name is permanent. Left empty, the device is listed by the start of its key.
 
 A link never joins by itself. It only fills in the form; you still press **Join** and compare the emoji.
@@ -72,7 +72,7 @@ The vault is encrypted, so its two versions cannot be shown side by side. Choose
 
 ### 5. Recovery phrase
 
-If every device on the account is gone, choose **My other devices are gone** on a new machine, enter the relay address, the twelve words (case and extra spaces do not matter) and a name for this device, and press **Recover this account**. No invite is needed.
+If every device on the account is gone, choose **My other devices are gone** on a new machine, enter the relay address, the twelve words (case and extra spaces do not matter) and a name for this device, and press **Recover this account**. No invite is needed. The screen that follows stays until you press **Done**.
 
 When it finishes it tells you how many devices are on the account. Read that list: anyone who has seen your phrase could have added a device the same way. Remove any you do not recognise.
 

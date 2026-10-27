@@ -321,8 +321,8 @@ documents:
     authority: historical
     visibility: internal
     title: Vendored from the addy server
-    hash: 0e869e60f8667ade
-    lines: 64
+    hash: c79cd008d8a60935
+    lines: 79
   sidecar-addyd-protocol-wordlists-readme:
     path: sidecar/addyd/protocol/wordlists/README.md
     type: unknown
@@ -345,8 +345,8 @@ documents:
     authority: audience
     visibility: public
     title: "Sync & devices"
-    hash: 22825c45429d893e
-    lines: 106
+    hash: 9e297ee7868289b2
+    lines: 108
   tests-probe-readme:
     path: tests/probe/README.md
     type: unknown
