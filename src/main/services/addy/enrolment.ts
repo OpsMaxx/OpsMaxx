@@ -93,6 +93,7 @@ export function saveEnrolment(e: Omit<AddyEnrolment, 'at'> & { at?: string }): v
   // recoverable — and a write that throws there would put the failure back
   // exactly where it was, with nothing on disk and no way to resume.
   mkdirSync(dirname(FILE()), { recursive: true })
+  const same = existing !== null && existing.accountId === e.accountId
   atomicWriteFileSync(
     FILE(),
     JSON.stringify(
@@ -101,8 +102,15 @@ export function saveEnrolment(e: Omit<AddyEnrolment, 'at'> & { at?: string }): v
         // Carried unless the caller names it, like `at` below. Most callers
         // rebuild the record field by field and would otherwise drop it — and
         // a dropped baseline silently swallows the next new-device alert.
-        seenDevices:
-          e.seenDevices ?? (existing?.accountId === e.accountId ? existing.seenDevices : undefined),
+        seenDevices: e.seenDevices ?? (same ? existing?.seenDevices : undefined),
+        // AND THE PIN, for the same reason and with worse consequences. Following
+        // another device's rotation rebuilt this record without it, so the
+        // anchor the verifier refuses a rollback against was simply gone — and
+        // the relay could rewind the roster, re-adding a revoked device to every
+        // peer list, after any rotation at all.
+        ...(e.pinSeq === undefined && same && existing?.pinSeq !== undefined
+          ? { pinSeq: existing.pinSeq, pinHead: existing.pinHead }
+          : {}),
         // The date this machine FIRST joined, not the date of the last login.
         // Re-stamping on every resume would make a year-old enrolment read as
         // this morning's, which is the same mistake the machine-grant record

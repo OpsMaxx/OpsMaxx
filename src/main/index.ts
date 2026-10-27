@@ -5016,9 +5016,18 @@ ipcMain.handle('addy:status', () => addySession.status())
 // Moving the account to a new epoch key. `revocation` needs the recovery
 // phrase, because the compromised key must not authorise the escape from
 // itself — see services/addy/session.ts for the order the writes happen in.
-ipcMain.handle('addy:rotate', (_e, kind: 'hygiene' | 'revocation', mnemonic?: string) =>
-  addySession.rotateEpoch(kind, mnemonic)
-)
+//
+// REVOCATION ONLY. The panel never sends anything else, and a `hygiene`
+// rotation arriving here writes no escrow (only the root key can, and a
+// routine rotation does not take the phrase) — so the recovery phrase would go
+// on opening a key the account had moved off. Refused at the boundary rather
+// than reachable from a renderer that asks for it.
+ipcMain.handle('addy:rotate', (_e, kind: unknown, mnemonic?: string) => {
+  if (kind !== 'revocation') {
+    throw new Error('Only a re-key with the recovery phrase can be started from here.')
+  }
+  return addySession.rotateEpoch('revocation', mnemonic)
+})
 
 // Getting back in with nothing but the twelve words. The path nobody takes
 // until every device is gone, which is why it exists before anyone needs it.
