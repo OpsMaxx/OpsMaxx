@@ -573,7 +573,7 @@ describe('a removed device wipes itself', () => {
     // `selfListed` is a cryptographic result, not a flag: the verifier applies
     // revocations as it walks the chain, so there is no field a forged entry
     // could set to claim otherwise.
-    expect(SESSION).toMatch(/if \(!verified\.selfListed && this\.account\)/)
+    expect(SESSION).toMatch(/if \(!verified\.selfListed && verified\.selfRevoked === true && this\.account\)/)
   })
 
   it('asks the question on every launch', () => {

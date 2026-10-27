@@ -452,3 +452,89 @@ describe('the session says what changed', () => {
     expect(wired).toBe(built - 1)
   })
 })
+
+describe('a revoked device', () => {
+  it('a live session the relay ended is retried through exactly one login', async () => {
+    let calls = 0
+    vi.stubGlobal('fetch', async () => {
+      calls++
+      return json(401, { error: 'this device has been removed from its sync group' })
+    })
+    // The login is what answers this: 403 with the chain, which the session
+    // verifies. Here it fails the way that path ends, and nothing loops.
+    const reauth = vi.fn(async () => {
+      throw new AddyError('not-paired', 'removed, and the verified chain confirms it')
+    })
+    const relay = new RelayClient({ baseURL: 'https://r.example', token: 't' }, signer, reauth)
+    const err = (await relay.roster().catch((e: unknown) => e)) as InstanceType<typeof AddyError>
+    expect(reauth).toHaveBeenCalledTimes(1)
+    expect(calls).toBe(1)
+    expect(err.message).toMatch(/verified chain confirms/)
+  })
+
+  it('a login refused with the chain carries the chain, for the session to verify', async () => {
+    const chain = Buffer.from('chain bytes').toString('base64')
+    vi.stubGlobal('fetch', async (url: string) =>
+      new URL(url).pathname === '/v1/auth/challenge'
+        ? json(200, { nonce: '00'.repeat(32) })
+        : json(403, { error: 'this device was removed from the account', roster: { chain } })
+    )
+    const sidecar = {
+      send: async (m: string) =>
+        m === 'whoami'
+          ? { accountId: 'ab'.repeat(16), devicePub: 'aa'.repeat(32) }
+          : { account: '', device: '', deviceNonce: '', ts: 0, signature: '' }
+    } as never
+    const relay = new RelayClient({ baseURL: 'https://r.example', token: '' }, sidecar)
+    vi.spyOn(relay, 'serverPin').mockResolvedValue({ spki: 'aa'.repeat(32), webpki: true })
+    const err = await relay.login().catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(relayMod.DeviceRemovedError)
+    expect((err as InstanceType<typeof relayMod.DeviceRemovedError>).chain).toBe(chain)
+    expect((err as InstanceType<typeof AddyError>).code).toBe('not-paired')
+  })
+
+  it('a key that is merely not on the roster is not re-logged in for ever', async () => {
+    vi.stubGlobal('fetch', async () =>
+      json(401, { error: "this device is not on its sync group's roster" })
+    )
+    const reauth = vi.fn(async () => undefined)
+    const relay = new RelayClient({ baseURL: 'https://r.example', token: 't' }, signer, reauth)
+    const err = (await relay.roster().catch((e: unknown) => e)) as InstanceType<typeof AddyError>
+    // Logging in again hands back the same limited session, so it is not tried.
+    expect(reauth).not.toHaveBeenCalled()
+    expect(err.code).toBe('not-paired')
+  })
+})
+
+describe('pairing writes the roster before it hands the key over', () => {
+  const session = readFileSync(
+    join(__dirname, '..', 'src', 'main', 'services', 'addy', 'session.ts'),
+    'utf8'
+  )
+  const body = (sig: string): string => {
+    const from = session.slice(session.indexOf(sig))
+    return from.slice(0, from.indexOf('\n  }\n'))
+  }
+
+  it('the initiator appends the joiner before publishing the handoff', () => {
+    // The joiner logs in and reads the chain the moment the handoff arrives.
+    // Handoff first meant it could find itself missing.
+    const fn = body('async completePairing(')
+    expect(fn.length, 'the parser is wrong, not the code').toBeGreaterThan(800)
+    const append = fn.indexOf('relay.appendRoster(')
+    const publish = fn.indexOf('await publish(')
+    expect(append).toBeGreaterThan(-1)
+    expect(publish).toBeGreaterThan(-1)
+    expect(append, 'the handoff is published before the roster lists the joiner').toBeLessThan(publish)
+  })
+
+  it('the joiner logs in only after the handoff, and pins nothing from it', () => {
+    // So with the new order, its first login and roster read already see its
+    // own add. It does not take the handoff's head as a pin either: that head
+    // is the one BEFORE its add, and a chain that extends it is exactly what
+    // it should accept.
+    const fn = body('async finishJoin(')
+    expect(fn.indexOf('await receive<')).toBeLessThan(fn.indexOf('await this.loginAndRecord()'))
+    expect(fn).not.toMatch(/pinSeq|pinHead/)
+  })
+})

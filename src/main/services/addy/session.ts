@@ -9,7 +9,7 @@ import {
   receive,
   type PairingConfirmation
 } from './pairing'
-import { RelayClient, comparePin, relayDetail, relayFetch } from './relay'
+import { DeviceRemovedError, RelayClient, comparePin, relayDetail, relayFetch } from './relay'
 import { recordAudit } from '../auditLog'
 import {
   discardConflict,
@@ -659,9 +659,37 @@ class AddySession {
      * is the ONLY thing that identifies the relay.
      */
     const repinned = { from: '' }
-    const { token, spki } = await relay.login((pin) => {
-      if (comparePin(known?.spki, pin, account.baseURL)) repinned.from = known?.spki ?? ''
-    })
+    let signedIn: { token: string; spki: string }
+    try {
+      signedIn = await relay.login((pin) => {
+        if (comparePin(known?.spki, pin, account.baseURL)) repinned.from = known?.spki ?? ''
+      })
+    } catch (err) {
+      if (!(err instanceof DeviceRemovedError)) throw err
+      /**
+       * THE RELAY SAYS THIS DEVICE WAS REMOVED, AND SENT THE CHAIN.
+       *
+       * Verified through the same path as any roster read — the sidecar,
+       * under the root and epoch keys this device holds, against the pin it
+       * recorded — and the wipe starts only if that chain really revokes this
+       * key. Anything less is a hard refusal and nothing more: a relay that
+       * could wipe a device by saying so is a relay that can wipe every
+       * device it serves.
+       */
+      const roster = await this.refreshRoster(err.chain).catch((verr: unknown) => {
+        throw new AddyError(
+          'not-paired',
+          `${err.message} The device list it sent did not verify (${verr instanceof Error ? verr.message : String(verr)}), so nothing on this machine was changed.`
+        )
+      })
+      throw new AddyError(
+        'not-paired',
+        roster.stillListed
+          ? `${err.message} The device list it sent still includes this device, so nothing on this machine was changed.`
+          : `${err.message} The verified device list confirms it.`
+      )
+    }
+    const { token, spki } = signedIn
     if (repinned.from !== '') {
       recordAudit({
         agentName: 'OpsMaxx',
@@ -864,18 +892,21 @@ class AddySession {
    *
    * Three things have to happen, in this order, and the order is the point:
    *
-   *  1. Seal the account key to the peer, BOUND TO THE SPAKE2 SECRET. That
-   *     binding is what stops the relay — which carries every frame —
-   *     substituting a handoff of its own; it never learns the secret.
-   *  2. Write the roster entry that says the device is on the account, signed
+   *  1. Write the roster entry that says the device is on the account, signed
    *     with the epoch key and chained to the head THIS device verified.
+   *  2. Seal the account key to the peer, BOUND TO THE SPAKE2 SECRET, and
+   *     publish it. That binding is what stops the relay — which carries
+   *     every frame — substituting a handoff of its own; it never learns the
+   *     secret.
    *  3. Only then forget the pairing.
    *
-   * If the roster append fails the handoff has already gone, which is the
-   * safe direction: the joiner holds a key to an account that does not list
-   * it, so it can read nothing and is refused everywhere until the entry
-   * lands. The reverse — listed but keyless — would be a device the account
-   * vouches for that cannot prove anything.
+   * The roster comes first because the joiner acts the moment the handoff
+   * arrives: it logs in and reads the chain. Handoff first meant it could
+   * read a chain that did not list it yet — which the relay now answers with
+   * a session that reaches nothing but the roster, and which this client used
+   * to answer by wiping the machine. If the handoff then fails, the account
+   * lists a device that holds no key: it can read nothing, and removing it
+   * from the device list is the remedy.
    */
   async completePairing(
     confirmation: PairingConfirmation,
@@ -926,6 +957,29 @@ class AddySession {
       throw new AddyError('config-invalid', 'this device cannot read its own account key')
     }
 
+    // THE ROSTER ENTRY FIRST, THEN THE HANDOFF. It was the other way round,
+    // and the joiner logs in and reads the chain the moment the handoff
+    // arrives — so it could find itself missing, and a device missing from a
+    // verified chain was wiped. The relay now also gives an unlisted key a
+    // session that reaches nothing but the roster. Listed-but-keyless for a
+    // moment is the harmless order: the joiner cannot read anything until the
+    // handoff lands, and the handoff is bound to the pairing secret either way.
+    const entry = await addyd.send<{ seq: number; entry: string }>('addDevice', {
+      headEntry: before.headEntry ?? '',
+      headSeq: before.headSeq ?? 0,
+      epoch: account.epoch,
+      pubSign: peerPubSign,
+      pubEnc: peerPubEnc,
+      // The pseudonym the joining device chose for itself, sealed into the
+      // entry so only devices holding this epoch's profile key can read it.
+      // THE FALLBACK IS UNIQUE, not a constant. If nobody types a name the
+      // device is still distinguishable from its siblings by the first bytes
+      // of its own signing key — which is what the panel shows beside it and
+      // what the revoke confirmation names. A shared name is not a name.
+      label: label?.trim() || confirmation.self?.label || `device ${peerPubSign.slice(0, 8)}`
+    })
+    await relay.appendRoster(entry.seq, entry.entry)
+
     // The counter is chosen HERE and travels beside the blob, because the
     // joiner has to pass it back to open one: it is bound into the sealed
     // handoff, so a relay that alters it in the frame produces a refusal
@@ -962,22 +1016,6 @@ class AddySession {
        */
       epoch1SignPub: account.epoch1SignPub ?? ''
     })
-
-    const entry = await addyd.send<{ seq: number; entry: string }>('addDevice', {
-      headEntry: before.headEntry ?? '',
-      headSeq: before.headSeq ?? 0,
-      epoch: account.epoch,
-      pubSign: peerPubSign,
-      pubEnc: peerPubEnc,
-      // The pseudonym the joining device chose for itself, sealed into the
-      // entry so only devices holding this epoch's profile key can read it.
-      // THE FALLBACK IS UNIQUE, not a constant. If nobody types a name the
-      // device is still distinguishable from its siblings by the first bytes
-      // of its own signing key — which is what the panel shows beside it and
-      // what the revoke confirmation names. A shared name is not a name.
-      label: label?.trim() || confirmation.self?.label || `device ${peerPubSign.slice(0, 8)}`
-    })
-    await relay.appendRoster(entry.seq, entry.entry)
 
     await this.cancelPairing()
     const after = await this.refreshRoster()
@@ -1142,7 +1180,11 @@ class AddySession {
    * yourself is not continuity, and the echo suppression downstream should
    * never have to think about it.
    */
-  async refreshRoster(): Promise<AddyRoster> {
+  async refreshRoster(
+    /** A chain the relay handed over some other way — the one a refused
+     *  login carries. Verified exactly as a fetched one is; never trusted more. */
+    supplied?: string
+  ): Promise<AddyRoster> {
     const relay = this.relay
     const addyd = this.addyd
     const account = this.account
@@ -1155,7 +1197,7 @@ class AddySession {
         ? { seq: saved.pinSeq, head: saved.pinHead }
         : null
 
-    const bytes = await relay.roster()
+    const bytes = supplied ?? (await relay.roster())
     // `selfListed`, not `stillListed`: the sidecar's name for it. Getting this
     // wrong reads as `undefined`, which is falsy — and a falsy answer here is
     // "this device has been revoked", which is the one conclusion that must
@@ -1169,6 +1211,8 @@ class AddySession {
         label?: string
       }[]
       selfListed: boolean
+      /** Absent AND revoked by a verified entry. See the condition below. */
+      selfRevoked?: boolean
       head: string
       headEntry: string
       headSeq: number
@@ -1191,8 +1235,13 @@ class AddySession {
     // device has not; everything it reads from now on is sealed under a key it
     // does not hold unless it follows. Walked one step at a time, because each
     // handoff is bound to the key of the epoch before it.
+    //
+    // Not for a SUPPLIED chain. That one arrives with a refused login, from
+    // inside the re-login a request is waiting on; following a rotation makes
+    // requests of its own, and each would wait on that same re-login for ever.
+    // Whether this device was revoked does not depend on which epoch it holds.
     let chainEpoch = verified.epoch
-    while (chainEpoch > (this.account?.epoch ?? 0)) {
+    while (supplied === undefined && chainEpoch > (this.account?.epoch ?? 0)) {
       if (!(await this.followRotation(chainEpoch).catch(() => false))) break
     }
     chainEpoch = verified.epoch
@@ -1219,7 +1268,13 @@ class AddySession {
      * The tombstone is written before the first file goes, so a crash midway
      * still leaves the device blocked on its next launch.
      */
-    if (!verified.selfListed && this.account) {
+    //
+    // ON A REVOKE, NOT ON ABSENCE. A device whose add has not landed yet is
+    // absent from a valid chain too — a joiner that read the roster before its
+    // pairer appended it did exactly that, and wiped itself. `selfRevoked` is
+    // the sidecar finding a revoke entry naming this key in the chain it just
+    // verified, which is the only thing that removes a device.
+    if (!verified.selfListed && verified.selfRevoked === true && this.account) {
       this.beginRevocationWipe(me.devicePub)
     }
 

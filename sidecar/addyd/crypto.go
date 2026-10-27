@@ -550,7 +550,37 @@ func handleVerifyRoster(req Request) (any, error) {
 		"epoch":      v.Epoch,
 		"entries":    v.Entries,
 		"selfListed": stillListed,
+		// ABSENT IS NOT THE SAME AS REMOVED, and only the second is a reason
+		// to wipe. A device whose add has not landed yet — a joiner that read
+		// the chain before its pairer appended it — is absent from a perfectly
+		// valid chain, and wiping it destroyed a machine that had done nothing
+		// but be quick. Revoked means the verified chain carries a revoke
+		// entry naming this key after its last add; nothing else removes a
+		// device, so that is the only proof there is.
+		"selfRevoked": !stillListed && self != nil && revokes(chain, self.Sign.Public().(ed25519.PublicKey)),
 	}, nil
+}
+
+// revokes reports whether a VERIFIED chain's last word on this key is a
+// revoke. Called only after VerifyChain accepted the same bytes.
+func revokes(chain []byte, key ed25519.PublicKey) bool {
+	revoked := false
+	for rest := chain; len(rest) > 0; {
+		e, next, err := protocol.DecodeEntry(rest)
+		if err != nil {
+			return false
+		}
+		if key.Equal(ed25519.PublicKey(e.PubSign)) {
+			switch e.Op {
+			case protocol.OpRevoke:
+				revoked = true
+			case protocol.OpAdd:
+				revoked = false
+			}
+		}
+		rest = next
+	}
+	return revoked
 }
 
 // --- fingerprint ---

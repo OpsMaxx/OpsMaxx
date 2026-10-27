@@ -36,6 +36,7 @@ vi.mock('../src/main/services/backup', async () => {
 })
 
 const { addySession } = await import('../src/main/services/addy/session')
+const { DeviceRemovedError } = await import('../src/main/services/addy/relay')
 const { revocationState, clearRevocation, REVOCATION_FILE } = await import(
   '../src/main/services/addy/revoke'
 )
@@ -44,16 +45,25 @@ const ME = 'aa'.repeat(32)
 const OTHER = 'bb'.repeat(32)
 
 /** A sidecar whose `verifyRoster` answers whatever this test wants. */
-function sidecarSaying(selfListed: boolean, devices: string[]): unknown {
+let verifiedChains: string[] = []
+function sidecarSaying(
+  selfListed: boolean,
+  devices: string[],
+  selfRevoked = !selfListed,
+  verifyFails = false
+): unknown {
   return {
     alive: () => true,
     close: async () => undefined,
-    send: async (method: string) => {
+    send: async (method: string, params?: { chain?: string }) => {
       if (method === 'whoami') return { devicePub: ME, deviceEnc: 'cc'.repeat(32) }
       if (method === 'verifyRoster') {
+        verifiedChains.push(params?.chain ?? '')
+        if (verifyFails) throw new Error('roster: an entry\'s signature does not verify')
         return {
           devices: devices.map((d) => ({ pubSign: d, pubEnc: 'dd', epoch: 1, mnemonicAdded: false })),
           selfListed,
+          selfRevoked,
           head: 'aa',
           headEntry: 'YQ==',
           headSeq: 1,
@@ -67,15 +77,21 @@ function sidecarSaying(selfListed: boolean, devices: string[]): unknown {
 
 /** Reach into the session, because `refreshRoster` is the unit under test and
  *  standing up a relay and a sidecar to reach it would test neither. */
-function attachFake(selfListed: boolean, devices: string[]): void {
+function attachFake(
+  selfListed: boolean,
+  devices: string[],
+  selfRevoked = !selfListed,
+  verifyFails = false
+): void {
   const s = addySession as unknown as Record<string, unknown>
-  s.addyd = sidecarSaying(selfListed, devices)
+  s.addyd = sidecarSaying(selfListed, devices, selfRevoked, verifyFails)
   s.relay = { roster: async () => 'Y2hhaW4=', token: 't' }
   s.account = { baseURL: 'https://r.example', token: 't', accountId: 'acct1', epoch: 1 }
   s.wiping = false
 }
 
 beforeEach(() => {
+  verifiedChains = []
   wiped.mockClear()
   rmSync(join(userData, REVOCATION_FILE), { force: true })
   clearRevocation()
@@ -119,5 +135,63 @@ describe('when the chain no longer lists it', () => {
     await Promise.all([addySession.refreshRoster(), addySession.refreshRoster()])
     await new Promise((r) => setTimeout(r, 30))
     expect(wiped).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('when the chain does not list it but never revoked it', () => {
+  // A joiner that read the roster before its pairer's append landed. Valid
+  // chain, device absent, no revoke anywhere: that is a device not added YET,
+  // and wiping it destroyed a machine for being quick.
+  it('nothing is deleted', async () => {
+    attachFake(false, [OTHER], false)
+    const roster = await addySession.refreshRoster()
+    expect(roster.stillListed).toBe(false)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(wiped).not.toHaveBeenCalled()
+    expect(revocationState()).toBeNull()
+  })
+})
+
+describe('a login the relay refuses because this device was removed', () => {
+  /** The session's own login path, with a relay that answers 403 + chain. */
+  async function signInAgainst(): Promise<unknown> {
+    const s = addySession as unknown as Record<string, unknown>
+    s.relay = {
+      token: '',
+      login: async () => {
+        throw new DeviceRemovedError('https://r.example says this device was removed from the account.', 'UkVMQVlDSEFJTg==')
+      }
+    }
+    return (s.signIn as () => Promise<void>).call(addySession).then(
+      () => null,
+      (e: unknown) => e
+    )
+  }
+
+  it('verifies the chain it sent, and wipes only because that chain revokes this device', async () => {
+    attachFake(false, [OTHER], true)
+    const err = (await signInAgainst()) as { code?: string }
+    expect(err?.code).toBe('not-paired')
+    expect(verifiedChains, 'the relay\'s chain was never verified').toEqual(['UkVMQVlDSEFJTg=='])
+    await new Promise((r) => setTimeout(r, 30))
+    expect(wiped).toHaveBeenCalled()
+  })
+
+  it('does not wipe on the relay\'s word when the chain still lists this device', async () => {
+    attachFake(true, [ME, OTHER])
+    const err = (await signInAgainst()) as { code?: string; message?: string }
+    expect(err?.code).toBe('not-paired')
+    expect(err?.message).toMatch(/still includes this device/)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(wiped).not.toHaveBeenCalled()
+  })
+
+  it('does not wipe when the chain does not verify', async () => {
+    attachFake(false, [OTHER], true, true)
+    const err = (await signInAgainst()) as { code?: string; message?: string }
+    expect(err?.code).toBe('not-paired')
+    expect(err?.message).toMatch(/did not verify/)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(wiped).not.toHaveBeenCalled()
   })
 })
