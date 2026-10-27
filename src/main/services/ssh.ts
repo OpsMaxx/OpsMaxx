@@ -408,7 +408,7 @@ async function connectClient(
     const name = getCachedServer(serverId)?.name ?? hop.host
     const allowed =
       allowPrompt &&
-      (await askToUse('server', serverId, name, serverFieldsNow(hop.host), `${hop.username}@${hop.host}:${hop.port || 22}`))
+      (await askToUse('server', serverId, name, serverFieldsNow(serverId, hop.host), `${hop.username}@${hop.host}:${hop.port || 22}`))
     if (!allowed) {
       discard(sock)
       throw new SyncHeldError(name)

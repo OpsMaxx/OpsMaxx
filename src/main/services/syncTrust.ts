@@ -185,10 +185,29 @@ export function vpnConnectionKey(spec: unknown): string {
  */
 export function fieldsOf(kind: HeldKind, rec: Rec): Record<string, string> | null {
   switch (kind) {
-    case 'server':
-      return { host: norm(rec.host) }
+    case 'server': {
+      // The host decides who receives the password, and so do these: a cloud
+      // target names the real machine behind an IAP or SSM forward, and an
+      // RDP KDC proxy or auth setting decides where a ticket derived from the
+      // password is sent. A synced change to any of them is held like a
+      // changed host.
+      const rdp = (rec.rdp && typeof rec.rdp === 'object' ? rec.rdp : {}) as Rec
+      return {
+        host: norm(rec.host),
+        cloud: stable(rec.cloud),
+        rdp: `${str(rdp.kdcProxyUrl)}|${rdp.nla === false ? 0 : 1}|${str(rdp.domain)}`
+      }
+    }
     case 'database':
-      return { host: norm(rec.host), via: str(rec.sshServerId) }
+      // TLS off and a different VPN route both expose the password without
+      // changing the host; a workspace move lifts AI restrictions on it.
+      return {
+        host: norm(rec.host),
+        via: str(rec.sshServerId),
+        tls: rec.ssl === true ? '1' : '0',
+        vpn: str(rec.vpnProfileId),
+        ws: str(rec.workspaceId)
+      }
     case 'cicd':
       return {
         url: `${str(rec.provider)}|${norm(rec.baseUrl).replace(/\/+$/, '')}`,
@@ -197,7 +216,9 @@ export function fieldsOf(kind: HeldKind, rec: Rec): Record<string, string> | nul
         // A synced `insecureTls` or a planted CA lets whoever sits on the path
         // read the token as easily as a changed URL would.
         tls: `${rec.insecureTls === true ? 1 : 0}|${str(rec.caPem)}`,
-        route: stable(rec.route)
+        route: stable(rec.route),
+        // A move into a workspace with fewer AI restrictions.
+        ws: str(rec.workspaceId)
       }
     case 'vpn': {
       if (!rec.spec || typeof rec.spec !== 'object') return null
@@ -206,7 +227,7 @@ export function fieldsOf(kind: HeldKind, rec: Rec): Record<string, string> | nul
       // test for "starting it uses a credential". Tailscale has none: it signs
       // in through a browser and holds nothing of ours.
       if (!text.includes('"vaultEntryId"')) return null
-      return { connection: text }
+      return { connection: text, ws: str(rec.workspaceId) }
     }
   }
 }
@@ -249,6 +270,21 @@ function markRecord(t: TrustFile, kind: HeldKind, rec: Rec, local: Rec | undefin
  * write never happens without them.
  */
 export function markArrivals(kind: HeldKind, local: unknown[], incoming: unknown[]): void {
+  // REFUSED, not filtered, when any record has an id that is not a non-empty
+  // string, or two records share one. A one-element array as an id was
+  // skipped here and still found its credential by id (`getSecret(["x"])`
+  // reads key "x"), so a database got no mark and its password went wherever
+  // the record pointed; two copies of one id let the second erase the first's
+  // mark. Nothing this app writes has either, so the whole write is refused.
+  const seen = new Set<string>()
+  for (const r of incoming) {
+    if (!r || typeof r !== 'object') continue
+    const id = (r as Rec).id
+    if (typeof id !== 'string' || id === '' || seen.has(id)) {
+      throw new Error(`a synced ${COLLECTION[kind]} record has a missing, malformed or repeated id; the copy was refused`)
+    }
+    seen.add(id)
+  }
   const asData = (list: unknown[]): Rec => ({ [COLLECTION[kind]]: list })
   const mine = new Map(recordsOf(asData(local), kind).map((r) => [r.id as string, r]))
   const theirs = recordsOf(asData(incoming), kind)
@@ -273,12 +309,27 @@ export function markHostKeyArrivals(local: unknown, incoming: unknown): void {
       const mine = fpOf(local, id)
       if (!fp || fp === mine) continue
       // An entry already marked keeps what THIS device had before the first
-      // synced change, not the synced value a second change replaced.
-      const before = t.hostKeys[id] && t.hostKeys[id].fp === mine ? t.hostKeys[id].mine : mine
+      // synced change, not the synced value a second change replaced -- or
+      // the removal a first pass made (see below).
+      const prev = t.hostKeys[id]
+      const before = prev && (prev.fp === mine || (prev.fp === REMOVED && mine === undefined)) ? prev.mine : mine
       t.hostKeys = { ...t.hostKeys, [id]: before ? { fp, mine: before } : { fp } }
+    }
+    // AN ENTRY SYNC REMOVED keeps what this device had. Deleting a host in one
+    // pass and re-adding it with another key in the next turned the hard
+    // "changed key" refusal into a first-connection prompt, because by the
+    // second pass this device's own copy no longer held the old key.
+    for (const id of Object.keys((local as Rec | null) ?? {})) {
+      const mine = fpOf(local, id)
+      if (mine && fpOf(incoming, id) === undefined && !t.hostKeys[id]) {
+        t.hostKeys = { ...t.hostKeys, [id]: { fp: REMOVED, mine } }
+      }
     }
   })
 }
+
+/** Stands for "sync removed this entry" in a host-key mark. */
+const REMOVED = '-removed-'
 
 /** Clear every mark: a restored backup is the person's own choice of state. */
 export function clearAllMarks(): void {
@@ -322,16 +373,33 @@ export function heldFields(kind: HeldKind, id: string, now: Record<string, strin
   return Object.keys(now).filter((f) => m.fields[f] !== undefined && m.fields[f] === hashOf(kind, id, f, now[f]))
 }
 
-/** Whether a server's stored credential may go to `host` without asking. */
-export function serverCredentialHeld(secretId: string, host: string): boolean {
-  return heldFields('server', secretId.replace(/:rdp$/, ''), { host: norm(host) }).length > 0
+/**
+ * A server judged on its stored record, not on the address being dialled.
+ *
+ * Judging the dialled host missed two things: a server reached through a VPN
+ * or cloud forward is dialled at 127.0.0.1, which never matched a held host,
+ * and the cloud and RDP fields that also decide where the credential goes
+ * were not compared at all. `dialled` is used only for a server this device
+ * has no record of.
+ */
+export function serverFieldsNow(serverId: string, dialled: string): Record<string, string> {
+  const id = serverId.replace(/:rdp$/, '')
+  const rec = recordsOf(loadData(), 'server').find((r) => r.id === id)
+  return fieldsOf('server', rec ?? { host: dialled }) ?? { host: norm(dialled) }
 }
 
-export const serverFieldsNow = (host: string): Record<string, string> => ({ host: norm(host) })
+/** Whether a server's stored credential may be used without asking. */
+export function serverCredentialHeld(secretId: string, dialled: string): boolean {
+  return heldFields('server', secretId.replace(/:rdp$/, ''), serverFieldsNow(secretId, dialled)).length > 0
+}
 
 /** A database judged on what is actually being dialled. */
-export function databaseFieldsNow(cfg: { host?: string; ssh?: { serverId?: string } }): Record<string, string> {
-  return { host: norm(cfg.host), via: str(cfg.ssh?.serverId) }
+export function databaseFieldsNow(cfg: { id?: string; host?: string; ssh?: { serverId?: string } }): Record<string, string> {
+  // The dialled address and jump, plus what the stored record says about TLS,
+  // VPN and workspace, which the dialled config may not carry.
+  const rec = recordsOf(loadData(), 'database').find((r) => r.id === cfg.id)
+  const stored = rec ? (fieldsOf('database', rec) ?? {}) : {}
+  return { ...stored, host: norm(cfg.host), via: str(cfg.ssh?.serverId) }
 }
 
 /**
@@ -359,7 +427,7 @@ export function hostKeyExpected(id: string, fileFp: string | undefined): string 
   // on the file's word until a person here accepts it again.
   if (t.unreadable) return undefined
   const m = t.hostKeys[id]
-  if (m && m.fp === fileFp) return m.mine
+  if (m && (m.fp === fileFp || (m.fp === REMOVED && fileFp === undefined))) return m.mine
   return fileFp
 }
 

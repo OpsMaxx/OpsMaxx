@@ -21,7 +21,6 @@ import {
   MACHINE_ONLY_SECRET_PREFIX
 } from './secrets'
 import { removeHistoryFiles } from './history'
-import { clearAllMarks } from './syncTrust'
 import { clearHistory as clearHttpHistory } from './httpHistory'
 import { CRED_PROXY_AUDIT_FILE } from './credProxy'
 import { RULES_FILE } from '../../shared/rules'
@@ -324,11 +323,11 @@ export async function backupImport(
     if (payload.vault !== null) writeJson('opsmaxx-vault.json', payload.vault)
     if (payload.workspaceLocks !== null) writeJson('opsmaxx-wslocks.json', payload.workspaceLocks)
     if (payload.knownHosts !== null) writeJson('opsmaxx-known-hosts.json', payload.knownHosts)
-    // A bundle the person chose and opened with its passphrase is theirs, so
-    // nothing in it is waiting on a confirmation of a change from another
-    // device: the marks in services/syncTrust.ts were about the estate this
-    // restore just replaced.
-    clearAllMarks()
+    // THE MARKS STAY. They hold synced values nobody here confirmed, compared
+    // by value: a restored record with this device's own old values is not
+    // held by them, and one carrying a synced attacker's values (a scheduled
+    // backup taken after the change arrived) still is. Clearing them released
+    // exactly that case.
 
     // The bundle carries connections, credentials and vault. It does not carry
     // history, and the history already on this machine belongs to a different

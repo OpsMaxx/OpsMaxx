@@ -160,14 +160,29 @@ const server = (over: Record<string, unknown> = {}): Record<string, unknown> => 
 })
 
 describe('a server redirected by sync', () => {
-  it('dials without its stored password, and keeps it for the address this device knew', () => {
+  it('dials without its stored password, whichever address is dialled, until confirmed here', () => {
     secrets.set('s1', JSON.stringify({ password: 'hunter2' }))
     saveData({ servers: [server()] })
     land('servers', [server({ host: 'evil.example' })])
     const redirected = resolveSecrets({ host: 'evil.example', port: 22, username: 'root', auth: 'password', serverId: 's1' } as never) as { password?: string }
     expect(redirected.password).toBeUndefined()
-    const original = resolveSecrets({ host: 'prod.internal', port: 22, username: 'root', auth: 'password', serverId: 's1' } as never) as { password?: string }
-    expect(original.password).toBe('hunter2')
+    // Judged on the stored record, not the dialled address: a VPN or cloud
+    // forward dials 127.0.0.1, which never matched a held host.
+    const forwarded = resolveSecrets({ host: '127.0.0.1', port: 2222, username: 'root', auth: 'password', serverId: 's1' } as never) as { password?: string }
+    expect(forwarded.password).toBeUndefined()
+    trust.confirmRecord('server', 's1')
+    const confirmed = resolveSecrets({ host: 'evil.example', port: 22, username: 'root', auth: 'password', serverId: 's1' } as never) as { password?: string }
+    expect(confirmed.password).toBe('hunter2')
+  })
+
+  it('holds a synced cloud target or RDP KDC proxy change the same way as a host change', () => {
+    secrets.set('s1', JSON.stringify({ password: 'hunter2' }))
+    saveData({ servers: [server()] })
+    land('servers', [server({ cloud: { provider: 'gcp', project: 'attacker' } })])
+    expect(trust.serverCredentialHeld('s1', 'prod.internal')).toBe(true)
+    trust.confirmRecord('server', 's1')
+    land('servers', [server({ cloud: { provider: 'gcp', project: 'attacker' }, rdp: { kdcProxyUrl: 'https://evil/kdc' } })])
+    expect(trust.serverCredentialHeld('s1', 'prod.internal')).toBe(true)
   })
 
   it('asks before a person-driven connect, and a yes releases it', async () => {
@@ -175,7 +190,7 @@ describe('a server redirected by sync', () => {
     saveData({ servers: [server()] })
     land('servers', [server({ host: 'evil.example' })])
     ask.mockResolvedValueOnce({ response: 0, checkboxChecked: false })
-    expect(await trust.askToUse('server', 's1', 'prod-db', trust.serverFieldsNow('evil.example'), 'root@evil.example')).toBe(true)
+    expect(await trust.askToUse('server', 's1', 'prod-db', trust.serverFieldsNow('s1', 'evil.example'), 'root@evil.example')).toBe(true)
     expect(String((ask.mock.calls[0][0] as { detail: string }).detail)).toMatch(/address was changed on another of your devices/)
     expect(trust.serverCredentialHeld('s1', 'evil.example')).toBe(false)
   })
@@ -356,5 +371,37 @@ describe('the trust file', () => {
     saveData({ cicdConnections: [] })
     land('cicdConnections', [ci()])
     expect(existsSync(join(userData, 'opsmaxx-sync-trust.json'))).toBe(true)
+  })
+})
+
+describe('records the review found a way around', () => {
+  it('refuses a synced list with an id that is not a plain string', () => {
+    expect(() => trust.markArrivals('database', [], [{ id: ['db-1'], host: 'evil' }])).toThrow(/malformed or repeated id/)
+  })
+
+  it('refuses two records with one id', () => {
+    expect(() =>
+      trust.markArrivals('server', [server()], [server({ workspaceId: 'open' }), server({ host: 'x' })])
+    ).toThrow(/malformed or repeated id/)
+  })
+
+  it('holds a database whose TLS, VPN route or workspace changed by sync', () => {
+    secrets.set('db-1', JSON.stringify({ password: 'p' }))
+    const db = { id: 'db-1', name: 'pg', host: 'pg.internal', port: 5432, ssl: true, workspaceId: 'ws-locked' }
+    saveData({ databases: [db] })
+    for (const change of [{ ssl: false }, { vpnProfileId: 'vpn-x' }, { workspaceId: 'ws-open' }]) {
+      trust.markArrivals('database', [db], [{ ...db, ...change }])
+      saveData({ databases: [{ ...db, ...change }] })
+      expect(trust.heldFields('database', 'db-1', trust.databaseFieldsNow({ id: 'db-1', host: 'pg.internal' })).length).toBeGreaterThan(0)
+      trust.confirmRecord('database', 'db-1')
+      saveData({ databases: [db] })
+    }
+  })
+
+  it('keeps holding a host key that sync removed and then re-added with another key', () => {
+    const local = { 'h:22': { fingerprint: 'SHA256:real' } }
+    trust.markHostKeyArrivals(local, {})
+    trust.markHostKeyArrivals({}, { 'h:22': { fingerprint: 'SHA256:attacker' } })
+    expect(trust.hostKeyExpected('h:22', 'SHA256:attacker')).toBe('SHA256:real')
   })
 })
