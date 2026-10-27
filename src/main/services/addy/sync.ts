@@ -6,7 +6,7 @@ import { atomicWriteFileSync } from '../atomicWrite'
 import { AddyError, type AddySidecar } from './sidecar'
 import type { RelayClient } from './relay'
 import { SOURCES, type CollectionSource } from './collections'
-import { baseOf, mergeCollections, type Base } from './merge'
+import { asRecords, baseOf, mergeCollections, type Base } from './merge'
 import { sealConflict } from './conflicts'
 import { SYNCED_COLLECTIONS, type SyncedCollection } from '../../../shared/addy'
 
@@ -106,6 +106,24 @@ interface SyncState {
   accountId?: string
   /** Keyed by collection name. Absent means never synced, which is a state. */
   collections: Record<string, CollectionState>
+  /**
+   * The highest counter this device has ever seen per collection, kept through
+   * every forget.
+   *
+   * THE FLOOR WENT TO ZERO WHENEVER THE AGREEMENT WAS FORGOTTEN — a resync, a
+   * conflict resolution, a re-key — and at zero the sidecar's rollback check
+   * accepts anything, so in exactly those moments the relay chose which
+   * archived copy this device adopted: an old vault swapped in silently, a
+   * host key from before a rotation brought back. Forgetting what was agreed
+   * is a reason to compare again, never a reason to accept older data. Only a
+   * different account (see `accountId`) starts from nothing.
+   */
+  floors?: Record<string, number>
+}
+
+/** Never below what this device has already seen, whatever was forgotten. */
+function floorOf(state: SyncState, name: string): number {
+  return Math.max(state.collections[name]?.counter ?? 0, state.floors?.[name] ?? 0)
 }
 
 /** DEVICE-LOCAL, and it must stay that way.
@@ -141,10 +159,23 @@ function loadState(forAccount?: string): SyncState {
 }
 
 function saveState(state: SyncState): void {
-  atomicWriteFileSync(statePath(), JSON.stringify(state))
+  const floors = { ...(state.floors ?? {}) }
+  for (const [name, entry] of Object.entries(state.collections)) {
+    floors[name] = Math.max(floors[name] ?? 0, entry.counter ?? 0)
+  }
+  atomicWriteFileSync(statePath(), JSON.stringify({ ...state, floors }))
 }
 
 const hash = (b: Buffer): string => createHash('sha256').update(b).digest('hex')
+
+/** More than half of a list of more than five identified records gone. */
+function removesMost(before: Buffer, after: Buffer): boolean {
+  const was = asRecords(before)
+  const now = asRecords(after)
+  if (!was || !now || was.length <= 5) return false
+  const kept = new Set(now.map((r) => r.id))
+  return was.filter((r) => !kept.has(r.id)).length * 2 > was.length
+}
 
 /**
  * Whether a payload is a collection with nothing in it.
@@ -363,7 +394,7 @@ async function syncCollection(
 
   // -- This machine has nothing. Take what the account has. -----------------
   if (!local && remote) {
-    const opened = await openObject(deps, name, epoch, remote.body, known?.counter ?? 0)
+    const opened = await openObject(deps, name, epoch, remote.body, floorOf(state, name))
     const landed = writeBack(deps, name, source, opened.payload)
     state.collections[name] = {
       etag: remote.etag,
@@ -416,7 +447,7 @@ async function syncCollection(
   // local copy is not lost — it is kept as a conflict copy, so the user is
   // offered the choice rather than having it made for them.
   if (!known) {
-    const opened = await openObject(deps, name, epoch, there.body, 0)
+    const opened = await openObject(deps, name, epoch, there.body, floorOf(state, name))
     // An empty local value on first contact is a fresh install, not an edit
     // somebody made. Adopting without keeping a conflict copy is what stops a
     // new device handing the user one chooser per populated collection before
@@ -441,7 +472,12 @@ async function syncCollection(
       // ancestor: everything on either side is an add. A record both sides
       // hold under one id with different contents is the only thing it will
       // not decide, and that still takes the keep-both path below.
-      const union = mergeCollections({}, body, opened.payload)
+      // ONLY ON GENUINE FIRST CONTACT. A device that has agreed with the
+      // account about this collection before and then forgot (a resync, a
+      // resolution) has no ancestor here, and a union against an empty one
+      // brings back every record deleted elsewhere since. That device keeps
+      // both copies for a person instead.
+      const union = (state.floors?.[name] ?? 0) > 0 ? null : mergeCollections({}, body, opened.payload)
       if (union) {
         const counter = opened.counter + 1
         try {
@@ -508,6 +544,14 @@ async function syncCollection(
 
   if (!localChanged && remoteChanged) {
     const opened = await openObject(deps, name, epoch, there.body, known.counter)
+    // A PULL THAT EMPTIES MOST OF A LIST keeps this device's copy first. An
+    // empty list from one device used to land everywhere with nothing kept,
+    // so one bad save (or one hostile device) could delete the estate from
+    // every machine. Single deletes still flow; a big one leaves the old copy
+    // in the chooser.
+    if (removesMost(body, opened.payload)) {
+      await keepAsConflict(deps, name, epoch, opened.counter + 1, body)
+    }
     const landed = writeBack(deps, name, source, opened.payload)
     state.collections[name] = {
       etag: there.etag,
@@ -659,7 +703,7 @@ async function conflictWithRemote(
   // demoted to a conflict copy, and the device's floor is LOWERED to the old
   // number — after which its own next push is refused as a rollback by every
   // other device.
-  const opened = await openObject(deps, name, epoch, fresh.body, state.collections[name]?.counter ?? 0)
+  const opened = await openObject(deps, name, epoch, fresh.body, floorOf(state, name))
 
   // IDENTICAL COPIES ARE NOT A CONFLICT. A pass that was interrupted leaves
   // collections on disk with no state entry, so the next one sees a local
@@ -766,7 +810,7 @@ async function keepAsConflict(
  * which archived copy becomes canonical.
  */
 export function counterFloor(collection: string): number {
-  return loadState().collections[collection]?.counter ?? 0
+  return floorOf(loadState(), collection)
 }
 
 /** Forget what this device has agreed to — everything, for a revocation wipe,
@@ -777,12 +821,14 @@ export function counterFloor(collection: string): number {
  *  demoted to a conflict copy and the account's older copy put back on the
  *  screen, and each of those became another conflict to resolve. */
 export function forgetSyncState(only?: string[]): void {
+  const state = loadState()
   if (only) {
-    const state = loadState()
     for (const name of only) delete state.collections[name]
     saveState(state)
   } else {
-    saveState({ version: 1, collections: {} })
+    // The floors stay, and the account they belong to with them: a resync
+    // compares again, it does not accept older data.
+    saveState({ version: 1, collections: {}, accountId: state.accountId, floors: floorsOf(state) })
   }
   forgetCount++
 }
@@ -800,6 +846,14 @@ export function forgetSyncState(only?: string[]): void {
  * difference between an offline laptop's edit being pushed after the rotation
  * and being reverted on its screen and demoted to a conflict copy.
  */
+function floorsOf(state: SyncState): Record<string, number> {
+  const floors: Record<string, number> = {}
+  for (const name of new Set([...Object.keys(state.collections), ...Object.keys(state.floors ?? {})])) {
+    floors[name] = floorOf(state, name)
+  }
+  return floors
+}
+
 export function forgetEpochState(): void {
   const state = loadState()
   for (const entry of Object.values(state.collections)) {

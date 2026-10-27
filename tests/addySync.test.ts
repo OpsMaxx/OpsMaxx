@@ -190,7 +190,9 @@ function seeded(relay: ReturnType<typeof fakeRelay>, name: string, value: unknow
 
 beforeEach(() => {
   applied.mockClear()
-  forgetSyncState()
+  // The file itself, not forgetSyncState(): a forget keeps the rollback
+  // floors on purpose, and each test is a fresh device.
+  rmSync(join(userData, SYNC_STATE_FILE), { force: true })
   rmSync(DATA, { force: true })
 })
 afterAll(() => rmSync(userData, { recursive: true, force: true }))
@@ -787,11 +789,57 @@ describe('when something goes wrong', () => {
     const r = await syncOnce(deps(relay))
 
     // With no memory of an agreement, a difference is never an overwrite in
-    // either direction: the lists are unioned, and only a record both sides
-    // hold differently goes to the user. That is what makes "resync
-    // everything" safe to offer at all.
-    expect(r.outcomes.servers).toBe('merged')
-    expect((readBlob().servers as { id: string }[]).map((x) => x.id)).toEqual(['s1', 'local-since'])
+    // either direction, and never a silent union either: this device has
+    // agreed before, so an empty ancestor would bring back records deleted
+    // elsewhere. Both copies are kept for a person. That is what makes
+    // "resync everything" safe to offer at all.
+    expect(r.outcomes.servers).toBe('conflicted')
+    expect(relay.conflicts.map((c) => c.name)).toContain('servers')
+  })
+
+  it('keeps the rollback floor through a resync, so the relay cannot hand back an older copy', async () => {
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'current' }], 7)
+    await syncOnce(deps(relay))
+    expect(readBlob().servers).toEqual([{ id: 'current', status: 'offline' }])
+
+    forgetSyncState()
+    // The relay now serves an archived copy, genuinely sealed, at counter 3.
+    seeded(relay, 'servers', [{ id: 'archived' }], 3)
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('failed')
+    expect(readBlob().servers).toEqual([{ id: 'current', status: 'offline' }])
+  })
+
+  it('keeps this device\'s copy when a pull would remove most of a list', async () => {
+    const six = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({ id }))
+    writeBlob({ servers: six })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+    // Another device empties the list.
+    const stored = relay.objects.get('servers')!
+    seeded(relay, 'servers', [{ id: 'a' }], stored.counter + 1)
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('pulled')
+    expect(relay.conflicts.map((c) => c.name)).toContain('servers')
+  })
+
+  it('lets a single delete through without a copy', async () => {
+    const six = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({ id }))
+    writeBlob({ servers: six })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+    const stored = relay.objects.get('servers')!
+    seeded(relay, 'servers', six.slice(1), stored.counter + 1)
+
+    await syncOnce(deps(relay))
+
+    expect(relay.conflicts).toEqual([])
   })
 })
 
