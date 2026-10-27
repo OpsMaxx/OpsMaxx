@@ -16,9 +16,9 @@ Make a folder on your computer part of a server's connection: it is mounted on t
 
 ## Goal
 
-You have a folder here, such as a project, a set of config files or a build output, and you want it on a server while you work there, without copying it. A folder share works like `docker -v host:path:ro`. You define it once in the server's connection settings: a folder on this computer, a path on the server, read-only or read-write. From then on it is mounted whenever a terminal to that server is open, and unmounted when the last one closes.
+You have a folder here, such as a project, a set of config files or a build output, and you want it on a server while you work there, without copying it. You define it once in the server's connection settings: a folder on this computer, a path on the server, read-only or read-write. From then on it is mounted whenever a terminal to that server is open, and unmounted when the last one closes.
 
-Under the hood it is **sshfs**. Programs on the server see an ordinary folder, and every read and write travels back over your SSH connection to the folder on this computer.
+Under the hood it is **sshfs** over your SSH connection; Docker is not involved. Programs on the server see an ordinary folder, and every read and write travels back over your SSH connection to the folder on this computer.
 
 **What the server needs.** sshfs installed, and a usable `/dev/fuse`. Most containers have neither, so this usually works on a VM or a physical machine and not inside a container. OpsMaxx checks both before mounting. When something is missing it tells you what, and what to run.
 
@@ -56,7 +56,7 @@ The files are those on this computer. On a read-only share, any attempt to write
 
 ### 4. Check, unmount or retry from the tab
 
-The tab's view bar, next to the server's address, has a **Folder shares** button. It shows how many shares are mounted, and turns into a warning sign when one has failed or is paused. Click it to see each share's state (**Mounting…**, **Mounted**, **Unmounting…**, **Failed** with the reason and the fix, or **No terminal open**), with:
+The tab's view bar, next to the server's address, has a **Folder shares** button. It shows how many shares are mounted, and turns into a warning sign reading **Share failed** (or **2 shares failed**, and so on) or **Shares paused** when one has failed or is paused. A share that fails to mount on connect raises no pop-up, so look here first. Click it to see each share's state (**Mounting…**, **Mounted**, **Unmounting…**, **Failed** with the reason and the fix, or **No terminal open**), with:
 
 - **Unmount** to take a share off the server until the next connect.
 - **Retry** after a failure, or **Mount** for a share that is not set to mount on connect. With no terminal open, these say so instead of doing anything.
