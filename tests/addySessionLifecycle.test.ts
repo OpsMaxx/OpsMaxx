@@ -112,6 +112,30 @@ describe('the vault locking', () => {
     expect((await addySession.status()).problem).toBeUndefined()
   })
 
+  it('launching with the vault locked holds no key, names the relay, and the unlock attaches', async () => {
+    // What main does at launch when the vault is shut: the same pause as a
+    // lock, on a session that never attached.
+    await addySession.detachForVaultLock()
+    expect(opened).toHaveLength(0)
+    const st = await addySession.status()
+    expect(st.enrolled).toBe(true)
+    expect(st.relayURL).toBe(ENROLMENT.baseURL)
+    expect(st.problem).toMatch(/paused while the vault is locked/)
+
+    addySession.resumeAfterVaultLock()
+    await tick()
+    expect(reconnects).toBe(1)
+  })
+
+  it('Try again does not attach past the lock', async () => {
+    s.reconnect = realReconnect
+    await addySession.detachForVaultLock()
+    const r = await addySession.reconnect()
+    expect(r.ok).toBe(false)
+    expect(r.problem).toMatch(/paused while the vault is locked/)
+    expect(opened).toHaveLength(0)
+  })
+
   it('a second unlock, or one with no lock behind it, attaches nothing', async () => {
     addySession.resumeAfterVaultLock()
     await tick()
@@ -283,6 +307,21 @@ describe('main is wired to all of it', () => {
     expect(unlock.slice(0, unlock.indexOf('\n}\n'))).toMatch(/addySession\.resumeAfterVaultLock\(\)/)
     // On wake only when no lock is in force: with a vault, the unlock does it.
     expect(MAIN).toMatch(/if \(!vault\.exists \|\| vault\.unlocked\) addySession\.resumeAfterVaultLock\(\)/)
+  })
+
+  it('launch does not attach while the vault is locked, and destroying the vault lifts the pause', () => {
+    const launch = MAIN.slice(MAIN.indexOf('const launchVault = vaultStatus()'))
+    const gate = launch.indexOf(
+      'if (launchVault.exists && !launchVault.unlocked) void addySession.detachForVaultLock()'
+    )
+    expect(gate).toBe(launch.indexOf('\n') + 3)
+    expect(launch.indexOf('.resume((line)')).toBeGreaterThan(launch.indexOf('else', gate))
+    // The only launch call to resume() is the gated one.
+    expect(MAIN.match(/addySession\s*\.resume\(/g)).toHaveLength(1)
+    const destroy = MAIN.slice(MAIN.indexOf("ipcMain.handle('vault:destroy'"))
+    expect(destroy.slice(0, destroy.indexOf('\n})\n'))).toMatch(
+      /if \(r\.ok\) addySession\.resumeAfterVaultLock\(\)/
+    )
   })
 
   it('a new device raises an OS notification', () => {

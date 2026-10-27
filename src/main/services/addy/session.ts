@@ -334,6 +334,10 @@ class AddySession {
    * account's state.
    */
   async reconnect(): Promise<{ ok: boolean; problem?: string }> {
+    // Not past a vault lock. The panel offers Try again beside the paused
+    // banner, and pressing it would load the account key the lock is keeping
+    // out of memory; the unlock is what lifts this.
+    if (this.lockedOut) return { ok: false, problem: this.lastProblem ?? undefined }
     // Torn down first. Reconnecting on top of a half-open sidecar is how you
     // get two of them and a port that never closes.
     await this.detach()

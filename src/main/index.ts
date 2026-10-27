@@ -5803,7 +5803,11 @@ ipcMain.handle('vault:destroy', () => {
   // A stored biometric key opens a vault that no longer exists; leaving it
   // behind is dead material on disk.
   disableBiometricUnlock()
-  return vaultDestroy()
+  const r = vaultDestroy()
+  // Sync paused for this vault would otherwise wait for an unlock that can no
+  // longer happen, until the next launch.
+  if (r.ok) addySession.resumeAfterVaultLock()
+  return r
 })
 
 // ---- Vault: biometric unlock ----
@@ -6592,13 +6596,22 @@ app.whenReady().then(() => {
   //
   // Not awaited. It starts a sidecar and makes a network round trip, and a
   // relay that is down must not hold up the window.
-  void addySession
-    .resume((line) => console.log('[addy]', line))
-    .then((r) => {
-      if (r.problem) console.error('[addy] resume:', r.problem)
-      else if (r.resumed) console.log(`[addy] resumed on ${r.baseURL}`)
-    })
-    .catch((e) => console.error('[addy] resume failed:', e))
+  //
+  // Not while the vault is locked, which it routinely is at launch. Suspend
+  // takes sync down with the vault so the account key is not held in memory
+  // while the vault is shut; launching straight into that state must not hand
+  // the key back. Same pause as a lock, so the panel says why and the unlock
+  // brings it up.
+  const launchVault = vaultStatus()
+  if (launchVault.exists && !launchVault.unlocked) void addySession.detachForVaultLock()
+  else
+    void addySession
+      .resume((line) => console.log('[addy]', line))
+      .then((r) => {
+        if (r.problem) console.error('[addy] resume:', r.problem)
+        else if (r.resumed) console.log(`[addy] resumed on ${r.baseURL}`)
+      })
+      .catch((e) => console.error('[addy] resume failed:', e))
 
   void vpnInit()
     .catch((e) => console.error('[vpn] init failed:', e))
