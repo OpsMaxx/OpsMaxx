@@ -5,6 +5,7 @@ import (
 	"crypto/ecdh"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -1516,5 +1517,109 @@ func TestTransferSealOverhead(t *testing.T) {
 		if got := len(sealed) - n; got != 98 {
 			t.Fatalf("sealing %d bytes added %d; transfer.ts assumes 98", n, got)
 		}
+	}
+}
+
+// THE FORM --rtc HANDS OUT IS THE FORM THAT IS SIGNED.
+//
+// The parent passes rtcOffer's `sdp` straight to signSignal and on to the
+// peer, and that string is rtc.go's encodeSDP: base64 of the JSON session
+// description. The test above only ever used hand-written raw SDP, so signing
+// refused every real description ("carries no SHA-256 DTLS fingerprint") and
+// every clipboard silently took the mailbox. This pushes a real one through
+// sign and verify, and checks the fingerprint signed is pion's own.
+func TestARealRtcDescriptionSignsAndVerifies(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+	if _, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "caller"})}); err != nil {
+		t.Fatal(err)
+	}
+	meV, _ := handleWhoami(Request{Method: "whoami", Params: params(t, map[string]any{})})
+	me := meV.(map[string]any)
+
+	offerV, err := handleRtcOffer(Request{Method: "rtcOffer", Params: params(t, map[string]any{"sessionId": "sig-real"})})
+	if err != nil {
+		t.Fatalf("rtcOffer: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = handleRtcClose(Request{Method: "rtcClose", Params: params(t, map[string]any{"sessionId": "sig-real"})})
+	})
+	encoded := offerV.(map[string]any)["sdp"].(string)
+
+	fp, err := fingerprintFromSDP(encoded)
+	if err != nil {
+		t.Fatalf("the description rtcOffer returns has no readable fingerprint: %v", err)
+	}
+	desc, err := decodeSDP(encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want, _ := fingerprintFromSDP(desc.SDP); !bytes.Equal(fp, want) {
+		t.Fatal("the fingerprint read from the encoded form is not the one in the description pion uses")
+	}
+
+	peerPub, _, _ := ed25519.GenerateKey(rand.Reader)
+	head := hex.EncodeToString(make([]byte, 32))
+	sV, err := handleSignSignal(Request{Method: "signSignal", Params: params(t, map[string]any{
+		"epoch": uint64(1), "peerPubSign": hex.EncodeToString(peerPub), "sdp": encoded, "rosterHead": head,
+	})})
+	if err != nil {
+		t.Fatalf("signing a real rtc description: %v", err)
+	}
+	signed := sV.(map[string]any)
+	if _, err := handleVerifySignal(Request{Method: "verifySignal", Params: params(t, map[string]any{
+		"epoch": uint64(1), "peerPubSign": hex.EncodeToString(peerPub), "signerPubSign": me["devicePub"],
+		"sdp": encoded, "rosterHead": head, "deviceNonce": signed["deviceNonce"],
+		"peerNonce": hex.EncodeToString(make([]byte, 32)), "ts": signed["ts"], "signature": signed["signature"],
+	})}); err != nil {
+		t.Fatalf("verifying a real rtc description: %v", err)
+	}
+}
+
+// signRequest over a parent-computed hash signs exactly what signing the body
+// would, so the relay's Authz (BodyHash = protocol.HashBody(body)) verifies.
+func TestSignRequestOverABodyHashIsTheBodySignature(t *testing.T) {
+	_, _ = loadTestAccount(t)
+	body := []byte(`{"epoch":1,"counter":2,"body":"QUFB"}`)
+	sum := sha256.Sum256(body)
+
+	sign := func(p map[string]any) map[string]any {
+		t.Helper()
+		v, err := handleSignRequest(Request{Method: "signRequest", Params: params(t, p)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v.(map[string]any)
+	}
+	byHash := sign(map[string]any{"method": "PUT", "path": "/v1/obj/servers", "bodyHash": hex.EncodeToString(sum[:])})
+
+	keys.mu.RLock()
+	acct, pub := keys.account, keys.device.Sign.Public().(ed25519.PublicKey)
+	keys.mu.RUnlock()
+	nonce, _ := hex.DecodeString(byHash["nonce"].(string))
+	sig, _ := hex.DecodeString(byHash["signature"].(string))
+	authz := protocol.Authz{AccountID: acct, DeviceNonce: nonce, Method: "PUT", Path: "/v1/obj/servers", BodyHash: protocol.HashBody(body)}
+	if err := protocol.Verify(pub, authz, sig); err != nil {
+		t.Fatalf("a signature over the hash does not verify as the server rebuilds it: %v", err)
+	}
+
+	if _, err := handleSignRequest(Request{Method: "signRequest", Params: params(t, map[string]any{
+		"method": "PUT", "path": "/v1/obj/servers", "bodyHash": "abcd",
+	})}); err == nil {
+		t.Fatal("a short body hash was signed")
+	}
+}
+
+// A request line over the limit stops the scanner for good. That has to come
+// back as an error — the process then exits non-zero — and not as the clean
+// "parent closed" exit it used to look like.
+func TestAnOverlongRequestLineIsAnErrorNotAShutdown(t *testing.T) {
+	var out bytes.Buffer
+	line := bytes.Repeat([]byte("a"), maxRequestBytes+1)
+	if err := serve(t.Context(), NewWriter(&out), "crypto", bytes.NewReader(line)); err == nil {
+		t.Fatal("an overlong line ended serve without an error")
+	}
+	if err := serve(t.Context(), NewWriter(&out), "crypto", bytes.NewReader(nil)); err != nil {
+		t.Fatalf("a clean EOF is an error: %v", err)
 	}
 }

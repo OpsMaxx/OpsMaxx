@@ -636,6 +636,11 @@ type signRequestParams struct {
 	Path string `json:"path"`
 	// Base64 of the request body, or empty for none.
 	Body string `json:"body"`
+	// OR hex of protocol.HashBody(body), computed by the parent. Preferred:
+	// the body itself can be megabytes, and carrying it base64'd inside a JSON
+	// line was what pushed a 4.5 MB file transfer past this process's line
+	// limit and took it down. The hash is all the signature covers anyway.
+	BodyHash string `json:"bodyHash"`
 }
 
 type signLoginParams struct {
@@ -738,13 +743,22 @@ func handleSignRequest(req Request) (any, error) {
 		return nil, codedf(ErrConfigInvalid, "path carries a query string; sign the path alone")
 	}
 
-	var body []byte
-	if in.Body != "" {
+	var bodyHash []byte
+	switch {
+	case in.BodyHash != "":
+		h, err := hex.DecodeString(in.BodyHash)
+		if err != nil || len(h) != len(protocol.NoBody) {
+			return nil, codedf(ErrConfigInvalid, "bodyHash is 32 bytes of hex")
+		}
+		bodyHash = h
+	case in.Body != "":
 		decoded, err := base64.StdEncoding.DecodeString(in.Body)
 		if err != nil {
 			return nil, codedf(ErrConfigInvalid, "body is not base64")
 		}
-		body = decoded
+		bodyHash = protocol.HashBody(decoded)
+	default:
+		bodyHash = protocol.HashBody(nil)
 	}
 
 	keys.mu.RLock()
@@ -765,7 +779,7 @@ func handleSignRequest(req Request) (any, error) {
 		DeviceNonce: nonce,
 		Method:      in.Method,
 		Path:        in.Path,
-		BodyHash:    protocol.HashBody(body),
+		BodyHash:    bodyHash,
 	}
 	sig, err := protocol.Sign(device.Sign, authz)
 	if err != nil {
@@ -1863,7 +1877,24 @@ func handleFingerprintSelf(Request) (any, error) {
 // fingerprintFromSDP pulls the SHA-256 DTLS fingerprint out of a session
 // description. `a=fingerprint:sha-256 AB:CD:...` -- colon-separated hex, and
 // the case is not guaranteed.
+//
+// The description is read in the form `--rtc` hands out and takes back --
+// base64 of the JSON SessionDescription (rtc.go encodeSDP) -- because that is
+// the string the parent signs, sends, and passes to rtcAccept/rtcAnswer, and
+// the fingerprint signed has to be the one pion will use. Signing was given
+// that encoded form and looked for `a=fingerprint` lines in base64, found
+// none, and refused every direct connection; the parent swallowed it and fell
+// back to the mailbox. A raw SDP is still read as one, for callers that have
+// it; it cannot be mistaken for the encoded form, which decodes to JSON.
 func fingerprintFromSDP(sdp string) ([]byte, error) {
+	if raw, err := base64.StdEncoding.DecodeString(sdp); err == nil {
+		var desc struct {
+			SDP string `json:"sdp"`
+		}
+		if json.Unmarshal(raw, &desc) == nil && desc.SDP != "" {
+			sdp = desc.SDP
+		}
+	}
 	for _, line := range strings.Split(sdp, "\n") {
 		line = strings.TrimSpace(line)
 		const prefix = "a=fingerprint:sha-256 "
