@@ -435,9 +435,10 @@ const api = {
     createAccount: (
       baseURL: string,
       invite: string,
-      label: string
+      label: string,
+      insecureTLS?: boolean
     ): Promise<{ accountId: string; mnemonic: string }> =>
-      ipcRenderer.invoke('addy:createAccount', baseURL, invite, label),
+      ipcRenderer.invoke('addy:createAccount', baseURL, invite, label, insecureTLS),
 
     /** Start a pairing and return the code IMMEDIATELY. The other device has
      *  not answered yet; `awaitPairing` is what resolves when it does. */
@@ -450,9 +451,10 @@ const api = {
     joinPairing: (
       baseURL: string,
       code: string,
-      pairingId: string
+      pairingId: string,
+      insecureTLS?: boolean
     ): Promise<AddyPairingConfirmation> =>
-      ipcRenderer.invoke('addy:joinPairing', baseURL, code, pairingId),
+      ipcRenderer.invoke('addy:joinPairing', baseURL, code, pairingId, insecureTLS),
     /** Ends it and forgets the shared secret. For "these do not match", and
      *  for closing the panel. */
     cancelPairing: (): Promise<void> => ipcRenderer.invoke('addy:cancelPairing'),
@@ -537,7 +539,12 @@ const api = {
     syncNow: (): Promise<unknown> => ipcRenderer.invoke('addy:syncNow'),
     /** Forget every agreement and take everything again from the relay. */
     resync: (): Promise<unknown> => ipcRenderer.invoke('addy:resync'),
-    leave: (): Promise<{ left: boolean; accountId: string | null; removedFromRoster?: boolean }> =>
+    leave: (): Promise<{
+      left: boolean
+      accountId: string | null
+      removedFromRoster?: boolean
+      rosterProblem?: string
+    }> =>
       ipcRenderer.invoke('addy:leave'),
     /** Try again without quitting. */
     reconnect: (): Promise<{ ok: boolean; problem?: string }> =>

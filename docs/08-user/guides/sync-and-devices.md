@@ -98,6 +98,8 @@ When it finishes it tells you how many devices are on the account. Read that lis
 | *This device is not connected to the relay right now, so nothing was synced.* | **Sync now** could not reach the relay. Check the network, or the sign-in banner. |
 | A link that does nothing but show a message | The link was refused, for example because its relay is not `https`. The message says why. |
 | *That pairing link is for a machine joining an account* | The link was opened on a machine that is already on an account. Open it on the machine you are adding. |
+| *… speaks a different addy protocol version than this copy of OpsMaxx* | OpsMaxx and the relay disagree on the protocol version. Update OpsMaxx; if it is already current, whoever runs the relay needs to update it. |
+| *that file is … MB and the limit is … MB* | Files sent between your devices go through the relay, which takes about 6 MB in one request. Use a file-transfer tool for anything bigger. |
 
 ## Related
 

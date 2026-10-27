@@ -545,7 +545,7 @@ function LeaveRow({
             ? 'This device was not on an account.'
             : r.removedFromRoster === true
               ? 'This device has left the account and removed itself from your device list.'
-              : 'This device has left the account. It could not reach the relay to remove itself, so your other devices still list it — remove it from one of them.',
+              : `This device has left the account, but could not remove itself from your device list${r.rosterProblem ? ` (${r.rosterProblem})` : ''} — remove it from one of your other devices.`,
           'ok'
         )
         setOpen(false)
@@ -565,8 +565,8 @@ function LeaveRow({
           {open && (
             <>
               <br />
-              This does not remove the device from the account: the other machines are not told, and
-              this one stays in their device list until somebody there removes it.
+              It also removes this device from your device list, if it can reach the relay. If it
+              cannot, the other machines keep listing it until somebody there removes it.
               <br />
               {alone ? (
                 <strong>

@@ -4968,13 +4968,17 @@ ipcMain.handle('addy:discardConflict', (_e, id: number) => addySession.discardCo
 // Pairing. Three calls rather than one, because the user has to be able to
 // read the code aloud while the other device is still being found -- a single
 // call that resolved only on completion would have nothing to show them.
-ipcMain.handle('addy:createAccount', (_e, baseURL: string, invite: string, label: string) =>
-  addySession.createAccount(baseURL, invite, label)
+ipcMain.handle(
+  'addy:createAccount',
+  (_e, baseURL: string, invite: string, label: string, insecureTLS?: boolean) =>
+    addySession.createAccount(baseURL, invite, label, insecureTLS === true)
 )
 ipcMain.handle('addy:beginPairing', (_e, baseURL: string) => addySession.beginPairing(baseURL))
 ipcMain.handle('addy:awaitPairing', () => addySession.awaitPairing())
-ipcMain.handle('addy:joinPairing', (_e, baseURL: string, code: string, pairingId: string) =>
-  addySession.joinPairing(baseURL, code, pairingId)
+ipcMain.handle(
+  'addy:joinPairing',
+  (_e, baseURL: string, code: string, pairingId: string, insecureTLS?: boolean) =>
+    addySession.joinPairing(baseURL, code, pairingId, insecureTLS === true)
 )
 ipcMain.handle('addy:cancelPairing', () => addySession.cancelPairing())
 // The two calls that make a pairing real. Until these existed, "They match"
