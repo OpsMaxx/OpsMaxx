@@ -41,12 +41,12 @@ You need the relay's address and one **invite** from whoever runs the relay. If 
 
 Both machines have to be open at the same time.
 
-1. **On the machine you already use**, open **Sync & devices**, find **Add another device**, and press **Show a code on this device**. It shows a pairing code, a pairing link, and how long the code has left. A code stops working after three minutes, or as soon as you leave Sync & devices for another view. **Cancel** stops it.
+1. **On the machine you already use**, open **Sync & devices**, find **Add another device**, and press **Show a code on this device**. It shows a pairing code, a pairing link, and how long the code has left. A code stops working after three minutes, or as soon as you leave Sync & devices for another view. **Cancel** stops it. Never give the code or the link to anyone else: nobody, including whoever runs your relay, will ever ask for it.
 2. **On the new machine**, either:
    - open the pairing link there. OpsMaxx opens **Sync & devices** with the relay address and the pairing code already filled in, or
    - open **Sync & devices**, choose **I already use OpsMaxx on another machine**, type the relay address (shown on the first machine under *Add another device*, with a copy button), press **Type a code from another device**, and paste the pairing code.
 3. Press **Join** on the new machine. It shows how long it will wait, and a **Cancel** button.
-4. **Compare the seven emoji on both screens.** The same emoji are also written out as words, so you can compare them over the phone. If they match, press **They match** on both. The new machine then waits, with a countdown and a **Cancel** button, until the other one has pressed it too. If they do not, press **They do not match**: something is between the two devices, so try again on a network you trust.
+4. **Compare the seven emoji on both screens.** The same emoji are also written out as words, so you can compare them over the phone. One press of **They match** on the machine that showed the code adds the other machine and gives it everything the account syncs, your servers, settings and vault, so press it only when the other screen shows the same emoji. If the other screen is still waiting, or shows different emoji, someone else used the code: press **They do not match** and start again. Press **They match** on the new machine too; it shows the relay it is joining, and waits, with a countdown and a **Cancel** button, until the other one has pressed it. If you do not know that relay, or the emoji differ, press **They do not match**: something is between the two devices, so try again on a network you trust.
 5. On the machine that showed the code, give the new machine a name under **What is the other machine called?** before pressing **They match**. That name is permanent. Left empty, the device is listed by the start of its key.
 
 A link never joins by itself. It only fills in the form; you still press **Join** and compare the emoji.
@@ -93,7 +93,7 @@ When it finishes it tells you how many devices are on the account. Read that lis
 |---|---|
 | A banner at the top saying this device could not sign in | Sync is not running on this device. The banner gives the reason; press **Try again** once it is fixed. |
 | *Sync last failed … could not carry your …* | One kind of data did not sync on the last pass. The rest of the sentence says why. The next pass tries again, or press **Sync now**. |
-| *the other device did not answer in time* | The pairing code ran out, or the code was mistyped. Start a new code on the first machine and type that one. |
+| *the other device did not answer in time* | The pairing code ran out, or the code was mistyped. Start a new code on the first machine and type that one. If the first machine already showed emoji and someone pressed **They match** there, another device may have used your code: check the device list on that machine and remove any device you do not recognise. |
 | The showing machine says the pairing failed while the new one is still waiting | The code typed on the new machine was wrong. Press **Cancel** on the new machine, start a new code, and type it again. |
 | *This device is not connected to the relay right now, so nothing was synced.* | **Sync now** could not reach the relay. Check the network, or the sign-in banner. |
 | A link that does nothing but show a message | The link was refused, for example because its relay is not `https`. The message says why. |

@@ -87,6 +87,33 @@ function useSecondsLeft(deadline: number | null): number | null {
   return Math.min(PAIRING_WINDOW_MS / 1000, Math.max(0, Math.ceil((deadline - now) / 1000)))
 }
 
+/**
+ * WHAT A STOLEN CODE LOOKS LIKE FROM THE MACHINE THAT TYPED IT: a timeout.
+ *
+ * If someone else uses the code first and the machine showing it presses
+ * They match, that someone is added and this machine is left waiting until the
+ * clock runs out — or the relay says the pairing is over. Both read as "the
+ * code expired", which is the one reading that hides what happened. So those
+ * two endings say where to look.
+ */
+const CODE_TAKEN_HINT =
+  'If the other machine already showed emoji and someone pressed They match, another device may have used your code — check the device list there.'
+
+export function joinerFailure(text: string): string {
+  if (!/did not answer in time|no longer open on the relay/.test(text)) return text
+  return `${text.replace(/\.?$/, '.')} ${CODE_TAKEN_HINT}`
+}
+
+/** The relay's host, for the joiner to see which account it is about to join.
+ *  The field may hold anything while it is being typed, so never throws. */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host
+  } catch {
+    return url
+  }
+}
+
 function mss(s: number | null): string {
   return s === null ? '' : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
 }
@@ -183,10 +210,12 @@ export function PairingPanel({
   }, [held, onHold])
   useEffect(() => () => onHold?.(false), [onHold])
 
-  const fail = (err: unknown): void => {
+  /** `joiner` — this machine typed the code, so a timeout may be a code
+   *  somebody else used. See `joinerFailure`. */
+  const fail = (err: unknown, joiner = false): void => {
     active.current = false
     setDeadline(null)
-    setError(errorText(err))
+    setError(joiner ? joinerFailure(errorText(err)) : errorText(err))
     setStage('failed')
   }
 
@@ -244,7 +273,7 @@ export function PairingPanel({
     stopWith(
       stage === 'showing'
         ? 'The code ran out before the other device used it. Start again for a new one.'
-        : 'The other device did not answer in time. Start again with a new code.'
+        : joinerFailure('The other device did not answer in time. Start again with a new code.')
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secondsLeft])
@@ -311,7 +340,7 @@ export function PairingPanel({
       setConfirmation(confirmed)
       setStage('compare')
     } catch (err) {
-      if (mine === attempt.current) fail(err)
+      if (mine === attempt.current) fail(err, true)
     }
   }
 
@@ -354,7 +383,7 @@ export function PairingPanel({
       // Said plainly and left on this screen. A failure here means the two
       // devices agreed and the account does not know it, which is exactly the
       // state the old toast concealed.
-      if (mine === attempt.current) fail(err)
+      if (mine === attempt.current) fail(err, joining)
     } finally {
       if (mine === attempt.current) setBusy(false)
     }
@@ -384,10 +413,35 @@ export function PairingPanel({
         {/* The words, because a phone call works as well as a photograph and
             some of these emoji render differently on different platforms. */}
         <p className="pair-words">{confirmation.sasWords}</p>
-        <p className="fine">
-          Compare them with the other device before answering. If they differ, something is between
-          you.
-        </p>
+        {/* WHAT THE BUTTON DOES, SAID BEFORE IT IS PRESSED. On the machine
+            showing the code one press is the whole decision: the other side
+            pressing too only finishes its own half. And the tell for a code
+            somebody else used is on the OTHER screen — still waiting, or
+            different emoji — so that is where this sends the eye. */}
+        {confirmation.self ? (
+          <>
+            <p className="fine">
+              This machine will join the account on <strong>{hostOf(baseURL)}</strong>. If you do not
+              know that relay, press <strong>They do not match</strong>.
+            </p>
+            <p className="fine">
+              Compare the emoji with the other device before answering. If they differ, something is
+              between you.
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="fine">
+              Pressing <strong>They match</strong> gives that machine everything this account syncs:
+              your servers, settings and vault. Press it only if the other screen shows these same
+              emoji.
+            </p>
+            <p className="fine">
+              If the other screen is still waiting, or shows different emoji, someone else used the
+              code — press <strong>They do not match</strong>.
+            </p>
+          </>
+        )}
         {/* NAMED HERE BECAUSE IT CANNOT BE NAMED LATER. The label is sealed
             into the roster entry that adds the device, and roster entries are
             immutable — this instant is the only chance. Shown only to the
@@ -480,6 +534,12 @@ export function PairingPanel({
               <Copy size={14} />
             </button>
           </div>
+          {/* Said where the code is, because this is where somebody is asked
+              for it: a message, a call, a "support" chat. */}
+          <p className="fine">
+            <strong>Never give this code to anyone.</strong> Nobody, including whoever runs your
+            relay, will ever ask for it.
+          </p>
           {/* THE LINK NOBODY WAS EMITTING. `opsmaxx://` was registered, parsed
               and tested, and the only thing that ever produced one was the
               relay console's invite — so a person told "use the link" while
@@ -488,7 +548,9 @@ export function PairingPanel({
               It fills the form on arrival; it never joins by itself. */}
           {pairLink && (
             <>
-              <p className="fine">Or send this link to the other machine — it fills both in:</p>
+              <p className="fine">
+                Or send this link to your other machine, and only to it — it fills both in:
+              </p>
               <div className="pair-code">
                 <code className="pair-link">{pairLink}</code>
                 <button

@@ -3,7 +3,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { stubBridge } from './setup/renderer'
 import { AddySetup, copyPhrase } from '../src/renderer/src/components/addy/AddySetup'
-import { PairingPanel } from '../src/renderer/src/components/addy/PairingPanel'
+import { PairingPanel, joinerFailure } from '../src/renderer/src/components/addy/PairingPanel'
 import { ConflictChooser } from '../src/renderer/src/components/addy/ConflictChooser'
 import { AddyPanel } from '../src/renderer/src/components/addy/AddyPanel'
 import { deferConflict, holdPhrase, useAddyUi } from '../src/renderer/src/store/addy'
@@ -305,3 +305,98 @@ describe('leaving without being removed', () => {
   })
 })
 
+
+describe('pairing says what is at stake', () => {
+  const asJoiner = {
+    sas: ['🐶'],
+    sasWords: 'dog',
+    peer: { pubSign: 'aa' },
+    self: { pubSign: 'bb', pubEnc: 'cc' }
+  }
+
+  function typeCode(): void {
+    fireEvent.click(screen.getByRole('button', { name: /Type a code/ }))
+    fireEvent.change(screen.getByPlaceholderText('Paste it here'), { target: { value: 'abcd1234.wxyz9876' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Join' }))
+  }
+
+  it('tells the person holding the code never to give it to anyone, beside the code and the link', async () => {
+    stubBridge({
+      addy: {
+        beginPairing: vi.fn().mockResolvedValue({ code: 'abcd1234', pairingId: 'wxyz9876' }),
+        awaitPairing: vi.fn(() => new Promise(() => {})),
+        cancelPairing: vi.fn()
+      }
+    })
+    render(<PairingPanel baseURL="https://relay.example" />)
+    fireEvent.click(screen.getByRole('button', { name: /Show a code/ }))
+    const warning = await screen.findByText(
+      (_, el) => el?.tagName === 'P' && /^Never give this code to anyone\./.test(el.textContent ?? '')
+    )
+    expect(warning.textContent).toMatch(/including whoever runs your relay, will ever ask for it/)
+    expect(screen.getByText(/send this link to your other machine, and only to it/)).toBeTruthy()
+  })
+
+  it('says what They match grants on the machine showing the code, and what a used code looks like', async () => {
+    stubBridge({
+      addy: {
+        beginPairing: vi.fn().mockResolvedValue({ code: 'abcd1234', pairingId: 'wxyz9876' }),
+        awaitPairing: vi.fn().mockResolvedValue({ sas: ['🐶'], sasWords: 'dog', peer: { pubSign: 'aa' } }),
+        cancelPairing: vi.fn()
+      }
+    })
+    render(<PairingPanel baseURL="https://relay.example" />)
+    fireEvent.click(screen.getByRole('button', { name: /Show a code/ }))
+    await screen.findByRole('button', { name: /They match/ })
+    const text = document.body.textContent ?? ''
+    expect(text).toMatch(/gives that machine everything this account syncs: your servers, settings and vault/)
+    expect(text).toMatch(/only if the other screen shows these same emoji/)
+    expect(text).toMatch(/still waiting, or shows different emoji, someone else used the code/)
+    // It is not "nothing is added until both sides agree": this one press adds.
+    expect(text).not.toMatch(/both sides agree/)
+  })
+
+  it('shows the joiner which relay it is joining, and not the initiator\'s warning', async () => {
+    stubBridge({ addy: { joinPairing: vi.fn().mockResolvedValue(asJoiner), cancelPairing: vi.fn() } })
+    render(<PairingPanel baseURL="https://relay.example:8443/" canShow={false} />)
+    typeCode()
+    await screen.findByRole('button', { name: /They match/ })
+    expect(screen.getByText('relay.example:8443', { selector: 'strong' })).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/gives that machine everything/)
+  })
+
+  it('tells a joiner that timed out where to look, from main or from its own clock', async () => {
+    stubBridge({
+      addy: {
+        joinPairing: vi
+          .fn()
+          .mockRejectedValue(
+            new Error("Error invoking remote method 'addy:joinPairing': AddyError: the other device did not answer in time")
+          ),
+        cancelPairing: vi.fn()
+      }
+    })
+    const { unmount } = render(<PairingPanel baseURL="https://relay.example" canShow={false} />)
+    typeCode()
+    expect((await screen.findByRole('alert')).textContent).toMatch(
+      /did not answer in time\. If the other machine already showed emoji and someone pressed They match, another device may have used your code/
+    )
+    unmount()
+
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    stubBridge({ addy: { joinPairing: vi.fn(() => new Promise(() => {})), cancelPairing: vi.fn() } })
+    render(<PairingPanel baseURL="https://relay.example" canShow={false} />)
+    typeCode()
+    await act(async () => {
+      vi.advanceTimersByTime(181_000)
+    })
+    expect((await screen.findByRole('alert')).textContent).toMatch(/another device may have used your code/)
+  })
+
+  it('leaves every other failure as it was', () => {
+    expect(joinerFailure('the relay refused the rendezvous (403)')).toBe('the relay refused the rendezvous (403)')
+    expect(joinerFailure('this pairing is no longer open on the relay — it finished.')).toMatch(
+      /it finished\. If the other machine/
+    )
+  })
+})
