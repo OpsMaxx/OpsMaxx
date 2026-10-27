@@ -935,7 +935,13 @@ class AddySession {
       const seed = loadAddySecret('account', `${saved.accountId}:account:${n}`)
       if (seed) epochKeys[n] = seed
     }
-    if (!keys.deviceSignSeed || !keys.deviceEncKey || !keys.akSeed) {
+    // THE CURRENT EPOCH'S KEY, not epoch 1's. A re-key deliberately deletes
+    // every key before the new one — that is the point of it — so demanding
+    // the unsuffixed epoch-1 key locked out the very device that performed the
+    // re-key, at its next launch, and sent the user to phrase recovery. Epoch
+    // 1's key is not needed to verify anything: the chain is checked against
+    // `epoch1SignPub`, which the enrolment carries.
+    if (!keys.deviceSignSeed || !keys.deviceEncKey || !epochKeys[saved.epoch]) {
       this.lastProblem =
         'This machine is enrolled on a relay, but its keys cannot be read from the keychain. ' +
         'On macOS an update can change which signature the keychain trusts; unlocking the ' +
@@ -1369,12 +1375,6 @@ class AddySession {
     if (!relay || !addyd || !account) {
       return { devices: [], stillListed: false, problem: 'not attached' }
     }
-    const saved = loadEnrolment()
-    const pin =
-      saved?.pinSeq !== undefined && saved.pinHead
-        ? { seq: saved.pinSeq, head: saved.pinHead }
-        : null
-
     const bytes = supplied ?? (await relay.roster())
     // `selfListed`, not `stillListed`: the sidecar's name for it. Getting this
     // wrong reads as `undefined`, which is falsy — and a falsy answer here is
@@ -1407,7 +1407,7 @@ class AddySession {
       // withhold the newest entries and every device verified the shorter
       // chain without complaint — including a chain missing the entry that
       // revoked a device, which puts that device back in everyone's peer list.
-      ...(pin ? { havePin: true, pinnedSeq: pin.seq, pinnedHead: pin.head } : {})
+      ...this.rosterPin()
     })
 
     // A ROTATION ANNOUNCES ITSELF HERE. The chain's epoch moved and this
@@ -1419,11 +1419,22 @@ class AddySession {
     // inside the re-login a request is waiting on; following a rotation makes
     // requests of its own, and each would wait on that same re-login for ever.
     // Whether this device was revoked does not depend on which epoch it holds.
-    let chainEpoch = verified.epoch
+    //
+    // AND A CHAIN THAT ENDS BEFORE THIS DEVICE'S EPOCH IS A ROLLBACK, not
+    // something to read past. This device only moves to an epoch it saw a
+    // verified transition into, so the relay serving a chain without that
+    // transition is withholding entries — the same refusal the pin makes, for
+    // an enrolment whose pin predates the rotation or never had one.
+    if (verified.epoch < account.epoch) {
+      throw new AddyError(
+        'roster-rewound',
+        `${account.baseURL} served a device list ending in epoch ${verified.epoch}, but this device has already moved to epoch ${account.epoch}. The relay is withholding entries; nothing was changed.`
+      )
+    }
+    const chainEpoch = verified.epoch
     while (supplied === undefined && chainEpoch > (this.account?.epoch ?? 0)) {
       if (!(await this.followRotation(chainEpoch).catch(() => false))) break
     }
-    chainEpoch = verified.epoch
 
     const me = await addyd.send<{ devicePub: string }>('whoami', {})
     this.roster = verified.devices.map((d) => d.pubSign).filter((id) => id !== me.devicePub)
@@ -1476,13 +1487,28 @@ class AddySession {
      * writing a lower sequence here would undo the refusal for every launch
      * afterwards.
      */
-    if (saved && verified.headSeq > (saved.pinSeq ?? -1)) {
-      saveEnrolment({ ...saved, pinSeq: verified.headSeq, pinHead: verified.head })
+    //
+    // RE-READ, not `saved`: a rotation followed above has rewritten the record
+    // at the new epoch since then, and writing the copy from before it back
+    // put the old epoch on disk — so every launch followed the same rotation
+    // again and zeroed every counter floor doing it.
+    const latest = loadEnrolment()
+    if (latest?.accountId === account.accountId && verified.headSeq > (latest.pinSeq ?? -1)) {
+      saveEnrolment({ ...latest, pinSeq: verified.headSeq, pinHead: verified.head })
     }
     this.noticeNewDevices(verified.devices, me.devicePub)
 
     this.announce()
     return roster
+  }
+
+  /** This device's roster pin, in the shape every sidecar call that reads a
+   *  chain takes it — `verifyRoster`, `rotateEpoch` and `adoptEpoch` alike. */
+  private rosterPin(): { havePin?: true; pinnedSeq?: number; pinnedHead?: string } {
+    const saved = loadEnrolment()
+    return saved?.accountId === this.account?.accountId && saved?.pinSeq !== undefined && saved.pinHead
+      ? { havePin: true, pinnedSeq: saved.pinSeq, pinnedHead: saved.pinHead }
+      : {}
   }
 
   /**
@@ -2122,7 +2148,8 @@ class AddySession {
       // Pinned at enrolment, never from a relay response. The genesis entry is
       // signed by this key, so without it no chain verifies at all.
       epoch1Sign: account.epoch1SignPub ?? '',
-      chained: !mine
+      chained: !mine,
+      ...this.rosterPin()
     })
 
     // STORED BEFORE THE ACCOUNT MOVES. A device that adopted an epoch and
@@ -2199,13 +2226,28 @@ class AddySession {
       secrets: { akSeed: string }
       seq: number
       entry: string
+      entryHash: string
     }>('rotateEpoch', {
       kind,
       chain,
       rootSignPub: account.rootSignPub ?? '',
       epoch1Sign: account.epoch1SignPub ?? '',
-      ...(mnemonic ? { mnemonic } : {})
+      ...(mnemonic ? { mnemonic } : {}),
+      // PINNED, like every other roster read. Unpinned, a relay serving the
+      // chain from before a revoke had the new key sealed to the revoked
+      // device, and the re-key handed it the one thing it was meant to take.
+      ...this.rosterPin()
     })
+    // From THIS device's epoch, or not at all. A chain ending earlier is one
+    // the relay cut short, and a device that kept an older key (a routine
+    // rotation keeps them) would otherwise rotate away from an epoch the
+    // account already left.
+    if (prepared.epoch !== account.epoch + 1) {
+      throw new AddyError(
+        'roster-rewound',
+        `${account.baseURL} served a device list ending in epoch ${prepared.epoch - 1}, but this device is on epoch ${account.epoch}. Nothing was rotated.`
+      )
+    }
 
     // 0. THE KEY ITSELF, BEFORE ANY OF THE WRITES.
     //
@@ -2304,12 +2346,59 @@ class AddySession {
     //    that works.
     await relay.appendRoster(prepared.seq, prepared.entry)
 
+    // 5. AND SEE THAT IT LANDED, before anything is treated as moved. The
+    //    relay's acknowledgement is its word: one that acks the append and
+    //    drops it leaves every other device on the key the revoked device
+    //    holds, while this one deletes its old keys and believes it re-keyed.
+    //    So the chain is read back, pinned to the very entry appended, and
+    //    must end in the new epoch. Until it does nothing below runs — the old
+    //    keys stay, the enrolment stays at epoch n — which is the failure mode
+    //    this method promises for every other step.
+    const confirmed = await addyd
+      .send<{ epoch: number; headSeq: number; head: string }>('verifyRoster', {
+        chain: await relay.roster(),
+        rootSignPub: account.rootSignPub ?? '',
+        epoch1Sign: account.epoch1SignPub ?? '',
+        havePin: true,
+        pinnedSeq: prepared.seq,
+        pinnedHead: prepared.entryHash
+      })
+      .catch((err: unknown) => {
+        throw new AddyError(
+          'roster-rewound',
+          `${account.baseURL} accepted the re-key but its device list does not carry it (${err instanceof Error ? err.message : String(err)}). The account is still on its old key and no key was deleted; try the re-key again, or move to another relay.`
+        )
+      })
+    if (confirmed.epoch !== prepared.epoch) {
+      throw new AddyError(
+        'roster-rewound',
+        `${account.baseURL} accepted the re-key but its device list ends in epoch ${confirmed.epoch}, not ${prepared.epoch}. No key was deleted.`
+      )
+    }
+
     this.account = {
       ...account,
       epoch: prepared.epoch,
       ...(prepared.epoch === 1 ? { epoch1SignPub: prepared.epochSignPub } : {})
     }
-    await this.refreshRoster()
+    // ON DISK AT THE NEW EPOCH, and pinned to the confirmed head. Nothing
+    // wrote it: the record kept saying epoch n, so the next launch looked for
+    // epoch n's key — which a revocation had just deleted — and this device
+    // locked itself out by the act of re-keying. Before the deletion below, so
+    // a crash in between leaves a device that resumes on the new key.
+    const saved = loadEnrolment()
+    if (saved?.accountId === account.accountId) {
+      saveEnrolment({
+        ...saved,
+        epoch: prepared.epoch,
+        pinSeq: confirmed.headSeq,
+        pinHead: confirmed.head
+      })
+    }
+    // The peer list and the new-device baseline. Not fatal: the transition is
+    // confirmed above, and a relay that hiccups now must not leave the old
+    // keys behind or the sync state pinned to objects that are gone.
+    await this.refreshRoster().catch(() => undefined)
 
     /**
      * AND LET THE OLD KEYS GO, which nothing did.
