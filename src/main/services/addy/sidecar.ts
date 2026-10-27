@@ -44,6 +44,13 @@ interface Pending {
 
 const DEFAULT_TIMEOUT_MS = 30_000
 
+/**
+ * The longest line addyd will read (`maxRequestBytes` in its main.go; a test
+ * pins the two together). A longer one stops its reader for good, so it is
+ * refused here, before it is written, as what it is: too large.
+ */
+export const MAX_LINE_BYTES = 32 * 1024 * 1024
+
 export interface AddySidecar {
   send<T>(method: string, params?: unknown, timeoutMs?: number): Promise<T>
   close(): Promise<void>
@@ -186,8 +193,19 @@ export async function openAddyd(
           // id counter that wrapped or was recycled would allow.
           reject(new AddyError('internal', `addyd did not answer ${method} within ${timeoutMs}ms`))
         }, timeoutMs)
+        const line = JSON.stringify({ id, method, params }) + '\n'
+        if (Buffer.byteLength(line) > MAX_LINE_BYTES) {
+          clearTimeout(timer)
+          reject(
+            new AddyError(
+              'too-large',
+              `that is too large to ${method} (${(Buffer.byteLength(line) / 1024 / 1024).toFixed(1)} MB encoded; the limit is ${MAX_LINE_BYTES / 1024 / 1024} MB)`
+            )
+          )
+          return
+        }
         pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
-        child.stdin.write(JSON.stringify({ id, method, params }) + '\n')
+        child.stdin.write(line)
       })
     },
     close(): Promise<void> {

@@ -68,6 +68,10 @@ export interface AddyEnrolment {
    */
   pinSeq?: number
   pinHead?: string
+  /** The relay this account's epoch-1 signing key was last handed to
+   *  (POST /v1/roster/epoch1), so it is sent once per relay rather than on
+   *  every login. */
+  epoch1SentTo?: string
   /** When this machine joined, for the panel to show. */
   at: string
 }

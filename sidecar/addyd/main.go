@@ -47,6 +47,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"syscall"
@@ -60,7 +61,12 @@ var (
 	BuildSha = "unknown"
 )
 
-const maxRequestBytes = 8 << 20
+// The longest request line. Above the relay's 8 MiB request limit on purpose:
+// sealing a collection that still fits one request sends it here base64'd,
+// and opening one brings an 8 MiB object back the same way. The parent
+// refuses a longer line before writing it (sidecar.ts MAX_LINE_BYTES, pinned
+// to this by addyRelayContract.test.ts).
+const maxRequestBytes = 32 << 20
 
 func main() {
 	var (
@@ -100,10 +106,17 @@ func main() {
 	w := NewWriter(os.Stdout)
 	w.Log("info", fmt.Sprintf("addyd %s (%s) started as %s", Version, BuildSha, role))
 
-	serve(ctx, w, role, os.Stdin)
+	if err := serve(ctx, w, role, os.Stdin); err != nil {
+		// NOT the "parent closed" line and not exit 0. A request line longer
+		// than the limit stops the scanner for good; this used to log that
+		// the parent had gone and exit cleanly, so the parent saw a sidecar
+		// that quit for no reason in the middle of a transfer.
+		w.Log("error", fmt.Sprintf("stopping: reading a request failed: %v", err))
+		os.Exit(1)
+	}
 }
 
-func serve(ctx context.Context, w *Writer, role string, in *os.File) {
+func serve(ctx context.Context, w *Writer, role string, in io.Reader) error {
 	scanner := bufio.NewScanner(in)
 	scanner.Buffer(make([]byte, 0, 64<<10), maxRequestBytes)
 
@@ -125,10 +138,14 @@ func serve(ctx context.Context, w *Writer, role string, in *os.File) {
 		dispatch(ctx, w, role, req)
 	}
 
+	if err := scanner.Err(); err != nil {
+		return err
+	}
 	// stdin EOF means the parent is gone. Exiting is the orphan safety net: a
 	// sidecar that outlives its parent is a process holding keys with nobody
 	// watching it.
 	w.Log("info", "parent closed the connection; stopping")
+	return nil
 }
 
 func dispatch(ctx context.Context, w *Writer, role string, req Request) {

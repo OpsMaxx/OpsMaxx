@@ -192,7 +192,7 @@ class AddySession {
     this.relay = new RelayClient(
       { baseURL: account.baseURL, token: account.token, insecureTLS: this.insecureTLS },
       addyd,
-      () => this.signIn()
+      () => this.reauth()
     )
     this.account = account
   }
@@ -482,6 +482,10 @@ class AddySession {
         body: JSON.stringify({
           account: minted.accountId,
           root_sign_pub: minted.rootSignPub,
+          // So the relay can check every roster append by signature, not
+          // just by shape. It refuses the registration if this does not
+          // sign the genesis entry, which it always does from here.
+          epoch1_sign_pub: minted.epoch1SignPub,
           genesis: minted.genesis,
           escrow: minted.escrow,
           invite
@@ -541,8 +545,10 @@ class AddySession {
       rootSignPub: minted.rootSignPub,
       epoch1SignPub: minted.epoch1SignPub
     }
-    this.relay = new RelayClient({ baseURL: relay, token: '', insecureTLS: this.insecureTLS }, addyd, () =>
-      this.signIn()
+    this.relay = new RelayClient(
+      { baseURL: relay, token: '', insecureTLS: this.insecureTLS },
+      addyd,
+      () => this.reauth()
     )
 
     // LOG IN, which is the step that used to be missing entirely.
@@ -716,8 +722,70 @@ class AddySession {
       epoch1SignPub: account.epoch1SignPub ?? '',
       spki,
       insecureTLS: this.insecureTLS,
-      ...(known?.pinSeq !== undefined ? { pinSeq: known.pinSeq, pinHead: known.pinHead } : {})
+      ...(known?.pinSeq !== undefined ? { pinSeq: known.pinSeq, pinHead: known.pinHead } : {}),
+      ...(known?.epoch1SentTo ? { epoch1SentTo: known.epoch1SentTo } : {})
     })
+    // Not awaited: it is a request of its own, and this may be running as the
+    // re-login another request is waiting on.
+    void this.sendEpoch1()
+  }
+
+  /**
+   * The re-login a RelayClient runs when the relay has forgotten the session.
+   * A failure is said on the panel, not only in whichever sync error happens
+   * to carry it: a refused pin or a removed device is a reason the person
+   * has to see, and the banner is where reasons go.
+   */
+  private async reauth(): Promise<void> {
+    try {
+      await this.signIn()
+    } catch (err) {
+      this.lastProblem = `This device could not sign back in to ${this.account?.baseURL ?? 'the relay'}: ${err instanceof Error ? err.message : String(err)}`
+      this.announce()
+      throw err
+    }
+  }
+
+  /**
+   * Hands the relay this account's epoch-1 signing key, once per relay.
+   *
+   * WITH IT the relay checks each roster append's signature before storing
+   * it; without it, structure only — and a member could append an entry that
+   * no client accepts, leaving every device on a head nobody can verify. An
+   * account registered before the relay asked for the key never sent it, so
+   * it is sent after a login. The relay accepts it only if the whole stored
+   * chain verifies under it, so who sends it does not matter.
+   *
+   * Never fatal to sync. 400 (the stored chain does not verify under it) and
+   * 409 (the relay already holds a DIFFERENT key — which no honest relay
+   * should) are surfaced as a problem, and asked again on the next login.
+   */
+  private async sendEpoch1(): Promise<void> {
+    const account = this.account
+    const relay = this.relay
+    const key = account?.epoch1SignPub
+    if (!account || !relay || !key) return
+    if (loadEnrolment()?.epoch1SentTo === account.baseURL) return
+    let resp: Response
+    try {
+      resp = await relay.request('POST', '/v1/roster/epoch1', { epoch1_sign_pub: key })
+    } catch {
+      return // asked again at the next login
+    }
+    if (resp.ok) {
+      const saved = loadEnrolment()
+      if (saved && saved.accountId === account.accountId) {
+        saveEnrolment({ ...saved, epoch1SentTo: account.baseURL })
+      }
+      return
+    }
+    if (resp.status !== 400 && resp.status !== 409) return // a relay that predates the route
+    const detail = await relayDetail(resp)
+    this.lastProblem =
+      resp.status === 409
+        ? `${account.baseURL} already holds a different signing key for this account's device list than the one this device has. That should never happen on an honest relay; tell whoever runs it.${detail ? ` (${detail})` : ''}`
+        : `${account.baseURL} says this account's stored device list does not verify under the key this device has${detail ? ` (${detail})` : ''}. Sync continues, but the relay cannot check new entries.`
+    this.announce()
   }
 
   /**
@@ -1103,7 +1171,7 @@ class AddySession {
     this.relay = new RelayClient(
       { baseURL: ctx.baseURL, token: '', insecureTLS: this.insecureTLS },
       addyd,
-      () => this.signIn()
+      () => this.reauth()
     )
     await this.loginAndRecord()
     /**

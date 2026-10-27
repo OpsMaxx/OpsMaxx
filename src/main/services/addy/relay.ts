@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { AddyError, type AddySidecar } from './sidecar'
 
 /**
@@ -249,6 +250,18 @@ export class RelayClient {
    *  same moment, rather than one login each. */
   private reauthing: Promise<void> | null = null
 
+  /**
+   * A re-login that just FAILED, shared the same way.
+   *
+   * Without it each request of a sync pass found the session gone on its own,
+   * after the previous one's re-login had already failed, and tried again — a
+   * refused pin cost sixteen logins per pass, one per collection, each with
+   * the same answer. Kept for a minute: long enough to cover a pass, short
+   * enough that the next pass asks again.
+   */
+  private reauthFailed: { err: unknown; at: number } | null = null
+  private static readonly REAUTH_RETRY_MS = 60_000
+
   /** The token this client is using, so a session can persist it. */
   get token(): string {
     return this.cfg.token
@@ -369,6 +382,7 @@ export class RelayClient {
     if (!token) throw new AddyError('relay-unreachable', 'the relay issued no token.')
 
     this.cfg = { ...this.cfg, token }
+    this.reauthFailed = null
     return { token, spki }
   }
 
@@ -402,10 +416,15 @@ export class RelayClient {
     path: string,
     body?: Buffer
   ): Promise<SignedHeaders> {
+    // THE HASH, NOT THE BODY. It is all the signature covers — the relay
+    // rebuilds `protocol.HashBody(body)`: SHA-256, or 32 zero bytes for none —
+    // and the body itself, base64'd inside a JSON line, is what took addyd
+    // down on a 4.5 MB file: past its line limit, its reader stopped and it
+    // exited as if the app had quit.
     return this.addyd.send<SignedHeaders>('signRequest', {
       method,
       path,
-      body: body ? body.toString('base64') : ''
+      ...(body && body.length > 0 ? { bodyHash: createHash('sha256').update(body).digest('hex') } : {})
     })
   }
 
@@ -420,9 +439,22 @@ export class RelayClient {
     // ONCE, and then whatever the relay says stands. A login that fails throws
     // its own error, which says more than the 401 it replaces; a retry that
     // still 401s is reported as before rather than looping.
-    this.reauthing ??= this.reauth().finally(() => {
-      this.reauthing = null
-    })
+    if (this.reauthFailed && Date.now() - this.reauthFailed.at < RelayClient.REAUTH_RETRY_MS) {
+      throw this.reauthFailed.err
+    }
+    this.reauthing ??= this.reauth()
+      .then(
+        () => {
+          this.reauthFailed = null
+        },
+        (err: unknown) => {
+          this.reauthFailed = { err, at: Date.now() }
+          throw err
+        }
+      )
+      .finally(() => {
+        this.reauthing = null
+      })
     await this.reauthing
     return this.send(method, pathWithQuery, body, extraHeaders)
   }
@@ -457,6 +489,14 @@ export class RelayClient {
       path = raw
     }
     const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body), 'utf8')
+    if (payload && payload.length > MAX_REQUEST_BYTES) {
+      // Refused here, unsigned and unsent: the relay would answer 413 after
+      // reading 8 MiB of it, and nothing about a second attempt would differ.
+      throw new AddyError(
+        'too-large',
+        `that is too large for the relay, which accepts at most ${MAX_REQUEST_BYTES / 1024 / 1024} MB in one request (this one is ${(payload.length / 1024 / 1024).toFixed(1)} MB).`
+      )
+    }
     const { nonce, signature } = await this.signed(method, path, payload)
 
     const headers: Record<string, string> = {
