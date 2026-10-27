@@ -349,11 +349,40 @@ describe('pairing says what is at stake', () => {
     fireEvent.click(screen.getByRole('button', { name: /Show a code/ }))
     await screen.findByRole('button', { name: /They match/ })
     const text = document.body.textContent ?? ''
-    expect(text).toMatch(/gives that machine everything this account syncs: your servers, settings and vault/)
+    expect(text).toMatch(/gives that machine everything this account syncs: your servers, connections and vault/)
     expect(text).toMatch(/only if the other screen shows these same emoji/)
     expect(text).toMatch(/still waiting, or shows different emoji, someone else used the code/)
     // It is not "nothing is added until both sides agree": this one press adds.
     expect(text).not.toMatch(/both sides agree/)
+  })
+
+  it('tells a machine with its own servers and vault what joining does with them', async () => {
+    useApp.setState({ servers: [{ id: 'a' }, { id: 'b' }] as never })
+    stubBridge({
+      addy: { cancelPairing: vi.fn() },
+      vault: { status: vi.fn().mockResolvedValue({ exists: true, unlocked: false, stage: 'locked', entryCount: 0 }) }
+    })
+    render(<PairingPanel baseURL="https://relay.example" canShow={false} />)
+    fireEvent.click(screen.getByRole('button', { name: /Type a code/ }))
+    const note = await screen.findByText(/This machine already has 2 servers and a vault\. Joining keeps them\./)
+    const text = note.closest('[role="note"]')?.textContent ?? ''
+    expect(text).toMatch(/added to the account's/)
+    expect(text).toMatch(/set aside, not deleted/)
+    expect(text).toMatch(/this machine's master password/)
+    useApp.setState({ servers: [] })
+  })
+
+  it('says nothing about keeping things on a machine that has none', async () => {
+    useApp.setState({ servers: [] })
+    stubBridge({
+      addy: { cancelPairing: vi.fn() },
+      vault: { status: vi.fn().mockResolvedValue({ exists: false, unlocked: false, stage: 'locked', entryCount: 0 }) }
+    })
+    render(<PairingPanel baseURL="https://relay.example" canShow={false} />)
+    fireEvent.click(screen.getByRole('button', { name: /Type a code/ }))
+    await screen.findByPlaceholderText('Paste it here')
+    await act(async () => undefined)
+    expect(screen.queryByRole('note')).toBeNull()
   })
 
   it('shows the joiner which relay it is joining, and not the initiator\'s warning', async () => {

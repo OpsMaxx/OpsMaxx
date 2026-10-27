@@ -234,6 +234,7 @@ import {
   vaultList,
   vaultEntriesForResolve,
   vaultSave,
+  vaultMergeFrom,
   vaultChangePassword,
   vaultDestroy,
   vaultDispose,
@@ -4965,6 +4966,21 @@ ipcMain.handle('addy:resolveConflict', (_e, id: number, collection: string, chos
   addySession.resolveConflict(id, collection, chosen)
 )
 ipcMain.handle('addy:discardConflict', (_e, id: number) => addySession.discardConflict(id))
+// A vault set aside on first sync — this machine's own, most often — folded
+// into the one in use. Sync never opens a vault; this needs the master password
+// the other copy was made with, which only the person has.
+ipcMain.handle('addy:mergeVaultCopy', async (_e, id: number, password: string) => {
+  const copy = (await addySession.conflicts()).find((c) => c.id === id && c.collection === 'vault')
+  if (!copy || copy.losing === undefined) {
+    return { ok: false, error: copy?.problem ?? 'That copy is no longer on the relay.' }
+  }
+  const r = await vaultMergeFrom(JSON.stringify(copy.losing), String(password))
+  if (r.ok) {
+    await addySession.discardConflict(id)
+    void addySession.syncNow().catch(() => undefined)
+  }
+  return r
+})
 
 // Pairing. Three calls rather than one, because the user has to be able to
 // read the code aloud while the other device is still being found -- a single

@@ -424,6 +424,11 @@ const api = {
     /** Drop a copy without writing anything, for the user who looked at both
      *  and decided the winner was right. */
     discardConflict: (id: number): Promise<void> => ipcRenderer.invoke('addy:discardConflict', id),
+    mergeVaultCopy: (
+      id: number,
+      password: string
+    ): Promise<{ ok: true; added: number } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('addy:mergeVaultCopy', id, password),
 
     /**
      * Mint an account on a relay.

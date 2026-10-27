@@ -2,7 +2,7 @@ import { app } from 'electron'
 import { join } from 'node:path'
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { atomicWriteFileSync } from './atomicWrite'
-import { randomBytes, scrypt, createCipheriv, createDecipheriv } from 'node:crypto'
+import { randomBytes, randomUUID, scrypt, createCipheriv, createDecipheriv } from 'node:crypto'
 import type { VaultEntry, VaultListResult, VaultResult, VaultStage, VaultStatus } from '../../shared/vault'
 import { VAULT_LOCKED, VAULT_MIN_PASSWORD } from '../../shared/vault'
 
@@ -456,6 +456,54 @@ export function vaultSave(entries: VaultEntry[]): VaultResult {
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+/**
+ * Fold another copy of the vault into this one, by entry id.
+ *
+ * A machine that joins a sync account with its own vault adopts the account's
+ * and keeps its own as a conflict copy, because sync carries the vault as
+ * ciphertext and cannot open either. Picking one copy in the chooser threw the
+ * other's credentials away, and the servers that pointed at them by id with
+ * them. Opening the other copy needs the master password it was made with,
+ * which only the person has, so this is the one place both are open at once.
+ *
+ * Entries already here are kept as they are. One that exists in both under the
+ * same id with different contents is added as a separate entry with a new id
+ * rather than chosen between: a credential is not something to guess about.
+ */
+export async function vaultMergeFrom(
+  text: string,
+  password: string
+): Promise<{ ok: true; added: number } | { ok: false; error: string }> {
+  if (stage !== 'open' || !key || !salt || !cache) {
+    return { ok: false, error: `${VAULT_LOCKED}: the vault is locked.` }
+  }
+  let file: VaultFile
+  try {
+    file = JSON.parse(text) as VaultFile
+    if (typeof file?.salt !== 'string' || typeof file.data !== 'string') throw new Error()
+  } catch {
+    return { ok: false, error: 'The other copy is not a vault file.' }
+  }
+  let theirs: VaultEntry[]
+  try {
+    theirs = decrypt(file, await derive(password, Buffer.from(file.salt, 'base64'), kdfOf(file)))
+  } catch {
+    return { ok: false, error: 'That master password does not open the other copy.' }
+  }
+  const mine = new Map(cache.map((e) => [e.id, e]))
+  const merged = [...cache]
+  let added = 0
+  for (const e of theirs) {
+    const here = mine.get(e.id)
+    if (here && JSON.stringify(here) === JSON.stringify(e)) continue
+    merged.push(here ? { ...e, id: randomUUID(), name: `${e.name} (other copy)` } : e)
+    added++
+  }
+  if (added === 0) return { ok: true, added }
+  const r = vaultSave(merged)
+  return r.ok ? { ok: true, added } : { ok: false, error: r.error ?? 'The vault could not be saved.' }
 }
 
 export async function vaultChangePassword(current: string, next: string): Promise<VaultResult> {

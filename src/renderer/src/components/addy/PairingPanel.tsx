@@ -126,6 +126,58 @@ function mss(s: number | null): string {
  * Settings needs no rule: its copy unmounts when it is left, and unmounting
  * cancels.
  */
+/**
+ * What a joining machine already holds, said before it joins.
+ *
+ * Joining used to replace this machine's servers with the account's and set
+ * its own aside as one whole copy in a chooser; nothing on this screen said
+ * so. Lists now merge by id on the first sync, but the vault cannot — it is
+ * ciphertext under this machine's master password — and a person deciding to
+ * join should know which of their things will merge and which will be set
+ * aside for them.
+ */
+function JoinKeeps(): React.JSX.Element | null {
+  const servers = useApp((s) => s.servers.length)
+  const [vault, setVault] = useState(false)
+  useEffect(() => {
+    let live = true
+    void window.opsmaxx?.vault
+      ?.status()
+      .then((v) => live && setVault(v.exists))
+      .catch(() => undefined)
+    return () => {
+      live = false
+    }
+  }, [])
+  if (servers === 0 && !vault) return null
+  const what = [servers > 0 ? `${servers} server${servers === 1 ? '' : 's'}` : null, vault ? 'a vault' : null]
+    .filter(Boolean)
+    .join(' and ')
+  return (
+    <div className="setting-desc pair-keeps" role="note">
+      <p>
+        This machine already has {what}. Joining keeps them.
+      </p>
+      {servers > 0 && (
+        <p>
+          Your servers, workspaces, tunnels and other lists are added to the account&apos;s. One
+          that the account holds under the same identity with different details is kept both
+          ways, for you to choose between.
+        </p>
+      )}
+      {vault && (
+        <p>
+          Your vault cannot be merged automatically: it is encrypted with this machine&apos;s master
+          password. If the account already has a vault, that one takes its place here and yours is
+          set aside, not deleted. Sync &amp; devices then offers to add its entries to the
+          account&apos;s vault — you will need this machine&apos;s master password for that, and the
+          account&apos;s to unlock the vault afterwards.
+        </p>
+      )}
+    </div>
+  )
+}
+
 function useOnScreen(): boolean {
   const activity = useApp((s) => s.activity)
   const onPanel = useNav((s) => s.fleetRail === 'monitor' && s.monitorTab === 'addy')
@@ -433,7 +485,7 @@ export function PairingPanel({
           <>
             <p className="fine">
               Pressing <strong>They match</strong> gives that machine everything this account syncs:
-              your servers, settings and vault. Press it only if the other screen shows these same
+              your servers, connections and vault. Press it only if the other screen shows these same
               emoji.
             </p>
             <p className="fine">
@@ -607,9 +659,12 @@ export function PairingPanel({
               </button>
             </>
           ) : (
-            <button className="btn" disabled={splitTicket(typedTicket) === null} onClick={() => void join()}>
-              Join
-            </button>
+            <>
+              <JoinKeeps />
+              <button className="btn" disabled={splitTicket(typedTicket) === null} onClick={() => void join()}>
+                Join
+              </button>
+            </>
           )}
         </>
       )}

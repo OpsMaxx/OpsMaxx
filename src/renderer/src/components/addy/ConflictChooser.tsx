@@ -87,6 +87,9 @@ export function ConflictChooser(): React.JSX.Element | null {
   }
   /** Why the last button press did not work. It used to fail silently. */
   const [actError, setActError] = useState<string | null>(null)
+  /** The master password the set-aside vault was made with. Held only while
+   *  this dialog is on that conflict. */
+  const [otherPassword, setOtherPassword] = useState('')
   const dialog = useRef<HTMLDivElement>(null)
   const later = useRef<HTMLButtonElement>(null)
 
@@ -179,6 +182,8 @@ export function ConflictChooser(): React.JSX.Element | null {
     document.addEventListener('keydown', onTab)
     return () => document.removeEventListener('keydown', onTab)
   }, [currentId])
+
+  useEffect(() => setOtherPassword(''), [currentId])
 
   if (!current) return null
 
@@ -307,6 +312,42 @@ export function ConflictChooser(): React.JSX.Element | null {
                   it rather than after. */}
               Keep both ({combined} entries, duplicates and all)
             </button>
+          )}
+          {/* The vault cannot be shown or concatenated — it is ciphertext under
+              a master password — so choosing a whole copy was the only offer,
+              and on the evening a machine joined that meant throwing away one
+              machine's credentials. Opened with the password it was made
+              with, its entries can be added to the vault in use by id. */}
+          {current.collection === 'vault' && current.losing !== undefined && (
+            <form
+              className="conflict-vault-merge"
+              onSubmit={(e) => {
+                e.preventDefault()
+                act(() =>
+                  window.opsmaxx!.addy.mergeVaultCopy(current.id, otherPassword).then((r) => {
+                    if (!r.ok) throw new Error(r.error)
+                  })
+                )
+              }}
+            >
+              <label className="fine" htmlFor="conflict-vault-password">
+                Or add the set-aside copy&apos;s entries to the vault in use. Enter the master
+                password that copy was made with (if both machines used the same one, it is that
+                one). Nothing in use is replaced: identical entries are skipped, and one that
+                differs is added as &ldquo;(other copy)&rdquo;. The vault in use must be unlocked.
+              </label>
+              <input
+                id="conflict-vault-password"
+                type="password"
+                autoComplete="off"
+                value={otherPassword}
+                onChange={(e) => setOtherPassword(e.target.value)}
+                disabled={busy}
+              />
+              <button className="btn" type="submit" disabled={busy || otherPassword === ''}>
+                Add its entries to this vault
+              </button>
+            </form>
           )}
           {/* The way out. Nothing is written and nothing is lost: the copy
               stays on the relay and this comes back. */}

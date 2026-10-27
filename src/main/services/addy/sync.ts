@@ -432,6 +432,36 @@ async function syncCollection(
       return 'adopted'
     }
     if (!opened.payload.equals(body)) {
+      // A MACHINE THAT ALREADY HAD ITS OWN SERVERS, joining. Adopting the
+      // account's list and demoting this one's to a conflict copy took every
+      // server off the screen of the laptop that had them, recoverable only by
+      // picking one whole list over the other in the chooser. Records are
+      // identified, so the two lists are unioned by id against an empty
+      // ancestor: everything on either side is an add. A record both sides
+      // hold under one id with different contents is the only thing it will
+      // not decide, and that still takes the keep-both path below.
+      const union = mergeCollections({}, body, opened.payload)
+      if (union) {
+        const counter = opened.counter + 1
+        try {
+          // Pushed before anything lands here, as in `mergeOrConflict`.
+          const etag = await putSealed(deps, name, epoch, counter, union.merged, there.etag)
+          const landed = writeBack(deps, name, source, union.merged)
+          state.collections[name] = {
+            etag,
+            counter,
+            localHash: hash(landed),
+            base: baseOf(landed) ?? undefined,
+            at: Date.now()
+          }
+          return 'merged'
+        } catch (err) {
+          // Somebody wrote since the read above. Keep both against the fresh
+          // copy; the next pass has a base and merges from there.
+          if (!(err instanceof AddyError) || err.code !== 'conflict') throw err
+          return conflictWithRemote(deps, name, epoch, source, state, body)
+        }
+      }
       await keepAsConflict(deps, name, epoch, opened.counter + 1, body)
       const landed = writeBack(deps, name, source, opened.payload)
       state.collections[name] = {

@@ -214,6 +214,31 @@
   cursor: default;
 }
 
+/* Its own row: a password field squeezed between the buttons reads as one more
+   choice of equal weight, and it is the one that needs explaining. */
+.conflict-vault-merge {
+  flex-basis: 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.conflict-vault-merge label {
+  flex-basis: 100%;
+}
+
+.conflict-vault-merge input {
+  flex: 1;
+  min-width: 180px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  color: inherit;
+  font: inherit;
+}
+
 /* Pairing. */
 .pair-panel,
 .pair-compare {

@@ -164,6 +164,14 @@ const readBlob = (): Record<string, unknown> => {
 }
 
 /** What the relay would be holding if another device had pushed this. */
+/** What the relay holds for one collection, unwrapped from the fake seal. */
+function relayPayload(relay: ReturnType<typeof fakeRelay>, name: string): any {
+  const o = relay.objects.get(name)
+  if (!o) return undefined
+  const inner = JSON.parse(o.body.toString('utf8'))
+  return JSON.parse(Buffer.from(inner.payload, 'base64').toString('utf8'))
+}
+
 function seeded(relay: ReturnType<typeof fakeRelay>, name: string, value: unknown, counter = 1): void {
   relay.objects.set(name, {
     body: Buffer.from(
@@ -216,9 +224,11 @@ describe('a machine with nothing', () => {
     // in memory and rewrites it over the file on its next save — which fires
     // on a theme change or an opened tab — and the next pass pushes that
     // revert as the account's winner.
-    writeBlob({ servers: [{ id: 's1' }, { id: 'added-here' }] })
+    // One record, two different contents: the one thing a first-contact
+    // union will not decide.
+    writeBlob({ servers: [{ id: 's1', name: 'edited-here' }] })
     const relay = fakeRelay()
-    seeded(relay, 'servers', [{ id: 's1' }, { id: 'added-there' }])
+    seeded(relay, 'servers', [{ id: 's1', name: 'edited-there' }])
 
     const r = await syncOnce(deps(relay))
 
@@ -303,18 +313,73 @@ describe('a machine with data and an empty account', () => {
 })
 
 describe('both sides have a copy and this device has never synced', () => {
-  it('adopts the account and keeps its own copy rather than choosing for the user', async () => {
+  it('unions the two lists by id: a joining machine keeps its own servers and gains the account\'s', async () => {
     writeBlob({ servers: [{ id: 'local-only' }] })
     const relay = fakeRelay()
     seeded(relay, 'servers', [{ id: 'from-the-account' }])
 
     const r = await syncOnce(deps(relay))
 
+    expect(r.outcomes.servers).toBe('merged')
+    expect(readBlob().servers).toEqual([
+      { id: 'local-only', status: 'offline' },
+      { id: 'from-the-account', status: 'offline' }
+    ])
+    // On the relay too, so every other device gets this machine's servers.
+    expect(relayPayload(relay, 'servers').map((x: { id: string }) => x.id)).toEqual([
+      'local-only',
+      'from-the-account'
+    ])
+    expect(relay.conflicts).toEqual([])
+    // And the next pass agrees with it rather than merging again.
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('unchanged')
+  })
+
+  it('keeps both copies when one id holds different records on each side', async () => {
+    writeBlob({ servers: [{ id: 's1', name: 'here' }, { id: 'local-only' }] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 's1', name: 'there' }])
+
+    const r = await syncOnce(deps(relay))
+
     expect(r.outcomes.servers).toBe('conflicted')
     // The account wins, because it is the copy the rest of the devices agree
     // on — one story rather than two.
-    expect(readBlob().servers).toEqual([{ id: 'from-the-account', status: 'offline' }])
+    expect(readBlob().servers).toEqual([{ id: 's1', name: 'there', status: 'offline' }])
     // And nothing was destroyed. These bytes existed nowhere else.
+    expect(relay.conflicts.map((c) => c.name)).toContain('servers')
+  })
+
+  it('keeps both copies of a collection that is not a list of records', async () => {
+    writeBlob({ apiWorkspace: { activeTab: 'here' } })
+    const relay = fakeRelay()
+    seeded(relay, 'apiWorkspace', { activeTab: 'there' })
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.apiWorkspace).toBe('conflicted')
+    expect(relay.conflicts.map((c) => c.name)).toContain('apiWorkspace')
+  })
+
+  it('keeps both copies when another device writes between the read and the union', async () => {
+    writeBlob({ servers: [{ id: 'local-only' }] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'from-the-account' }])
+    const racing = {
+      ...relay,
+      putObject: async (n: string, e: number, c: number, b: Buffer, ifMatch?: string) => {
+        if (n === 'servers' && ifMatch !== undefined) {
+          seeded(relay, 'servers', [{ id: 'later' }], 2)
+          relay.objects.get('servers')!.etag = 'written-meanwhile'
+        }
+        return relay.putObject(n, e, c, b, ifMatch)
+      }
+    }
+
+    const r = await syncOnce(deps(racing as never))
+
+    expect(r.outcomes.servers).toBe('conflicted')
+    expect(readBlob().servers).toEqual([{ id: 'later', status: 'offline' }])
     expect(relay.conflicts.map((c) => c.name)).toContain('servers')
   })
 
@@ -618,10 +683,10 @@ describe('a state agreed with a different account', () => {
 
     const r = await syncOnce(elsewhere)
 
-    // A conflict, not a silent pull: the local estate survives on the relay
-    // as a copy the user can choose.
-    expect(r.outcomes.servers).toBe('conflicted')
-    expect(other.conflicts.map((c) => c.name)).toContain('servers')
+    // Not a silent pull: the local estate survives, merged into the new
+    // account's as a machine that joins it with its own servers does.
+    expect(r.outcomes.servers).toBe('merged')
+    expect((readBlob().servers as { id: string }[]).map((x) => x.id)).toEqual(['mine', 'theirs'])
   })
 })
 
@@ -717,11 +782,12 @@ describe('when something goes wrong', () => {
 
     const r = await syncOnce(deps(relay))
 
-    // With no memory of an agreement, a difference is a question for the user
-    // rather than an overwrite in either direction. That is what makes
-    // "resync everything" safe to offer at all.
-    expect(r.outcomes.servers).toBe('conflicted')
-    expect(relay.conflicts.length).toBeGreaterThan(0)
+    // With no memory of an agreement, a difference is never an overwrite in
+    // either direction: the lists are unioned, and only a record both sides
+    // hold differently goes to the user. That is what makes "resync
+    // everything" safe to offer at all.
+    expect(r.outcomes.servers).toBe('merged')
+    expect((readBlob().servers as { id: string }[]).map((x) => x.id)).toEqual(['s1', 'local-since'])
   })
 })
 
