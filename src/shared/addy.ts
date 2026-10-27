@@ -261,6 +261,14 @@ export interface ConflictCopy {
   /** Hex of the device that wrote the LOSING copy. */
   device: string
   createdAt: string
+  /**
+   * True when `device` and `createdAt` are only the relay's word: a copy kept
+   * by OpsMaxx 0.59.0, or one that could not be opened. False when both came
+   * from inside the sealed copy, where neither the relay nor a removed device
+   * can have written them. The chooser says which, because for the vault they
+   * are the whole basis of the choice.
+   */
+  reportedByRelay: boolean
   /** The losing copy's contents, unsealed. Absent when it could not be opened
    *  -- sealed under an epoch this device no longer holds, most likely -- with
    *  `problem` saying so. */

@@ -134,6 +134,44 @@ func TestAnotherCollectionsCiphertextWillNotOpen(t *testing.T) {
 	}
 }
 
+// A conflict copy is sealed as `conflict:<name>` (src/main/services/addy/
+// conflicts.ts) so that it is NOT a valid `<name>` object. Sealed under the
+// collection's own label it was: the relay could serve a copy the user had
+// rejected as the resolution, or an archived real object as a "conflict".
+// This is the AEAD, not the client, refusing both directions.
+func TestAConflictCopyIsNotTheRealObjectNorTheReverse(t *testing.T) {
+	_, epoch := loadTestAccount(t)
+	seal := func(label string) any {
+		t.Helper()
+		sealed, err := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{
+			"collection": label, "epoch": epoch, "schema": 1,
+			"writerVersion": "0.59.1", "counter": 2,
+			"payload": base64.StdEncoding.EncodeToString([]byte(`{"v":1}`)),
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sealed.(map[string]any)["sealed"]
+	}
+	open := func(label string, sealed any) error {
+		_, err := handleOpen(Request{Method: "open", Params: params(t, map[string]any{
+			"collection": label, "epoch": epoch, "sealed": sealed,
+			"knownSchema": 1, "seenCounter": 0,
+		})})
+		return err
+	}
+
+	if open("vault", seal("conflict:vault")) == nil {
+		t.Error("a conflict copy opened as the real vault")
+	}
+	if open("conflict:vault", seal("vault")) == nil {
+		t.Error("the real vault opened as a conflict copy")
+	}
+	if err := open("conflict:vault", seal("conflict:vault")); err != nil {
+		t.Errorf("a conflict copy did not open under its own label: %v", err)
+	}
+}
+
 // A counter that goes backwards is a replayed object, and the client must
 // refuse rather than apply it.
 func TestARewoundCounterIsRefusedWithItsOwnCode(t *testing.T) {

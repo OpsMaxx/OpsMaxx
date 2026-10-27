@@ -1710,7 +1710,12 @@ class AddySession {
     if (!this.addyd || !this.relay || !this.account) {
       throw new AddyError('not-paired', 'this device is not attached to an addy account')
     }
-    return { addyd: this.addyd, relay: this.relay, epoch: () => this.account!.epoch }
+    return {
+      addyd: this.addyd,
+      relay: this.relay,
+      epoch: () => this.account!.epoch,
+      floor: counterFloor
+    }
   }
 
   /**
