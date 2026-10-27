@@ -2252,6 +2252,16 @@ class AddySession {
     if (!addyd || !relay || !account) {
       throw new AddyError('not-paired', 'this device is not attached to an addy account')
     }
+    // NOT WITHOUT A PIN. With none saved the sidecar verifies unpinned, and an
+    // unpinned chain cut before a revoke entry in this same epoch passes —
+    // the re-key would seal the new key to the device it exists to exclude.
+    // A device that has never verified the roster has nothing to re-key from.
+    if (!this.rosterPin().havePin) {
+      throw new AddyError(
+        'roster-invalid',
+        'this device has not verified its device list yet, so it cannot re-key safely. Wait for a sync to finish, then try again.'
+      )
+    }
 
     const chain = await relay.roster()
     const prepared = await addyd.send<{

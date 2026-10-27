@@ -418,7 +418,7 @@ async function syncCollection(
     // gone, recoverable only through a chooser they have to know to open.
     if (!known && isEmptyish(local)) return 'unchanged'
 
-    const counter = (known?.counter ?? 0) + 1
+    const counter = floorOf(state, name) + 1
     try {
       const etag = await putSealed(deps, name, epoch, counter, local)
       state.collections[name] = { etag, counter, localHash: hash(local),
@@ -527,7 +527,7 @@ async function syncCollection(
   if (!localChanged && !remoteChanged) return 'unchanged'
 
   if (localChanged && !remoteChanged) {
-    const counter = known.counter + 1
+    const counter = floorOf(state, name) + 1
     try {
       const etag = await putSealed(deps, name, epoch, counter, body, known.etag)
       state.collections[name] = { etag, counter, localHash: hash(body),
@@ -543,7 +543,7 @@ async function syncCollection(
   }
 
   if (!localChanged && remoteChanged) {
-    const opened = await openObject(deps, name, epoch, there.body, known.counter)
+    const opened = await openObject(deps, name, epoch, there.body, floorOf(state, name))
     // A PULL THAT EMPTIES MOST OF A LIST keeps this device's copy first. An
     // empty list from one device used to land everywhere with nothing kept,
     // so one bad save (or one hostile device) could delete the estate from
@@ -607,7 +607,7 @@ async function mergeOrConflict(
 
   let opened
   try {
-    opened = await openObject(deps, name, epoch, fresh.body, known.counter)
+    opened = await openObject(deps, name, epoch, fresh.body, floorOf(state, name))
   } catch {
     // Cannot read the remote at all. That is the chooser's problem, not the
     // merge's, and conflictWithRemote already handles it without losing a copy.
@@ -638,7 +638,7 @@ async function mergeOrConflict(
   // collection that is not a list of records (the vault, known hosts), with
   // the account's older copy put on its screen in place of the edit.
   if (hash(opened.payload) === known.localHash) {
-    const counter = Math.max(opened.counter, known.counter) + 1
+    const counter = Math.max(opened.counter, floorOf(state, name)) + 1
     const etag = await putSealed(deps, name, epoch, counter, body, fresh.etag)
     state.collections[name] = { etag, counter, localHash: hash(body), base: baseOf(body) ?? undefined, at: Date.now() }
     return 'pushed'
@@ -650,7 +650,7 @@ async function mergeOrConflict(
   // Nothing is overwritten until the merged copy is on the relay. A write that
   // fails here leaves both sides exactly as they were, and the next pass sees
   // the same situation rather than a half-applied merge.
-  const counter = Math.max(opened.counter, known.counter) + 1
+  const counter = Math.max(opened.counter, floorOf(state, name)) + 1
   const etag = await putSealed(deps, name, epoch, counter, merged.merged, fresh.etag)
   // What landed, not what was pushed: the relay holds `merged.merged` and this
   // disk may hold a transformed copy of it, and the record has to describe the
@@ -687,7 +687,7 @@ async function conflictWithRemote(
   const fresh = await deps.relay.getObject(name, epoch)
   if (!fresh) {
     // It went away between the two reads. Nothing to conflict with.
-    const counter = (state.collections[name]?.counter ?? 0) + 1
+    const counter = floorOf(state, name) + 1
     const etag = await putSealed(deps, name, epoch, counter, local)
     state.collections[name] = { etag, counter, localHash: hash(local),
  base: baseOf(local) ?? undefined, at: Date.now() }
@@ -715,7 +715,7 @@ async function conflictWithRemote(
   if (opened.payload.equals(local)) {
     state.collections[name] = {
       etag: fresh.etag,
-      counter: Math.max(opened.counter, state.collections[name]?.counter ?? 0),
+      counter: Math.max(opened.counter, floorOf(state, name)),
       localHash: hash(local),
       base: baseOf(local) ?? undefined,
       at: Date.now()
@@ -737,7 +737,7 @@ async function conflictWithRemote(
     // NEVER BACKWARDS. The floor is a high-water mark; writing a lower number
     // here would re-enable, for every later pass, exactly the replay the
     // check above just refused.
-    counter: Math.max(opened.counter, state.collections[name]?.counter ?? 0),
+    counter: Math.max(opened.counter, floorOf(state, name)),
     localHash: hash(landed),
     base: baseOf(landed) ?? undefined,
     at: Date.now()
@@ -822,6 +822,8 @@ export function counterFloor(collection: string): number {
  *  screen, and each of those became another conflict to resolve. */
 export function forgetSyncState(only?: string[]): void {
   const state = loadState()
+  // Before anything is deleted, for the same reason as in forgetEpochState.
+  state.floors = floorsOf(state)
   if (only) {
     for (const name of only) delete state.collections[name]
     saveState(state)
@@ -856,6 +858,9 @@ function floorsOf(state: SyncState): Record<string, number> {
 
 export function forgetEpochState(): void {
   const state = loadState()
+  // Before the counters are zeroed: a state file written before floors
+  // existed carries them only in these entries.
+  state.floors = floorsOf(state)
   for (const entry of Object.values(state.collections)) {
     entry.etag = ''
     entry.counter = 0

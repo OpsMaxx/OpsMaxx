@@ -224,6 +224,27 @@ describe('a re-key', () => {
     expect(prepared.params).toMatchObject({ havePin: true, pinnedSeq: 3, pinnedHead: 'h3' })
   })
 
+  it('is refused on a device that has no pin yet, and writes nothing', async () => {
+    saveEnrolment({
+      baseURL: BASE,
+      accountId: ACCT,
+      epoch: 1,
+      rootSignPub: 'r'.repeat(64),
+      epoch1SignPub: 'e'.repeat(64),
+      spki: 'spki',
+      seenDevices: [ME]
+    })
+    const side = sidecar({ chainEpoch: 1, headSeq: 3, head: 'h3' })
+    attachFake(1, side)
+    const err = (await addySession.rotateEpoch('revocation', 'twelve words').catch((e: unknown) => e)) as {
+      code?: string
+    }
+    expect(err?.code).toBe('roster-invalid')
+    expect(side.calls.some((c) => c.method === 'rotateEpoch')).toBe(false)
+    expect(puts).toEqual([])
+    expect(appended).toEqual([])
+  })
+
   it('refuses a chain that ends before this device’s epoch, and writes nothing', async () => {
     enrol(2, 3, 'h3')
     keychain.set(`account|${ACCT}:account:2`, 'AK2')

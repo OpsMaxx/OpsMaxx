@@ -814,6 +814,53 @@ describe('when something goes wrong', () => {
     expect(readBlob().servers).toEqual([{ id: 'current', status: 'offline' }])
   })
 
+  it('keeps the floor through a re-key, so the relay cannot serve an older copy after it', async () => {
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'current' }], 7)
+    await syncOnce(deps(relay))
+
+    forgetEpochState()
+    seeded(relay, 'servers', [{ id: 'archived' }], 3)
+
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('failed')
+    expect(readBlob().servers).toEqual([{ id: 'current', status: 'offline' }])
+  })
+
+  it('writes a new object above the floor after a resync, so it does not lock itself out', async () => {
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'current' }], 7)
+    await syncOnce(deps(relay))
+
+    forgetSyncState()
+    // The relay lost the object (a restore, a move, or on purpose).
+    relay.objects.delete('servers')
+    writeBlob({ servers: [{ id: 'current' }, { id: 'new' }] })
+
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('pushed')
+    expect(relay.objects.get('servers')!.counter).toBeGreaterThan(7)
+    // And this device can read back what it wrote.
+    expect((await syncOnce(deps(relay))).outcomes.servers).not.toBe('failed')
+  })
+
+  it('keeps the floor from a state file written before floors existed', async () => {
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'current' }], 7)
+    await syncOnce(deps(relay))
+    // A 0.59.0 state file: counters in the entries, no floors.
+    const path = join(userData, SYNC_STATE_FILE)
+    const old = JSON.parse(readFileSync(path, 'utf8'))
+    delete old.floors
+    writeFileSync(path, JSON.stringify(old))
+
+    forgetEpochState()
+    seeded(relay, 'servers', [{ id: 'archived' }], 3)
+
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('failed')
+  })
+
   it('keeps this device\'s copy when a pull would remove most of a list', async () => {
     const six = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({ id }))
     writeBlob({ servers: six })
