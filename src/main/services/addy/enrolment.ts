@@ -72,6 +72,14 @@ export interface AddyEnrolment {
    *  (POST /v1/roster/epoch1), so it is sent once per relay rather than on
    *  every login. */
   epoch1SentTo?: string
+  /**
+   * Every device (`pub_sign`, hex) on the last roster this machine verified,
+   * plus any it added itself. What "a device was added" is measured against —
+   * on disk, so a device added while this machine was shut down still raises
+   * the alert on its next launch. Absent means "never compared", which raises
+   * nothing: the first verified roster is a baseline, not news.
+   */
+  seenDevices?: string[]
   /** When this machine joined, for the panel to show. */
   at: string
 }
@@ -90,6 +98,11 @@ export function saveEnrolment(e: Omit<AddyEnrolment, 'at'> & { at?: string }): v
     JSON.stringify(
       {
         ...e,
+        // Carried unless the caller names it, like `at` below. Most callers
+        // rebuild the record field by field and would otherwise drop it — and
+        // a dropped baseline silently swallows the next new-device alert.
+        seenDevices:
+          e.seenDevices ?? (existing?.accountId === e.accountId ? existing.seenDevices : undefined),
         // The date this machine FIRST joined, not the date of the last login.
         // Re-stamping on every resume would make a year-old enrolment read as
         // this morning's, which is the same mistake the machine-grant record

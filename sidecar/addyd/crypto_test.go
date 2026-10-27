@@ -599,6 +599,10 @@ func TestRecoveringAnAccountFromThePhraseAlone(t *testing.T) {
 	if added, _ := recoveredRow["mnemonicAdded"].(bool); !added {
 		t.Fatal("the recovered device is not marked as added with the recovery phrase")
 	}
+	// The panel's "added on" and the new-device alert read this; it was never sent.
+	if at, _ := recoveredRow["addedAt"].(uint64); at == 0 {
+		t.Fatalf("the recovered device carries no addedAt (row: %v)", recoveredRow)
+	}
 
 	// And it can read the account's data, which is the point of all of it.
 	if _, err := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{

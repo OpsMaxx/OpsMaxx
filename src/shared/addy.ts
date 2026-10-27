@@ -310,8 +310,13 @@ export interface AddyStatusDevice {
   self: boolean
   /** Epoch ms the relay last saw it. `null` when it does not report that. */
   lastSeen: number | null
-  /** Epoch ms it joined the account. `null` when unknown. */
+  /** Epoch ms it joined the account, from the timestamp in the verified roster
+   *  entry that added it (the adding device's clock). `null` when unknown. */
   addedAt: number | null
+  /** The verified roster's add entry for it was signed with the recovery-phrase
+   *  (root) key — "added with the recovery phrase", which every other device
+   *  should be told about loudly in case it was not the owner. */
+  addedWithPhrase: boolean
   revoked?: boolean
 }
 

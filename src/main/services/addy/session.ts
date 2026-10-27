@@ -24,7 +24,7 @@ import {
   type SyncedCollection
 } from '../../../shared/addy'
 import { app } from 'electron'
-import { counterFloor, forgetSyncState, syncOnce, type SyncResult } from './sync'
+import { counterFloor, forgetEpochState, forgetSyncState, syncOnce, type SyncResult } from './sync'
 import { SOURCES } from './collections'
 import { revocationState, runRevocationWipe } from './revoke'
 import { deleteAllData } from '../backup'
@@ -62,6 +62,8 @@ export interface AddyRoster {
     pubEnc: string
     epoch: number
     mnemonicAdded: boolean
+    /** Epoch ms from the add entry's own timestamp. Absent from an older addyd. */
+    addedAt?: number
     /** The pseudonym, opened in the sidecar. Absent when this device does not
      *  hold the profile key of the epoch that device was added in — the
      *  ordinary state for one that joined after a rotation, not an error. */
@@ -141,6 +143,21 @@ class AddySession {
    *  copies neither user caused. */
   private syncing = false
   private syncTimer: NodeJS.Timeout | null = null
+  /** The user pressed Pause. Kept across a re-attach — a laptop lid closing
+   *  and opening is not the user changing their mind. */
+  private paused = false
+  /** Down because the vault locked, so the vault coming back is what brings
+   *  this back. Never set by a detach the user asked for. */
+  private lockedOut = false
+  /** Bumped by anything that means "stay down", so a re-attach loop already
+   *  waiting out its back-off gives up instead of undoing it. */
+  private reattachGen = 0
+  /** When the sidecar last died on its own, for the restart budget. */
+  private crashes: number[] = []
+  /** Back-off between automatic re-attach attempts: bounded, and the last one
+   *  is the end of it — the banner and its Try again take over from there. */
+  private reattachDelays = [0, 2_000, 10_000, 30_000, 120_000]
+  private deviceAddedCb: ((d: { id: string; label: string; addedWithPhrase: boolean }) => void) | null = null
 
   /** True once a device is attached to an account and the sidecar is up. */
   get attached(): boolean {
@@ -159,7 +176,7 @@ class AddySession {
     log?: (line: string) => void
   ): Promise<void> {
     await this.detach()
-    const addyd = await openAddyd('--crypto', log)
+    const addyd = await this.openCrypto(log)
     // ROOTSIGNPUB IS REQUIRED AND WAS NEVER SENT, and it cost every relaunch.
     //
     // `handleLoad` in the sidecar (crypto.go:160) refuses a load without it —
@@ -224,6 +241,82 @@ class AddySession {
     await held?.close()
   }
 
+  /** `addyd --crypto`, watched: a process that exits without being asked to
+   *  takes the session with it, and that must be said and repaired rather
+   *  than leave every sync, clipboard and roster call failing in silence. */
+  private async openCrypto(log?: (line: string) => void): Promise<AddySidecar> {
+    const addyd: AddySidecar = await openAddyd('--crypto', log, (reason) => void this.sidecarExited(addyd, reason))
+    return addyd
+  }
+
+  /**
+   * The sidecar went away and nobody asked it to.
+   *
+   * IT USED TO BE SILENT. The account object stayed, `attached` turned false,
+   * and every pass, clipboard hotkey and roster read failed against a dead
+   * pipe with no banner and nothing that would ever start it again. Now the
+   * panel says so and the session is rebuilt — a bounded number of times, so a
+   * binary that dies on every start is reported rather than respawned for ever.
+   */
+  private async sidecarExited(which: AddySidecar, reason: string): Promise<void> {
+    if (which !== this.addyd || this.account === null) return
+    const now = Date.now()
+    this.crashes = [...this.crashes.filter((t) => now - t < 10 * 60_000), now]
+    const giveUp = this.crashes.length > 3
+    this.lastProblem = giveUp
+      ? `The sync helper (addyd) keeps stopping (${reason}; ${this.crashes.length} times in ten minutes). Sync is off until you press Try again.`
+      : `The sync helper (addyd) stopped unexpectedly (${reason}). Reconnecting…`
+    await this.detach()
+    this.announce()
+    if (!giveUp) void this.reattach()
+  }
+
+  /**
+   * Bring the session back after a detach nobody asked for, with back-off.
+   *
+   * The whole path, via `reconnect`, for the reason that gives. Stops as soon
+   * as something else attached it, the enrolment is gone, or anything bumped
+   * `reattachGen` — the vault locking again, or the user leaving.
+   */
+  private async reattach(): Promise<void> {
+    const gen = ++this.reattachGen
+    for (const delay of this.reattachDelays) {
+      if (delay > 0) await new Promise((r) => setTimeout(r, delay).unref?.())
+      if (gen !== this.reattachGen || loadEnrolment() === null) return
+      if (this.attached && this.account?.token) return
+      if ((await this.reconnect()).ok) return
+      this.announce()
+    }
+  }
+
+  /**
+   * The vault is locking: stop holding the account key, and SAY so.
+   *
+   * The detach is the point — the sidecar holds the account key in memory and
+   * locking is exactly when it should stop. What was missing was everything
+   * after it: no banner, and nothing that ever attached again, so closing the
+   * lid (suspend locks the vault) turned sync, received files, the clipboard
+   * hotkeys and revocation detection off until OpsMaxx was restarted, while
+   * the panel's Resume answered "not signed in yet".
+   */
+  async detachForVaultLock(): Promise<void> {
+    this.reattachGen++
+    const enrolled = this.account !== null || loadEnrolment() !== null
+    await this.detach()
+    if (!enrolled) return
+    this.lockedOut = true
+    this.lastProblem = 'Sync is paused while the vault is locked — unlock to resume.'
+    this.announce()
+  }
+
+  /** The vault is usable again — unlocked, or (on wake) there is none to wait
+   *  for. Only undoes a lock: a session the user paused or left stays so. */
+  resumeAfterVaultLock(): void {
+    if (!this.lockedOut) return
+    this.lockedOut = false
+    void this.reattach()
+  }
+
   /**
    * Try again, without quitting the app.
    *
@@ -270,6 +363,7 @@ class AddySession {
    * forget they flipped, and the symptom is silence.
    */
   pauseSync(): void {
+    this.paused = true
     this.stopSync()
     // Said, not just done. `sync.running` is read from the timer, and nothing
     // pushed the change, so the panel went on reading "syncing" over a paused
@@ -284,6 +378,7 @@ class AddySession {
     if (this.account === null || this.account.token === '') {
       return { ok: false, problem: 'This device is not signed in to the relay yet.' }
     }
+    this.paused = false
     this.startSync()
     return { ok: true }
   }
@@ -367,6 +462,9 @@ class AddySession {
     // take this device for revoked. `leaving` makes the wipe stand down until
     // the detach below, after which there is no account for it to fire on.
     this.leaving = true
+    this.reattachGen++
+    this.lockedOut = false
+    this.paused = false
     this.stopSync()
     if (this.account !== null && this.addyd !== null && this.relay !== null) {
       try {
@@ -452,7 +550,7 @@ class AddySession {
 
     await this.detach()
     this.insecureTLS = insecureTLS
-    const addyd = await openAddyd('--crypto')
+    const addyd = await this.openCrypto()
     this.addyd = addyd
 
     const minted = await addyd.send<{
@@ -617,8 +715,9 @@ class AddySession {
     // A token is exactly what the engine was waiting for. Started here rather
     // than at each call site, because every path that ends with this device
     // authenticated — launch, minting, joining — should end with it syncing,
-    // and three call sites is three chances to forget one.
-    this.startSync()
+    // and three call sites is three chances to forget one. Unless the user
+    // paused it: this also runs when a lock or a crash is repaired.
+    if (!this.paused) this.startSync()
   }
 
   /**
@@ -903,7 +1002,7 @@ class AddySession {
 
   async beginPairing(baseURL: string): Promise<{ code: string; pairingId: string }> {
     await this.cancelPairing()
-    const addyd = this.addyd ?? (await openAddyd('--crypto'))
+    const addyd = this.addyd ?? (await this.openCrypto())
     this.addyd ??= addyd
 
     const abort = new AbortController()
@@ -940,7 +1039,7 @@ class AddySession {
   ): Promise<PairingConfirmation> {
     await this.cancelPairing()
     this.insecureTLS = insecureTLS
-    const addyd = this.addyd ?? (await openAddyd('--crypto'))
+    const addyd = this.addyd ?? (await this.openCrypto())
     this.addyd ??= addyd
     const abort = new AbortController()
     this.pairing = { id: pairingId, abort }
@@ -1047,6 +1146,13 @@ class AddySession {
       label: label?.trim() || confirmation.self?.label || `device ${peerPubSign.slice(0, 8)}`
     })
     await relay.appendRoster(entry.seq, entry.entry)
+    // THIS MACHINE ADDED IT, so it is not news here. Recorded on disk at once
+    // rather than left to the roster read below, which may fail and leave the
+    // next launch alerting the person about the device they just paired.
+    const seen = loadEnrolment()
+    if (seen?.seenDevices && !seen.seenDevices.includes(peerPubSign)) {
+      saveEnrolment({ ...seen, seenDevices: [...seen.seenDevices, peerPubSign] })
+    }
 
     // The counter is chosen HERE and travels beside the blob, because the
     // joiner has to pass it back to open one: it is bound into the sealed
@@ -1276,6 +1382,7 @@ class AddySession {
         pubEnc: string
         epoch: number
         mnemonicAdded: boolean
+        addedAt?: number
         label?: string
       }[]
       selfListed: boolean
@@ -1368,9 +1475,50 @@ class AddySession {
     if (saved && verified.headSeq > (saved.pinSeq ?? -1)) {
       saveEnrolment({ ...saved, pinSeq: verified.headSeq, pinHead: verified.head })
     }
+    this.noticeNewDevices(verified.devices, me.devicePub)
 
     this.announce()
     return roster
+  }
+
+  /**
+   * Say so when the account gains a device this machine did not add.
+   *
+   * DESIGN.md asks for "a notification naming the device", and nothing ever
+   * raised one: a stranger holding the recovery phrase could add a machine
+   * that then read everything, and every other device showed one more row in
+   * a list nobody was looking at. The roster had the fact all along —
+   * `mnemonicAdded` was computed and dropped.
+   *
+   * Measured against the set on disk, not the last in-memory roster, so a
+   * device added while this machine was off is reported at its next launch.
+   * No set on disk is a baseline, not news. This device and any device it
+   * added itself (`completePairing` records those) are never reported.
+   */
+  private noticeNewDevices(devices: AddyRoster['devices'], self: string): void {
+    const saved = loadEnrolment()
+    if (!saved || saved.accountId !== this.account?.accountId) return
+    const ids = devices.map((d) => d.pubSign)
+    const before = saved.seenDevices
+    if (before) {
+      for (const d of devices) {
+        if (d.pubSign === self || before.includes(d.pubSign)) continue
+        this.deviceAddedCb?.({
+          id: d.pubSign,
+          label: d.label ?? `device ${d.pubSign.slice(0, 8)}`,
+          addedWithPhrase: d.mnemonicAdded
+        })
+      }
+    }
+    if (!before || ids.length !== before.length || ids.some((id) => !before.includes(id))) {
+      saveEnrolment({ ...saved, seenDevices: ids })
+    }
+  }
+
+  /** Told about each device that appears on the account without this machine
+   *  having added it. Registered once, by main, which raises the alert. */
+  onDeviceAdded(cb: (d: { id: string; label: string; addedWithPhrase: boolean }) => void): void {
+    this.deviceAddedCb = cb
   }
 
   /**
@@ -1614,10 +1762,13 @@ class AddySession {
               // least true -- unlike a made-up "Device 2".
               label: d.label ?? `device ${d.pubSign.slice(0, 8)}`,
               self: d.pubSign === roster.self,
-              // Neither is reported by the relay. `null`, so the panel says
-              // "not reported" instead of drawing 1970 or "just now".
+              // Not reported by the relay. `null`, so the panel says "not
+              // reported" instead of drawing 1970 or "just now".
               lastSeen: null,
-              addedAt: null
+              // From the verified add entry: the time the ADDING device wrote
+              // on it. `null` from a sidecar too old to send it.
+              addedAt: d.addedAt ?? null,
+              addedWithPhrase: d.mnemonicAdded
             }))
           }
         : {}),
@@ -1991,9 +2142,10 @@ class AddySession {
       spki: loadEnrolment()?.spki ?? '',
       insecureTLS: this.insecureTLS
     })
-    // Every pinned ETag and counter was against the old epoch's objects. The
-    // next pass reconciles from scratch, which is what should happen.
-    forgetSyncState()
+    // Every pinned ETag and counter was against the old epoch's objects, so
+    // those go. What this device last agreed to does not, or an edit it has
+    // not pushed yet is reverted on the next pass — see `forgetEpochState`.
+    forgetEpochState()
     return true
   }
 
@@ -2170,9 +2322,9 @@ class AddySession {
       }
     }
     // The sync state pins per-collection ETags and counters against the old
-    // epoch's objects, none of which apply now. Forgetting it makes the next
-    // pass reconcile from scratch, which is exactly what should happen.
-    forgetSyncState()
+    // epoch's objects, none of which apply now. Only those go — see
+    // `forgetEpochState` for what an edit not yet pushed needs kept.
+    forgetEpochState()
     void this.syncNow().catch(() => undefined)
 
     return { epoch: prepared.epoch, resealed }
@@ -2211,7 +2363,7 @@ class AddySession {
 
     await this.detach()
     this.insecureTLS = insecureTLS
-    const addyd = await openAddyd('--crypto')
+    const addyd = await this.openCrypto()
     this.addyd = addyd
 
     try {
@@ -2540,10 +2692,12 @@ class AddySession {
       source.write(Buffer.from(JSON.stringify(chosen), 'utf8'))
       if (source.inRendererStore) this.appliedCb?.([collection as SyncedCollection])
     }
-    // The next pass reconciles the counters and the ETag from scratch rather
-    // than from a record written here, which would be a second place the
-    // bookkeeping is done and a second place to get it wrong.
-    forgetSyncState()
+    // The next pass reconciles THIS collection's counter and ETag from scratch
+    // rather than from a record written here, which would be a second place
+    // the bookkeeping is done and a second place to get it wrong. Only this
+    // one: every other collection's agreement is still true, and forgetting it
+    // turned each unpushed edit elsewhere into a fresh conflict.
+    forgetSyncState([collection])
     void this.syncNow().catch(() => undefined)
   }
 

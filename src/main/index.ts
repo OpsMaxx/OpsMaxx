@@ -394,6 +394,7 @@ import { vaultWaiting } from './services/vaultWaiting'
 import { clearRevocation, revocationState } from './services/addy/revoke'
 import { sshAgent } from './services/sshAgent/service'
 import { addySession } from './services/addy/session'
+import { holdSyncedKeys, rendererReloaded } from './services/addy/collections'
 import { discardTransfer, pendingFiles } from './services/addy/transfer'
 import type { PairingConfirmation } from './services/addy/pairing'
 import { previewBitwardenImport } from './services/import/bitwarden'
@@ -5090,6 +5091,28 @@ addySession.onApplied((collections) => {
 addySession.watch((snapshot) => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('addy:status', snapshot)
 })
+// A DEVICE JOINED THAT THIS MACHINE DID NOT ADD. DESIGN.md asks for a
+// notification naming it, and it is the only way somebody learns that a
+// stranger with their recovery phrase now reads everything they sync. An OS
+// notification rather than the panel: nobody is looking at the panel.
+addySession.onDeviceAdded((d) => {
+  if (!Notification.isSupported()) return
+  const n = new Notification({
+    title: d.addedWithPhrase ? 'A device was added with your recovery phrase' : 'A new device was added',
+    body: d.addedWithPhrase
+      ? `“${d.label}” can now read everything you sync. If this was not you, your recovery phrase is exposed: remove it in Sync & devices and change the account key.`
+      : `“${d.label}” can now read everything you sync. If you do not recognise it, remove it in Sync & devices.`,
+    icon: appIcon()
+  })
+  n.on('click', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore()
+      mainWindow.show()
+      mainWindow.focus()
+    }
+  })
+  n.show()
+})
 
 // Files, to one of your own devices. The bytes go into the object store
 // sealed; the mailbox carries a pointer — see services/addy/transfer.ts for
@@ -5700,6 +5723,9 @@ const resumeChecksAfterUnlock = (r: { ok: boolean }): { ok: boolean } => {
     // the user has already done the one thing that clears it, which reads as
     // the unlock not having worked.
     backupResumeAfterUnlock()
+    // And sync, which the lock took down on purpose and nothing brought back:
+    // closing the lid turned it off until OpsMaxx was restarted.
+    addySession.resumeAfterVaultLock()
   }
   return r
 }
@@ -5733,8 +5759,9 @@ const lockVaultFully = (): VaultResult => {
   // must not diverge.
   sshAgent.onVaultLocked()
   // The addy sidecar holds the account key in memory; the vault locking is
-  // exactly the moment it should stop holding it.
-  void addySession.detach()
+  // exactly the moment it should stop holding it. The panel says why sync
+  // stopped, and the unlock path above brings it back.
+  void addySession.detachForVaultLock()
   // A global shortcut outliving the process would be a key combination nothing
   // answers, held until the OS notices we are gone.
   globalShortcut.unregisterAll()
@@ -5863,8 +5890,17 @@ ipcMain.on('debug:event', (_e, kind: unknown, message: unknown, stack: unknown) 
 })
 
 // ---- Data persistence ----
-ipcMain.handle('data:load', () => loadData())
-ipcMain.handle('data:save', (_e, data: unknown) => {
+ipcMain.handle('data:load', () => {
+  // The renderer reads the file to reload what sync wrote, so from here what
+  // it saves is no older than that write. See `holdSyncedKeys`.
+  rendererReloaded()
+  return loadData()
+})
+ipcMain.handle('data:save', (_e, incoming: unknown) => {
+  // A save queued before the renderer heard about a sync write carries the
+  // pre-sync copy of that collection; written as sent, it reverts the pull and
+  // the next pass pushes the revert to every device.
+  const data = holdSyncedKeys(incoming)
   saveData(data)
   // The local terminal's kill switch is a renderer setting, but a renderer-side
   // flag stops only the honest UI — a compromised renderer would call
@@ -6500,6 +6536,11 @@ app.whenReady().then(() => {
   powerMonitor.on('resume', () => {
     historyStore?.recordEvent(SAMPLING_RESUMED, null, { reason: 'wake' })
     void fleetSampler.sampleNow()
+    // Suspend detached sync with the vault lock. With no vault there is
+    // nothing to unlock, so nothing else would ever bring it back; with one,
+    // the unlock does, and waking alone must not undo the lock.
+    const vault = vaultStatus()
+    if (!vault.exists || vault.unlocked) addySession.resumeAfterVaultLock()
   })
 
   /**
