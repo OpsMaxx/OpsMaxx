@@ -60,6 +60,7 @@ Any device on the account can add the next one. There is no main device.
 - Sync runs on its own every five minutes. **Sync now** runs a pass straight away.
 - **Files** sends a file to one of your other machines. It waits on the relay if that machine is asleep. Received files are listed, never opened for you, and are deleted after a week.
 - **Send and receive the clipboard with a keystroke** is off until you turn it on. `Cmd/Ctrl+Shift+C` sends this clipboard to your other devices and `Cmd/Ctrl+Shift+V` takes the newest one sent here. These shortcuts are taken from every application while OpsMaxx runs.
+- A clipboard or file is encrypted for the one device it is sent to and signed by the device that sent it. The receiving machine accepts it only from a device still on its device list, so a removed device can neither read nor send one. Both machines need OpsMaxx 0.59.1 or later.
 - **Pause sync** stops carrying data without leaving the account. It lasts until OpsMaxx next opens.
 
 ### 4. When the same thing changed on two devices
@@ -112,6 +113,7 @@ When it finishes it tells you how many devices are on the account. The screen st
 | A link that does nothing but show a message | The link was refused, for example because its relay is not `https`. The message says why. |
 | *That pairing link is for a machine joining an account* | The link was opened on a machine that is already on an account. Open it on the machine you are adding. |
 | *… speaks a different addy protocol version than this copy of OpsMaxx* | OpsMaxx and the relay disagree on the protocol version. Update OpsMaxx; if it is already current, whoever runs the relay needs to update it. |
+| *It was sent by an older version of OpsMaxx … Update OpsMaxx on the sending device.* | A clipboard or file came from a machine running OpsMaxx 0.59.0 or earlier, which cannot prove which device sent it, so it was not used. Update OpsMaxx on that machine and send it again. |
 | *that file is … MB and the limit is … MB* | Files sent between your devices go through the relay, which takes about 6 MB in one request. Use a file-transfer tool for anything bigger. |
 
 ## Related

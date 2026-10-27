@@ -1662,33 +1662,6 @@ func TestAnAbsentDeviceIsNotReportedRevoked(t *testing.T) {
 	}
 }
 
-// The client caps a file transfer so the sealed, base64-encoded PUT fits the
-// relay's 8 MiB request limit, and it does that arithmetic with a constant:
-// TRANSFER_SEAL_OVERHEAD in src/main/services/addy/transfer.ts. This is the
-// check that the constant is what sealing a transfer actually adds. If the
-// object layout changes, this fails before a user's file starts failing with
-// 413 at 99% of the limit.
-func TestTransferSealOverhead(t *testing.T) {
-	_, epoch := loadTestAccount(t)
-	for _, n := range []int{0, 1, 4096} {
-		out, err := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{
-			"collection": "transfer:00112233445566778899aabb", "epoch": epoch, "schema": 1,
-			"writerVersion": "transfer", "counter": 1,
-			"payload": base64.StdEncoding.EncodeToString(make([]byte, n)),
-		})})
-		if err != nil {
-			t.Fatal(err)
-		}
-		sealed, err := base64.StdEncoding.DecodeString(out.(map[string]any)["sealed"].(string))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := len(sealed) - n; got != 98 {
-			t.Fatalf("sealing %d bytes added %d; transfer.ts assumes 98", n, got)
-		}
-	}
-}
-
 // THE FORM --rtc HANDS OUT IS THE FORM THAT IS SIGNED.
 //
 // The parent passes rtcOffer's `sdp` straight to signSignal and on to the

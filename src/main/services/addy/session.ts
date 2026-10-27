@@ -1357,6 +1357,9 @@ class AddySession {
    *  which is the honest answer: sending to a device list nobody checked is
    *  sending to whatever the relay said. */
   private roster: string[] = []
+  /** Each of those devices' encryption keys, from the same verified chain.
+   *  Mail is sealed to these (mail.ts), never to a key a relay supplied. */
+  private rosterEnc = new Map<string, string>()
 
   setRoster(devices: string[]): void {
     this.roster = devices
@@ -1453,6 +1456,7 @@ class AddySession {
 
     const me = await addyd.send<{ devicePub: string }>('whoami', {})
     this.roster = verified.devices.map((d) => d.pubSign).filter((id) => id !== me.devicePub)
+    this.rosterEnc = new Map(verified.devices.map((d) => [d.pubSign, d.pubEnc]))
 
     /**
      * THE REVOCATION SIGNAL, ACTED ON.
@@ -1717,6 +1721,7 @@ class AddySession {
     return {
       ...base,
       peers: () => this.roster,
+      peerEnc: (pubSign) => this.rosterEnc.get(pubSign),
       tryDirect: async (peerHex, sealed) => {
         const rtc = await this.ensureRtc()
         if (!rtc || !this.account || !this.addyd) return false
@@ -2882,7 +2887,7 @@ class AddySession {
 
   private transferDeps(): TransferDeps {
     const base = this.deps()
-    return { ...base, peers: () => this.roster }
+    return { ...base, peers: () => this.roster, peerEnc: (pubSign) => this.rosterEnc.get(pubSign) }
   }
 
   /** Empty rather than throwing when unattached.

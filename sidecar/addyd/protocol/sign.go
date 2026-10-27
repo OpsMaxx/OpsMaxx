@@ -34,6 +34,7 @@ const (
 	DomainRoster      = "addy-roster-v1"
 	DomainSignal      = "addy-signal-v1"
 	DomainEscrowWrite = "addy-escrow-write-v1"
+	DomainMail        = "addy-mail-v1"
 )
 
 // NonceLen is 32 bytes, drawn fresh for every signature.
@@ -215,6 +216,59 @@ func (w EscrowWrite) Encode() ([]byte, error) {
 		U64(w.Epoch).
 		U64(w.Counter).
 		Fixed(w.BodyHash).
+		Out(), nil
+}
+
+// Mail is what a device signs on a clipboard, a file notice, or anything else
+// it leaves for ONE other device.
+//
+// Mail was sealed under the account-wide epoch key with the recipient's name
+// as a label, and the sender was whatever the relay said it was. So every
+// holder of that key -- a removed device included, until the next re-key --
+// could read every clipboard, and could write one "from your desktop" that the
+// receiver pasted into a terminal. Mail is now sealed to the recipient's DK_enc
+// (see mail.go) and signed by the sender's DK_sign over this structure, and the
+// receiver checks the signer against the roster it verified itself.
+//
+// TO IS IN THE SIGNATURE, which is what stops a recipient re-sealing a mail it
+// was sent to a third device: sign-then-encrypt without the recipient inside
+// the signature lets any recipient forward a signed message as though it had
+// been addressed elsewhere. KIND is in it so a clipboard cannot be replayed as
+// a file notice. NONCE is the sender's own, per rule 2 above, and is what a
+// receiver remembers to refuse a replay; TS is what bounds how long it has to.
+type Mail struct {
+	AccountID   AccountID
+	Kind        string
+	From        []byte // fixed[32]; the sender's DK_sign public half
+	To          []byte // fixed[32]; the recipient's DK_sign public half
+	Nonce       []byte // fixed[32]
+	TS          uint64 // ms, the sender's clock
+	PayloadHash []byte // fixed[32]; SHA-256 of the payload
+}
+
+// Encode produces the exact bytes that get signed.
+func (m Mail) Encode() ([]byte, error) {
+	for name, p := range map[string][]byte{
+		"from":         m.From,
+		"to":           m.To,
+		"nonce":        m.Nonce,
+		"payload_hash": m.PayloadHash,
+	} {
+		if err := fixed(name, p, 32); err != nil {
+			return nil, err
+		}
+	}
+	if m.Kind == "" {
+		return nil, errors.New("protocol: mail needs a kind")
+	}
+	return NewEncoder(DomainMail).
+		Fixed(m.AccountID[:]).
+		Str(m.Kind).
+		Fixed(m.From).
+		Fixed(m.To).
+		Fixed(m.Nonce).
+		U64(m.TS).
+		Fixed(m.PayloadHash).
 		Out(), nil
 }
 

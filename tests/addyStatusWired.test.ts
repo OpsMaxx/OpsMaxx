@@ -734,12 +734,14 @@ describe('the relay is checked, not just written down', () => {
   })
 
   it('inbound mail has to come from a device still on the roster', () => {
-    // Opening proves somebody holding this epoch's key sealed it — which a
-    // device removed without a re-key still is.
-    const T = read('src/main/services/addy/transfer.ts')
-    const C = read('src/main/services/addy/clipboard.ts')
-    expect(T).toMatch(/peers\.has\(m\.fromDevice\)/)
-    expect(C).toMatch(/peers\.has\(m\.fromDevice\)/)
+    // Decided by the signature against the verified roster, which mail.ts
+    // hands the sidecar as `senders` — never by the relay's `fromDevice`,
+    // which a relay can set to any member. The behaviour is exercised in
+    // addyClipboardEcho and addyTransferArrival; this pins the wiring.
+    const M = read('src/main/services/addy/mail.ts')
+    expect(M).toMatch(/senders: deps\.peers\(\)/)
+    expect(read('src/main/services/addy/clipboard.ts')).not.toMatch(/from: m\.fromDevice/)
+    expect(read('src/main/services/addy/transfer.ts')).not.toMatch(/from: m\.fromDevice/)
   })
 })
 
