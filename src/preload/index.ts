@@ -326,6 +326,8 @@ export interface AddyRevocation {
 
 const api = {
   platform: (): Promise<NodeJS.Platform> => ipcRenderer.invoke('app:platform'),
+  /** This machine's hostname, as the OS reports it. */
+  hostname: (): Promise<string> => ipcRenderer.invoke('app:hostname'),
   // addy: the satellite relay. Sync, pairing and continuity.
   //
   // The renderer never holds a key and never sees one. Everything here either
@@ -544,6 +546,10 @@ const api = {
     pauseSync: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('addy:pauseSync'),
     resumeSync: (): Promise<{ ok: boolean; problem?: string }> =>
       ipcRenderer.invoke('addy:resumeSync'),
+    /** The link main is holding, if any, and forget it there. Main keeps every
+     *  link until this is called, so one that arrived before the window did is
+     *  not lost. */
+    takeLink: (): Promise<AddyLink | null> => ipcRenderer.invoke('addy:takeLink'),
     /** A link the OS handed us. It FILLS A FORM; it never acts. */
     onLink: (cb: (l: AddyLink) => void): (() => void) => {
       const h = (_e: unknown, l: AddyLink): void => cb(l)

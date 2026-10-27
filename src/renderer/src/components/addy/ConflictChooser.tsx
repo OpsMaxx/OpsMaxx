@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { GitMerge, AlertTriangle } from 'lucide-react'
 import type { AddyStatusDevice, ConflictCopy } from '../../../../shared/addy'
 import { approvalShowing } from '../../hooks/useClickOutside'
+import { deferConflict, useAddyUi } from '../../store/addy'
+import { collectionName as nameOf } from './collectionNames'
 
 /**
  * Two versions of the same thing, and a person deciding.
@@ -16,37 +18,6 @@ import { approvalShowing } from '../../hooks/useClickOutside'
  * what they do not want afterwards, which is a worse outcome than a real merge
  * and a much better one than silently losing an entry.
  */
-/**
- * What each collection is, in the words the app uses elsewhere.
- *
- * The heading printed the raw protocol id, so a user was asked about
- * `knownHosts`, `apiWorkspace` or `cicdConnections` — names from
- * `SYNCED_COLLECTIONS`, which exist so two implementations agree with each
- * other and not so anybody reads them.
- */
-const COLLECTION_NAMES: Record<string, string> = {
-  apiCollections: 'your HTTP collections',
-  apiWorkspace: 'your HTTP environments and variables',
-  cicdConnections: 'your CI/CD connections',
-  databases: 'your saved databases',
-  deviceNames: 'what you call your devices',
-  env: 'your environment variables',
-  folders: 'your folders',
-  httpChecks: 'your HTTP checks',
-  knownHosts: 'your trusted SSH host keys',
-  manifest: 'your provisioning manifest',
-  monitorGroups: 'your monitor groups',
-  servers: 'your servers',
-  tunnels: 'your tunnels',
-  vault: 'your vault',
-  vpns: 'your VPN profiles',
-  workspaces: 'your workspaces'
-}
-
-function nameOf(collection: string): string {
-  return COLLECTION_NAMES[collection] ?? collection
-}
-
 /**
  * Which machine made the copy that was set aside.
  *
@@ -94,19 +65,33 @@ export function ConflictChooser(): React.JSX.Element | null {
    * app. That is not a choice, it is a toll.
    *
    * Deferring changes nothing on the relay: the copy stays, the panel's
-   * attention tile keeps counting it, and the dialog comes back next launch.
+   * attention tile keeps counting it, and the dialog comes back next launch —
+   * or sooner, from "Review now" on Sync & devices, which is why this lives in
+   * a store the panel can reach rather than in this component.
    */
-  const [deferred, setDeferred] = useState<number[]>([])
+  const deferred = useAddyUi((s) => s.deferredConflicts)
   /** The roster, so the copy that was set aside can be named by the machine
    *  that made it. `undefined` until it arrives, and on a preload that has no
    *  `status` call at all — see `madeBy`. */
   const [devices, setDevices] = useState<AddyStatusDevice[] | undefined>(undefined)
 
+  // Kept as it was when the read fails. `conflicts()` reaches the relay, and a
+  // relay that is down for a minute is not a reason to close a dialog somebody
+  // is reading.
   const refresh = async (): Promise<void> => {
-    const list = await window.opsmaxx?.addy.conflicts()
-    setConflicts(list ?? [])
+    const list = await window.opsmaxx?.addy.conflicts().catch(() => undefined)
+    if (list !== undefined) setConflicts(list)
   }
 
+  /**
+   * READ ON EVERY STATUS PUSH AND EVERY RETURN TO THE WINDOW, not once.
+   *
+   * It used to fetch when the app opened and never again, so a conflict that
+   * a sync pass found an hour later was counted by the panel's attention tile
+   * and never offered here until the next launch. Every pass ends with a
+   * status push, which is exactly when a new one can have appeared; focus
+   * covers somebody who went to the other machine and came back.
+   */
   useEffect(() => {
     void refresh()
     // Optional, like every other bridge read on this screen: a window whose
@@ -116,6 +101,16 @@ export function ConflictChooser(): React.JSX.Element | null {
       (s) => setDevices(s.devices),
       () => undefined
     )
+    const off = window.opsmaxx?.addy?.onStatus?.((s) => {
+      if (s.devices !== undefined) setDevices(s.devices)
+      void refresh()
+    })
+    const onFocus = (): void => void refresh()
+    window.addEventListener('focus', onFocus)
+    return () => {
+      off?.()
+      window.removeEventListener('focus', onFocus)
+    }
   }, [])
 
   const current = conflicts.find((c) => !deferred.includes(c.id))
@@ -135,7 +130,7 @@ export function ConflictChooser(): React.JSX.Element | null {
     const onKey = (e: KeyboardEvent): void => {
       // An approval paints above this chooser, so an Escape then was meant for
       // it; see useClickOutside.
-      if (e.key === 'Escape' && !approvalShowing()) setDeferred((d) => [...d, currentId])
+      if (e.key === 'Escape' && !approvalShowing()) deferConflict(currentId)
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
@@ -181,8 +176,9 @@ export function ConflictChooser(): React.JSX.Element | null {
             Whichever version you keep, the other is deleted from the relay and cannot be brought
             back.
           </strong>{' '}
-          If you are not sure, <strong>Decide later</strong> leaves both exactly where they are and
-          brings this back next time.
+          If you are not sure, <strong>Decide later</strong> leaves both exactly where they are.
+          It comes back the next time OpsMaxx opens, or sooner from <strong>Review now</strong> on
+          Sync &amp; devices.
         </p>
 
         {current.problem && (
@@ -269,7 +265,7 @@ export function ConflictChooser(): React.JSX.Element | null {
           )}
           {/* The way out. Nothing is written and nothing is lost: the copy
               stays on the relay and this comes back. */}
-          <button className="btn ghost" disabled={busy} onClick={() => setDeferred((d) => [...d, current.id])}>
+          <button className="btn ghost" disabled={busy} onClick={() => deferConflict(current.id)}>
             Decide later
           </button>
         </div>

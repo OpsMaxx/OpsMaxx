@@ -339,6 +339,14 @@ documents:
     title: opsmaxx-netd
     hash: 4aa90adcfdb6a283
     lines: 559
+  sync-and-devices:
+    path: docs/08-user/guides/sync-and-devices.md
+    type: user.guide
+    authority: audience
+    visibility: public
+    title: "Sync & devices"
+    hash: 22825c45429d893e
+    lines: 106
   tests-probe-readme:
     path: tests/probe/README.md
     type: unknown

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { addyPairLink } from '../../../../shared/addyLink'
 import { AlertTriangle, Check, Copy, Loader2, Smartphone, X } from 'lucide-react'
 import { toast } from '../../store/toast'
+import { errorText } from '../../lib/connectionError'
 import type { AddyPairingConfirmation } from '../../../../shared/addy'
 
 /**
@@ -61,12 +62,41 @@ export function splitTicket(raw: string): { code: string; pairingId: string } | 
 // the shape a chat client produces when it wraps. It means the same thing.
 const cleanedSeparator = '.'
 
+/**
+ * How long a code is good for: `RENDEZVOUS_TIMEOUT_MS` in
+ * main/services/addy/pairing.ts, which this cannot import (it pulls the
+ * sidecar into the renderer). The waiting screen used to say the code worked
+ * "while this window is open", and it stopped working three minutes in.
+ */
+export const PAIRING_WINDOW_MS = 180_000
+
+/** `m:ss` until `deadline`, ticking once a second; `null` with no deadline. */
+function useTimeLeft(deadline: number | null): string | null {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (deadline === null) return undefined
+    setNow(Date.now())
+    const id = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(id)
+  }, [deadline])
+  if (deadline === null) return null
+  const s = Math.max(0, Math.ceil((deadline - now) / 1000))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 export function PairingPanel({
   baseURL,
-  canShow = true
+  canShow = true,
+  ticket: linkedTicket,
+  onHold
 }: {
   baseURL: string
   canShow?: boolean
+  /** A pairing code that arrived in a link, to fill in. Never joins by itself. */
+  ticket?: string
+  /** Told whether an exchange is in progress here, so the parent keeps this
+   *  mounted until it settles. See AddySetup's `joinHeld`. */
+  onHold?: (held: boolean) => void
 }): React.JSX.Element {
   const [stage, setStage] = useState<Stage>('choose')
   const [code, setCode] = useState('')
@@ -85,6 +115,21 @@ export function PairingPanel({
   // failure on a pairing that actually worked.
   const [busy, setBusy] = useState(false)
   const active = useRef(false)
+  /**
+   * WHICH EXCHANGE IS CURRENT. Every start, join and cancel takes a new
+   * number, and a result is used only if its number is still the current one.
+   *
+   * Without it a second Join reported the first one's cancellation as its own
+   * failure: main cancels the previous session before starting the next, the
+   * previous promise rejects with "the pairing was cancelled", and that landed
+   * on the screen of the attempt that had just begun.
+   */
+  const attempt = useRef(0)
+  /** When the code on screen, or the one being joined, stops working. */
+  const [deadline, setDeadline] = useState<number | null>(null)
+  const timeLeft = useTimeLeft(deadline)
+  // The joiner is waiting from Join until the emoji arrive or it fails.
+  const waiting = stage === 'joining' && deadline !== null
 
   // Cancelling on unmount is not tidiness: a pairing left in the sidecar is a
   // session an attacker can still send frames to, and the sidecar's map is the
@@ -95,35 +140,60 @@ export function PairingPanel({
     }
   }, [])
 
+  // Held from the moment there is something in flight until it has settled
+  // and the person has read how it ended. `done` releases it: there is
+  // nothing left to show that the next screen does not say better.
+  const held = waiting || stage === 'compare' || stage === 'failed'
+  useEffect(() => {
+    onHold?.(held)
+  }, [held, onHold])
+  useEffect(() => () => onHold?.(false), [onHold])
+
   const fail = (err: unknown): void => {
     active.current = false
-    setError(err instanceof Error ? err.message : String(err))
+    setDeadline(null)
+    setError(errorText(err))
     setStage('failed')
   }
 
   const start = async (): Promise<void> => {
+    const mine = ++attempt.current
     setError(null)
     try {
       const handle = await window.opsmaxx!.addy.beginPairing(baseURL)
+      if (mine !== attempt.current) return
       active.current = true
       setCode(handle.code)
       setPairingId(handle.pairingId)
+      setDeadline(Date.now() + PAIRING_WINDOW_MS)
       setStage('showing')
 
       // Resolves when the other device answers, which may be a minute away.
       // The code is already on screen by then, which is the point of the
       // split.
       const confirmed = await window.opsmaxx!.addy.awaitPairing()
+      if (mine !== attempt.current) return
+      setDeadline(null)
       setConfirmation(confirmed)
       setStage('compare')
     } catch (err) {
-      fail(err)
+      if (mine === attempt.current) fail(err)
     }
+  }
+
+  /** Stop waiting, here and in main. What was typed stays typed. */
+  const cancel = (): void => {
+    attempt.current++
+    active.current = false
+    setDeadline(null)
+    void window.opsmaxx?.addy.cancelPairing()
+    setStage(stage === 'showing' ? 'choose' : 'joining')
   }
 
   /** Back to the start, with nothing left over from the last exchange. A
    *  stale code in a field is a code somebody will try to use. */
   const reset = (): void => {
+    setDeadline(null)
     setTypedTicket('')
     setNewLabel('')
     setConfirmation(null)
@@ -132,52 +202,41 @@ export function PairingPanel({
   }
 
   /**
-   * A pairing link that arrived from the OS.
-   *
-   * THE HANDLER WAS WIRED FROM THE SCHEME TO THE RENDERER AND NO FURTHER.
-   * `opsmaxx://` was registered, parsed, bounds-checked and tested, and
-   * nothing on this side ever subscribed — so a person who clicked a link
-   * watched the app come to the front and do nothing, which is worse than
-   * having no link at all.
+   * A pairing code from a link, handed down by the setup screen that took it.
    *
    * It FILLS THE FIELD. It does not join. The person still presses Join and
    * still compares the seven emoji, because a link that joined on arrival
    * would be a link anybody could send you.
    */
   useEffect(() => {
-    const off = window.opsmaxx?.addy?.onLink?.((l) => {
-      if (l.action !== 'pair' || l.code === undefined || l.pairingId === undefined) return
-      setTypedTicket(`${l.code}.${l.pairingId}`)
-      setError(null)
-      setStage('joining')
-      toast('Pairing code filled in from the link. Check the emoji before you confirm.')
-    })
-    const offBad = window.opsmaxx?.addy?.onLinkRefused?.((reason) => {
-      setError(reason)
-      setStage('failed')
-    })
-    return () => {
-      off?.()
-      offBad?.()
-    }
-  }, [])
-
-  const join = async (): Promise<void> => {
+    if (!linkedTicket) return
+    attempt.current++
+    setDeadline(null)
+    setTypedTicket(linkedTicket)
     setError(null)
     setStage('joining')
+  }, [linkedTicket])
+
+  const join = async (): Promise<void> => {
+    const parts = splitTicket(typedTicket)
+    if (parts === null) {
+      setError('That does not look like a pairing code. Copy the whole thing from the other device.')
+      setStage('failed')
+      return
+    }
+    const mine = ++attempt.current
+    setError(null)
+    setStage('joining')
+    setDeadline(Date.now() + PAIRING_WINDOW_MS)
     try {
       active.current = true
-      const parts = splitTicket(typedTicket)
-      if (parts === null) {
-        setError('That does not look like a pairing code. Copy the whole thing from the other device.')
-        setStage('failed')
-        return
-      }
       const confirmed = await window.opsmaxx!.addy.joinPairing(baseURL, parts.code, parts.pairingId)
+      if (mine !== attempt.current) return
+      setDeadline(null)
       setConfirmation(confirmed)
       setStage('compare')
     } catch (err) {
-      fail(err)
+      if (mine === attempt.current) fail(err)
     }
   }
 
@@ -293,7 +352,7 @@ export function PairingPanel({
           <div className="setting-desc">
             {canShow
               ? 'Adding a device needs both devices open at the same time. One shows a code, the other types it, and you compare seven emoji.'
-              : 'This machine has no account yet, so it is the one that TYPES the code. Start on the machine you already use: open Account there, choose Add another device, and it will show you a code and a pairing id.'}
+              : 'This machine has no account yet, so it is the one that TYPES the code. Start on the machine you already use: open Sync & devices there, choose Show a code on this device, and it will show you a pairing code.'}
           </div>
           <div className="pair-actions">
             {canShow && (
@@ -352,10 +411,13 @@ export function PairingPanel({
               <Copy size={14} />
             </button>
           </div>
-          <p className="fine">
-            <Loader2 size={13} className="spin" /> Waiting for the other device. This code only works
-            while this window is open.
+          <p className="fine" role="status">
+            <Loader2 size={13} className="spin" /> Waiting for the other device. This code stops
+            working in {timeLeft}, or as soon as you leave this screen.
           </p>
+          <button className="btn" onClick={cancel}>
+            Cancel
+          </button>
         </>
       )}
 
@@ -368,12 +430,29 @@ export function PairingPanel({
               onChange={(e) => setTypedTicket(e.target.value)}
               spellCheck={false}
               autoFocus
+              disabled={waiting}
               placeholder="Paste it here"
             />
           </label>
-          <button className="btn" disabled={splitTicket(typedTicket) === null} onClick={() => void join()}>
-            Join
-          </button>
+          {waiting ? (
+            <>
+              {/* WHAT A WRONG CODE LOOKS LIKE FROM HERE: nothing. The other
+                  device is the one that finds out, and this side waits out the
+                  clock — so the clock is on screen, and so is the way out. */}
+              <p className="fine" role="status">
+                <Loader2 size={13} className="spin" /> Waiting for the other device… ({timeLeft} left).
+                If the other device says the code was wrong, start a new code there, cancel here,
+                and type the new one.
+              </p>
+              <button className="btn" onClick={cancel}>
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button className="btn" disabled={splitTicket(typedTicket) === null} onClick={() => void join()}>
+              Join
+            </button>
+          )}
         </>
       )}
 
