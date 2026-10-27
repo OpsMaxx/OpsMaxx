@@ -1,6 +1,6 @@
 import { AddyError, type AddySidecar } from './sidecar'
 import type { RelayClient } from './relay'
-import type { ConflictCopy } from '../../../shared/addy'
+import type { ConflictCopy, ConflictReason } from '../../../shared/addy'
 
 /**
  * Conflict copies, opened so a person can choose between them.
@@ -60,6 +60,8 @@ interface ConflictEnvelope {
   v: 1
   device: string
   writtenAt: string
+  /** Why it was set aside, when that is not an ordinary race. */
+  reason?: ConflictReason
   /** The collection's own bytes, base64, exactly as they were on disk. */
   body: string
 }
@@ -71,13 +73,15 @@ export async function sealConflict(
   epoch: number,
   counter: number,
   payload: Buffer,
-  writerVersion: string
+  writerVersion: string,
+  reason?: ConflictReason
 ): Promise<Buffer> {
   const { devicePub } = await addyd.send<{ devicePub: string }>('whoami')
   const envelope: ConflictEnvelope = {
     v: 1,
     device: devicePub,
     writtenAt: new Date().toISOString(),
+    ...(reason ? { reason } : {}),
     body: payload.toString('base64')
   }
   const { sealed } = await addyd.send<{ sealed: string }>('seal', {
@@ -142,6 +146,7 @@ export async function listConflicts(deps: ConflictDeps): Promise<ConflictCopy[]>
         copy.device = env.device
         copy.createdAt = env.writtenAt
         copy.reportedByRelay = false
+        if (env.reason) copy.reason = env.reason
       } catch (err) {
         if (!(err instanceof NotAConflictCopy)) throw err
         // A LEGACY COPY, kept by OpsMaxx 0.59.0 under the collection's own

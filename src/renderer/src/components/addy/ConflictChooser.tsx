@@ -215,11 +215,20 @@ export function ConflictChooser(): React.JSX.Element | null {
         {/* WHAT HAPPENED, FOR SOMEBODY WHO HAS NEVER HEARD THE WORD CONFLICT.
             The old opening sentence was "Both copies are here now", which
             assumes the reader already knows there are two and why. */}
-        <p className="fine">
-          Two of your machines changed this before they had synced with each other, so OpsMaxx
-          kept both rather than picking one and telling nobody. It is already using the version
-          marked <strong>In use now</strong>; the other has been set aside, waiting for this.
-        </p>
+        {current.reason === 'bulk-removal' ? (
+          <p className="fine">
+            Another of your machines removed most of this list. OpsMaxx is already using that
+            version, marked <strong>In use now</strong>, and kept this machine&apos;s copy from
+            before in case the removal was not meant. If it was, keep the version in use; if it
+            was not, replace it with the other copy.
+          </p>
+        ) : (
+          <p className="fine">
+            Two of your machines changed this before they had synced with each other, so OpsMaxx
+            kept both rather than picking one and telling nobody. It is already using the version
+            marked <strong>In use now</strong>; the other has been set aside, waiting for this.
+          </p>
+        )}
         <p className="fine">
           Nothing is lost yet and nothing is written until you press one of the buttons below.{' '}
           <strong>

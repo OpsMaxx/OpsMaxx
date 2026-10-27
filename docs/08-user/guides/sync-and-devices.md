@@ -109,7 +109,7 @@ When it finishes it tells you how many devices are on the account. The screen st
 
 ### 7. Remove a device, or leave
 
-- **Remove** (on another device's row, then **Remove it**) takes that device off the account. Everything OpsMaxx stores on it is deleted the next time it opens and reaches the relay. A device kept offline never hears, and removing a device does not take back data it already has. For a lost or stolen machine, also use **Change the account key**: it needs your recovery phrase and re-seals everything under a new key.
+- **Remove** (on another device's row, then **Remove it**) takes that device off the account. Everything OpsMaxx stores on it is deleted the next time it opens and reaches the relay. A device kept offline never hears, and removing a device does not take back data it already has. For a lost or stolen machine, also use **Change the account key**: it needs your recovery phrase and re-seals everything under a new key. Afterwards, check that **Account fingerprint** shows the same words on each of your other devices: a relay could show the old device list to one of them, which would keep the removed machine in its view.
 - **Leave** (then **Leave the account**) on this device stops sync here and forgets the keys this device holds. Your servers, workspaces, tunnels and vault stay on this computer as they are. If your other devices still list this one afterwards, remove it from one of them. If this is the only device on the account, the recovery phrase is the only way back in.
 
 ## Verification
@@ -134,6 +134,8 @@ When it finishes it tells you how many devices are on the account. The screen st
 | *That pairing link is for a machine joining an account* | The link was opened on a machine that is already on an account. Open it on the machine you are adding. |
 | *… speaks a different addy protocol version than this copy of OpsMaxx* | OpsMaxx and the relay disagree on the protocol version. Update OpsMaxx; if it is already current, whoever runs the relay needs to update it. |
 | *It was sent by an older version of OpsMaxx … Update OpsMaxx on the sending device.* | A clipboard or file came from a machine running OpsMaxx 0.59.0 or earlier, which cannot prove which device sent it, so it was not used. Update OpsMaxx on that machine and send it again. |
+| *the relay served an older copy of … than this device has already seen* | The relay handed this device data older than what it has already synced, and OpsMaxx refused it. If whoever runs the relay restored it from a backup, leave the account on this device (Sync & devices → Leave) and pair it again. Otherwise the relay is serving stale data: do not trust it. |
+| On an OpsMaxx 0.59.0 device: a clipboard or file from another of your devices never arrives, or *Nothing that could be opened* | The sending device runs 0.59.1 or later, which encrypts clipboards and files to the receiving device in a format 0.59.0 cannot read. Update OpsMaxx on this device. |
 | *that file is … MB and the limit is … MB* | Files sent between your devices go through the relay, which takes about 6 MB in one request. Use a file-transfer tool for anything bigger. |
 
 ## Related

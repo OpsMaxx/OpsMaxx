@@ -285,3 +285,12 @@ describe('a vault set aside on the first sync', () => {
     expect(screen.queryByRole('button', { name: 'Add its entries to this vault' })).toBeNull()
   })
 })
+
+describe('a copy kept because another device removed most of a list', () => {
+  it('says so instead of describing a race', async () => {
+    withConflicts([conflict({ reason: 'bulk-removal', reportedByRelay: false })])
+    render(<ConflictChooser />)
+    expect(await screen.findByText(/removed most of this list/)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/changed this before they had synced/)
+  })
+})

@@ -8,7 +8,7 @@ import type { RelayClient } from './relay'
 import { SOURCES, type CollectionSource } from './collections'
 import { asRecords, baseOf, mergeCollections, type Base } from './merge'
 import { sealConflict } from './conflicts'
-import { SYNCED_COLLECTIONS, type SyncedCollection } from '../../../shared/addy'
+import { SYNCED_COLLECTIONS, type ConflictReason, type SyncedCollection } from '../../../shared/addy'
 
 /**
  * The engine that actually carries data between two machines.
@@ -549,8 +549,14 @@ async function syncCollection(
     // so one bad save (or one hostile device) could delete the estate from
     // every machine. Single deletes still flow; a big one leaves the old copy
     // in the chooser.
-    if (removesMost(body, opened.payload)) {
-      await keepAsConflict(deps, name, epoch, opened.counter + 1, body)
+    // Once per remote copy: a device that already kept its copy against this
+    // ETag does not post another on the next pass.
+    const keep = removesMost(body, opened.payload) && known.conflictedEtag !== there.etag
+    if (keep) {
+      await keepAsConflict(deps, name, epoch, opened.counter + 1, body, 'bulk-removal')
+      // Recorded before the overwrite, so a pass that fails after keeping the
+      // copy does not keep a second one when it runs again.
+      state.collections[name] = { ...known, conflictedEtag: there.etag }
     }
     const landed = writeBack(deps, name, source, opened.payload)
     state.collections[name] = {
@@ -558,7 +564,8 @@ async function syncCollection(
       counter: opened.counter,
       localHash: hash(landed),
       base: baseOf(landed) ?? undefined,
-      at: Date.now()
+      at: Date.now(),
+      ...(keep ? { conflictedEtag: there.etag } : {})
     }
     return 'pulled'
   }
@@ -807,9 +814,10 @@ async function keepAsConflict(
   name: SyncedCollection,
   epoch: number,
   counter: number,
-  payload: Buffer
+  payload: Buffer,
+  reason?: ConflictReason
 ): Promise<void> {
-  const sealed = await sealConflict(deps.addyd, name, epoch, counter, payload, versionString())
+  const sealed = await sealConflict(deps.addyd, name, epoch, counter, payload, versionString(), reason)
   await deps.relay.keepConflict(name, epoch, counter, sealed)
 }
 

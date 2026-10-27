@@ -394,13 +394,15 @@ export function AddySetup(): React.JSX.Element | null {
             <div className="setting-desc">
               Open <strong>Sync &amp; devices</strong> there: the words under{' '}
               <em>Account fingerprint</em> must be these, in this order. If they differ, stop.
+              That device needs OpsMaxx 0.59.1 or later to show them.
             </div>
           </div>
         </div>
         <ul className="setting-desc">
           <li>
             Account key: number {review.epoch}
-            {review.epoch === 1 ? ', never changed' : ''}.
+            {review.epoch === 1 ? ', never changed' : ''}. If you changed the account key after
+            the date below, stop: the relay is showing you an older account than the one you have.
           </li>
           <li>
             {n} {n === 1 ? 'device is' : 'devices are'} on the account

@@ -892,6 +892,13 @@ describe('when something goes wrong', () => {
 
     expect(r.outcomes.servers).toBe('pulled')
     expect(relay.conflicts.map((c) => c.name)).toContain('servers')
+    // Sealed inside the copy: why it was kept, for the chooser to say.
+    const sealed = JSON.parse(relay.conflicts[0].body.toString('utf8'))
+    const envelope = JSON.parse(Buffer.from(sealed.payload, 'base64').toString('utf8'))
+    expect(envelope.reason).toBe('bulk-removal')
+    // And once: the next pass over the same remote copy keeps no second one.
+    await syncOnce(deps(relay))
+    expect(relay.conflicts).toHaveLength(1)
   })
 
   it('lets a single delete through without a copy', async () => {

@@ -267,6 +267,10 @@ export type AddyErrorCode =
  * needs it and must not import a main module -- that pulls Electron, the vault
  * and the sidecar into the renderer's bundle for the sake of four fields.
  */
+/** 'bulk-removal': another device removed most of this list, and this is
+ *  the copy from before, kept in case that was not meant. */
+export type ConflictReason = 'bulk-removal'
+
 export interface ConflictCopy {
   id: number
   collection: string
@@ -281,6 +285,9 @@ export interface ConflictCopy {
    * are the whole basis of the choice.
    */
   reportedByRelay: boolean
+  /** Why the copy was set aside, when it was not an ordinary race. Sealed
+   *  inside the copy; absent on 0.59.0 copies. */
+  reason?: ConflictReason
   /** The losing copy's contents, unsealed. Absent when it could not be opened
    *  -- sealed under an epoch this device no longer holds, most likely -- with
    *  `problem` saying so. */
