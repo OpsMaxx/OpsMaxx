@@ -126,7 +126,7 @@ Already keep hosts in `~/.ssh/config`? Import them instead of retyping — `Prox
 - Workspace passwords are stored as **scrypt verifiers** compared in constant time. They gate the UI — they do not encrypt that workspace's servers separately
 - **Host keys are verified**: unknown servers prompt with a SHA-256 fingerprint, and a changed key is refused outright
 - **Remote desktop certificates are pinned** the same way — RDP servers are self-signed by default, so a first sighting asks and a change is refused
-- **Sync is end-to-end encrypted**: every object is sealed on the device before it reaches the addy relay, and the vault travels still encrypted under your master password. The relay sees how many devices an account has and when they sync, not what they sync. Credentials kept only in the OS keychain never leave the machine
+- **Sync is end-to-end encrypted**: every object is sealed on the device before it reaches the addy relay, and the vault travels still encrypted under your master password. The relay sees how many devices an account has, when they sync, and the name and size of each sealed collection — never what is inside. Credentials kept only in the OS keychain never leave the machine
 - Shell input is **parsed, never evaluated** — no `eval` on anything you type
 - The renderer runs with `contextIsolation` on and `nodeIntegration` off, behind a strict Content-Security-Policy
 
