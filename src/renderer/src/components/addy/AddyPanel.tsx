@@ -863,6 +863,22 @@ function fingerprint(id: string): string {
   return id.slice(0, 8)
 }
 
+const PHRASE_ADDED_WHY =
+  'This device was added with the recovery phrase, not by pairing. Whoever holds the phrase can add devices. If you do not recognise this one, remove it.'
+
+/** The roster entry that added it was signed with the recovery-phrase key.
+ *  Read loosely: main fills the field from the verified chain, and a build
+ *  that does not send it has no phrase-added devices to show. */
+function addedWithPhrase(d: AddyDevice): boolean {
+  return (d as { addedWithPhrase?: boolean }).addedWithPhrase === true
+}
+
+/** The date in the signed add entry. A date, not a time: it is for spotting a
+ *  machine that turned up recently, not for an audit trail. */
+function addedOn(ms: number): string {
+  return new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 /**
  * The roster.
  *
@@ -926,10 +942,21 @@ function AddyDevices({
               <span className="addy-device-name">{d.label}</span>
               {d.self && <span className="chip info">This device</span>}
               {d.revoked === true && <span className="chip danger">Revoked</span>}
+              {/* NOT EVERY ADD IS A PAIRING. The recovery phrase can add a
+                  device with no other machine present and nobody comparing
+                  emoji, so a row added that way is the one to look at twice.
+                  The chip says it in words; the explanation is the hover text
+                  and the screen-reader description. */}
+              {addedWithPhrase(d) && (
+                <span className="chip warn" title={PHRASE_ADDED_WHY} aria-description={PHRASE_ADDED_WHY}>
+                  Added with recovery phrase
+                </span>
+              )}
               {/* Under the name rather than beside it: it is what you read
                   when the name did not settle it, and a row that leads with
                   a key is a row nobody scans. */}
               <div className="addy-device-fp">{fingerprint(d.id)}</div>
+              {d.addedAt !== null && <div className="fine">Added {addedOn(d.addedAt)}</div>}
             </td>
             <td className="right">
               {/* Never on this device's own row. A device that revoked itself
@@ -944,9 +971,10 @@ function AddyDevices({
         ))}
       </tbody>
       {/* SAID ONCE, rather than printed as a falsehood on every row.
-          `lastSeen` and `addedAt` are `null` because the relay reports
-          neither — the shared contract says so in as many words — and the
-          columns rendered that null as "never". So every device on every
+          `lastSeen` is `null` because the relay does not report it — the
+          shared contract says so in as many words — and the column rendered
+          that null as "never". (`addedAt` comes from the signed add entry and
+          is shown on the row when present.) So every device on every
           account, including the one being looked at, read "Last seen: never".
           That is the column a sysadmin scans to spot a machine that should not
           be there, and it was uniformly false. */}

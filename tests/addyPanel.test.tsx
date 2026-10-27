@@ -6,7 +6,13 @@ import { join } from 'node:path'
 import { stubBridge } from './setup/renderer'
 import { useToasts } from '../src/renderer/src/store/toast'
 import { AddyPanel } from '../src/renderer/src/components/addy/AddyPanel'
-import { addyJourney, ago, type AddyStatus, type AddySync } from '../src/renderer/src/components/addy/addyStatus'
+import {
+  addyJourney,
+  ago,
+  type AddyDevice,
+  type AddyStatus,
+  type AddySync
+} from '../src/renderer/src/components/addy/addyStatus'
 import { duration } from '../src/renderer/src/lib/format'
 import { useApp } from '../src/renderer/src/store/app'
 import { PROMOTED_MODULE_IDS, MODULES } from '../src/shared/modules'
@@ -312,6 +318,38 @@ describe('what it says once main can answer', () => {
     await screen.findByText(/does not report when each device was last seen/)
     expect(screen.queryByText('never')).toBeNull()
     // The note under the table is where it is said, once.
+  })
+
+  it('marks a device added with the recovery phrase, in words, and says why it matters', async () => {
+    // The phrase adds a device with no second machine present and nobody
+    // comparing emoji. That row used to look exactly like a paired one, so a
+    // stranger holding the phrase was one more laptop in the list.
+    const s = healthy()
+    s.devices = [
+      s.devices![0],
+      { id: 'cc', label: 'unknown box', self: false, lastSeen: null, addedAt: null, addedWithPhrase: true } as AddyDevice
+    ]
+    stubStatus(s)
+    render(<AddyPanel />)
+    const chips = await screen.findAllByText('Added with recovery phrase')
+    expect(chips).toHaveLength(1)
+    // Not colour alone: the words are the chip, and the reason is announced.
+    expect(chips[0].getAttribute('aria-description')).toMatch(/Whoever holds the phrase can add devices/)
+    expect(chips[0].getAttribute('aria-description')).toMatch(/do not recognise this one, remove it/)
+    expect(chips[0].closest('tr')?.textContent).toContain('unknown box')
+  })
+
+  it('shows when a device was added once main knows, and nothing when it does not', async () => {
+    const s = healthy()
+    s.devices = [
+      { ...s.devices![0], addedAt: Date.UTC(2026, 9, 27, 12) },
+      s.devices![1]
+    ]
+    stubStatus(s)
+    render(<AddyPanel />)
+    const added = await screen.findByText(/^Added .*2026$/)
+    expect(added.closest('tr')?.textContent).toContain('work laptop')
+    expect(screen.getAllByText(/^Added /)).toHaveLength(1)
   })
 
   it('does not offer to create a second account beside the one that exists', async () => {
