@@ -18,8 +18,7 @@ import {
 /**
  * Folder shares: folders on this computer, mounted on a server (reverse sshfs).
  *
- * Shaped like `docker -v host:path:ro`: a share is part of the server's
- * connection settings (`FolderSharesSection`, in the server editor), mounted
+ * A share is part of the server's connection settings (`FolderSharesSection`, in the server editor), mounted
  * when a terminal to the server connects and unmounted when the last one
  * closes. Main does that on its own. `FolderSharesIndicator`, on the tab's view
  * bar, is the secondary half: state, Unmount and Retry, and the way back to the
@@ -56,8 +55,8 @@ export const FolderSharesSection = forwardRef<
     <div className="field" ref={ref} data-testid="folder-shares">
       <label className="field-label">Folder shares</label>
       <span className="field-hint" style={{ marginBottom: 6 }}>
-        Folders on this computer, mounted on the server while a terminal to it is open, like{' '}
-        <span className="mono">docker -v</span>. Saved on this computer only. The server needs sshfs and a usable
+        Folders on this computer, mounted on the server through this SSH connection while a terminal to it is
+        open. Saved on this computer only. The server needs sshfs and a usable
         /dev/fuse; most containers have neither. Read-only is enforced by OpsMaxx, whatever the server does.
       </span>
       {unavailable ? (
@@ -176,28 +175,47 @@ export function FolderSharesIndicator({ server }: { server: Server }): React.JSX
   }, [server.id])
 
   const mounted = view.mounts.filter((s) => s.state === 'mounted').length
-  const failed = view.mounts.some((s) => s.state === 'failed')
+  // A failed mount of a share that is also paused reads as paused, as its row
+  // in the dialog does. One whose share is no longer saved still counts: a
+  // failed unmount can leave it mounted on the server.
+  const failedCount = view.mounts.filter(
+    (m) => m.state === 'failed' && !view.shares.find((s) => s.id === m.shareId)?.stale
+  ).length
   const stale = view.shares.some((s) => s.stale)
-  const title = failed
-    ? 'Folder shares: one failed — open for the reason'
+  // Auto-mount fails without a toast, so a failure has to be readable here:
+  // an icon alone went unnoticed by the first person it happened to.
+  const warning = failedCount
+    ? `${failedCount === 1 ? 'Share' : `${failedCount} shares`} failed`
     : stale
-      ? "Folder shares: this server's address changed, so its shares are paused"
+      ? 'Shares paused'
+      : null
+  const title = failedCount
+    ? `Folder shares: ${warning} — open for the reason`
+    : stale
+      ? `Folder shares: ${warning} — this server's address changed`
       : mounted
         ? `Folder shares: ${mounted} folder${mounted === 1 ? '' : 's'} from this computer mounted`
         : 'Folder shares: folders from this computer, mounted on this server'
+  const label = warning ?? (mounted > 0 ? String(mounted) : null)
   return (
     <>
       <button
-        className={clsx('icon-btn', mounted > 0 && 'active')}
+        className={clsx('icon-btn', mounted > 0 && !warning && 'active')}
+        // .icon-btn is a 26px grid: with a label beside the icon it has to be
+        // a row as wide as its text, or the text overflows onto the address.
+        style={label ? { width: 'auto', display: 'inline-flex', alignItems: 'center', gap: 4, padding: '0 6px' } : undefined}
         title={title}
         aria-label={title}
         aria-haspopup="dialog"
         onClick={() => setOpen(true)}
       >
-        {failed || stale ? <AlertTriangle size={15} style={{ color: 'var(--warn)' }} /> : <HardDrive size={15} />}
-        {mounted > 0 && (
-          <span aria-hidden style={{ fontSize: 'var(--fs-xs)', marginLeft: 2 }}>
-            {mounted}
+        {warning ? <AlertTriangle size={15} style={{ color: 'var(--warn)' }} /> : <HardDrive size={15} />}
+        {label && (
+          <span
+            aria-hidden
+            style={{ fontSize: 'var(--fs-caption)', whiteSpace: 'nowrap', color: warning ? 'var(--warn)' : undefined }}
+          >
+            {label}
           </span>
         )}
       </button>
