@@ -357,13 +357,16 @@ describe('the account key can be changed', () => {
     const rotate = SESSION.slice(SESSION.indexOf('async rotateEpoch('))
     const body = rotate.slice(0, rotate.indexOf('\n  /**', 10))
     const reseal = body.indexOf('for (const name of SYNCED_COLLECTIONS)')
-    const escrow = body.indexOf("putObject('escrow'")
+    const escrow = body.search(/putObject\(\s*'escrow'/)
     const handoff = body.indexOf('handoff:')
     const transition = body.indexOf('appendRoster(')
     expect(reseal, 'collections are not re-sealed').toBeGreaterThan(-1)
     expect(escrow, 'the escrow is not re-sealed').toBeGreaterThan(reseal)
     expect(handoff, 'no handoffs are published').toBeGreaterThan(escrow)
     expect(transition, 'the transition is not appended last').toBeGreaterThan(handoff)
+    // With the root key's signature, the only one the relay takes for an
+    // escrow: a member that could write one could make recovery refuse.
+    expect(body).toMatch(/putObject\(\s*'escrow',[\s\S]{0,200}?prepared\.escrowSig\s*\)/)
   })
 
   it('re-seals the escrow, or recovery silently stops working', () => {
@@ -635,6 +638,19 @@ describe('recovery lands on the current epoch or refuses', () => {
     // chain's end is proof the account rotated.
     expect(SESSION).toMatch(/getObject\('escrow', opened\.epoch \+ 1\)/)
     expect(SESSION).toMatch(/roster-rewound/)
+  })
+
+  it('counts that escrow only if it opens under the recovery phrase\'s key', () => {
+    // Existence was the test, so junk a member PUT at that name, or a blob
+    // the relay made up, made recovery refuse for good.
+    const recover = SESSION.slice(SESSION.indexOf("getObject('escrow', opened.epoch + 1)"))
+    const probe = recover.indexOf("'recoverProbe'")
+    const refuse = recover.indexOf("'roster-rewound'")
+    expect(probe).toBeGreaterThan(-1)
+    expect(probe).toBeLessThan(refuse)
+    expect(recover.slice(0, refuse)).toMatch(/if \(sealedByAccount\) \{\s*throw new AddyError\(\s*$/)
+    const mainGo = readFileSync(join(ROOT, 'sidecar/addyd/main.go'), 'utf8')
+    expect(mainGo).toMatch(/"recoverProbe":\s+handleRecoverProbe/)
   })
 
   it('will not fall back to the older key when the current escrow is missing', () => {

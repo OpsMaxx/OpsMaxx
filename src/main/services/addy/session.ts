@@ -2195,6 +2195,7 @@ class AddySession {
       handoffs: Record<string, string>
       chained?: string
       escrow?: string
+      escrowSig?: string
       secrets: { akSeed: string }
       seq: number
       entry: string
@@ -2273,7 +2274,14 @@ class AddySession {
     //    account had moved off, which is a recovery that appears to work and
     //    hands back nothing usable.
     if (prepared.escrow) {
-      await relay.putObject('escrow', prepared.epoch, 1, Buffer.from(prepared.escrow, 'base64'))
+      await relay.putObject(
+        'escrow',
+        prepared.epoch,
+        1,
+        Buffer.from(prepared.escrow, 'base64'),
+        undefined,
+        prepared.escrowSig
+      )
     }
 
     // 3. The handoffs: one per surviving device, plus the chained one for a
@@ -2501,8 +2509,39 @@ class AddySession {
        * card carries the roster head and the device count: the person is the
        * last check, and §6 of the review screen is where they make it.
        */
+      //
+      // ONLY ONE THE ACCOUNT SEALED COUNTS. Existence alone was the test, so
+      // anything at that name -- junk a paired device PUT there, or a blob
+      // the relay made up -- made recovery refuse for good, on the one path
+      // with no second chance. The relay now refuses escrow writes the root
+      // key did not sign, and this asks the sidecar whether the blob opens
+      // under RK_enc, whose public half never leaves it: nobody without the
+      // phrase can make one that does. One that does not is reported in the
+      // audit log and otherwise ignored.
       const ahead = await this.relay.getObject('escrow', opened.epoch + 1).catch(() => null)
-      if (ahead) {
+      const sealedByAccount =
+        ahead !== null &&
+        (
+          await addyd.send<{ sealed: boolean }>('recoverProbe', {
+            escrow: ahead.body.toString('base64'),
+            epoch: opened.epoch + 1
+          })
+        ).sealed
+      if (ahead && !sealedByAccount) {
+        recordAudit({
+          agentName: 'OpsMaxx',
+          sessionId: 'addy',
+          workspaceId: null,
+          workspaceName: null,
+          serverId: null,
+          serverName: null,
+          action: `addy: the relay at ${relay} holds an escrow for epoch ${opened.epoch + 1} that this account did not seal. It was ignored and recovery went ahead.`,
+          capability: null,
+          approval: 'not-required',
+          result: 'success'
+        })
+      }
+      if (sealedByAccount) {
         throw new AddyError(
           'roster-rewound',
           `this relay served a roster ending at epoch ${opened.epoch} while holding an escrow for epoch ${opened.epoch + 1}. That is a rolled-back account, not a recovery, and nothing was changed.`

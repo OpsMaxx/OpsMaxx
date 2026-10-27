@@ -643,13 +643,19 @@ export class RelayClient {
     epoch: number,
     counter: number,
     sealed: Buffer,
-    ifMatch?: string
+    ifMatch?: string,
+    /** The root key's signature over an escrow write; the relay refuses an
+     *  escrow without one. See `EscrowWrite` in the sidecar's protocol. */
+    rootSig?: string
   ): Promise<string> {
     const resp = await this.request(
       'PUT',
       `/v1/obj/${encodeURIComponent(name)}`,
       { epoch, counter, body: sealed.toString('base64') },
-      ifMatch ? { 'if-match': ifMatch } : {}
+      {
+        ...(ifMatch ? { 'if-match': ifMatch } : {}),
+        ...(rootSig ? { 'x-addy-root-sig': rootSig } : {})
+      }
     )
     if (resp.status === 409) {
       // Somebody else wrote first. Distinct from every other refusal, because

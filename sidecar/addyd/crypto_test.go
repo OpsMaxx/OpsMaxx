@@ -780,6 +780,20 @@ func TestRotatingTheEpoch(t *testing.T) {
 	if rev["escrow"] == nil {
 		t.Fatal("a revocation rotation did not re-seal the escrow")
 	}
+	// And signs the write with the root key, which is the only signature the
+	// relay takes for an escrow.
+	escrowBytes, _ := base64.StdEncoding.DecodeString(rev["escrow"].(string))
+	escrowSig, _ := base64.StdEncoding.DecodeString(rev["escrowSig"].(string))
+	rootPub, _ := hex.DecodeString(acct["rootSignPub"].(string))
+	idBytes, _ := hex.DecodeString(acct["accountId"].(string))
+	var acctID protocol.AccountID
+	copy(acctID[:], idBytes)
+	sum := sha256.Sum256(escrowBytes)
+	if err := protocol.Verify(ed25519.PublicKey(rootPub), protocol.EscrowWrite{
+		AccountID: acctID, Epoch: rev["epoch"].(uint64), Counter: 1, BodyHash: sum[:],
+	}, escrowSig); err != nil {
+		t.Fatalf("the escrow write is not signed by the root key: %v", err)
+	}
 
 	genesisWire, _ = base64.StdEncoding.DecodeString(genesis)
 	revWire, _ := base64.StdEncoding.DecodeString(rev["entry"].(string))
@@ -1625,5 +1639,118 @@ func TestAnOverlongRequestLineIsAnErrorNotAShutdown(t *testing.T) {
 	}
 	if err := serve(t.Context(), NewWriter(&out), "crypto", bytes.NewReader(nil)); err != nil {
 		t.Fatalf("a clean EOF is an error: %v", err)
+	}
+}
+
+// RECOVERY'S ROLLBACK CHECK OPENS WHAT IT IS SHOWN. An escrow past the
+// roster's end used to count by existing, so junk at that name -- a member's or
+// the relay's own -- made recovery refuse for good. Only one sealed to this
+// account's RK_enc, at that epoch, says the account was rolled back.
+func TestTheRecoveryProbeCountsOnlyAnEscrowTheAccountSealed(t *testing.T) {
+	keys.reset()
+	t.Cleanup(func() {
+		keys.reset()
+		_, _ = handleRecoverForget(Request{Method: "recoverForget"})
+	})
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "laptop"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct := minted.(map[string]any)
+	other, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "elsewhere"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys.reset()
+	if _, err := handleRecoverIdentity(Request{Method: "recoverIdentity", Params: params(t, map[string]any{
+		"mnemonic": acct["mnemonic"], "label": "the replacement",
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	probe := func(escrow string, epoch uint64) bool {
+		t.Helper()
+		out, err := handleRecoverProbe(Request{Method: "recoverProbe", Params: params(t, map[string]any{
+			"escrow": escrow, "epoch": epoch,
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.(map[string]any)["sealed"].(bool)
+	}
+	if !probe(acct["escrow"].(string), 1) {
+		t.Error("the account's own escrow did not count")
+	}
+	for name, c := range map[string]struct {
+		escrow string
+		epoch  uint64
+	}{
+		"junk":                 {base64.StdEncoding.EncodeToString([]byte("junk a member put there")), 2},
+		"not base64":           {"%%%", 2},
+		"another account's":    {other.(map[string]any)["escrow"].(string), 1},
+		"its own, wrong epoch": {acct["escrow"].(string), 2},
+	} {
+		if probe(c.escrow, c.epoch) {
+			t.Errorf("%s escrow counted as one this account sealed", name)
+		}
+	}
+}
+
+// RECOVERING A RE-KEYED ACCOUNT reports epoch 1's key as epoch 1's. It
+// reported the epoch just opened instead; the parent stored that as the
+// genesis key and every roster check afterwards failed on entry 0, so a
+// re-keyed account could not be recovered onto a working device at all.
+func TestRecoveringAReKeyedAccountKeepsEpoch1sKey(t *testing.T) {
+	keys.reset()
+	t.Cleanup(func() {
+		keys.reset()
+		_, _ = handleRecoverForget(Request{Method: "recoverForget"})
+	})
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "laptop"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct := minted.(map[string]any)
+	v, err := handleRotateEpoch(Request{Method: "rotateEpoch", Params: params(t, map[string]any{
+		"kind": "revocation", "chain": acct["genesis"], "mnemonic": acct["mnemonic"],
+		"rootSignPub": acct["rootSignPub"], "epoch1Sign": acct["epoch1SignPub"],
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rev := v.(map[string]any)
+	genesisWire, _ := base64.StdEncoding.DecodeString(acct["genesis"].(string))
+	revWire, _ := base64.StdEncoding.DecodeString(rev["entry"].(string))
+	chain := base64.StdEncoding.EncodeToString(append(genesisWire, revWire...))
+
+	keys.reset()
+	if _, err := handleRecoverIdentity(Request{Method: "recoverIdentity", Params: params(t, map[string]any{
+		"mnemonic": acct["mnemonic"], "label": "the replacement",
+	})}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := handleRecoverOpen(Request{Method: "recoverOpen", Params: params(t, map[string]any{
+		"escrow": acct["escrow"], "epoch": 1, "chain": chain,
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.(map[string]any)["needEpoch"] != uint64(2) {
+		t.Fatalf("epoch 1's escrow did not send recovery on to epoch 2: %v", first)
+	}
+	second, err := handleRecoverOpen(Request{Method: "recoverOpen", Params: params(t, map[string]any{
+		"escrow": rev["escrow"], "epoch": 2, "chain": chain,
+	})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened := second.(map[string]any)
+	if opened["epoch1SignPub"] != acct["epoch1SignPub"] {
+		t.Fatalf("recovery reported %v as epoch 1's key, want %v", opened["epoch1SignPub"], acct["epoch1SignPub"])
+	}
+	// What the parent does next with it: verify the chain from genesis.
+	if _, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+		"chain": chain, "rootSignPub": opened["rootSignPub"], "epoch1Sign": opened["epoch1SignPub"],
+	})}); err != nil {
+		t.Fatalf("the recovered device cannot verify its own account's roster: %v", err)
 	}
 }

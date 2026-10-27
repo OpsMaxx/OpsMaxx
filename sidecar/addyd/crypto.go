@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ecdh"
 	"crypto/ed25519"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
@@ -1198,6 +1199,40 @@ type recoverOpenRequest struct {
 	Chain string `json:"chain"`
 }
 
+// recoverProbeRequest is an escrow the relay holds past the roster's end.
+type recoverProbeRequest struct {
+	Escrow string `json:"escrow"`
+	Epoch  uint64 `json:"epoch"`
+}
+
+// handleRecoverProbe says whether an escrow is one the account sealed.
+//
+// Recovery reads an escrow one epoch past the roster's end as proof the relay
+// rolled the account back, and it used to take the object's mere EXISTENCE as
+// that proof -- so anything at that name, written by a member or made up by the
+// relay, made recovery refuse for good. Only a blob sealed to RK_enc for this
+// account and epoch counts: RK_enc's public half never leaves this process, so
+// nobody without the phrase can make one that opens. Read-only; nothing is
+// kept.
+func handleRecoverProbe(req Request) (any, error) {
+	var in recoverProbeRequest
+	if err := decodeParams(req, &in); err != nil {
+		return nil, err
+	}
+	recovery.mu.Lock()
+	root := recovery.root
+	recovery.mu.Unlock()
+	if root == nil {
+		return nil, codedf(ErrConfigInvalid, "no recovery is in progress; start with the phrase")
+	}
+	sealed, err := base64.StdEncoding.DecodeString(in.Escrow)
+	if err != nil {
+		return map[string]any{"sealed": false}, nil
+	}
+	_, err = protocol.OpenEscrow(sealed, root.AccountID, in.Epoch, 1, root.Enc, 0)
+	return map[string]any{"sealed": err == nil}, nil
+}
+
 // handleRecoverOpen opens the escrow and authors this device's way back in.
 func handleRecoverOpen(req Request) (any, error) {
 	var in recoverOpenRequest
@@ -1350,10 +1385,15 @@ func handleRecoverOpen(req Request) (any, error) {
 	}
 
 	return map[string]any{
-		"accountId":     root.AccountID.String(),
-		"epoch":         verified.Epoch,
-		"rootSignPub":   hex.EncodeToString(root.Sign.Public().(ed25519.PublicKey)),
-		"epoch1SignPub": hex.EncodeToString(epochKeys.Sign.Public().(ed25519.PublicKey)),
+		"accountId":   root.AccountID.String(),
+		"epoch":       verified.Epoch,
+		"rootSignPub": hex.EncodeToString(root.Sign.Public().(ed25519.PublicKey)),
+		// EPOCH 1'S, remembered from the first escrow -- not the one just
+		// opened. On an account that had been re-keyed this reported the
+		// current epoch's key as epoch 1's, the parent stored it, and every
+		// roster check after that failed on the genesis entry: recovering a
+		// re-keyed account ended in "entry 0 does not verify".
+		"epoch1SignPub": hex.EncodeToString(epoch1Sign),
 		// What the user has to look at before this is over. Recovery is the one
 		// path where the honest next question is "is everything on this list
 		// still yours", because whoever else read the card is on it too.
@@ -1580,7 +1620,18 @@ func handleRotateEpoch(req Request) (any, error) {
 		if err != nil {
 			return nil, wrapCoded(ErrInternal, err, "re-sealing the escrow")
 		}
+		// And the root key's signature over the write, which the relay asks
+		// for before it will store an escrow: a member that could PUT one
+		// could make recovery refuse for good. See protocol.EscrowWrite.
+		sum := sha256.Sum256(escrow)
+		sig, err := protocol.Sign(root.Sign, protocol.EscrowWrite{
+			AccountID: acct, Epoch: rot.NewKeys.Epoch, Counter: 1, BodyHash: sum[:],
+		})
+		if err != nil {
+			return nil, wrapCoded(ErrInternal, err, "signing the escrow write")
+		}
 		out["escrow"] = base64.StdEncoding.EncodeToString(escrow)
+		out["escrowSig"] = base64.StdEncoding.EncodeToString(sig)
 	}
 
 	// HELD, so the caller can re-seal every collection under it before the
