@@ -227,6 +227,7 @@ export function AddyPanel(): React.JSX.Element {
 
       <h3 className="ui-section-title addy-h">Devices</h3>
       <AddyDevices devices={status?.devices} supported={supported} onChanged={refresh} />
+      {status?.fingerprint && <AccountFingerprint words={status.fingerprint} />}
 
       {/* Offered only once there is somewhere to send to. On a one-device
           account the shortcuts would be taken from every application on the
@@ -1078,6 +1079,34 @@ function RevokeButton({
         {busy ? <Loader2 size={13} className="spin" /> : null} Remove it
       </button>
     </span>
+  )
+}
+
+/**
+ * The device list this machine verified, as five words.
+ *
+ * WHAT A RECOVERING MACHINE IS TOLD TO COMPARE WITH. Recovery shows the same
+ * words for the list the relay served it, before it adds itself, and a relay
+ * serving an old list — from before a device was removed — gives it words this
+ * screen does not show. Read only: it changes whenever a device is added or
+ * removed, which is also why it is not something to write down.
+ */
+function AccountFingerprint({ words }: { words: string[] }): React.JSX.Element {
+  return (
+    <div className="setting-row">
+      <div className="s-info">
+        <div className="s-title">Account fingerprint</div>
+        <div className="s-desc">
+          A machine recovering this account with the recovery phrase shows five words before it
+          joins. They must be these, in this order. If they differ, tell it to stop.
+        </div>
+        <ol className="addy-phrase" aria-label="Account fingerprint">
+          {words.map((w, i) => (
+            <li key={i}>{w}</li>
+          ))}
+        </ol>
+      </div>
+    </div>
   )
 }
 

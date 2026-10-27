@@ -406,7 +406,7 @@ describe('addy device-sync flow matrix', () => {
     say('\n================ PATH 4: recover from the phrase on a machine with nothing')
     const e = (devices.E = await newDevice('E'))
     trace = true
-    await on(e, 'recoverFromPhrase', (s) => s.recoverFromPhrase(RELAY, mnemonic, 'recovered'))
+    await on(e, 'recoverFromPhrase', (s) => s.recoverFromPhrase(RELAY, mnemonic, 'recovered').then(() => s.confirmRecovery()))
     trace = false
     snapshot(e, 'after recovery')
     await on(e, 'status', (s) => s.status())
@@ -415,7 +415,9 @@ describe('addy device-sync flow matrix', () => {
     say('\n================ PATH 8: leave, then re-join by the phrase')
     await on(e, 'leaveAccount', (s) => s.leaveAccount())
     snapshot(e, 'after leave')
-    await on(e, 'recoverFromPhrase (again)', (s) => s.recoverFromPhrase(RELAY, mnemonic, 'recovered-again'))
+    await on(e, 'recoverFromPhrase (again)', (s) =>
+      s.recoverFromPhrase(RELAY, mnemonic, 'recovered-again').then(() => s.confirmRecovery())
+    )
     snapshot(e, 'after re-recovery')
     await on(devices.A, 'A roster', async (s) => {
       const r = await s.refreshRoster()

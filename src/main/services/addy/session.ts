@@ -19,6 +19,7 @@ import {
 } from './conflicts'
 import {
   SYNCED_COLLECTIONS,
+  type AddyRecoveryReview,
   type AddyStatusSnapshot,
   type ConflictCopy,
   type SyncedCollection
@@ -123,6 +124,19 @@ class AddySession {
    *  the panel renders the two differently on purpose, so this must never be
    *  initialised to `[]`. */
   private lastRoster: AddyRoster | null = null
+
+  /** A recovery that opened and verified and is waiting on the person: the
+   *  sidecar holding its keys, and what `confirmRecovery` writes. Memory only,
+   *  and only between `recoverFromPhrase` and a confirm, a cancel or a detach. */
+  private pendingRecovery: {
+    addyd: AddySidecar
+    relay: RelayClient
+    account: AddyAccount
+    deviceSecrets: { deviceSignSeed: string; deviceEncKey: string }
+    akSeed: string
+    seq: number
+    entry: string
+  } | null = null
 
   /** The last reason this device could not attach, for the panel to show.
    *  Cleared on a successful attach: a banner explaining a failure that has
@@ -238,6 +252,7 @@ class AddySession {
     // beside a count that was no longer true. A stale list of somebody's
     // machines is worse than no list.
     this.lastRoster = null
+    await this.cancelRecovery()
     await held?.close()
   }
 
@@ -1737,6 +1752,18 @@ class AddySession {
     const relayURL = this.account?.baseURL ?? enrolment?.baseURL
     const accountId = this.account?.accountId ?? enrolment?.accountId
     const roster = this.lastRoster
+    // The verified head as words: what a machine recovering with the phrase
+    // shows before it adds itself, and the only thing it has to compare with
+    // that a relay serving it a cut-short chain cannot fake. Computed in the
+    // sidecar by the same op the recovering side uses, from the head this
+    // device verified itself. Left out, not guessed, if the sidecar is down.
+    const fingerprint =
+      roster?.head && this.addyd
+        ? await this.addyd
+            .send<{ words: string[] }>('fingerprint', { head: roster.head })
+            .then((r) => r.words)
+            .catch(() => undefined)
+        : undefined
 
     return {
       // A device is enrolled once it has an account, whether or not the
@@ -1773,7 +1800,8 @@ class AddySession {
               // on it. `null` from a sidecar too old to send it.
               addedAt: d.addedAt ?? null,
               addedWithPhrase: d.mnemonicAdded
-            }))
+            })),
+            ...(fingerprint ? { fingerprint } : {})
           }
         : {}),
       sync: {
@@ -2361,13 +2389,19 @@ class AddySession {
    * device that the root key vouches for, and the entry it writes is
    * root-signed — which is what a person reviewing their devices later sees as
    * "added with the recovery phrase".
+   *
+   * OPENS AND VERIFIES, AND WRITES NOTHING. It used to run straight on to the
+   * roster append, the keychain and sync, and then show a device count — after
+   * the one step that cannot be taken back. What it returns now is the review
+   * (`AddyRecoveryReview`); `confirmRecovery` does the writing once the person
+   * has compared the words, and `cancelRecovery` drops everything.
    */
   async recoverFromPhrase(
     baseURL: string,
     mnemonic: string,
     label: string,
     insecureTLS = false
-  ): Promise<{ accountId: string; devices: number }> {
+  ): Promise<AddyRecoveryReview> {
     const relay = baseURL.replace(/\/+$/, '')
     if (!relay.startsWith('https://')) {
       throw new AddyError('config-invalid', 'a relay address must be https://')
@@ -2375,8 +2409,13 @@ class AddySession {
 
     await this.detach()
     this.insecureTLS = insecureTLS
+    // NOT `this.addyd`, and nothing below touches `this.account` or
+    // `this.relay`. Until the person confirms, this session is not attached
+    // to anything: the panel keeps saying "not on an account", and nothing
+    // that reads the session can sync, pair or seal through a recovery
+    // nobody has agreed to yet.
     const addyd = await this.openCrypto()
-    this.addyd = addyd
+    let held = false
 
     try {
       const identity = await addyd.send<{
@@ -2386,34 +2425,13 @@ class AddySession {
         secrets: { deviceSignSeed: string; deviceEncKey: string }
       }>('recoverIdentity', { mnemonic, label })
 
-      // Stored before the network, unlike `createAccount` which stores after
-      // it — and the asymmetry is the point. There, a failure means an account
-      // that does not exist and keys worth discarding. Here the account
-      // already exists and these keys are the only ones this machine will ever
-      // have for it: a relay that goes down between the login and the roster
-      // append must not cost the user their one recovery attempt.
-      for (const [scope, value] of [
-        ['device', identity.secrets.deviceSignSeed],
-        ['device-enc', identity.secrets.deviceEncKey]
-      ] as const) {
-        if (!storeAddySecret('device', `${identity.accountId}:${scope}`, value)) {
-          throw new AddyError(
-            'config-invalid',
-            'this machine has no usable keychain, so the recovered keys cannot be stored. Nothing was kept.'
-          )
-        }
-      }
-
-      this.account = {
-        baseURL: relay,
-        token: '',
-        accountId: identity.accountId,
-        epoch: 1,
-        rootSignPub: identity.rootSignPub
-      }
-      this.relay = new RelayClient({ baseURL: relay, token: '', insecureTLS }, addyd)
-      const { token } = await this.relay.login()
-      this.account = { ...this.account, token }
+      // NOT STORED HERE ANY MORE. They were written to the keychain before
+      // the network so a relay outage could not cost "the one recovery
+      // attempt" — but nothing is appended until the person confirms, so a
+      // failure anywhere before that costs nothing and the phrase simply
+      // works again. Kept in memory until `confirmRecovery`.
+      const client = new RelayClient({ baseURL: relay, token: '', insecureTLS }, addyd)
+      const { token } = await client.login()
 
       // The escrow, then the chain. Both are fetched before either is trusted:
       // the escrow carries the head entry as the ACCOUNT committed it, so the
@@ -2421,14 +2439,14 @@ class AddySession {
       // catches a relay serving a truncated roster to a device that has
       // nothing else to compare against, at the moment that is most worth
       // trying.
-      const escrowObj = await this.relay.getObject('escrow', 1)
+      const escrowObj = await client.getObject('escrow', 1)
       if (!escrowObj) {
         throw new AddyError(
           'not-paired',
           'this relay has no escrow for that account, so there is nothing to recover from here. Check the relay address.'
         )
       }
-      const chain = await this.relay.roster()
+      const chain = await client.roster()
 
       type Opened = {
         accountId: string
@@ -2441,6 +2459,9 @@ class AddySession {
         needEpoch?: number
         seq: number
         entry: string
+        /** H(last entry) of the chain as served, hex, and that entry's date. */
+        head: string
+        headTS: number
         secrets: { akSeed: string }
       }
 
@@ -2465,7 +2486,7 @@ class AddySession {
       })
 
       if (opened.needEpoch !== undefined) {
-        const current = await this.relay.getObject('escrow', opened.needEpoch)
+        const current = await client.getObject('escrow', opened.needEpoch)
         if (!current) {
           // The chain says the account rotated and the relay has no escrow
           // for the epoch it rotated to. Refused rather than falling back to
@@ -2504,10 +2525,10 @@ class AddySession {
        * too — and hiding it breaks recovery visibly for anyone who really did
        * re-key, rather than silently downgrading someone who did.
        *
-       * This is a bound, not a cure. A device recovering from nothing has no
-       * prior state to compare against, which is why the design's printable
-       * card carries the roster head and the device count: the person is the
-       * last check, and §6 of the review screen is where they make it.
+       * This is a bound, not a cure: a relay that answers 404 for the next
+       * escrow walks straight past it. A device recovering from nothing has no
+       * prior state to compare against, so the person is the last check — the
+       * review this returns, which nothing below writes ahead of.
        */
       //
       // ONLY ONE THE ACCOUNT SEALED COUNTS. Existence alone was the test, so
@@ -2518,7 +2539,7 @@ class AddySession {
       // under RK_enc, whose public half never leaves it: nobody without the
       // phrase can make one that does. One that does not is reported in the
       // audit log and otherwise ignored.
-      const ahead = await this.relay.getObject('escrow', opened.epoch + 1).catch(() => null)
+      const ahead = await client.getObject('escrow', opened.epoch + 1).catch(() => null)
       const sealedByAccount =
         ahead !== null &&
         (
@@ -2548,42 +2569,128 @@ class AddySession {
         )
       }
 
-      // UNDER ITS OWN EPOCH. The unsuffixed name is epoch 1's by convention —
-      // it was written before any other kind existed — so a recovery onto a
-      // rotated account that stored its key there would come back after a
-      // restart with the current key filed as epoch 1's, and seal nothing
-      // anyone could read.
-      const keyName =
-        opened.epoch > 1
-          ? `${opened.accountId}:account:${opened.epoch}`
-          : `${opened.accountId}:account`
-      if (!storeAddySecret('account', keyName, opened.secrets.akSeed)) {
-        throw new AddyError(
-          'config-invalid',
-          'this machine has no usable keychain, so the account key cannot be stored. Nothing was kept.'
-        )
+      /**
+       * THE REVIEW, BUILT AND RETURNED — AND NOTHING ELSE.
+       *
+       * The labels come from `verifyRoster` on the same bytes `recoverOpen`
+       * just pinned, opened under whichever epoch keys this process now
+       * holds. The words come from `fingerprint` on the served chain's head:
+       * the same op the Sync & devices panel of a device already on the
+       * account runs on its own verified head, so the two screens agree
+       * exactly when the chains do. The head hash covers every entry and its
+       * seq, so a chain cut short — the attack the probe above cannot see —
+       * shows different words from a device that has the rest of it.
+       */
+      const roster = await addyd.send<{ devices: { label?: string; pubSign: string; mnemonicAdded: boolean }[] }>(
+        'verifyRoster',
+        { chain, rootSignPub: opened.rootSignPub, epoch1Sign: opened.epoch1SignPub }
+      )
+      const { words } = await addyd.send<{ words: string[] }>('fingerprint', { head: opened.head })
+
+      this.pendingRecovery = {
+        addyd,
+        relay: client,
+        account: {
+          baseURL: relay,
+          token,
+          accountId: opened.accountId,
+          epoch: opened.epoch,
+          rootSignPub: opened.rootSignPub,
+          epoch1SignPub: opened.epoch1SignPub
+        },
+        deviceSecrets: identity.secrets,
+        akSeed: opened.secrets.akSeed,
+        seq: opened.seq,
+        entry: opened.entry
       }
-
-      await this.relay.appendRoster(opened.seq, opened.entry)
-
-      this.account = {
-        ...this.account,
+      held = true
+      return {
+        accountId: opened.accountId,
+        fingerprint: words,
         epoch: opened.epoch,
-        rootSignPub: opened.rootSignPub,
-        epoch1SignPub: opened.epoch1SignPub
+        devices: roster.devices.map((d) => ({
+          label: d.label ?? `device ${d.pubSign.slice(0, 8)}`,
+          addedWithPhrase: d.mnemonicAdded
+        })),
+        lastEntryAt: opened.headTS
       }
-      // Re-logs in and writes the enrolment, so this survives a restart like
-      // any other attachment — and starts the engine, which is what actually
-      // brings the estate back onto this machine.
-      await this.loginAndRecord()
-      const after = await this.refreshRoster()
-      return { accountId: opened.accountId, devices: after.devices.length }
     } finally {
-      // RK is the whole estate. It is dropped whether this worked or not,
-      // because a process holding it after it has no further use for it is
-      // the one thing a recovery must not leave behind.
+      // RK is the whole estate. It is dropped whether this worked or not —
+      // and now before the review rather than after it: the entry is already
+      // signed, so nothing past this point needs it, and it must not sit in a
+      // process while somebody reads a screen.
       await addyd.send('recoverForget').catch(() => undefined)
+      // A recovery that failed leaves no process holding the minted device
+      // key or the opened epoch key either.
+      if (!held) await addyd.close().catch(() => undefined)
     }
+  }
+
+  /**
+   * The person compared the words and they match: write what recovery found.
+   *
+   * Keys to the keychain first, then the roster entry, then the enrolment and
+   * sync — the order `recoverFromPhrase` used to run without stopping. Keys
+   * before the append so a keychain that refuses costs an error rather than a
+   * roster entry for a key nobody holds; an append that fails takes them back
+   * out, so this machine is left exactly as it was and the phrase works again.
+   * (An append the relay applied and then failed to acknowledge leaves an entry
+   * no machine holds the key for. The next recovery lists it, marked as added
+   * with the phrase, and it can be removed like any other.)
+   */
+  async confirmRecovery(): Promise<{ accountId: string; devices: number }> {
+    const p = this.pendingRecovery
+    this.pendingRecovery = null
+    if (!p) {
+      throw new AddyError('not-paired', 'there is no recovery waiting to be confirmed. Start again with the phrase.')
+    }
+    const id = p.account.accountId
+    // UNDER ITS OWN EPOCH. The unsuffixed name is epoch 1's by convention —
+    // it was written before any other kind existed — so a recovery onto a
+    // rotated account that stored its key there would come back after a
+    // restart with the current key filed as epoch 1's, and seal nothing
+    // anyone could read.
+    const accountKey = p.account.epoch > 1 ? `${id}:account:${p.account.epoch}` : `${id}:account`
+    const secrets = [
+      ['device', `${id}:device`, p.deviceSecrets.deviceSignSeed],
+      ['device', `${id}:device-enc`, p.deviceSecrets.deviceEncKey],
+      ['account', accountKey, p.akSeed]
+    ] as const
+    const stored: (typeof secrets)[number][] = []
+    try {
+      for (const s of secrets) {
+        if (!storeAddySecret(s[0], s[1], s[2])) {
+          throw new AddyError(
+            'config-invalid',
+            'this machine has no usable keychain, so the recovered keys cannot be stored. Nothing was kept.'
+          )
+        }
+        stored.push(s)
+      }
+      await p.relay.appendRoster(p.seq, p.entry)
+    } catch (err) {
+      for (const s of stored) forgetAddySecret(s[0], s[1])
+      await p.addyd.close().catch(() => undefined)
+      throw err
+    }
+
+    this.addyd = p.addyd
+    this.relay = p.relay
+    this.account = p.account
+    // Re-logs in and writes the enrolment, so this survives a restart like
+    // any other attachment — and starts the engine, which is what actually
+    // brings the estate back onto this machine.
+    await this.loginAndRecord()
+    const after = await this.refreshRoster()
+    return { accountId: id, devices: after.devices.length }
+  }
+
+  /** The words did not match, or the person stopped. Nothing was written, so
+   *  dropping the held keys and the sidecar holding the rest is all of it. */
+  async cancelRecovery(): Promise<void> {
+    const p = this.pendingRecovery
+    this.pendingRecovery = null
+    await p?.addyd.close().catch(() => undefined)
   }
 
   /**

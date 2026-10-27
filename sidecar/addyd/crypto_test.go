@@ -1695,6 +1695,89 @@ func TestTheRecoveryProbeCountsOnlyAnEscrowTheAccountSealed(t *testing.T) {
 	}
 }
 
+// THE REVIEW FINGERPRINT is what a person compares between the recovering
+// machine and one they still have, so it must be the same words exactly when
+// the two are looking at the same chain and different words otherwise. The
+// attack it exists for: a relay serves epoch 1's escrow with the chain cut back
+// to genesis, every check in recoverOpen passes (a prefix of a valid chain is a
+// valid chain), and only the person comparing words can tell.
+func TestTheRecoveryFingerprintMatchesAnExistingDeviceOnTheSameChainOnly(t *testing.T) {
+	keys.reset()
+	t.Cleanup(func() {
+		keys.reset()
+		_, _ = handleRecoverForget(Request{Method: "recoverForget"})
+	})
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "laptop"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct := minted.(map[string]any)
+	genesis := acct["genesis"].(string)
+
+	words := func(head string) string {
+		t.Helper()
+		out, err := handleFingerprint(Request{Method: "fingerprint", Params: params(t, map[string]any{"head": head})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(out.(map[string]any)["words"].([]string), " ")
+	}
+	panelWords := func(chain string) string {
+		t.Helper()
+		v, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+			"chain": chain, "rootSignPub": acct["rootSignPub"], "epoch1Sign": acct["epoch1SignPub"],
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return words(v.(map[string]any)["head"].(string))
+	}
+	recoverOn := func(chain string) map[string]any {
+		t.Helper()
+		keys.reset()
+		if _, err := handleRecoverIdentity(Request{Method: "recoverIdentity", Params: params(t, map[string]any{
+			"mnemonic": acct["mnemonic"], "label": "the replacement",
+		})}); err != nil {
+			t.Fatal(err)
+		}
+		out, err := handleRecoverOpen(Request{Method: "recoverOpen", Params: params(t, map[string]any{
+			"escrow": acct["escrow"], "chain": chain,
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.(map[string]any)
+	}
+
+	// The existing device, on the genesis-only chain.
+	onGenesis := panelWords(genesis)
+
+	first := recoverOn(genesis)
+	if got := words(first["head"].(string)); got != onGenesis {
+		t.Fatalf("same chain, different words: recovering %q, existing %q", got, onGenesis)
+	}
+	if ts, _ := first["headTS"].(uint64); ts == 0 {
+		t.Fatal("recoverOpen did not report the date of the roster's last entry")
+	}
+
+	// The account moves on by one entry. An existing device now shows other
+	// words, and a recovery served the old, cut chain still shows the old ones
+	// -- which is the mismatch the person is told to stop on.
+	g, _ := base64.StdEncoding.DecodeString(genesis)
+	e, _ := base64.StdEncoding.DecodeString(first["entry"].(string))
+	longer := base64.StdEncoding.EncodeToString(append(g, e...))
+	onLonger := panelWords(longer)
+	if onLonger == onGenesis {
+		t.Fatal("a longer chain fingerprints the same as its prefix")
+	}
+	if got := words(recoverOn(genesis)["head"].(string)); got == onLonger {
+		t.Fatal("a recovery served a cut chain showed the current chain's words")
+	}
+	if got := words(recoverOn(longer)["head"].(string)); got != onLonger {
+		t.Fatalf("same longer chain, different words: recovering %q, existing %q", got, onLonger)
+	}
+}
+
 // RECOVERING A RE-KEYED ACCOUNT reports epoch 1's key as epoch 1's. It
 // reported the epoch just opened instead; the parent stored that as the
 // genesis key and every roster check afterwards failed on entry 0, so a

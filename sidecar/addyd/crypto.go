@@ -1383,10 +1383,26 @@ func handleRecoverOpen(req Request) (any, error) {
 	if err != nil {
 		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
 	}
+	// The chain's last entry as served, for its date on the review screen.
+	// Verified above, so it decodes; a failure here is not one to explain.
+	last, err := lastEntry(chain)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "reading the roster's last entry")
+	}
 
 	return map[string]any{
 		"accountId":   root.AccountID.String(),
 		"epoch":       verified.Epoch,
+		// WHAT THE PERSON COMPARES BEFORE ANYTHING IS WRITTEN. The escrow pin
+		// proves the chain reaches the head the account committed when that
+		// escrow was sealed -- not that nothing came after it, so a relay can
+		// serve epoch 1's escrow with the chain cut back to genesis and every
+		// check here passes. `head` is H(last entry), which covers its seq and
+		// everything before it; the parent renders it with `fingerprint`, the
+		// same op an existing device's panel uses, so the two screens show the
+		// same words exactly when they are looking at the same chain.
+		"head":   hex.EncodeToString(verified.Head),
+		"headTS": last.TS,
 		"rootSignPub": hex.EncodeToString(root.Sign.Public().(ed25519.PublicKey)),
 		// EPOCH 1'S, remembered from the first escrow -- not the one just
 		// opened. On an account that had been re-keyed this reported the

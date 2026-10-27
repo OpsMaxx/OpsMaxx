@@ -663,7 +663,8 @@ describe('recovery lands on the current epoch or refuses', () => {
     // The unsuffixed keychain name is epoch 1's by convention. A rotated
     // account's key stored there comes back after a restart filed as epoch
     // 1's, sealing things no other device can read.
-    expect(SESSION).toMatch(/account:\$\{opened\.epoch\}/)
+    // Filed at confirm now, from what the review held.
+    expect(SESSION).toMatch(/account:\$\{p\.account\.epoch\}/)
   })
 })
 

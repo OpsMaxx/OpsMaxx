@@ -74,9 +74,16 @@ The vault is encrypted, so its two versions cannot be shown side by side. Choose
 
 ### 5. Recovery phrase
 
-If every device on the account is gone, choose **My other devices are gone** on a new machine, enter the relay address, the twelve words (case and extra spaces do not matter) and a name for this device, and press **Recover this account**. No invite is needed. The screen that follows stays until you press **Done**.
+If every device on the account is gone, choose **My other devices are gone** on a new machine, enter the relay address, the twelve words (case and extra spaces do not matter) and a name for this device, and press **Recover this account**. No invite is needed.
 
-When it finishes it tells you how many devices are on the account. Read that list: anyone who has seen your phrase could have added a device the same way. Remove any you do not recognise.
+Nothing is added to the account yet. First **Check this is your account** shows five words, the account fingerprint, with the account key's number, the devices on the account by name, and the date the device list last changed. A relay can show a recovering machine an old device list, from before you removed a device, and nothing on that machine can tell. So compare:
+
+- **With another device of yours**, if you still have one: open **Sync & devices** there. The words under **Account fingerprint** must be the same five, in the same order.
+- **With what you remember**, if you have none: a device you removed should not be listed, and if you removed a device or changed the account key after the date shown, the list is out of date.
+
+If they match, press **They match — add this device**. If anything differs, press **Stop**: nothing is added to the account and nothing is kept on this machine. There is no way to continue past a mismatch.
+
+When it finishes it tells you how many devices are on the account. The screen stays until you press **Done**. Read that list: anyone who has seen your phrase could have added a device the same way. Remove any you do not recognise.
 
 ### 6. Remove a device, or leave
 
@@ -98,6 +105,8 @@ When it finishes it tells you how many devices are on the account. Read that lis
 | *the other device did not answer in time* | The pairing code ran out, or the code was mistyped. Start a new code on the first machine and type that one. If the first machine already showed emoji and someone pressed **They match** there, another device may have used your code: check the device list on that machine and remove any device you do not recognise. |
 | The showing machine says the pairing failed while the new one is still waiting | The code typed on the new machine was wrong. Press **Cancel** on the new machine, start a new code, and type it again. |
 | *This device is not connected to the relay right now, so nothing was synced.* | **Sync now** could not reach the relay. Check the network, or the sign-in banner. |
+| The account fingerprint on the recovering machine differs from the one on your other device | The relay showed the recovering machine a different device list from the one your device has. Press **Stop**. Check that the relay address is the one your device uses, and that your device has synced recently (press **Sync now** there, then compare again). If the words still differ, do not recover through that relay. |
+| *That is a rolled-back account, not a recovery, and nothing was changed.* | The relay served an old device list while also holding a newer account key. Nothing was added. Do not recover through that relay. |
 | A link that does nothing but show a message | The link was refused, for example because its relay is not `https`. The message says why. |
 | *That pairing link is for a machine joining an account* | The link was opened on a machine that is already on an account. Open it on the machine you are adding. |
 | *… speaks a different addy protocol version than this copy of OpsMaxx* | OpsMaxx and the relay disagree on the protocol version. Update OpsMaxx; if it is already current, whoever runs the relay needs to update it. |
