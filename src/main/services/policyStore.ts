@@ -1,4 +1,5 @@
 import { app } from 'electron'
+import { UNKNOWN_WORKSPACE } from './policyEngine'
 import { join } from 'node:path'
 import { existsSync, readFileSync, unlinkSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
@@ -783,6 +784,7 @@ export function setProtected(scope: PolicyScope, on: boolean): PolicyScope[] {
  */
 export function isProtected(serverId: string | null, workspaceId: string | null): boolean {
   const moved = serverId ? pendingWorkspace(serverId, getCachedServer(serverId)?.workspaceId ?? '') : null
+  if (moved === UNKNOWN_WORKSPACE) return true
   return listProtected().some((p) =>
     p.level === 'server'
       ? !!serverId && p.serverId === serverId

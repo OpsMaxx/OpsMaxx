@@ -145,6 +145,14 @@ describe('a CI connection changed by sync', () => {
     writeFileSync(join(userData, 'opsmaxx-sync-trust.json'), '{not json')
     expect(() => resolveSecret(ci())).toThrow(trust.SyncHeldError)
   })
+
+  it('treats a workspace move as unknown when the trust file is damaged: no AI access', async () => {
+    writeFileSync(join(userData, 'opsmaxx-sync-trust.json'), '{not json')
+    const { resolveRestriction, UNKNOWN_WORKSPACE } = await import('../src/main/services/policyEngine')
+    const former = trust.pendingWorkspace('s1', 'ws-open')
+    expect(former).toBe(UNKNOWN_WORKSPACE)
+    expect(resolveRestriction([], 's1', 'ws-open', former)).toEqual({ kind: 'no-ai-access' })
+  })
 })
 
 // ------------------------------------------------- finding 2, servers half

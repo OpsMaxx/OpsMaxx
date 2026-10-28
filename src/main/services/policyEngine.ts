@@ -43,6 +43,10 @@ export type Restriction =
   | { kind: 'no-ai-access' }
   | { kind: 'group'; groupId: string }
 
+/** `formerWorkspaceId` when the device cannot tell whether a move is pending
+ *  (its sync-trust file is damaged). Refused rather than guessed. */
+export const UNKNOWN_WORKSPACE = '\u0000unknown-workspace'
+
 export function resolveRestriction(
   assignments: PolicyAssignment[],
   serverId: string,
@@ -65,6 +69,7 @@ export function resolveRestriction(
   const inWs = (ws: string): PolicyAssignment | undefined =>
     assignments.find((a) => a.scope.level === 'workspace' && a.scope.workspaceId === ws)
   const now = inWs(workspaceId)
+  if (formerWorkspaceId === UNKNOWN_WORKSPACE) return { kind: 'no-ai-access' }
   const before = formerWorkspaceId ? inWs(formerWorkspaceId) : undefined
   if (before && (!now || before.groupId !== now.groupId)) return now ? { kind: 'no-ai-access' } : of(before)
   return now ? of(now) : { kind: 'none' }

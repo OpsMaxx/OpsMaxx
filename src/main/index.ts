@@ -248,7 +248,7 @@ import { rdpAdvisory, rdpLastError, rdpMintTicket, stopRdpRelay } from './servic
 import type { RdpDesktopSize } from '../shared/rdp'
 import type { TunnelConfig, TunnelSshConfig } from '../shared/tunnel'
 import { knownHostList, knownHostForget } from './services/knownhosts'
-import { askToUseDatabase, askToUseRecord, confirmRecord, confirmSecretOwner, heldRecords } from './services/syncTrust'
+import { askToUseDatabase, askToUseRecord, confirmRecord, confirmSecretOwner, heldRecords, pendingWorkspace } from './services/syncTrust'
 import {
   setVpnPrompter,
   vpnAttachRenderer,
@@ -2286,6 +2286,11 @@ function groupForServer(serverId: string): AccessGroup | null {
   const server = getCachedServer(serverId)
   if (!server) return null
   const groupId = resolveGroupId(listAssignments(), serverId, server.workspaceId)
+  // A workspace move that arrived by sync and is not confirmed here grants
+  // nothing the old workspace did not: the same rule as every restriction
+  // read (see restrictionOf in mcpServer.ts).
+  const former = pendingWorkspace(serverId, server.workspaceId)
+  if (former !== null && resolveGroupId(listAssignments(), serverId, former) !== groupId) return null
   return groupId ? getGroup(groupId) : null
 }
 

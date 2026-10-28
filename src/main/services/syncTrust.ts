@@ -7,6 +7,7 @@ import { askInWindow } from './promptWindow'
 import { getSecret } from './secrets'
 import { loadData } from './store'
 import type { HeldRecord, HeldKind } from '../../shared/addy'
+import { UNKNOWN_WORKSPACE } from './policyEngine'
 
 /**
  * Which synced changes THIS device's user has not confirmed yet.
@@ -412,7 +413,12 @@ export function databaseFieldsNow(cfg: { id?: string; host?: string; ssh?: { ser
  * confirmed, the policy applies the old workspace's rules as well.
  */
 export function pendingWorkspace(serverId: string, currentWs: string): string | null {
-  const ws = read().marks[`server:${serverId}`]?.ws
+  const t = read()
+  // Damaged marks cannot say whether a move is pending, and "a damaged file
+  // holds everything" covers policy too: the unknown former workspace is
+  // treated as No AI Access and Protected by its readers.
+  if (t.unreadable) return UNKNOWN_WORKSPACE
+  const ws = t.marks[`server:${serverId}`]?.ws
   return ws && ws.to === currentWs ? ws.from : null
 }
 

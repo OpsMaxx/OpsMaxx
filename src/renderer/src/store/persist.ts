@@ -373,6 +373,17 @@ async function applyExternal(collections: string[]): Promise<void> {
     if (key in saved) patch[key] = saved[key]
   }
   if (Object.keys(patch).length > 0) useApp.setState(patch as never)
+  // A WORKSPACE'S LOCK IS THIS DEVICE'S, never the synced flag. The record
+  // carries `hasPassword`, and another device sending `false` unlocked the
+  // workspace here: the lock file in main decides, exactly as on launch.
+  if ('workspaces' in patch) {
+    const lockedIds = await window.opsmaxx?.workspaceLock.ids()
+    if (lockedIds) {
+      useApp.getState().syncWorkspaceLocks(lockedIds)
+      const st = useApp.getState()
+      if (!st.isWorkspaceAccessible(st.activeWorkspaceId)) st.lockWorkspace(st.activeWorkspaceId)
+    }
+  }
 }
 
 /** Writes everything now, pending timers included. For a relaunch that must not lose the last edits. */
