@@ -3,6 +3,7 @@ import { backfillModules, type ModuleState } from '../../../shared/modules'
 import type { Server, MonitorGroup } from '../types'
 import { hasBackupContent } from '../../../shared/backupContent'
 import { apiSaveFields, applyExternalApi, hydrateApi, subscribeApiPersistence } from './persistHttp'
+import { refreshHeld } from './addy'
 
 // Bump when the seed/shape changes in a way that should discard older on-disk
 // data (e.g. removing the original sample/dummy dataset).
@@ -331,7 +332,10 @@ async function hydrate(): Promise<void> {
    */
   window.opsmaxx?.data?.onExternalChange?.((collections) => {
     void applyExternal(collections)
+    // What arrived may be a record this device now holds until confirmed.
+    refreshHeld()
   })
+  refreshHeld()
 }
 
 /** The store keys an inbound collection can land in. A collection not in here
@@ -369,6 +373,17 @@ async function applyExternal(collections: string[]): Promise<void> {
     if (key in saved) patch[key] = saved[key]
   }
   if (Object.keys(patch).length > 0) useApp.setState(patch as never)
+  // A WORKSPACE'S LOCK IS THIS DEVICE'S, never the synced flag. The record
+  // carries `hasPassword`, and another device sending `false` unlocked the
+  // workspace here: the lock file in main decides, exactly as on launch.
+  if ('workspaces' in patch) {
+    const lockedIds = await window.opsmaxx?.workspaceLock.ids()
+    if (lockedIds) {
+      useApp.getState().syncWorkspaceLocks(lockedIds)
+      const st = useApp.getState()
+      if (!st.isWorkspaceAccessible(st.activeWorkspaceId)) st.lockWorkspace(st.activeWorkspaceId)
+    }
+  }
 }
 
 /** Writes everything now, pending timers included. For a relaunch that must not lose the last edits. */

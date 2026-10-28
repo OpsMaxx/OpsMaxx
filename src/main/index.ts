@@ -248,6 +248,7 @@ import { rdpAdvisory, rdpLastError, rdpMintTicket, stopRdpRelay } from './servic
 import type { RdpDesktopSize } from '../shared/rdp'
 import type { TunnelConfig, TunnelSshConfig } from '../shared/tunnel'
 import { knownHostList, knownHostForget } from './services/knownhosts'
+import { askToUseDatabase, askToUseRecord, confirmRecord, confirmSecretOwner, heldRecords, pendingWorkspace } from './services/syncTrust'
 import {
   setVpnPrompter,
   vpnAttachRenderer,
@@ -259,6 +260,7 @@ import {
   vpnList,
   vpnLogs,
   vpnProbe,
+  vpnProfile,
   vpnProfiles,
   vpnProfilesExternalChange,
   vpnReload,
@@ -2284,6 +2286,11 @@ function groupForServer(serverId: string): AccessGroup | null {
   const server = getCachedServer(serverId)
   if (!server) return null
   const groupId = resolveGroupId(listAssignments(), serverId, server.workspaceId)
+  // A workspace move that arrived by sync and is not confirmed here grants
+  // nothing the old workspace did not: the same rule as every restriction
+  // read (see restrictionOf in mcpServer.ts).
+  const former = pendingWorkspace(serverId, server.workspaceId)
+  if (former !== null && resolveGroupId(listAssignments(), serverId, former) !== groupId) return null
   return groupId ? getGroup(groupId) : null
 }
 
@@ -4747,15 +4754,22 @@ ipcMain.handle('fleet:collect-now', (_e, serverIds?: string[]) =>
 // withVpnTransportDb resolves the profile from the saved record, so a
 // connection cannot skip its VPN just because one call site predates the
 // feature.
-ipcMain.handle('db:test', (_e, cfg: DbConnectConfig) => dbTest(withVpnTransportDb(resolveDbSecrets(cfg))))
-ipcMain.handle('db:query', (_e, cfg: DbConnectConfig, text: string) =>
+// Every one of these is a person in the database panel, so a connection whose
+// address changed on another device is asked about first; the resolver then
+// refuses on its own if they said no. The sampler and the bridge never ask.
+const dbForPerson = async (cfg: DbConnectConfig): Promise<DbConnectConfig> => {
+  await askToUseDatabase(cfg)
+  return withVpnTransportDb(resolveDbSecrets(cfg))
+}
+ipcMain.handle('db:test', async (_e, cfg: DbConnectConfig) => dbTest(await dbForPerson(cfg)))
+ipcMain.handle('db:query', async (_e, cfg: DbConnectConfig, text: string) =>
   // A person typed this query. The MCP bridge's query_database keeps the
   // default and never raises a dialog on a bastion.
-  dbQuery(withVpnTransportDb(resolveDbSecrets(cfg)), text, true)
+  dbQuery(await dbForPerson(cfg), text, true)
 )
-ipcMain.handle('db:info', (_e, cfg: DbConnectConfig) => dbInfo(withVpnTransportDb(resolveDbSecrets(cfg))))
-ipcMain.handle('db:shell', (_e, cfg: DbConnectConfig, line: string) =>
-  dbShell(withVpnTransportDb(resolveDbSecrets(cfg)), line)
+ipcMain.handle('db:info', async (_e, cfg: DbConnectConfig) => dbInfo(await dbForPerson(cfg)))
+ipcMain.handle('db:shell', async (_e, cfg: DbConnectConfig, line: string) =>
+  dbShell(await dbForPerson(cfg), line)
 )
 ipcMain.handle('db:close', (_e, id: string) => dbClose(id))
 // Operational reads (roadmap 18). Strictly read-only — see the refusal written
@@ -4786,7 +4800,7 @@ ipcMain.handle('db:close', (_e, id: string) => dbClose(id))
 const dbVerdictSeen = new Map<string, string>()
 
 ipcMain.handle('db:ops', async (_e, cfg: DbConnectConfig) => {
-  const report = await dbOps(withVpnTransportDb(resolveDbSecrets(cfg)), true)
+  const report = await dbOps(await dbForPerson(cfg), true)
   // Item 47's growth series. Recorded HERE rather than inside `dbOps` so that
   // function stays a pure read with no store dependency, and recorded only
   // when the report yields a number this can honestly plot -- see
@@ -5011,22 +5025,48 @@ ipcMain.handle('addy:finishJoin', () => addySession.finishJoin())
 // handler exists — deliberately, so the screen was honest while the engine
 // behind it was written. This is the line that turns it on.
 ipcMain.handle('addy:status', () => addySession.status())
+// Synced records this device will not use until confirmed here, and the
+// confirmation. The kind is checked because it names a key in a file main
+// owns; the id only ever selects a record that is already on disk, so the
+// renderer can confirm what it can see and nothing it cannot.
+ipcMain.handle('addy:held', () => heldRecords())
+ipcMain.handle('addy:confirmHeld', (_e, kind: unknown, id: unknown) => {
+  if ((kind === 'server' || kind === 'database' || kind === 'cicd' || kind === 'vpn') && typeof id === 'string') {
+    confirmRecord(kind, id)
+    if (kind === 'cicd') cicd.refresh(id)
+  }
+  return heldRecords()
+})
 // One pass, now. The panel's Sync button, and what the engine's own timer
 // calls between times.
 // Moving the account to a new epoch key. `revocation` needs the recovery
 // phrase, because the compromised key must not authorise the escape from
 // itself — see services/addy/session.ts for the order the writes happen in.
-ipcMain.handle('addy:rotate', (_e, kind: 'hygiene' | 'revocation', mnemonic?: string) =>
-  addySession.rotateEpoch(kind, mnemonic)
-)
+//
+// REVOCATION ONLY. The panel never sends anything else, and a `hygiene`
+// rotation arriving here writes no escrow (only the root key can, and a
+// routine rotation does not take the phrase) — so the recovery phrase would go
+// on opening a key the account had moved off. Refused at the boundary rather
+// than reachable from a renderer that asks for it.
+ipcMain.handle('addy:rotate', (_e, kind: unknown, mnemonic?: string) => {
+  if (kind !== 'revocation') {
+    throw new Error('Only a re-key with the recovery phrase can be started from here.')
+  }
+  return addySession.rotateEpoch('revocation', mnemonic)
+})
 
 // Getting back in with nothing but the twelve words. The path nobody takes
 // until every device is gone, which is why it exists before anyone needs it.
+// Two steps: `recover` opens and verifies and writes nothing; the person
+// compares the fingerprint, then `confirmRecovery` writes or
+// `cancelRecovery` drops it all.
 ipcMain.handle(
   'addy:recover',
   (_e, baseURL: string, mnemonic: string, label: string, insecureTLS?: boolean) =>
     addySession.recoverFromPhrase(baseURL, mnemonic, label, insecureTLS === true)
 )
+ipcMain.handle('addy:confirmRecovery', () => addySession.confirmRecovery())
+ipcMain.handle('addy:cancelRecovery', () => addySession.cancelRecovery())
 
 // Remove another device. The actor side of a revocation, which did not exist:
 // `services/addy/revoke.ts` implemented what a revoked device does to itself
@@ -5546,8 +5586,13 @@ ipcMain.handle('inspect:env', () => inspectEnv())
 
 ipcMain.handle('vpn:list', () => vpnList())
 ipcMain.handle('vpn:profiles', () => vpnProfiles())
-ipcMain.handle('vpn:start', (e, id: string) => {
+ipcMain.handle('vpn:start', async (e, id: string) => {
   vpnAttachRenderer(e.sender)
+  // A person pressed Start, so a profile changed on another device is asked
+  // about here. A No needs no handling: the start refuses on its own, at the
+  // credential, which is also what an auto-start or an agent's start meets.
+  const profile = vpnProfile(id)
+  if (profile) await askToUseRecord('vpn', profile as never)
   return vpnStart(id)
 })
 ipcMain.handle('vpn:stop', (_e, id: string, force?: boolean) => vpnStop(id, { force }))
@@ -5848,7 +5893,13 @@ ipcMain.handle('wslock:delete', (_e, id: string) => wsLockDelete(id))
 
 // ---- Secrets ----
 ipcMain.handle('secrets:available', () => secretsAvailable())
-ipcMain.handle('secrets:set', (_e, id: string, value: string) => setSecret(id, value))
+ipcMain.handle('secrets:set', (_e, id: string, value: string) => {
+  const ok = setSecret(id, value)
+  // A credential typed in on this device for a record is the person saying
+  // where it goes, so the record is confirmed as it stands. See syncTrust.ts.
+  if (ok) confirmSecretOwner(id)
+  return ok
+})
 ipcMain.handle('secrets:delete', (_e, id: string) => deleteSecret(id))
 // Ids and dates, never values — see shared/machineGrants.ts. A standing
 // authorisation that nothing enumerates cannot be withdrawn, which is

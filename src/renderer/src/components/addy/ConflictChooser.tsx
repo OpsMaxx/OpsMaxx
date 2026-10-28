@@ -215,11 +215,20 @@ export function ConflictChooser(): React.JSX.Element | null {
         {/* WHAT HAPPENED, FOR SOMEBODY WHO HAS NEVER HEARD THE WORD CONFLICT.
             The old opening sentence was "Both copies are here now", which
             assumes the reader already knows there are two and why. */}
-        <p className="fine">
-          Two of your machines changed this before they had synced with each other, so OpsMaxx
-          kept both rather than picking one and telling nobody. It is already using the version
-          marked <strong>In use now</strong>; the other has been set aside, waiting for this.
-        </p>
+        {current.reason === 'bulk-removal' ? (
+          <p className="fine">
+            Another of your machines removed most of this list. OpsMaxx is already using that
+            version, marked <strong>In use now</strong>, and kept this machine&apos;s copy from
+            before in case the removal was not meant. If it was, keep the version in use; if it
+            was not, replace it with the other copy.
+          </p>
+        ) : (
+          <p className="fine">
+            Two of your machines changed this before they had synced with each other, so OpsMaxx
+            kept both rather than picking one and telling nobody. It is already using the version
+            marked <strong>In use now</strong>; the other has been set aside, waiting for this.
+          </p>
+        )}
         <p className="fine">
           Nothing is lost yet and nothing is written until you press one of the buttons below.{' '}
           <strong>
@@ -241,9 +250,9 @@ export function ConflictChooser(): React.JSX.Element | null {
                 control with no reason beside it reads as a broken dialog. */}
             <span>
               The copy that was set aside cannot be opened on this device: {current.problem}. That
-              is why it cannot be chosen here — it is sealed under a key this machine does not
-              hold, and another of your devices may still be able to read it. Keeping the version
-              in use deletes it.
+              is why it cannot be chosen here — either it is sealed in a way this machine cannot
+              read, or it is older than a version this machine has already used, which is how a
+              copy replayed by the relay looks. Keeping the version in use deletes it.
             </span>
           </div>
         )}
@@ -265,9 +274,16 @@ export function ConflictChooser(): React.JSX.Element | null {
           <section>
             <h3>
               <span>Set aside{from !== null ? `, ${from}` : ''}</span>
-              <span className="conflict-when">{when(current.createdAt)}</span>
+              {/* Marked when it is only the relay's word: a copy kept by an
+                  older OpsMaxx carries no sealed record of who made it, and
+                  the relay can say anything. For the vault this line is the
+                  whole basis of the choice, so it must not look checked. */}
+              <span className="conflict-when">
+                {when(current.createdAt)}
+                {current.reportedByRelay ? ' (as reported by the relay, not checked)' : ''}
+              </span>
             </h3>
-            <pre>{preview(current.losing, current.collection)}</pre>
+            <pre>{preview(current.losing, current.collection, current.reportedByRelay)}</pre>
           </section>
         </div>
 
@@ -379,17 +395,21 @@ export function ConflictChooser(): React.JSX.Element | null {
 /** A readable summary. Full JSON, pretty-printed, capped: the user is
  *  comparing two things and a truncated one they cannot scroll is worse than
  *  no preview, but a megabyte of vault is not a comparison either. */
-function preview(value: unknown, collection?: string): string {
+function preview(value: unknown, collection?: string, reportedByRelay?: boolean): string {
   if (value === undefined) return 'Could not be read on this device.'
   // THE VAULT TRAVELS AS CIPHERTEXT, by design — nothing in the sync path
   // opens it. Pretty-printing it offered the user two walls of base64 and
   // asked which one they preferred, which is not a question anybody can
-  // answer. The timestamps and the device name beside each copy are.
+  // answer. The time and the machine beside the set-aside copy are — and only
+  // when they came from inside the sealed copy rather than from the relay.
   if (collection === 'vault') {
-    return (
-      'Your vault is encrypted with your master password and cannot be shown here.\n' +
-      'Choose by when each copy was made and which machine made it.'
-    )
+    const basis =
+      reportedByRelay === undefined
+        ? 'It is the copy every device is using.'
+        : reportedByRelay
+          ? 'The time and machine above are only what the relay reports: this copy was kept by an older OpsMaxx and they could not be checked.'
+          : 'The time and machine above were sealed into this copy by a device on this account.'
+    return 'Your vault is encrypted with your master password and cannot be shown here.\n' + basis
   }
   const text = JSON.stringify(value, null, 2)
   return text.length > 8000 ? text.slice(0, 8000) + '\n… (truncated)' : text

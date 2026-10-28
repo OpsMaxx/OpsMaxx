@@ -43,16 +43,36 @@ export type Restriction =
   | { kind: 'no-ai-access' }
   | { kind: 'group'; groupId: string }
 
+/** `formerWorkspaceId` when the device cannot tell whether a move is pending
+ *  (its sync-trust file is damaged). Refused rather than guessed. */
+export const UNKNOWN_WORKSPACE = '\u0000unknown-workspace'
+
 export function resolveRestriction(
   assignments: PolicyAssignment[],
   serverId: string,
-  workspaceId: string
+  workspaceId: string,
+  /**
+   * The workspace this device last confirmed the server in, when a move that
+   * arrived by sync has put it somewhere else since (`pendingWorkspace` in
+   * services/syncTrust.ts). A move made on another device must not lift a
+   * restriction here until it is confirmed here, so the old workspace's rule
+   * still applies: alone when the new one has none, and as No AI Access when
+   * the two disagree — two different groups have no "stricter" to pick
+   * without evaluating both, and refusing is the side that cannot be wrong.
+   */
+  formerWorkspaceId?: string | null
 ): Restriction {
-  const found =
-    assignments.find((a) => a.scope.level === 'server' && a.scope.serverId === serverId) ??
-    assignments.find((a) => a.scope.level === 'workspace' && a.scope.workspaceId === workspaceId)
-  if (!found) return { kind: 'none' }
-  return found.groupId ? { kind: 'group', groupId: found.groupId } : { kind: 'no-ai-access' }
+  const of = (a: PolicyAssignment): Restriction =>
+    a.groupId ? { kind: 'group', groupId: a.groupId } : { kind: 'no-ai-access' }
+  const own = assignments.find((a) => a.scope.level === 'server' && a.scope.serverId === serverId)
+  if (own) return of(own)
+  const inWs = (ws: string): PolicyAssignment | undefined =>
+    assignments.find((a) => a.scope.level === 'workspace' && a.scope.workspaceId === ws)
+  const now = inWs(workspaceId)
+  if (formerWorkspaceId === UNKNOWN_WORKSPACE) return { kind: 'no-ai-access' }
+  const before = formerWorkspaceId ? inWs(formerWorkspaceId) : undefined
+  if (before && (!now || before.groupId !== now.groupId)) return now ? { kind: 'no-ai-access' } : of(before)
+  return now ? of(now) : { kind: 'none' }
 }
 
 export function resolveGroupId(

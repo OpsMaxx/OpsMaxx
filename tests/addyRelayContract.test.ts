@@ -179,7 +179,13 @@ describe('a transfer fits in one request', () => {
     writeFileSync(path, Buffer.alloc(transfer.MAX_TRANSFER_BYTES + 1))
     const err = await transfer
       .sendFile(
-        { addyd: signer as never, relay: {} as never, epoch: () => 1, peers: () => ['bb'.repeat(32)] },
+        {
+          addyd: signer as never,
+          relay: {} as never,
+          epoch: () => 1,
+          peers: () => ['bb'.repeat(32)],
+          peerEnc: () => 'ee'.repeat(32)
+        },
         path,
         'bb'.repeat(32)
       )
@@ -198,10 +204,18 @@ describe('a transfer fits in one request', () => {
         deleted.push(name)
       }
     }
-    const sidecar = { send: async () => ({ sealed: Buffer.from('x').toString('base64') }) }
+    const sidecar = {
+      send: async () => ({ key: 'a2V5', sealed: Buffer.from('x').toString('base64') })
+    }
     const err = await transfer
       .sendFile(
-        { addyd: sidecar as never, relay: relay as never, epoch: () => 1, peers: () => ['bb'.repeat(32)] },
+        {
+          addyd: sidecar as never,
+          relay: relay as never,
+          epoch: () => 1,
+          peers: () => ['bb'.repeat(32)],
+          peerEnc: () => 'ee'.repeat(32)
+        },
         path,
         'bb'.repeat(32)
       )
@@ -236,8 +250,7 @@ describe('mail nobody can use is acknowledged', () => {
       deleteObject: async () => undefined
     }
     const sidecar = {
-      send: async (method: string) => {
-        if (method === 'whoami') return { devicePub: 'aa'.repeat(32) }
+      send: async () => {
         throw new Error('AEAD: message authentication failed')
       }
     }
@@ -245,7 +258,8 @@ describe('mail nobody can use is acknowledged', () => {
       addyd: sidecar as never,
       relay: relay as never,
       epoch: () => 1,
-      peers: () => [member]
+      peers: () => [member],
+      peerEnc: () => 'ee'.repeat(32)
     })
     expect(acked.flat().sort()).toEqual([1, 2, 3])
   })
@@ -258,6 +272,7 @@ describe('mail nobody can use is acknowledged', () => {
       name: 'runbook.sh',
       size: bytes.length,
       sha256: createHash('sha256').update(bytes).digest('hex'),
+      key: 'a2V5',
       sentAt: 1
     }
     const order: string[] = []
@@ -285,13 +300,16 @@ describe('mail nobody can use is acknowledged', () => {
     }
     const sidecar = {
       send: async (method: string, p?: { sealed?: string }) =>
-        method === 'whoami' ? { devicePub: 'aa'.repeat(32) } : { payload: p?.sealed }
+        method === 'openMail'
+          ? { from: 'bb'.repeat(32), sentAt: 1, payload: p?.sealed }
+          : { payload: p?.sealed }
     }
     const arrived = await transfer.collectFiles({
       addyd: sidecar as never,
       relay: relay as never,
       epoch: () => 1,
-      peers: () => ['bb'.repeat(32)]
+      peers: () => ['bb'.repeat(32)],
+      peerEnc: () => 'ee'.repeat(32)
     })
     expect(arrived).toHaveLength(1)
     expect(order).toEqual(['ack', 'delete transfer:deadbeef00000001'])

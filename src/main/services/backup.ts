@@ -323,6 +323,11 @@ export async function backupImport(
     if (payload.vault !== null) writeJson('opsmaxx-vault.json', payload.vault)
     if (payload.workspaceLocks !== null) writeJson('opsmaxx-wslocks.json', payload.workspaceLocks)
     if (payload.knownHosts !== null) writeJson('opsmaxx-known-hosts.json', payload.knownHosts)
+    // THE MARKS STAY. They hold synced values nobody here confirmed, compared
+    // by value: a restored record with this device's own old values is not
+    // held by them, and one carrying a synced attacker's values (a scheduled
+    // backup taken after the change arrived) still is. Clearing them released
+    // exactly that case.
 
     // The bundle carries connections, credentials and vault. It does not carry
     // history, and the history already on this machine belongs to a different
@@ -448,6 +453,15 @@ export const ALL_DATA_FILES = [
   'opsmaxx-spec-files.json',
   'opsmaxx-spec-files.seeded',
   'opsmaxx-known-hosts.json',
+  // What this device's user confirmed about records that arrived by sync, and
+  // the host keys it accepted itself (services/syncTrust.ts). Hashes and ids,
+  // never a credential — but a record of what this person trusted, and a
+  // revocation wipe that left it would leave the next account on this machine
+  // inheriting the last one's confirmations.
+  'opsmaxx-sync-trust.json',
+  // Which clipboards this device already applied, by signer and time, until
+  // each one's window closes (addy/clipboard.ts). No content.
+  'opsmaxx-addy-clipboard-seen.json',
   // Folder shares: which folders on THIS machine are mounted on which server.
   // Per-machine by design and never in a backup bundle or a sync (a share
   // restored elsewhere would mount that machine's folder), but it is a record

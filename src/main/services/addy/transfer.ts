@@ -2,9 +2,10 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { basename, join } from 'node:path'
 import { app } from 'electron'
-import { AddyError, type AddySidecar } from './sidecar'
+import { AddyError } from './sidecar'
 import { MAX_REQUEST_BYTES, relayError, type RelayClient } from './relay'
 import { CLIPBOARD_KIND } from './clipboard'
+import { LEGACY_MAIL_REASON, isLegacyMail, openMail, sealMail, type MailDeps, type OpenedMail } from './mail'
 
 /**
  * Sending a file to another of your own devices.
@@ -39,15 +40,13 @@ export const TRANSFER_DIR = 'addy-transfers'
 /**
  * What sealing adds to a transfer's bytes, exactly.
  *
- * The sealed object is the ACE encoding in `protocol/object.go`:
- * "addy-obj-v1\0" (12) + suite (1) + nonce (24) + a u32 length (4), around a
- * ciphertext that is the plaintext plus a 16-byte tag. The plaintext is
- * "addy-coll-v1\0" (13) + schema u32 (4) + writer version as a u32-prefixed
- * string (4 + 8 for "transfer") + counter u64 (8) + the payload's own u32
- * length (4). 41 + 57 = 98. `TestTransferSealOverhead` in the sidecar seals a
- * transfer and fails if this number is wrong.
+ * The bytes are a mail blob (`protocol/mail.go`, `SealMailBlob`), sealed under
+ * a one-time key that travels only inside the notice: "addy-mail-blob-v1\0"
+ * (18) + nonce (24) + the plaintext + a 16-byte tag = 58.
+ * `TestTransferSealOverhead` in the sidecar seals a transfer and fails if this
+ * number is wrong.
  */
-export const TRANSFER_SEAL_OVERHEAD = 98
+export const TRANSFER_SEAL_OVERHEAD = 58
 
 /** Room for `{"epoch":…,"counter":1,"body":"…"}` around the base64. The real
  *  envelope is 33 bytes plus the epoch's digits. */
@@ -83,16 +82,34 @@ interface TransferNotice {
    *  from a complete one. The AEAD already proves the bytes were not altered
    *  by anyone without the key; this proves they are all there. */
   sha256: string
+  /**
+   * Base64 of the one-time key the object is sealed under.
+   *
+   * The object was sealed under the EPOCH key, so every device on the account
+   * -- and a removed one, until somebody re-keyed -- could fetch and read any
+   * file sent to any other. The key now travels only here, in a notice sealed
+   * to the recipient and signed by the sender, so the bytes are exactly as
+   * readable as the notice: by one device.
+   */
+  key: string
   sentAt: number
 }
 
-export interface TransferDeps {
-  addyd: AddySidecar
+export interface TransferDeps extends MailDeps {
   relay: RelayClient
   epoch(): number
-  /** Every other device on the roster, as hex signing keys. */
-  peers(): string[]
 }
+
+/**
+ * Notices opened on an earlier pass whose bytes were not there yet.
+ *
+ * Opening one spends its nonce — the sidecar refuses the same mail twice, so a
+ * relay cannot replay it — and the ordinary reason the bytes are missing is a
+ * sender still uploading. Without this the retry the comment below promises
+ * would open a "replay" and drop the transfer. Keyed by the sealed bytes, so
+ * the relay renumbering a row cannot attach one notice's verdict to another.
+ */
+const heldNotices = new Map<string, OpenedMail>()
 
 const quarantine = (): string => join(app.getPath('userData'), TRANSFER_DIR)
 
@@ -105,10 +122,10 @@ const quarantine = (): string => join(app.getPath('userData'), TRANSFER_DIR)
  * `authorized_keys` writes an SSH key into the user's home directory at mode
  * 0600, which is exactly the mode sshd insists on.
  *
- * The sender holding the epoch key is not a reason to trust the id. It is the
- * reason to check it: a revoked-but-not-re-keyed device still holds that key,
- * and an arriving file is the one artefact this feature asks the user to make
- * a trust judgement about.
+ * A valid signature from a device on the roster is not a reason to trust the
+ * id either. It is the reason to check it: a member is a device somebody could
+ * have paired, and an arriving file is the one artefact this feature asks the
+ * user to make a trust judgement about.
  */
 const TRANSFER_ID = /^[0-9a-f]{8,64}$/
 
@@ -156,12 +173,7 @@ export async function sendFile(
   const name = basename(path)
   const digest = createHash('sha256').update(bytes).digest('hex')
 
-  const sealed = await deps.addyd.send<{ sealed: string }>('seal', {
-    collection: objectName(id),
-    epoch: deps.epoch(),
-    schema: 1,
-    writerVersion: 'transfer',
-    counter: 1,
+  const sealed = await deps.addyd.send<{ key: string; sealed: string }>('sealBlob', {
     payload: bytes.toString('base64')
   })
   await deps.relay.putObject(
@@ -173,19 +185,24 @@ export async function sendFile(
 
   // THE NOTICE SECOND. See above: announcing before the bytes are there is a
   // recipient that fetches a 404 and reports a failure for a working transfer.
-  const notice: TransferNotice = { id, name, size: bytes.length, sha256: digest, sentAt: Date.now() }
-  const sealedNotice = await deps.addyd.send<{ sealed: string }>('seal', {
-    collection: `${TRANSFER_KIND}:${toDevice}`,
-    epoch: deps.epoch(),
-    schema: 1,
-    writerVersion: 'transfer',
-    counter: Date.now(),
-    payload: Buffer.from(JSON.stringify(notice), 'utf8').toString('base64')
-  })
+  const notice: TransferNotice = {
+    id,
+    name,
+    size: bytes.length,
+    sha256: digest,
+    key: sealed.key,
+    sentAt: Date.now()
+  }
+  const sealedNotice = await sealMail(
+    deps,
+    TRANSFER_KIND,
+    toDevice,
+    Buffer.from(JSON.stringify(notice), 'utf8')
+  )
   const resp = await deps.relay.request('POST', '/v1/mail', {
     toDevice,
     kind: TRANSFER_KIND,
-    sealed: sealedNotice.sealed
+    sealed: sealedNotice
   })
   if (!resp.ok) {
     // The bytes are already on the relay and now nothing will ever point at
@@ -222,20 +239,17 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
     messages: { id: number; fromDevice: string; kind: string; sealed: string }[]
   }
   /**
-   * ONLY FROM A DEVICE THAT IS STILL ON THE ROSTER.
+   * ONLY FROM A DEVICE THAT IS STILL ON THE ROSTER — and that is decided by
+   * the notice's SIGNATURE, in `openMail`, against the roster this device
+   * verified. A removed device keeps a working key, and a file arriving from
+   * "one of your own devices" is exactly the belief this feature asks the
+   * user to act on.
    *
-   * Opening a notice proves someone holding this epoch's key sealed it under
-   * the right collection name. That is a weaker statement than it looks: a
-   * device that was removed and not re-keyed is still someone holding that
-   * key. Without this filter, such a device could go on delivering files to
-   * every machine on the account — and a file arriving from "one of your own
-   * devices" is exactly the belief this feature asks the user to act on.
-   *
-   * The sender is the relay's word for it, which is why this is a filter and
-   * not a proof: a relay can relabel a row. What it buys is that the relay
-   * must now name a CURRENT member, so a removed device cannot deliver under
-   * its own identity, and the label shown to the user is at least a device
-   * that exists on the account.
+   * The `fromDevice` filter here is housekeeping, not that proof: it is the
+   * relay's label, and a relay can write any label it likes. Relabelling a
+   * removed device's notice as a member's gets it as far as `openMail`, which
+   * refuses it; relabelling a real one as a stranger's drops it, which a relay
+   * can do anyway by not delivering it.
    */
   const peers = new Set(deps.peers())
   const notices = messages.filter((m) => m.kind === TRANSFER_KIND && peers.has(m.fromDevice))
@@ -266,7 +280,6 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
     return []
   }
 
-  const { devicePub } = await deps.addyd.send<{ devicePub: string }>('whoami')
   const dir = quarantine()
   mkdirSync(dir, { recursive: true })
 
@@ -274,20 +287,19 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
   const done: number[] = []
   /** Objects to delete once their notice is acknowledged. */
   const finished: string[] = []
+  let legacy = 0
   for (const m of notices) {
+    let opened: OpenedMail
     let notice: TransferNotice
     try {
-      const opened = await deps.addyd.send<{ payload: string }>('open', {
-        collection: `${TRANSFER_KIND}:${devicePub}`,
-        epoch: deps.epoch(),
-        sealed: m.sealed,
-        knownSchema: 1,
-        seenCounter: 0
-      })
-      notice = JSON.parse(Buffer.from(opened.payload, 'base64').toString('utf8')) as TransferNotice
+      opened = heldNotices.get(m.sealed) ?? (await openMail(deps, TRANSFER_KIND, m.sealed))
+      heldNotices.delete(m.sealed)
+      notice = JSON.parse(opened.payload.toString('utf8')) as TransferNotice
     } catch {
-      // A notice that does not open will not open next time either: sealed
-      // under an epoch this device no longer holds, or to another device.
+      // A notice that does not open will not open next time either: sealed to
+      // another device, signed by one not on the roster, already delivered,
+      // or from an OpsMaxx too old to sign it.
+      if (isLegacyMail(m.sealed)) legacy++
       unusable.push(m.id)
       continue
     }
@@ -297,7 +309,11 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
     // TRANSFER_ID. Refused rather than sanitised, because there is no
     // legitimate id this rejects: every one this code mints is hex. Dropped
     // with it, because it is the same notice every time it is offered.
-    if (typeof notice.id !== 'string' || !TRANSFER_ID.test(notice.id)) {
+    if (
+      typeof notice.id !== 'string' ||
+      !TRANSFER_ID.test(notice.id) ||
+      typeof notice.key !== 'string'
+    ) {
       unusable.push(m.id)
       continue
     }
@@ -309,22 +325,19 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
         // The bytes are not there. NOT acknowledged, so the next collection
         // tries again: the ordinary cause is a sender still uploading, and
         // dropping the notice would lose the transfer permanently.
+        heldNotices.set(m.sealed, opened)
         continue
       }
-      const body = await deps.addyd.send<{ payload: string }>('open', {
-        collection: objectName(notice.id),
-        epoch: deps.epoch(),
-        sealed: object.body.toString('base64'),
-        knownSchema: 1,
-        seenCounter: 0
+      const body = await deps.addyd.send<{ payload: string }>('openBlob', {
+        key: notice.key,
+        sealed: object.body.toString('base64')
       })
       const bytes = Buffer.from(body.payload, 'base64')
 
-      // CHECKED BEFORE IT IS WRITTEN. The AEAD proves nobody without the key
-      // altered these bytes; the digest proves they are all of them.
-      // Dropped when it fails: the AEAD has already proved these are the
-      // bytes the sender sealed, so a mismatch is the sender's mistake and
-      // fetching them again would get the same ones.
+      // CHECKED BEFORE IT IS WRITTEN. The AEAD proves nobody without the
+      // notice's key altered these bytes; the digest, which the sender
+      // signed, proves they are all of them and the ones it meant.
+      // Dropped when it fails: fetching again gets the same bytes.
       const digest = createHash('sha256').update(bytes).digest('hex')
       if (digest !== notice.sha256) {
         unusable.push(m.id)
@@ -349,15 +362,16 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
         name: safe,
         size: bytes.length,
         path: full,
-        from: m.fromDevice,
-        at: notice.sentAt
+        from: opened.from,
+        at: opened.sentAt
       })
       done.push(m.id)
       finished.push(objectName(notice.id))
     } catch {
       // One bad transfer does not stop the rest, and it is NOT acknowledged —
       // so a failure that was transient is retried rather than silently
-      // dropped on the floor.
+      // dropped on the floor. Held, for the same reason as a missing object.
+      heldNotices.set(m.sealed, opened)
     }
   }
 
@@ -371,6 +385,14 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
       // sync itself started failing with 507.
       for (const name of finished) await deps.relay.deleteObject(name).catch(() => undefined)
     }
+  }
+  if (legacy > 0 && arrived.length === 0) {
+    // Said, because otherwise the file simply never arrives. Thrown only once
+    // the notices are acknowledged, so it is said once rather than every pass.
+    throw new AddyError(
+      'config-invalid',
+      `${legacy === 1 ? 'A file' : `${legacy} files`} sent to this device ${legacy === 1 ? 'was' : 'were'} refused. ${LEGACY_MAIL_REASON}`
+    )
   }
   return arrived
 }

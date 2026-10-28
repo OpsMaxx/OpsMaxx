@@ -380,6 +380,14 @@ describe('the account key can be changed', () => {
 
   it('and every layer above it is connected', () => {
     expect(MAIN).toMatch(/ipcMain\.handle\('addy:rotate'/)
+    // Revocation only, refused at the boundary: a hygiene rotation writes no
+    // escrow, so the recovery phrase would go on opening a key the account
+    // had left. The panel never sends one; nothing else may either.
+    const handler = MAIN.slice(MAIN.indexOf("ipcMain.handle('addy:rotate'"))
+    const body = handler.slice(0, handler.indexOf('\n})') + 3)
+    expect(body).toMatch(/if \(kind !== 'revocation'\) \{\s*throw /)
+    expect(body).toMatch(/rotateEpoch\('revocation', mnemonic\)/)
+    expect(body).not.toMatch(/rotateEpoch\(kind/)
     expect(PRELOAD).toMatch(/invoke\('addy:rotate'/)
     const PANEL = read('src/renderer/src/components/addy/AddyPanel.tsx')
     expect(PANEL).toMatch(/addy\.rotate\('revocation'/)
@@ -663,7 +671,8 @@ describe('recovery lands on the current epoch or refuses', () => {
     // The unsuffixed keychain name is epoch 1's by convention. A rotated
     // account's key stored there comes back after a restart filed as epoch
     // 1's, sealing things no other device can read.
-    expect(SESSION).toMatch(/account:\$\{opened\.epoch\}/)
+    // Filed at confirm now, from what the review held.
+    expect(SESSION).toMatch(/account:\$\{p\.account\.epoch\}/)
   })
 })
 
@@ -680,7 +689,14 @@ describe('recovery lands on the current epoch or refuses', () => {
 describe('a withheld roster entry is detectable', () => {
   it('the pin is supplied on every verification', () => {
     expect(SESSION).toMatch(/havePin: true/)
-    expect(SESSION).toMatch(/pinnedSeq: pin\.seq/)
+    expect(SESSION).toMatch(/pinnedSeq: saved\.pinSeq/)
+    // On every call that reads a chain, not only `verifyRoster`: a re-key
+    // verified unpinned sealed the new key to a device cut off by a withheld
+    // revoke, and a follow verified unpinned adopted from a rewound chain.
+    for (const call of ['rotateEpoch', 'adoptEpoch']) {
+      const args = SESSION.match(new RegExp(`'${call}', \\{[\\s\\S]*?\\n    \\}\\)`))?.[0] ?? ''
+      expect(args, `${call} is sent without this device's pin`).toMatch(/\.\.\.this\.rosterPin\(\)/)
+    }
   })
 
   it('and it is on disk, or it is nothing', () => {
@@ -695,7 +711,7 @@ describe('a withheld roster entry is detectable', () => {
   it('only ever moves forward', () => {
     // A shorter chain has already been refused by the verifier; writing a
     // lower sequence would undo that refusal for every launch afterwards.
-    expect(SESSION).toMatch(/verified\.headSeq > \(saved\.pinSeq \?\? -1\)/)
+    expect(SESSION).toMatch(/verified\.headSeq > \(latest\.pinSeq \?\? -1\)/)
   })
 })
 
@@ -718,12 +734,14 @@ describe('the relay is checked, not just written down', () => {
   })
 
   it('inbound mail has to come from a device still on the roster', () => {
-    // Opening proves somebody holding this epoch's key sealed it — which a
-    // device removed without a re-key still is.
-    const T = read('src/main/services/addy/transfer.ts')
-    const C = read('src/main/services/addy/clipboard.ts')
-    expect(T).toMatch(/peers\.has\(m\.fromDevice\)/)
-    expect(C).toMatch(/peers\.has\(m\.fromDevice\)/)
+    // Decided by the signature against the verified roster, which mail.ts
+    // hands the sidecar as `senders` — never by the relay's `fromDevice`,
+    // which a relay can set to any member. The behaviour is exercised in
+    // addyClipboardEcho and addyTransferArrival; this pins the wiring.
+    const M = read('src/main/services/addy/mail.ts')
+    expect(M).toMatch(/senders: deps\.peers\(\)/)
+    expect(read('src/main/services/addy/clipboard.ts')).not.toMatch(/from: m\.fromDevice/)
+    expect(read('src/main/services/addy/transfer.ts')).not.toMatch(/from: m\.fromDevice/)
   })
 })
 

@@ -1,6 +1,6 @@
 import { AddyError, type AddySidecar } from './sidecar'
 import type { RelayClient } from './relay'
-import type { ConflictCopy } from '../../../shared/addy'
+import type { ConflictCopy, ConflictReason } from '../../../shared/addy'
 
 /**
  * Conflict copies, opened so a person can choose between them.
@@ -17,6 +17,82 @@ export interface ConflictDeps {
   addyd: AddySidecar
   relay: RelayClient
   epoch(): number
+  /** The highest counter this device has accepted for a collection — the
+   *  rollback floor (`sync.ts`'s `counterFloor`). Passed in rather than
+   *  imported because `sync.ts` imports `sealConflict` from here. */
+  floor(collection: string): number
+}
+
+/**
+ * The label a conflict copy is sealed under: `conflict:<name>`, never `<name>`.
+ *
+ * THE LABEL IS THE AEAD'S ASSOCIATED DATA, so it decides what a ciphertext can
+ * be opened as. Sealed under the collection's own name, a conflict copy was a
+ * perfectly valid canonical object -- same account, same epoch, same name, and
+ * a counter of the winner's plus one, which is exactly the number the
+ * resolution is written at. So the relay could hand a copy the user had just
+ * rejected back as the resolution, and every device would open it and adopt
+ * it. Under its own label it cannot open as `vault`, and nothing sealed as
+ * `vault` opens as a conflict copy. The relay still files the copy under the
+ * plain name (`POST /v1/obj/vault/conflict`); only the sealing differs.
+ *
+ * Collection names are not validated by the sidecar or the protocol -- the
+ * label is a length-prefixed string in the AAD, which is how `clipboard:<peer>`
+ * already works -- so this needs no protocol change and no version bump. An
+ * OpsMaxx 0.59.0 client opens these under the plain name, fails the tag, and
+ * shows the copy as one that cannot be opened: it can discard it, never adopt.
+ */
+export function conflictLabel(name: string): string {
+  return `conflict:${name}`
+}
+
+/**
+ * What goes INSIDE a conflict copy's sealed plaintext, around the payload.
+ *
+ * The relay's `device` and `createdAt` are its own word -- unauthenticated,
+ * and the chooser's only basis for a vault, which cannot be shown. So the
+ * writer and the time travel sealed, where only a holder of the current epoch
+ * key can have put them. That is a member of the account as it stands, not a
+ * signature by one particular device: a member can claim another member's
+ * name, the relay and a removed device cannot claim anything.
+ */
+interface ConflictEnvelope {
+  v: 1
+  device: string
+  writtenAt: string
+  /** Why it was set aside, when that is not an ordinary race. */
+  reason?: ConflictReason
+  /** The collection's own bytes, base64, exactly as they were on disk. */
+  body: string
+}
+
+/** Seals `payload` as a conflict copy of `name`, with who and when inside. */
+export async function sealConflict(
+  addyd: AddySidecar,
+  name: string,
+  epoch: number,
+  counter: number,
+  payload: Buffer,
+  writerVersion: string,
+  reason?: ConflictReason
+): Promise<Buffer> {
+  const { devicePub } = await addyd.send<{ devicePub: string }>('whoami')
+  const envelope: ConflictEnvelope = {
+    v: 1,
+    device: devicePub,
+    writtenAt: new Date().toISOString(),
+    ...(reason ? { reason } : {}),
+    body: payload.toString('base64')
+  }
+  const { sealed } = await addyd.send<{ sealed: string }>('seal', {
+    collection: conflictLabel(name),
+    epoch,
+    schema: 1,
+    writerVersion,
+    counter,
+    payload: Buffer.from(JSON.stringify(envelope), 'utf8').toString('base64')
+  })
+  return Buffer.from(sealed, 'base64')
 }
 
 interface RawConflict {
@@ -44,16 +120,44 @@ export async function listConflicts(deps: ConflictDeps): Promise<ConflictCopy[]>
   }
   const { conflicts } = (await resp.json()) as { conflicts: RawConflict[] }
 
+  const epoch = deps.epoch()
   const out: ConflictCopy[] = []
   for (const raw of conflicts) {
+    // THE CURRENT EPOCH ONLY. A copy sealed under an older key was written
+    // before the last re-key, and a re-key is what removing a device does: so
+    // it may be the removed device's, posted while it was still a member, or
+    // something the relay kept from then. Offering it put one click between a
+    // device the user threw out and every device they kept -- "Replace"
+    // re-seals it under the current key and syncs it everywhere. The relay
+    // deletes these when the epoch advances; a 0.1.0 relay does not, so they
+    // are filtered here as well, and not counted.
+    if (raw.epoch !== epoch) continue
     const copy: ConflictCopy = {
       id: raw.id,
       collection: raw.name,
       device: raw.device,
-      createdAt: raw.createdAt
+      createdAt: raw.createdAt,
+      reportedByRelay: true
     }
     try {
-      copy.losing = await openBlob(deps, raw.name, raw.epoch, raw.body)
+      try {
+        const env = await openConflict(deps, raw.name, epoch, raw.body)
+        copy.losing = JSON.parse(Buffer.from(env.body, 'base64').toString('utf8'))
+        copy.device = env.device
+        copy.createdAt = env.writtenAt
+        copy.reportedByRelay = false
+        if (env.reason) copy.reason = env.reason
+      } catch (err) {
+        if (!(err instanceof NotAConflictCopy)) throw err
+        // A LEGACY COPY, kept by OpsMaxx 0.59.0 under the collection's own
+        // label -- which makes it indistinguishable from any archived copy of
+        // the real object. So it is opened at this device's floor, not 0: the
+        // relay could otherwise list last month's vault as a "conflict" and
+        // one click would reinstate it. A genuine legacy copy older than the
+        // floor is refused and shown as one that cannot be opened, which is
+        // the safe failure. Who and when stay the relay's, and say so.
+        copy.losing = await openBlob(deps, raw.name, epoch, raw.body, deps.floor(raw.name))
+      }
     } catch (err) {
       // Offered with the reason rather than dropped. A conflict that vanishes
       // from the list is a decision nobody gets to make, and the data is still
@@ -61,9 +165,18 @@ export async function listConflicts(deps: ConflictDeps): Promise<ConflictCopy[]>
       copy.problem = err instanceof Error ? err.message : String(err)
     }
     try {
-      const stored = await deps.relay.getObject(raw.name, deps.epoch())
+      const stored = await deps.relay.getObject(raw.name, epoch)
       if (stored) {
-        copy.winning = await openBlob(deps, raw.name, deps.epoch(), stored.body.toString('base64'))
+        // At the floor too. What is shown here as "in use now" is what the
+        // user keeps, or concatenates into "keep both" -- an archived copy
+        // served in its place would be written back as the resolution.
+        copy.winning = await openBlob(
+          deps,
+          raw.name,
+          epoch,
+          stored.body.toString('base64'),
+          deps.floor(raw.name)
+        )
       }
     } catch {
       // The winner being unreadable is worth showing the loser for anyway:
@@ -78,20 +191,58 @@ async function openBlob(
   deps: ConflictDeps,
   collection: string,
   epoch: number,
-  sealed: string
+  sealed: string,
+  seenCounter: number
 ): Promise<unknown> {
   const { payload } = await deps.addyd.send<{ payload: string }>('open', {
     collection,
     epoch,
     sealed,
     knownSchema: 1,
-    // Zero, deliberately: this is a copy being INSPECTED, not applied. The
-    // rollback check exists to stop an old document overwriting a newer one,
-    // and a conflict copy is old by definition -- enforcing it here would make
-    // every conflict unopenable, which is the opposite of the point.
-    seenCounter: 0
+    seenCounter
   })
   return JSON.parse(Buffer.from(payload, 'base64').toString('utf8'))
+}
+
+/** The sealed body did not open under the conflict label: a legacy copy, or
+ *  not a conflict copy at all. Distinct so the caller can try the legacy
+ *  reading without swallowing a malformed envelope. */
+class NotAConflictCopy extends Error {}
+
+async function openConflict(
+  deps: ConflictDeps,
+  name: string,
+  epoch: number,
+  sealed: string
+): Promise<ConflictEnvelope> {
+  let payload: string
+  try {
+    ;({ payload } = await deps.addyd.send<{ payload: string }>('open', {
+      collection: conflictLabel(name),
+      epoch,
+      sealed,
+      knownSchema: 1,
+      // Zero, and only here. The rollback floor guards a collection's own
+      // counter sequence, and this copy cannot be served as part of it -- the
+      // label sees to that. A floor would only make a copy unopenable once the
+      // collection had moved on twice, which for a busy server list is hours.
+      // What a replayed old copy CAN do is be offered again, and its sealed
+      // date says when it was really written.
+      seenCounter: 0
+    }))
+  } catch (err) {
+    throw new NotAConflictCopy(err instanceof Error ? err.message : String(err))
+  }
+  const env = JSON.parse(Buffer.from(payload, 'base64').toString('utf8')) as Partial<ConflictEnvelope>
+  if (
+    env.v !== 1 ||
+    typeof env.device !== 'string' ||
+    typeof env.writtenAt !== 'string' ||
+    typeof env.body !== 'string'
+  ) {
+    throw new AddyError('internal', 'the conflict copy opened but its contents are not in a shape this version reads')
+  }
+  return env as ConflictEnvelope
 }
 
 /**

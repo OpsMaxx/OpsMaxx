@@ -162,8 +162,8 @@ describe('which path the clipboard takes', () => {
           return { ok: true, status: 200 } as Response
         }
       } as never,
-      epoch: () => 1,
       peers: () => ['aa', 'bb'],
+      peerEnc: () => 'ee'.repeat(32),
       tryDirect
     })
     return { result, mailed }

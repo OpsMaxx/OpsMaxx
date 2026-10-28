@@ -134,6 +134,44 @@ func TestAnotherCollectionsCiphertextWillNotOpen(t *testing.T) {
 	}
 }
 
+// A conflict copy is sealed as `conflict:<name>` (src/main/services/addy/
+// conflicts.ts) so that it is NOT a valid `<name>` object. Sealed under the
+// collection's own label it was: the relay could serve a copy the user had
+// rejected as the resolution, or an archived real object as a "conflict".
+// This is the AEAD, not the client, refusing both directions.
+func TestAConflictCopyIsNotTheRealObjectNorTheReverse(t *testing.T) {
+	_, epoch := loadTestAccount(t)
+	seal := func(label string) any {
+		t.Helper()
+		sealed, err := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{
+			"collection": label, "epoch": epoch, "schema": 1,
+			"writerVersion": "0.59.1", "counter": 2,
+			"payload": base64.StdEncoding.EncodeToString([]byte(`{"v":1}`)),
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sealed.(map[string]any)["sealed"]
+	}
+	open := func(label string, sealed any) error {
+		_, err := handleOpen(Request{Method: "open", Params: params(t, map[string]any{
+			"collection": label, "epoch": epoch, "sealed": sealed,
+			"knownSchema": 1, "seenCounter": 0,
+		})})
+		return err
+	}
+
+	if open("vault", seal("conflict:vault")) == nil {
+		t.Error("a conflict copy opened as the real vault")
+	}
+	if open("conflict:vault", seal("vault")) == nil {
+		t.Error("the real vault opened as a conflict copy")
+	}
+	if err := open("conflict:vault", seal("conflict:vault")); err != nil {
+		t.Errorf("a conflict copy did not open under its own label: %v", err)
+	}
+}
+
 // A counter that goes backwards is a replayed object, and the client must
 // refuse rather than apply it.
 func TestARewoundCounterIsRefusedWithItsOwnCode(t *testing.T) {
@@ -1312,6 +1350,119 @@ func TestAWithheldEntryIsCaughtByThePin(t *testing.T) {
 	}
 }
 
+// A RE-KEY IS PINNED LIKE ANY OTHER ROSTER READ.
+//
+// It was the one that was not: `rotateEpoch` verified the relay's chain with
+// no pin, so a relay serving the chain as it stood before a revoke had the
+// new key sealed to the revoked device -- the re-key handed over the very
+// thing it was performed to take away. And the transition's hash comes back,
+// so the parent can pin its re-read to the entry it appended.
+func TestARotationRefusesAChainCutBeforeARevoke(t *testing.T) {
+	keys.reset()
+	t.Cleanup(keys.reset)
+
+	run := func(h func(Request) (any, error), m string, p map[string]any) map[string]any {
+		t.Helper()
+		v, err := h(Request{Method: m, Params: params(t, p)})
+		if err != nil {
+			t.Fatalf("%s: %v", m, err)
+		}
+		return v.(map[string]any)
+	}
+	minted := run(handleCreateAccount, "createAccount", map[string]any{"label": "laptop"})
+	verify := func(chain string, pin map[string]any) (map[string]any, error) {
+		p := map[string]any{"chain": chain, "rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"]}
+		for k, v := range pin {
+			p[k] = v
+		}
+		v, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, p)})
+		if err != nil {
+			return nil, err
+		}
+		return v.(map[string]any), nil
+	}
+
+	peerSign, _, _ := ed25519.GenerateKey(rand.Reader)
+	peerEnc, _ := ecdh.X25519().GenerateKey(rand.Reader)
+	gw, _ := base64.StdEncoding.DecodeString(minted["genesis"].(string))
+	one, _ := verify(minted["genesis"].(string), nil)
+	added := run(handleAddDevice, "addDevice", map[string]any{
+		"headEntry": one["headEntry"], "headSeq": one["headSeq"], "epoch": uint64(1),
+		"pubSign": hex.EncodeToString(peerSign), "pubEnc": hex.EncodeToString(peerEnc.PublicKey().Bytes()),
+		"label": "desktop",
+	})
+	aw, _ := base64.StdEncoding.DecodeString(added["entry"].(string))
+	twoChain := base64.StdEncoding.EncodeToString(append(append([]byte{}, gw...), aw...))
+	two, _ := verify(twoChain, nil)
+	revoked := run(handleRevokeDevice, "revokeDevice", map[string]any{
+		"headEntry": two["headEntry"], "headSeq": two["headSeq"], "epoch": uint64(1),
+		"pubSign": hex.EncodeToString(peerSign), "pubEnc": hex.EncodeToString(peerEnc.PublicKey().Bytes()),
+	})
+	rw, _ := base64.StdEncoding.DecodeString(revoked["entry"].(string))
+	fullWire := append(append(append([]byte{}, gw...), aw...), rw...)
+	full := base64.StdEncoding.EncodeToString(fullWire)
+	after, err := verify(full, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := map[string]any{"havePin": true, "pinnedSeq": after["headSeq"], "pinnedHead": after["head"]}
+
+	rotate := func(chain string, pin map[string]any) (map[string]any, error) {
+		p := map[string]any{
+			"kind": "revocation", "chain": chain, "mnemonic": minted["mnemonic"],
+			"rootSignPub": minted["rootSignPub"], "epoch1Sign": minted["epoch1SignPub"],
+		}
+		for k, v := range pin {
+			p[k] = v
+		}
+		v, err := handleRotateEpoch(Request{Method: "rotateEpoch", Params: params(t, p)})
+		if err != nil {
+			return nil, err
+		}
+		return v.(map[string]any), nil
+	}
+
+	// The attack, set up: unpinned, the cut chain is accepted and the revoked
+	// device gets a handoff of its own.
+	if cut, err := rotate(twoChain, nil); err != nil {
+		t.Fatalf("the cut chain should rotate unpinned, or the test proves nothing: %v", err)
+	} else if n := len(cut["handoffs"].(map[string]string)); n != 2 {
+		t.Fatalf("unpinned rotation sealed %d handoffs; the attack is not set up", n)
+	}
+
+	// Pinned, refused as a rollback.
+	if _, err := rotate(twoChain, pin); err == nil {
+		t.Fatal("a re-key accepted a chain missing a revoke this device had already seen")
+	} else if !strings.Contains(err.Error(), "rewound") && !strings.Contains(err.Error(), "seen") {
+		t.Fatalf("refused, but not as a rollback: %v", err)
+	}
+
+	// And the honest chain rotates, with a hash the re-read can be pinned to.
+	rot, err := rotate(full, pin)
+	if err != nil {
+		t.Fatalf("the full chain was refused against its own pin: %v", err)
+	}
+	if n := len(rot["handoffs"].(map[string]string)); n != 1 {
+		t.Fatalf("%d handoffs after the revoke; only this device survives", n)
+	}
+	tw, _ := base64.StdEncoding.DecodeString(rot["entry"].(string))
+	confirmed, err := verify(base64.StdEncoding.EncodeToString(append(fullWire, tw...)), map[string]any{
+		"havePin": true, "pinnedSeq": rot["seq"], "pinnedHead": rot["entryHash"],
+	})
+	if err != nil {
+		t.Fatalf("the chain ending on the transition does not verify against the returned hash: %v", err)
+	}
+	if confirmed["epoch"].(uint64) != rot["epoch"].(uint64) {
+		t.Fatalf("the confirmed chain ends in epoch %v, not %v", confirmed["epoch"], rot["epoch"])
+	}
+	// A chain WITHOUT the transition fails that same pin -- the dropped append.
+	if _, err := verify(full, map[string]any{
+		"havePin": true, "pinnedSeq": rot["seq"], "pinnedHead": rot["entryHash"],
+	}); err == nil {
+		t.Fatal("a chain without the transition passed the transition's pin")
+	}
+}
+
 // A SIGNED SESSION DESCRIPTION, and what it refuses.
 //
 // `protocol.Signal` binds the DTLS fingerprint and says why in its own
@@ -1511,33 +1662,6 @@ func TestAnAbsentDeviceIsNotReportedRevoked(t *testing.T) {
 	}
 }
 
-// The client caps a file transfer so the sealed, base64-encoded PUT fits the
-// relay's 8 MiB request limit, and it does that arithmetic with a constant:
-// TRANSFER_SEAL_OVERHEAD in src/main/services/addy/transfer.ts. This is the
-// check that the constant is what sealing a transfer actually adds. If the
-// object layout changes, this fails before a user's file starts failing with
-// 413 at 99% of the limit.
-func TestTransferSealOverhead(t *testing.T) {
-	_, epoch := loadTestAccount(t)
-	for _, n := range []int{0, 1, 4096} {
-		out, err := handleSeal(Request{Method: "seal", Params: params(t, map[string]any{
-			"collection": "transfer:00112233445566778899aabb", "epoch": epoch, "schema": 1,
-			"writerVersion": "transfer", "counter": 1,
-			"payload": base64.StdEncoding.EncodeToString(make([]byte, n)),
-		})})
-		if err != nil {
-			t.Fatal(err)
-		}
-		sealed, err := base64.StdEncoding.DecodeString(out.(map[string]any)["sealed"].(string))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if got := len(sealed) - n; got != 98 {
-			t.Fatalf("sealing %d bytes added %d; transfer.ts assumes 98", n, got)
-		}
-	}
-}
-
 // THE FORM --rtc HANDS OUT IS THE FORM THAT IS SIGNED.
 //
 // The parent passes rtcOffer's `sdp` straight to signSignal and on to the
@@ -1692,6 +1816,89 @@ func TestTheRecoveryProbeCountsOnlyAnEscrowTheAccountSealed(t *testing.T) {
 		if probe(c.escrow, c.epoch) {
 			t.Errorf("%s escrow counted as one this account sealed", name)
 		}
+	}
+}
+
+// THE REVIEW FINGERPRINT is what a person compares between the recovering
+// machine and one they still have, so it must be the same words exactly when
+// the two are looking at the same chain and different words otherwise. The
+// attack it exists for: a relay serves epoch 1's escrow with the chain cut back
+// to genesis, every check in recoverOpen passes (a prefix of a valid chain is a
+// valid chain), and only the person comparing words can tell.
+func TestTheRecoveryFingerprintMatchesAnExistingDeviceOnTheSameChainOnly(t *testing.T) {
+	keys.reset()
+	t.Cleanup(func() {
+		keys.reset()
+		_, _ = handleRecoverForget(Request{Method: "recoverForget"})
+	})
+	minted, err := handleCreateAccount(Request{Method: "createAccount", Params: params(t, map[string]any{"label": "laptop"})})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acct := minted.(map[string]any)
+	genesis := acct["genesis"].(string)
+
+	words := func(head string) string {
+		t.Helper()
+		out, err := handleFingerprint(Request{Method: "fingerprint", Params: params(t, map[string]any{"head": head})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return strings.Join(out.(map[string]any)["words"].([]string), " ")
+	}
+	panelWords := func(chain string) string {
+		t.Helper()
+		v, err := handleVerifyRoster(Request{Method: "verifyRoster", Params: params(t, map[string]any{
+			"chain": chain, "rootSignPub": acct["rootSignPub"], "epoch1Sign": acct["epoch1SignPub"],
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return words(v.(map[string]any)["head"].(string))
+	}
+	recoverOn := func(chain string) map[string]any {
+		t.Helper()
+		keys.reset()
+		if _, err := handleRecoverIdentity(Request{Method: "recoverIdentity", Params: params(t, map[string]any{
+			"mnemonic": acct["mnemonic"], "label": "the replacement",
+		})}); err != nil {
+			t.Fatal(err)
+		}
+		out, err := handleRecoverOpen(Request{Method: "recoverOpen", Params: params(t, map[string]any{
+			"escrow": acct["escrow"], "chain": chain,
+		})})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.(map[string]any)
+	}
+
+	// The existing device, on the genesis-only chain.
+	onGenesis := panelWords(genesis)
+
+	first := recoverOn(genesis)
+	if got := words(first["head"].(string)); got != onGenesis {
+		t.Fatalf("same chain, different words: recovering %q, existing %q", got, onGenesis)
+	}
+	if ts, _ := first["headTS"].(uint64); ts == 0 {
+		t.Fatal("recoverOpen did not report the date of the roster's last entry")
+	}
+
+	// The account moves on by one entry. An existing device now shows other
+	// words, and a recovery served the old, cut chain still shows the old ones
+	// -- which is the mismatch the person is told to stop on.
+	g, _ := base64.StdEncoding.DecodeString(genesis)
+	e, _ := base64.StdEncoding.DecodeString(first["entry"].(string))
+	longer := base64.StdEncoding.EncodeToString(append(g, e...))
+	onLonger := panelWords(longer)
+	if onLonger == onGenesis {
+		t.Fatal("a longer chain fingerprints the same as its prefix")
+	}
+	if got := words(recoverOn(genesis)["head"].(string)); got == onLonger {
+		t.Fatal("a recovery served a cut chain showed the current chain's words")
+	}
+	if got := words(recoverOn(longer)["head"].(string)); got != onLonger {
+		t.Fatalf("same longer chain, different words: recovering %q, existing %q", got, onLonger)
 	}
 }
 

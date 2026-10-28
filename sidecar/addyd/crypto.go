@@ -424,6 +424,34 @@ type verifyRosterRequest struct {
 	HavePinnedAt bool   `json:"havePin"`
 }
 
+// pinFrom decodes the furthest point in the roster the caller has verified,
+// or nil when it sent none. The same three fields on every request that reads
+// a chain, because a pin that one reader honours and another ignores is a
+// rollback the relay simply routes through the other reader.
+func pinFrom(have bool, seq uint64, head string) (*protocol.Pin, error) {
+	if !have {
+		return nil, nil
+	}
+	h, err := hex.DecodeString(head)
+	if err != nil {
+		return nil, codedf(ErrConfigInvalid, "pinnedHead is hex")
+	}
+	return &protocol.Pin{Seq: seq, Hash: h}, nil
+}
+
+// rosterErr names a rollback and a fork by their own codes, so the parent can
+// tell "the relay withheld entries" from "this chain is malformed".
+func rosterErr(err error, doing string) error {
+	switch {
+	case errors.Is(err, protocol.ErrForked):
+		return wrapCoded(ErrRosterForked, err, doing)
+	case errors.Is(err, protocol.ErrRewound):
+		return wrapCoded(ErrRosterRewound, err, doing)
+	default:
+		return wrapCoded(ErrRosterInvalid, err, doing)
+	}
+}
+
 func handleVerifyRoster(req Request) (any, error) {
 	var in verifyRosterRequest
 	if err := decodeParams(req, &in); err != nil {
@@ -442,13 +470,9 @@ func handleVerifyRoster(req Request) (any, error) {
 		return nil, codedf(ErrConfigInvalid, "epoch1Sign is 32 bytes of hex")
 	}
 
-	var pin *protocol.Pin
-	if in.HavePinnedAt {
-		head, err := hex.DecodeString(in.PinnedHead)
-		if err != nil {
-			return nil, codedf(ErrConfigInvalid, "pinnedHead is hex")
-		}
-		pin = &protocol.Pin{Seq: in.PinnedSeq, Hash: head}
+	pin, err := pinFrom(in.HavePinnedAt, in.PinnedSeq, in.PinnedHead)
+	if err != nil {
+		return nil, err
 	}
 
 	keys.mu.RLock()
@@ -477,14 +501,7 @@ func handleVerifyRoster(req Request) (any, error) {
 
 	v, err := protocol.VerifyChain(chain, acct, rootPub, epoch1, pin)
 	if err != nil {
-		switch {
-		case errors.Is(err, protocol.ErrForked):
-			return nil, wrapCoded(ErrRosterForked, err, "verifying the roster")
-		case errors.Is(err, protocol.ErrRewound):
-			return nil, wrapCoded(ErrRosterRewound, err, "verifying the roster")
-		default:
-			return nil, wrapCoded(ErrRosterInvalid, err, "verifying the roster")
-		}
+		return nil, rosterErr(err, "verifying the roster")
 	}
 
 	// `Devices` is the LIVE set: the verifier applies revocations as it walks
@@ -1383,10 +1400,26 @@ func handleRecoverOpen(req Request) (any, error) {
 	if err != nil {
 		return nil, wrapCoded(ErrInternal, err, "encoding the entry")
 	}
+	// The chain's last entry as served, for its date on the review screen.
+	// Verified above, so it decodes; a failure here is not one to explain.
+	last, err := lastEntry(chain)
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "reading the roster's last entry")
+	}
 
 	return map[string]any{
 		"accountId":   root.AccountID.String(),
 		"epoch":       verified.Epoch,
+		// WHAT THE PERSON COMPARES BEFORE ANYTHING IS WRITTEN. The escrow pin
+		// proves the chain reaches the head the account committed when that
+		// escrow was sealed -- not that nothing came after it, so a relay can
+		// serve epoch 1's escrow with the chain cut back to genesis and every
+		// check here passes. `head` is H(last entry), which covers its seq and
+		// everything before it; the parent renders it with `fingerprint`, the
+		// same op an existing device's panel uses, so the two screens show the
+		// same words exactly when they are looking at the same chain.
+		"head":   hex.EncodeToString(verified.Head),
+		"headTS": last.TS,
 		"rootSignPub": hex.EncodeToString(root.Sign.Public().(ed25519.PublicKey)),
 		// EPOCH 1'S, remembered from the first escrow -- not the one just
 		// opened. On an account that had been re-keyed this reported the
@@ -1454,6 +1487,14 @@ type rotateEpochRequest struct {
 	// rotation: RK is what signs the escape from a compromised epoch key, and
 	// asking for it when it is not needed trains people to type it.
 	Mnemonic string `json:"mnemonic"`
+	// THIS DEVICE'S ROSTER PIN, as `verifyRoster` takes it. Without it a relay
+	// serves the chain as it stood before a revoke entry, the chain verifies
+	// on its own terms, and the new key is sealed to the device the re-key
+	// exists to shut out. A re-key is the one roster read that must not be
+	// the unpinned one.
+	PinnedSeq    uint64 `json:"pinnedSeq"`
+	PinnedHead   string `json:"pinnedHead"`
+	HavePinnedAt bool   `json:"havePin"`
 }
 
 func handleRotateEpoch(req Request) (any, error) {
@@ -1498,11 +1539,15 @@ func handleRotateEpoch(req Request) (any, error) {
 		return nil, codedf(ErrNotPaired, "no account is loaded")
 	}
 
+	pin, err := pinFrom(in.HavePinnedAt, in.PinnedSeq, in.PinnedHead)
+	if err != nil {
+		return nil, err
+	}
 	verified, err := protocol.VerifyChain(
-		chain, acct, ed25519.PublicKey(rootPub), ed25519.PublicKey(epoch1), nil,
+		chain, acct, ed25519.PublicKey(rootPub), ed25519.PublicKey(epoch1), pin,
 	)
 	if err != nil {
-		return nil, wrapCoded(ErrRosterInvalid, err, "verifying the roster before rotating it")
+		return nil, rosterErr(err, "verifying the roster before rotating it")
 	}
 	current, haveCurrent := held[verified.Epoch]
 	if !haveCurrent {
@@ -1645,8 +1690,17 @@ func handleRotateEpoch(req Request) (any, error) {
 	if err != nil {
 		return nil, wrapCoded(ErrInternal, err, "encoding the transition")
 	}
+	// And its hash, hex, in the form a pin takes: the parent re-reads the
+	// chain after appending and pins it to THIS entry, because an append the
+	// relay acknowledged and then dropped leaves every other device on the
+	// key the revoked one holds.
+	entryHash, err := rot.Entry.Hash()
+	if err != nil {
+		return nil, wrapCoded(ErrInternal, err, "hashing the transition")
+	}
 	out["seq"] = rot.Entry.Seq
 	out["entry"] = base64.StdEncoding.EncodeToString(wire)
+	out["entryHash"] = hex.EncodeToString(entryHash)
 	return out, nil
 }
 
@@ -1683,6 +1737,10 @@ type adoptEpochRequest struct {
 	// own key so any device holding it can catch up -- or one sealed to this
 	// device in particular.
 	Chained bool `json:"chained"`
+	// This device's roster pin, as `verifyRoster` takes it.
+	PinnedSeq    uint64 `json:"pinnedSeq"`
+	PinnedHead   string `json:"pinnedHead"`
+	HavePinnedAt bool   `json:"havePin"`
 }
 
 // handleAdoptEpoch takes the new epoch key after somebody else rotated.
@@ -1771,12 +1829,17 @@ func handleAdoptEpoch(req Request) (any, error) {
 		)
 	}
 
-	// VERIFIED FIRST, so everything read out of it afterwards is signed.
+	// VERIFIED FIRST, so everything read out of it afterwards is signed --
+	// and against this device's own pin as well as the handoff's head below.
+	pin, err := pinFrom(in.HavePinnedAt, in.PinnedSeq, in.PinnedHead)
+	if err != nil {
+		return nil, err
+	}
 	verified, err := protocol.VerifyChain(
-		chain, acct, ed25519.PublicKey(rootPub), ed25519.PublicKey(epoch1), nil,
+		chain, acct, ed25519.PublicKey(rootPub), ed25519.PublicKey(epoch1), pin,
 	)
 	if err != nil {
-		return nil, wrapCoded(ErrRosterInvalid, err, "verifying the roster before adopting an epoch")
+		return nil, rosterErr(err, "verifying the roster before adopting an epoch")
 	}
 	if verified.Epoch != in.Epoch {
 		return nil, codedf(

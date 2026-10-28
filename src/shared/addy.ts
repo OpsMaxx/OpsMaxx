@@ -170,7 +170,7 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
    * all four, and the reason is the point.
    */
   secrets:
-    'device-local: safeStorage credentials. They reach another device inside the vault collection or a backup bundle, never as their own synced object -- a sync path carrying unsealed credentials would be a second way to lose them',
+    'device-local: safeStorage credentials for servers and databases, including which vault entry each one uses. They do NOT reach another device by sync: the vault syncs, but the link from a server or database to its entry lives here, so a second device has to be given it again. They travel only in a backup bundle -- a sync path carrying unsealed credentials would be a second way to lose them',
   wslocks:
     'device-local: workspace lock passwords protect a workspace on THIS machine; syncing them would make one machine unlock decision apply everywhere',
   mcpSessions:
@@ -179,6 +179,16 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
     'device-local: plaintext request and response bodies spilled by the traffic inspector. Swept on every inspector start, and the last thing that should acquire a second copy on another machine',
   specFiles:
     'device-local: a list of local OpenAPI file paths, and its marker, left behind by older versions. Nothing writes or reads them now; "delete all data" removes them, and a path to this machine\'s files means nothing on another',
+  // WHAT THIS DEVICE'S USER HAS CONFIRMED about records that steer a
+  // credential: per record, a hash of its destination and credential pointer as
+  // last confirmed here, plus the host keys this device itself accepted. It is
+  // the answer to "did a person on THIS machine agree to send that credential
+  // there", and syncing it would let the device being guarded against answer
+  // for every other one. See services/syncTrust.ts.
+  addyClipboardSeen:
+    'device-local: which clipboards this device already applied, so a relay cannot replay one after a restart; it says nothing another device needs',
+  syncTrust:
+    'device-local: what this device\'s user confirmed about synced records and host keys; syncing it would let another device confirm on their behalf',
   httpSession:
     'per-device open tabs and unsaved drafts; drafts can hold values the user has not decided to share',
   apiWorkspaceLegacy:
@@ -235,6 +245,10 @@ export type AddyErrorCode =
   | 'roster-invalid'
   | 'roster-forked'
   | 'roster-rewound'
+  // Raised by main: the relay served a sealed object older than one this
+  // device already saw. Refused; leaving and pairing again is the way out
+  // after a relay restored from a backup.
+  | 'rolled-back'
   | 'schema-too-new'
   | 'quota-exceeded'
   | 'relay-unreachable'
@@ -255,12 +269,27 @@ export type AddyErrorCode =
  * needs it and must not import a main module -- that pulls Electron, the vault
  * and the sidecar into the renderer's bundle for the sake of four fields.
  */
+/** 'bulk-removal': another device removed most of this list, and this is
+ *  the copy from before, kept in case that was not meant. */
+export type ConflictReason = 'bulk-removal'
+
 export interface ConflictCopy {
   id: number
   collection: string
   /** Hex of the device that wrote the LOSING copy. */
   device: string
   createdAt: string
+  /**
+   * True when `device` and `createdAt` are only the relay's word: a copy kept
+   * by OpsMaxx 0.59.0, or one that could not be opened. False when both came
+   * from inside the sealed copy, where neither the relay nor a removed device
+   * can have written them. The chooser says which, because for the vault they
+   * are the whole basis of the choice.
+   */
+  reportedByRelay: boolean
+  /** Why the copy was set aside, when it was not an ordinary race. Sealed
+   *  inside the copy; absent on 0.59.0 copies. */
+  reason?: ConflictReason
   /** The losing copy's contents, unsealed. Absent when it could not be opened
    *  -- sealed under an epoch this device no longer holds, most likely -- with
    *  `problem` saying so. */
@@ -268,6 +297,27 @@ export interface ConflictCopy {
   /** The copy that won, as it stands on the relay now. */
   winning?: unknown
   problem?: string
+}
+
+/**
+ * A synced record this device will not use without asking, as the Sync &
+ * devices panel and the badges show it.
+ *
+ * Declared here for the reason `ConflictCopy` is: the renderer names it and
+ * must not import a main module. See services/syncTrust.ts for what holds one.
+ */
+export type HeldKind = 'server' | 'database' | 'cicd' | 'vpn'
+
+export interface HeldRecord {
+  kind: HeldKind
+  id: string
+  name: string
+  /** What changed, in words: "address", "saved credential", "workspace". */
+  changed: string[]
+  /** It arrived from another device and has never been confirmed here. */
+  arrived: boolean
+  /** Where it points now, for the person to check. */
+  destination: string
 }
 
 /** What both devices show once a pairing has been confirmed.
@@ -356,7 +406,35 @@ export interface AddyStatusSnapshot {
   accountId?: string
   /** Omitted, not empty, until a roster has been verified on this device. */
   devices?: AddyStatusDevice[]
+  /** The verified roster head as five words: what a machine recovering with
+   *  the phrase shows before it adds itself, so the person can compare the
+   *  two screens. Omitted with `devices`. */
+  fingerprint?: string[]
   sync: AddyStatusSync
+}
+
+/**
+ * What a recovery found, shown BEFORE anything is written.
+ *
+ * The phrase opens epoch 1's escrow and the chain verifies against the head
+ * that escrow carries, but a relay chooses which escrow and how much chain to
+ * serve: epoch 1's escrow and a chain cut back to genesis verify perfectly, and
+ * land the person on the key every removed device still holds. Nothing this
+ * machine holds can tell. So the roster head is shown as words to compare with
+ * another device, alongside what the chain says about itself, and the roster
+ * entry, the keys and sync all wait until the person says they match.
+ */
+export interface AddyRecoveryReview {
+  accountId: string
+  /** Five words from the verified roster head, the same as Sync & devices
+   *  shows on a device looking at the same chain. */
+  fingerprint: string[]
+  /** The account's current epoch, as the chain states it. */
+  epoch: number
+  /** The devices on the chain as served, before this one is added. */
+  devices: { label: string; addedWithPhrase: boolean }[]
+  /** Epoch ms of the chain's last entry, by its author's clock. */
+  lastEntryAt: number
 }
 
 /**

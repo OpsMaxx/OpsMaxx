@@ -70,6 +70,8 @@ function fakeSidecar(): { send: (m: string, p?: unknown) => Promise<unknown>; al
     alive: () => true,
     send: async (method: string, params?: unknown) => {
       const p = params as Record<string, unknown>
+      // A conflict copy carries its writer inside the seal; see conflicts.ts.
+      if (method === 'whoami') return { devicePub: 'aa'.repeat(32) }
       if (method === 'seal') {
         return {
           sealed: Buffer.from(
@@ -188,7 +190,9 @@ function seeded(relay: ReturnType<typeof fakeRelay>, name: string, value: unknow
 
 beforeEach(() => {
   applied.mockClear()
-  forgetSyncState()
+  // The file itself, not forgetSyncState(): a forget keeps the rollback
+  // floors on purpose, and each test is a fresh device.
+  rmSync(join(userData, SYNC_STATE_FILE), { force: true })
   rmSync(DATA, { force: true })
 })
 afterAll(() => rmSync(userData, { recursive: true, force: true }))
@@ -470,7 +474,9 @@ describe('once the two sides agree', () => {
     const kept = relay.conflicts.find((c) => c.name === 'servers')
     expect(kept).toBeTruthy()
     const inner = JSON.parse(kept!.body.toString('utf8'))
-    expect(JSON.parse(Buffer.from(inner.payload, 'base64').toString('utf8'))).toEqual([
+    // Inside the conflict envelope (writer, time, body) — see conflicts.ts.
+    const envelope = JSON.parse(Buffer.from(inner.payload, 'base64').toString('utf8'))
+    expect(JSON.parse(Buffer.from(envelope.body, 'base64').toString('utf8'))).toEqual([
       { id: 's1', name: 'mine' }
     ])
   })
@@ -783,11 +789,129 @@ describe('when something goes wrong', () => {
     const r = await syncOnce(deps(relay))
 
     // With no memory of an agreement, a difference is never an overwrite in
-    // either direction: the lists are unioned, and only a record both sides
-    // hold differently goes to the user. That is what makes "resync
-    // everything" safe to offer at all.
-    expect(r.outcomes.servers).toBe('merged')
-    expect((readBlob().servers as { id: string }[]).map((x) => x.id)).toEqual(['s1', 'local-since'])
+    // either direction, and never a silent union either: this device has
+    // agreed before, so an empty ancestor would bring back records deleted
+    // elsewhere. Both copies are kept for a person. That is what makes
+    // "resync everything" safe to offer at all.
+    expect(r.outcomes.servers).toBe('conflicted')
+    expect(relay.conflicts.map((c) => c.name)).toContain('servers')
+  })
+
+  it('keeps the rollback floor through a resync, so the relay cannot hand back an older copy', async () => {
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'current' }], 7)
+    await syncOnce(deps(relay))
+    expect(readBlob().servers).toEqual([{ id: 'current', status: 'offline' }])
+
+    forgetSyncState()
+    // The relay now serves an archived copy, genuinely sealed, at counter 3.
+    seeded(relay, 'servers', [{ id: 'archived' }], 3)
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('failed')
+    expect(readBlob().servers).toEqual([{ id: 'current', status: 'offline' }])
+  })
+
+  it('names a refused older copy plainly, and leaving clears the floor so pairing again works', async () => {
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'current' }], 7)
+    await syncOnce(deps(relay))
+    forgetSyncState()
+    seeded(relay, 'servers', [{ id: 'restored' }], 3)
+
+    const refused = await syncOnce(deps(relay))
+    expect(refused.error?.code).toBe('rolled-back')
+    expect(refused.error?.message).toMatch(/leave the account on this device and pair it again/)
+
+    // Leaving: the floors go with the agreement, and the restored relay's copy
+    // is adopted on the next join.
+    forgetSyncState(undefined, { floors: 'clear' })
+    expect((await syncOnce(deps(relay))).outcomes.servers).not.toBe('failed')
+  })
+
+  it('keeps the floor through a re-key, so the relay cannot serve an older copy after it', async () => {
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'current' }], 7)
+    await syncOnce(deps(relay))
+
+    forgetEpochState()
+    seeded(relay, 'servers', [{ id: 'archived' }], 3)
+
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('failed')
+    expect(readBlob().servers).toEqual([{ id: 'current', status: 'offline' }])
+  })
+
+  it('writes a new object above the floor after a resync, so it does not lock itself out', async () => {
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'current' }], 7)
+    await syncOnce(deps(relay))
+
+    forgetSyncState()
+    // The relay lost the object (a restore, a move, or on purpose).
+    relay.objects.delete('servers')
+    writeBlob({ servers: [{ id: 'current' }, { id: 'new' }] })
+
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('pushed')
+    expect(relay.objects.get('servers')!.counter).toBeGreaterThan(7)
+    // And this device can read back what it wrote.
+    expect((await syncOnce(deps(relay))).outcomes.servers).not.toBe('failed')
+  })
+
+  it('keeps the floor from a state file written before floors existed', async () => {
+    writeBlob({ servers: [] })
+    const relay = fakeRelay()
+    seeded(relay, 'servers', [{ id: 'current' }], 7)
+    await syncOnce(deps(relay))
+    // A 0.59.0 state file: counters in the entries, no floors.
+    const path = join(userData, SYNC_STATE_FILE)
+    const old = JSON.parse(readFileSync(path, 'utf8'))
+    delete old.floors
+    writeFileSync(path, JSON.stringify(old))
+
+    forgetEpochState()
+    seeded(relay, 'servers', [{ id: 'archived' }], 3)
+
+    expect((await syncOnce(deps(relay))).outcomes.servers).toBe('failed')
+  })
+
+  it('keeps this device\'s copy when a pull would remove most of a list', async () => {
+    const six = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({ id }))
+    writeBlob({ servers: six })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+    // Another device empties the list.
+    const stored = relay.objects.get('servers')!
+    seeded(relay, 'servers', [{ id: 'a' }], stored.counter + 1)
+
+    const r = await syncOnce(deps(relay))
+
+    expect(r.outcomes.servers).toBe('pulled')
+    expect(relay.conflicts.map((c) => c.name)).toContain('servers')
+    // Sealed inside the copy: why it was kept, for the chooser to say.
+    const sealed = JSON.parse(relay.conflicts[0].body.toString('utf8'))
+    const envelope = JSON.parse(Buffer.from(sealed.payload, 'base64').toString('utf8'))
+    expect(envelope.reason).toBe('bulk-removal')
+    // And once: the next pass over the same remote copy keeps no second one.
+    await syncOnce(deps(relay))
+    expect(relay.conflicts).toHaveLength(1)
+  })
+
+  it('lets a single delete through without a copy', async () => {
+    const six = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => ({ id }))
+    writeBlob({ servers: six })
+    const relay = fakeRelay()
+    await syncOnce(deps(relay))
+    const stored = relay.objects.get('servers')!
+    seeded(relay, 'servers', six.slice(1), stored.counter + 1)
+
+    await syncOnce(deps(relay))
+
+    expect(relay.conflicts).toEqual([])
   })
 })
 

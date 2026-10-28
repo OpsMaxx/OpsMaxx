@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { AlertTriangle, Check, Copy, KeyRound, Loader2, Server } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { AlertTriangle, Check, Copy, KeyRound, Loader2, Server, X } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
@@ -7,6 +7,7 @@ import { errorText } from '../../lib/connectionError'
 import { clearLink, forgetPhrase, holdPhrase, useAddyUi } from '../../store/addy'
 import { PairingPanel } from './PairingPanel'
 import { useAddyStatus } from './addyStatus'
+import type { AddyRecoveryReview } from '../../../../shared/addy'
 
 /**
  * Getting onto a relay for the first time.
@@ -188,6 +189,17 @@ export function AddySetup(): React.JSX.Element | null {
     }
   })()
   const [recovered, setRecovered] = useState<{ devices: number } | null>(null)
+  /** What recovery found, held for the person to check before anything is
+   *  written. Main is holding the keys meanwhile; leaving this screen any way
+   *  other than the two buttons tells it to drop them. */
+  const [review, setReview] = useState<AddyRecoveryReview | null>(null)
+  const reviewing = useRef(false)
+  useEffect(
+    () => () => {
+      if (reviewing.current) void window.opsmaxx?.addy.cancelRecovery()
+    },
+    []
+  )
 
   /**
    * Nothing in flight, and this device is already on an account.
@@ -209,7 +221,7 @@ export function AddySetup(): React.JSX.Element | null {
    * clause of `midFlow` is state this component owns, which is the whole point
    * — no outside signal can close this screen while it is mid-flow.
    */
-  const midFlow = busy || phrase !== null || recovered !== null || joinHeld
+  const midFlow = busy || phrase !== null || recovered !== null || review !== null || joinHeld
   if (status?.enrolled === true && !midFlow) {
     // The relay this device actually attached to, not what happens to be in
     // settings: a machine that joined by pairing was enrolled by the sidecar,
@@ -308,20 +320,113 @@ export function AddySetup(): React.JSX.Element | null {
    * the roster too, and the moment a person is most able to notice a device
    * they do not recognise is the moment they have just listed them all. So the
    * last thing recovery says is a count and a question, not "done".
+   *
+   * AND THE FIRST REVIEW COMES BEFORE ANYTHING IS WRITTEN. A relay can serve
+   * an old escrow and a device list cut back to before a removal, and
+   * everything this machine can check passes. The words are the check it
+   * cannot do: they come from the device list it was served, and another of
+   * the person's devices shows the same words only if it has the same list.
    */
   const recover = async (): Promise<void> => {
     setBusy(true)
     setError(null)
     try {
-      const result = await window.opsmaxx!.addy.recover(url.trim(), mnemonic.trim(), label.trim())
+      const found = await window.opsmaxx!.addy.recover(url.trim(), mnemonic.trim(), label.trim())
+      reviewing.current = true
+      setReview(found)
+    } catch (err) {
+      setError(errorText(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const confirmRecovery = async (): Promise<void> => {
+    setBusy(true)
+    setError(null)
+    // Spent either way: main drops what it held on a failure too, so a retry
+    // starts from the phrase rather than from a half-written recovery.
+    reviewing.current = false
+    try {
+      const result = await window.opsmaxx!.addy.confirmRecovery()
       setSettings({ addyRelayURL: url.trim() })
       setRecovered({ devices: result.devices })
       toast('This device is back on the account', 'ok')
     } catch (err) {
       setError(errorText(err))
     } finally {
+      setReview(null)
       setBusy(false)
     }
+  }
+
+  const stopRecovery = async (): Promise<void> => {
+    reviewing.current = false
+    setReview(null)
+    await window.opsmaxx!.addy.cancelRecovery().catch(() => undefined)
+    toast('Stopped. Nothing was added to the account and nothing was kept on this machine.')
+  }
+
+  if (review) {
+    const n = review.devices.length
+    const lastChange = new Date(review.lastEntryAt).toLocaleDateString(undefined, {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    })
+    return (
+      <div className="addy-setup">
+        <h3>Check this is your account</h3>
+        <div className="setting-desc">
+          Nothing has been added to the account yet. First check that the relay showed this machine
+          the account as it really is: a relay can show an old device list, from before you removed a
+          device, and nothing on this machine can tell.
+        </div>
+        <ol className="addy-phrase" aria-label="Account fingerprint">
+          {review.fingerprint.map((w, i) => (
+            <li key={i}>{w}</li>
+          ))}
+        </ol>
+        <div className="addy-note" role="status">
+          <AlertTriangle size={15} aria-hidden />
+          <div>
+            <strong>Compare these words with another device of yours.</strong>
+            <div className="setting-desc">
+              Open <strong>Sync &amp; devices</strong> there: the words under{' '}
+              <em>Account fingerprint</em> must be these, in this order. If they differ, stop.
+              That device needs OpsMaxx 0.59.1 or later to show them.
+            </div>
+          </div>
+        </div>
+        <ul className="setting-desc">
+          <li>
+            Account key: number {review.epoch}
+            {review.epoch === 1 ? ', never changed' : ''}. If you changed the account key after
+            the date below, stop: the relay is showing you an older account than the one you have.
+          </li>
+          <li>
+            {n} {n === 1 ? 'device is' : 'devices are'} on the account
+            {n > 0 ? `: ${review.devices.map((d) => d.label).join(', ')}` : ''}. This one joins as{' '}
+            <strong>{label.trim()}</strong>.
+          </li>
+          <li>The device list last changed on {lastChange}.</li>
+        </ul>
+        <div className="setting-desc">
+          No other device left? Check these against what you remember. If a device you removed is
+          listed, or you removed one or changed the account key after that date, stop.
+        </div>
+        <button className="btn primary" disabled={busy} onClick={() => void confirmRecovery()}>
+          {busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />} They match — add this
+          device
+        </button>
+        {/* NO "CONTINUE ANYWAY" anywhere on this path. Different words mean a
+            different device list, and the one the relay served is the one
+            this machine would join and seal everything under. */}
+        <button className="btn" disabled={busy} onClick={() => void stopRecovery()}>
+          <X size={14} /> Stop
+        </button>
+      </div>
+    )
   }
 
   if (recovered) {

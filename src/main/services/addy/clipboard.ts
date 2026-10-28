@@ -1,7 +1,19 @@
-import { clipboard } from 'electron'
+import { app, clipboard } from 'electron'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { atomicWriteFileSync } from '../atomicWrite'
+import { AddyError } from './sidecar'
 import { EchoSuppressor, identifyText, type ClipboardIdentity } from '../../../shared/clipboardIdentity'
-import { AddyError, type AddySidecar } from './sidecar'
 import { relayError, type RelayClient } from './relay'
+import {
+  LEGACY_MAIL_REASON,
+  MAILBOX_MAX_AGE_MS,
+  isLegacyMail,
+  openMail,
+  sealMail,
+  type MailDeps,
+  type OpenedMail
+} from './mail'
 
 /**
  * Sending the clipboard to another device, and receiving one.
@@ -35,12 +47,8 @@ export const CLIPBOARD_KIND = 'clipboard'
  *  that gets a feature switched off. */
 export const MAX_CLIPBOARD_BYTES = 1024 * 1024
 
-export interface ClipboardDeps {
-  addyd: AddySidecar
+export interface ClipboardDeps extends MailDeps {
   relay: RelayClient
-  epoch(): number
-  /** Every device on the roster except this one, as hex signing keys. */
-  peers(): string[]
   /**
    * Try a direct connection first, returning true when the payload went that
    * way. Absent means "no p2p available" -- the `--rtc` sidecar is not
@@ -64,10 +72,10 @@ export interface ClipboardDeps {
  * user presses receive expecting the URL they just copied, and pastes last
  * week's password into whatever has focus.
  *
- * `sentAt` is INSIDE the sealed payload, so it is the sender's own claim and
- * not the relay's. Ten minutes is generous for "I copied that on the other
- * machine a moment ago" and short enough that nothing stale is applied
- * silently.
+ * The time used is the one the sender SIGNED (see mail.ts), so it is the
+ * sender's own claim and not the relay's. Ten minutes is generous for "I
+ * copied that on the other machine a moment ago" and short enough that
+ * nothing stale is applied silently.
  */
 const MAX_CLIPBOARD_AGE_MS = 10 * 60_000
 
@@ -78,7 +86,6 @@ interface ClipboardPayload {
   /** The sender's own identity for the content, so the receiver can suppress
    *  its own echo without re-deriving it and risking a different answer. */
   identity: ClipboardIdentity
-  sentAt: number
 }
 
 /** Shared between send and receive, because the whole point of arming is that
@@ -130,22 +137,22 @@ export async function sendClipboard(deps: ClipboardDeps): Promise<{ sent: number
     }
   }
 
-  const payload: ClipboardPayload = { kind: 'text', text, identity, sentAt: Date.now() }
+  const payload: ClipboardPayload = { kind: 'text', text, identity }
   const plaintext = Buffer.from(JSON.stringify(payload), 'utf8')
 
   let sent = 0
   const failed: string[] = []
   for (const peer of deps.peers()) {
-    // Sealed TO THAT DEVICE. The relay routes on the recipient's public key,
-    // which it can compare and cannot use.
-    const { sealed } = await deps.addyd.send<{ sealed: string }>('seal', {
-      collection: `${CLIPBOARD_KIND}:${peer}`,
-      epoch: deps.epoch(),
-      schema: 1,
-      writerVersion: process.env.npm_package_version ?? 'dev',
-      counter: Date.now(),
-      payload: plaintext.toString('base64')
-    })
+    // Sealed TO THAT DEVICE'S OWN KEY and signed by this one's — see mail.ts.
+    // The relay routes on the recipient's public key, which it can compare
+    // and cannot use.
+    let sealed: string
+    try {
+      sealed = await sealMail(deps, CLIPBOARD_KIND, peer, plaintext)
+    } catch (err) {
+      failed.push(`device ${peer.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`)
+      continue
+    }
 
     // DIRECT FIRST, MAILBOX SECOND, and the order is decreasing quality
     // rather than decreasing convenience: a direct path means the relay sees
@@ -204,38 +211,49 @@ export async function receiveClipboard(
     messages: { id: number; fromDevice: string; kind: string; sealed: string }[]
   }
 
-  // FROM A CURRENT MEMBER ONLY — see the note in transfer.ts. Opening proves
-  // somebody holding this epoch's key sealed it, and a device removed without
-  // a re-key is still somebody holding that key.
-  const peers = new Set(deps.peers())
-  const clips = messages.filter((m) => m.kind === CLIPBOARD_KIND && peers.has(m.fromDevice))
+  // FROM A CURRENT MEMBER ONLY, and decided by the SIGNATURE, not by
+  // `fromDevice`. Filtering on the relay's label let a relay name any current
+  // member, and opening proved only that somebody holding the epoch key sealed
+  // it — a removed device included. `openMail` refuses a signer that is not on
+  // the verified roster, whatever the row says.
+  const clips = messages.filter((m) => m.kind === CLIPBOARD_KIND)
   if (clips.length === 0) return { applied: false, reason: 'Nothing has been sent to this device.' }
 
   /**
    * THE NEWEST BY ITS OWN TIMESTAMP, not by the relay's ordering.
    *
-   * Opened before one is chosen, because the only trustworthy `sentAt` is the
-   * one inside the seal — the array's order is the relay's to pick.
+   * Opened before one is chosen, because the only trustworthy time is the one
+   * the sender signed — the array's order is the relay's to pick.
    */
-  const opened: { id: number; from: string; payload: ClipboardPayload }[] = []
+  const opened: (OpenedMail & { clip: ClipboardPayload })[] = []
+  let legacy = false
   for (const m of clips) {
     try {
-      opened.push({ id: m.id, from: m.fromDevice, payload: await openClipboard(deps, m.sealed) })
+      // The mailbox's window, not the clipboard's ten minutes: an older one
+      // still opens, so the refusal below can say how old it was.
+      opened.push(await openClipboard(deps, m.sealed, MAILBOX_MAX_AGE_MS))
     } catch {
       // A payload this device cannot open is one to acknowledge and forget
-      // rather than retry for ever — it was sealed under an epoch this device
-      // no longer holds, or to another device entirely.
+      // rather than retry for ever: sealed to another device, signed by one
+      // that is not on the roster, already delivered once, or from an
+      // OpsMaxx too old to sign it.
+      legacy ||= isLegacyMail(m.sealed)
     }
   }
-  opened.sort((a, b) => (a.payload.sentAt ?? 0) - (b.payload.sentAt ?? 0))
+  opened.sort((a, b) => a.sentAt - b.sentAt)
   const newest = opened[opened.length - 1]
 
   if (!newest) {
     await deps.relay.request('POST', '/v1/mail/ack', { ids: clips.map((m) => m.id) })
-    return { applied: false, reason: 'Nothing that could be opened on this device.' }
+    return {
+      applied: false,
+      reason: legacy
+        ? `The clipboard sent to this device was not pasted. ${LEGACY_MAIL_REASON}`
+        : 'Nothing that could be opened on this device.'
+    }
   }
 
-  const age = Date.now() - (newest.payload.sentAt ?? 0)
+  const age = Date.now() - newest.sentAt
   if (age > MAX_CLIPBOARD_AGE_MS) {
     // Acknowledged, so it stops being offered — but NOT applied. Writing a
     // week-old clipboard into whatever has focus is the one outcome this
@@ -247,7 +265,7 @@ export async function receiveClipboard(
     }
   }
 
-  applyOpenedClipboard(newest.payload)
+  applyOpenedClipboard(newest.clip)
 
   // Acknowledge everything, not just the one applied. The rest are older
   // clipboard entries nobody is going to want, and leaving them means the next
@@ -264,29 +282,54 @@ export async function receiveClipboard(
  * connection and one that came out of the mailbox are the same bytes sealed
  * the same way, and a second copy of this is a second place the echo flag can
  * be armed in the wrong order — which is a loop between two devices that each
- * re-send what the other just pasted.
+ * re-send what the other just pasted. And the same signature check: a direct
+ * connection proves which device dialled, not that it is still a member.
  */
 export async function applySealedClipboard(
   deps: ClipboardDeps,
   sealed: string
 ): Promise<ClipboardIdentity> {
-  return applyOpenedClipboard(await openClipboard(deps, sealed))
+  return applyOpenedClipboard((await openClipboard(deps, sealed, MAX_CLIPBOARD_AGE_MS)).clip)
 }
 
 /** Opens one sealed clipboard payload without applying it. */
-async function openClipboard(deps: ClipboardDeps, sealed: string): Promise<ClipboardPayload> {
-  const opened = await deps.addyd.send<{ payload: string }>('open', {
-    collection: `${CLIPBOARD_KIND}:${await selfDevice(deps)}`,
-    epoch: deps.epoch(),
-    sealed,
-    knownSchema: 1,
-    // Clipboard entries are not a document with a history, so there is no
-    // rollback to enforce by counter: every one is newer than the last by
-    // construction. Freshness is checked on `sentAt` instead, which is inside
-    // the seal and therefore the sender's claim rather than the relay's.
-    seenCounter: 0
-  })
-  return JSON.parse(Buffer.from(opened.payload, 'base64').toString('utf8')) as ClipboardPayload
+async function openClipboard(
+  deps: ClipboardDeps,
+  sealed: string,
+  maxAgeMs: number
+): Promise<OpenedMail & { clip: ClipboardPayload }> {
+  // Not a document with a history, so there is no counter to enforce. The
+  // sidecar refuses a replay by the sender's nonce and a stale one by the
+  // signed time.
+  const opened = await openMail(deps, CLIPBOARD_KIND, sealed, maxAgeMs)
+  // AND ON DISK. The sidecar's memory of what it opened is gone after a
+  // restart, so the relay could hand back a clipboard still inside its window
+  // and it would be applied a second time — into whatever terminal has focus.
+  // Remembered here by signer and signed time until that window closes.
+  if (seenBefore(`${opened.from}:${opened.sentAt}`, opened.sentAt + maxAgeMs + 5 * 60_000)) {
+    throw new AddyError('config-invalid', 'this clipboard was already delivered once')
+  }
+  return { ...opened, clip: JSON.parse(opened.payload.toString('utf8')) as ClipboardPayload }
+}
+
+/** DEVICE-LOCAL: which clipboards this device already applied, until each
+ *  one's window closes. In NOT_SYNCED.clipboardSeen and the wipe list. */
+export const CLIPBOARD_SEEN_FILE = 'opsmaxx-addy-clipboard-seen.json'
+
+function seenBefore(key: string, until: number): boolean {
+  const path = join(app.getPath('userData'), CLIPBOARD_SEEN_FILE)
+  let seen: Record<string, number> = {}
+  try {
+    if (existsSync(path)) seen = JSON.parse(readFileSync(path, 'utf8')) as Record<string, number>
+  } catch {
+    seen = {}
+  }
+  const now = Date.now()
+  for (const [k, t] of Object.entries(seen)) if (t < now) delete seen[k]
+  if (key in seen) return true
+  seen[key] = until
+  atomicWriteFileSync(path, JSON.stringify(seen))
+  return false
 }
 
 function applyOpenedClipboard(payload: ClipboardPayload): ClipboardIdentity {
@@ -315,17 +358,4 @@ function applyOpenedClipboard(payload: ClipboardPayload): ClipboardIdentity {
  *  so it now has a caller. */
 export function isOwnEcho(hash: string): boolean {
   return echo.shouldIgnore(hash)
-}
-
-/**
- * This device's own signing key, asked of the sidecar rather than remembered.
- *
- * The parent must not be the party that tracks it: a separately held copy can
- * drift from the key actually loaded, and the symptom of that is a seal nobody
- * can open -- discovered by a user whose clipboard silently stops arriving.
- */
-async function selfDevice(deps: ClipboardDeps): Promise<string> {
-  const { devicePub } = await deps.addyd.send<{ devicePub: string }>('whoami')
-  if (!devicePub) throw new AddyError('not-paired', 'this device is not attached to an account')
-  return devicePub
 }

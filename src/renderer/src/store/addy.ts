@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { AddyLink } from '../../../shared/addyLink'
+import type { HeldRecord } from '../../../shared/addy'
 import { moduleEnabled } from '../../../shared/modules'
 import { useApp } from './app'
 import { openMonitor, openSettings } from './nav'
@@ -37,14 +38,64 @@ interface AddyUiState {
   link: AddyLink | null
   /** Conflict ids the user chose to leave for now, this session. */
   deferredConflicts: number[]
+  /** Synced records this device will not use until confirmed here. Main owns
+   *  the answer (services/syncTrust.ts); this is the last copy it gave. */
+  held: HeldRecord[]
 }
 
 export const useAddyUi = create<AddyUiState>(() => ({
   phrase: null,
   checkWords: [],
   link: null,
-  deferredConflicts: []
+  deferredConflicts: [],
+  held: []
 }))
+
+/** Ask main again which synced records are waiting for a confirmation. */
+export function refreshHeld(): void {
+  void window.opsmaxx?.addy?.held?.().then(
+    (held) => useAddyUi.setState({ held }),
+    () => undefined
+  )
+}
+
+const KIND_WORD: Record<HeldRecord['kind'], string> = {
+  server: 'server',
+  database: 'database',
+  cicd: 'CI/CD connection',
+  vpn: 'VPN profile'
+}
+
+/** What a held record is waiting on, in one sentence a person can check. */
+export function heldSentence(r: HeldRecord): string {
+  if (r.arrived && r.changed.length === 0) return `This ${KIND_WORD[r.kind]} arrived from another of your devices.`
+  const what = r.changed.length === 1 ? r.changed[0] : `${r.changed.slice(0, -1).join(', ')} and ${r.changed[r.changed.length - 1]}`
+  return `Its ${what} ${r.changed.length === 1 ? 'was' : 'were'} changed on another of your devices.`
+}
+
+/**
+ * Confirm one held record, after saying exactly what is being agreed to.
+ *
+ * A native confirm, as revoking a machine grant uses: the question is short,
+ * and a button beside an explanation is still pressed without reading it.
+ */
+export async function confirmHeldRecord(r: HeldRecord): Promise<void> {
+  const ws = r.changed.includes('workspace')
+    ? '\n\nIt was also moved to another workspace. Until you confirm, AI access rules from its old workspace still apply to it here.'
+    : ''
+  const ok = window.confirm(
+    `Use "${r.name}" on this device?\n\n${heldSentence(r)} It now points at ${r.destination}.${ws}\n\n` +
+      'Confirm only if you made this change. If you did not, leave it and check the devices listed in Sync & devices.'
+  )
+  if (!ok) return
+  try {
+    const held = await window.opsmaxx?.addy?.confirmHeld(r.kind, r.id)
+    if (held) useAddyUi.setState({ held })
+    toast(`Confirmed. "${r.name}" is used on this device again.`, 'ok')
+  } catch (err) {
+    toast(err instanceof Error ? err.message : 'Could not confirm it.', 'error')
+  }
+}
 
 /** Three distinct positions out of `count`, in reading order. */
 export function pickCheckWords(count: number, random: () => number = Math.random): number[] {

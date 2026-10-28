@@ -93,6 +93,26 @@ function kdfOf(file: VaultFile): KdfParams {
   return file.kdf ?? LEGACY_KDF
 }
 
+/**
+ * Only the two parameter sets this module has ever written.
+ *
+ * THE FILE CHOSE ITS OWN WORK FACTOR, and the file now arrives by sync. A
+ * device on the account could push a vault whose `kdf` asks for p=65000 —
+ * about fifty minutes per unlock attempt, each holding a libuv thread, so a
+ * few attempts stall every file and crypto call in main on every device.
+ * Nothing legitimate ever writes other values, so anything else is refused as
+ * a file OpsMaxx did not make.
+ */
+function kdfAllowed(params: KdfParams): boolean {
+  return (
+    isCurrentKdf(params) ||
+    (params.N === LEGACY_KDF.N && params.r === LEGACY_KDF.r && params.p === LEGACY_KDF.p)
+  )
+}
+
+const KDF_REFUSED =
+  'This vault file asks for key-derivation settings OpsMaxx never writes, so it was not made by OpsMaxx. Restore the vault from a backup.'
+
 function isCurrentKdf(params: KdfParams): boolean {
   return params.N === KDF.N && params.r === KDF.r && params.p === KDF.p
 }
@@ -198,6 +218,7 @@ export async function vaultUnlock(password: string): Promise<VaultResult> {
   try {
     const s = Buffer.from(file.salt, 'base64')
     const stored = kdfOf(file)
+    if (!kdfAllowed(stored)) return { ok: false, error: KDF_REFUSED }
     const k = await derive(password, s, stored)
     cache = decrypt(file, k) // throws if the password is wrong
 
@@ -361,10 +382,11 @@ export function vaultLock(): VaultResult {
  * Unannounced, that was two defects rather than one:
  *
  *   The read. `vaultList` and `vaultEntriesForResolve` both serve `cache`, so
- *   the pulled credentials were invisible for the rest of the session. The
- *   second device imported an estate it could log in to nothing on, and its
- *   monitoring stayed empty because the sampler skips a target whose
- *   credential it cannot resolve.
+ *   the pulled entries were invisible for the rest of the session, and every
+ *   synced record that points at one (CI connections, VPN profiles, secret
+ *   environment variables) stayed unresolved. Servers and databases are a
+ *   separate gap: their link to a vault entry is device-local and does not
+ *   sync at all (see NOT_SYNCED.secrets).
  *
  *   The write, which is worse. `vaultSave` re-encrypts `cache` under the key
  *   and salt still held and replaces the file — so ONE edit after a pull put
@@ -388,10 +410,13 @@ export function vaultExternalChange(): { relocked: boolean } {
     try {
       const entries = decrypt(file, key)
       cache = entries
-      // The salt travels inside the file, and a save has to seal against the
-      // one the file actually carries or the next reader is locked out of a
-      // vault whose password is correct.
-      salt = Buffer.from(file.salt, 'base64')
+      // THE SALT IS NOT TAKEN FROM THE FILE. The key is scrypt(password,
+      // salt), so a genuine copy this key opens carries this salt already; a
+      // copy that opens under this key with a DIFFERENT salt was written by a
+      // key holder who edited the field. Adopting it would make every later
+      // save seal under a salt the master password no longer derives this key
+      // from, locking every device out of a vault whose password is correct.
+      // The next save writes the right salt back.
       return { relocked: false }
     } catch {
       /* not a copy this key opens — fall through */
@@ -488,6 +513,7 @@ export async function vaultMergeFrom(
   }
   let theirs: VaultEntry[]
   try {
+    if (!kdfAllowed(kdfOf(file))) return { ok: false, error: KDF_REFUSED }
     theirs = decrypt(file, await derive(password, Buffer.from(file.salt, 'base64'), kdfOf(file)))
   } catch {
     return { ok: false, error: 'That master password does not open the other copy.' }

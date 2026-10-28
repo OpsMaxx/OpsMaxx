@@ -222,6 +222,23 @@ describe('the words it uses', () => {
     expect((await screen.findAllByText(/cannot be shown here/)).length).toBe(2)
     expect(screen.queryByText(/AAAA/)).toBeNull()
   })
+
+  it('says when who-and-when for a vault is only the relay\'s word', async () => {
+    // For the vault those two facts are the whole basis of the choice. A copy
+    // kept by 0.59.0 carries no sealed record of them, so the relay's fields
+    // are shown -- and must not look checked.
+    withConflicts([conflict({ collection: 'vault', winning: 'AAAA', losing: 'BBBB', reportedByRelay: true })])
+    render(<ConflictChooser />)
+    expect(await screen.findByText(/as reported by the relay, not checked/)).toBeTruthy()
+    expect(screen.getByText(/only what the relay reports/)).toBeTruthy()
+  })
+
+  it('does not hedge who-and-when that came from inside the sealed copy', async () => {
+    withConflicts([conflict({ collection: 'vault', winning: 'AAAA', losing: 'BBBB', reportedByRelay: false })])
+    render(<ConflictChooser />)
+    expect(await screen.findByText(/sealed into this copy by a device on this account/)).toBeTruthy()
+    expect(screen.queryByText(/as reported by the relay/)).toBeNull()
+  })
 })
 
 describe('a vault set aside on the first sync', () => {
@@ -266,5 +283,14 @@ describe('a vault set aside on the first sync', () => {
     render(<ConflictChooser />)
     await screen.findByRole('button', { name: /Keep the version in use/ })
     expect(screen.queryByRole('button', { name: 'Add its entries to this vault' })).toBeNull()
+  })
+})
+
+describe('a copy kept because another device removed most of a list', () => {
+  it('says so instead of describing a race', async () => {
+    withConflicts([conflict({ reason: 'bulk-removal', reportedByRelay: false })])
+    render(<ConflictChooser />)
+    expect(await screen.findByText(/removed most of this list/)).toBeTruthy()
+    expect(document.body.textContent).not.toMatch(/changed this before they had synced/)
   })
 })

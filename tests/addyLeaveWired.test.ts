@@ -41,14 +41,13 @@ describe('leaving an account is wired end to end', () => {
     expect(fn, 'the enrolment record survives, so the panel still thinks it is joined').toContain(
       'forgetEnrolment()'
     )
-    expect(fn, 'sync state survives, so a later join would resume somebody else’s agreements').toContain(
-      'forgetSyncState()'
-    )
+    // With the rollback floors too: leaving and pairing again is the way out
+    // for a device whose relay was restored from an older backup.
+    const forget = "forgetSyncState(undefined, { floors: 'clear' })"
+    expect(fn, 'sync state survives, so a later join would resume somebody else’s agreements').toContain(forget)
     // Sync must stop BEFORE the state is forgotten, or an in-flight pass
     // writes it back afterwards.
-    expect(fn.indexOf('detach()'), 'detach must come before the forgetting').toBeLessThan(
-      fn.indexOf('forgetSyncState()')
-    )
+    expect(fn.indexOf('detach()'), 'detach must come before the forgetting').toBeLessThan(fn.indexOf(forget))
   })
 
   it('removes this device from the signed device list before it forgets how', () => {

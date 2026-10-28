@@ -217,7 +217,75 @@ describe('the conflict dialog', () => {
   })
 })
 
+const review = {
+  accountId: 'a',
+  fingerprint: ['amber', 'canal', 'drift', 'ledger', 'quill'],
+  epoch: 2,
+  devices: [
+    { label: 'old laptop', addedWithPhrase: false },
+    { label: 'desk', addedWithPhrase: true }
+  ],
+  lastEntryAt: Date.UTC(2026, 8, 1)
+}
+
+function fillRecovery(fork: HTMLElement): void {
+  fireEvent.click(fork)
+  fireEvent.change(screen.getByPlaceholderText('https://relay.example'), {
+    target: { value: 'https://relay.example' }
+  })
+  fireEvent.change(screen.getByPlaceholderText(/twelve words/), {
+    target: { value: 'one two three four five six seven eight nine ten eleven twelve' }
+  })
+  fireEvent.change(screen.getAllByRole('textbox').at(-1)!, { target: { value: 'laptop' } })
+  fireEvent.click(screen.getByRole('button', { name: /Recover this account/ }))
+}
+
 describe('recovery and the phrase', () => {
+  it('shows the fingerprint and what the chain says before anything is added, and Stop adds nothing', async () => {
+    const confirmRecovery = vi.fn()
+    const cancelRecovery = vi.fn().mockResolvedValue(undefined)
+    stubBridge({
+      addy: {
+        status: vi.fn().mockResolvedValue(notEnrolled),
+        recover: vi.fn().mockResolvedValue(review),
+        confirmRecovery,
+        cancelRecovery
+      }
+    })
+    render(<AddySetup />)
+    fillRecovery(await screen.findByRole('button', { name: /other devices are gone/ }))
+    await screen.findByText('Check this is your account')
+    const words = screen.getByRole('list', { name: 'Account fingerprint' })
+    expect(words.textContent).toBe('ambercanaldriftledgerquill')
+    expect(screen.getByText(/Nothing has been added to the account yet/)).toBeTruthy()
+    expect(screen.getByText(/Account key: number 2/)).toBeTruthy()
+    expect(screen.getByText(/2 devices are on the account: old laptop, desk/)).toBeTruthy()
+    expect(screen.getByText(/last changed on/)).toBeTruthy()
+    // No way past it but the two buttons: nothing that continues regardless.
+    expect(screen.queryByRole('button', { name: /anyway/i })).toBeNull()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }))
+    await waitFor(() => expect(cancelRecovery).toHaveBeenCalled())
+    expect(confirmRecovery).not.toHaveBeenCalled()
+    expect(screen.getByRole('button', { name: /Recover this account/ })).toBeTruthy()
+  })
+
+  it('drops the held recovery when the screen goes away mid-review', async () => {
+    const cancelRecovery = vi.fn().mockResolvedValue(undefined)
+    stubBridge({
+      addy: {
+        status: vi.fn().mockResolvedValue(notEnrolled),
+        recover: vi.fn().mockResolvedValue(review),
+        cancelRecovery
+      }
+    })
+    const { unmount } = render(<AddySetup />)
+    fillRecovery(await screen.findByRole('button', { name: /other devices are gone/ }))
+    await screen.findByText('Check this is your account')
+    unmount()
+    expect(cancelRecovery).toHaveBeenCalled()
+  })
+
   it('has a way out of the recovery review', async () => {
     let push: (s: unknown) => void = () => {}
     stubBridge({
@@ -227,19 +295,13 @@ describe('recovery and the phrase', () => {
           push = cb
           return () => {}
         },
-        recover: vi.fn().mockResolvedValue({ devices: 2 })
+        recover: vi.fn().mockResolvedValue(review),
+        confirmRecovery: vi.fn().mockResolvedValue({ accountId: 'a', devices: 2 })
       }
     })
     render(<AddySetup />)
-    fireEvent.click(await screen.findByRole('button', { name: /other devices are gone/ }))
-    fireEvent.change(screen.getByPlaceholderText('https://relay.example'), {
-      target: { value: 'https://relay.example' }
-    })
-    fireEvent.change(screen.getByPlaceholderText(/twelve words/), {
-      target: { value: 'one two three four five six seven eight nine ten eleven twelve' }
-    })
-    fireEvent.change(screen.getAllByRole('textbox').at(-1)!, { target: { value: 'laptop' } })
-    fireEvent.click(screen.getByRole('button', { name: /Recover this account/ }))
+    fillRecovery(await screen.findByRole('button', { name: /other devices are gone/ }))
+    fireEvent.click(await screen.findByRole('button', { name: /They match/ }))
     await screen.findByText('You are back in')
     // Enrolled now, and the review stays until the person is done with it.
     await act(async () => push(enrolled))
