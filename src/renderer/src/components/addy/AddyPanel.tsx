@@ -396,7 +396,7 @@ function RekeyRow(): React.JSX.Element {
           // needs to know is that it worked, how much moved, and that their
           // other machines are not broken by it.
           toast(
-            `The account key was changed. ${r.resealed} ${r.resealed === 1 ? 'item was' : 'items were'} re-sealed under the new one — your other devices pick it up the next time they sync.`,
+            `The account key was changed. ${r.resealed} ${r.resealed === 1 ? 'item was' : 'items were'} re-sealed under the new one — your other devices pick it up the next time they sync. Then check that Account fingerprint shows the same words on each of them.`,
             'ok'
           )
           setPhrase('')
