@@ -185,6 +185,8 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
   // the answer to "did a person on THIS machine agree to send that credential
   // there", and syncing it would let the device being guarded against answer
   // for every other one. See services/syncTrust.ts.
+  addyClipboardSeen:
+    'device-local: which clipboards this device already applied, so a relay cannot replay one after a restart; it says nothing another device needs',
   syncTrust:
     'device-local: what this device\'s user confirmed about synced records and host keys; syncing it would let another device confirm on their behalf',
   httpSession:

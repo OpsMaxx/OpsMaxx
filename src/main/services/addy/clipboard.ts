@@ -1,4 +1,8 @@
-import { clipboard } from 'electron'
+import { app, clipboard } from 'electron'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { atomicWriteFileSync } from '../atomicWrite'
+import { AddyError } from './sidecar'
 import { EchoSuppressor, identifyText, type ClipboardIdentity } from '../../../shared/clipboardIdentity'
 import { relayError, type RelayClient } from './relay'
 import {
@@ -298,7 +302,34 @@ async function openClipboard(
   // sidecar refuses a replay by the sender's nonce and a stale one by the
   // signed time.
   const opened = await openMail(deps, CLIPBOARD_KIND, sealed, maxAgeMs)
+  // AND ON DISK. The sidecar's memory of what it opened is gone after a
+  // restart, so the relay could hand back a clipboard still inside its window
+  // and it would be applied a second time — into whatever terminal has focus.
+  // Remembered here by signer and signed time until that window closes.
+  if (seenBefore(`${opened.from}:${opened.sentAt}`, opened.sentAt + maxAgeMs + 5 * 60_000)) {
+    throw new AddyError('config-invalid', 'this clipboard was already delivered once')
+  }
   return { ...opened, clip: JSON.parse(opened.payload.toString('utf8')) as ClipboardPayload }
+}
+
+/** DEVICE-LOCAL: which clipboards this device already applied, until each
+ *  one's window closes. In NOT_SYNCED.clipboardSeen and the wipe list. */
+export const CLIPBOARD_SEEN_FILE = 'opsmaxx-addy-clipboard-seen.json'
+
+function seenBefore(key: string, until: number): boolean {
+  const path = join(app.getPath('userData'), CLIPBOARD_SEEN_FILE)
+  let seen: Record<string, number> = {}
+  try {
+    if (existsSync(path)) seen = JSON.parse(readFileSync(path, 'utf8')) as Record<string, number>
+  } catch {
+    seen = {}
+  }
+  const now = Date.now()
+  for (const [k, t] of Object.entries(seen)) if (t < now) delete seen[k]
+  if (key in seen) return true
+  seen[key] = until
+  atomicWriteFileSync(path, JSON.stringify(seen))
+  return false
 }
 
 function applyOpenedClipboard(payload: ClipboardPayload): ClipboardIdentity {

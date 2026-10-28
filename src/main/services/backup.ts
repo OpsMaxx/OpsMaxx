@@ -459,6 +459,9 @@ export const ALL_DATA_FILES = [
   // revocation wipe that left it would leave the next account on this machine
   // inheriting the last one's confirmations.
   'opsmaxx-sync-trust.json',
+  // Which clipboards this device already applied, by signer and time, until
+  // each one's window closes (addy/clipboard.ts). No content.
+  'opsmaxx-addy-clipboard-seen.json',
   // Folder shares: which folders on THIS machine are mounted on which server.
   // Per-machine by design and never in a backup bundle or a sync (a share
   // restored elsewhere would mount that machine's folder), but it is a record
