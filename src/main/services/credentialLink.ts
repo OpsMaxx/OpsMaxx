@@ -59,8 +59,10 @@ function holdsCredential(raw: string): boolean {
     const blob = JSON.parse(raw) as Rec
     return CREDENTIAL_FIELDS.some((f) => typeof blob[f] === 'string' && blob[f] !== '')
   } catch {
-    // Unreadable is not a credential, and the resolvers read it as none too.
-    return false
+    // Not JSON: the oldest database blobs are the bare password, which
+    // `resolveDbSecrets` still accepts. Anything else non-empty is this
+    // device's own too, and hiding it behind a link would be worse.
+    return raw.trim() !== ''
   }
 }
 
@@ -105,4 +107,45 @@ export function linksOf(data: unknown): Map<string, string> {
     out.set(d.id, JSON.stringify(d.uri === true ? { vaultUriEntryId: d.vaultEntryId } : { vaultEntryId: d.vaultEntryId }))
   }
   return out
+}
+
+/**
+ * What `secrets:set` should store for `id`, and whether storing it confirms
+ * the record. See the comment there: re-saving the entry the synced record
+ * already links to, on a device with no credential of its own, is stored
+ * without the id and confirms nothing.
+ */
+export function credentialToStore(id: string, value: string): { store: string | null; confirms: boolean } {
+  const link = vaultLinkOf(value)
+  const relinked = link !== null && !hasOwnCredential(id) && link === vaultLinkOf(storedCredential(id))
+  return relinked ? { store: withoutLink(value, getSecret(id)), confirms: false } : { store: value, confirms: true }
+}
+
+/** `raw` without its vault entry id, over what this device already stores (a
+ *  remembered second-factor answer, say), or null when that leaves nothing
+ *  new to store. */
+function withoutLink(raw: string, existing: string | null): string | null {
+  try {
+    const b = JSON.parse(raw) as Record<string, unknown>
+    delete b.vaultEntryId
+    delete b.vaultUriEntryId
+    if (Object.keys(b).length === 0) return null
+    const had = existing ? (JSON.parse(existing) as Record<string, unknown>) : {}
+    return JSON.stringify({ ...had, ...b })
+  } catch {
+    return null
+  }
+}
+
+/** The vault entry a stored credential blob names, for a server's or a
+ *  database's (password or connection-string) credential. */
+export function vaultLinkOf(raw: string | null): string | null {
+  if (!raw) return null
+  try {
+    const b = JSON.parse(raw) as { vaultEntryId?: unknown; vaultUriEntryId?: unknown }
+    const id = b.vaultEntryId ?? b.vaultUriEntryId
+    return typeof id === 'string' && id !== '' ? id : null
+  } catch {
+    return null
+  }
 }

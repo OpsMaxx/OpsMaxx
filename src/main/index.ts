@@ -248,8 +248,9 @@ import { rdpAdvisory, rdpLastError, rdpMintTicket, stopRdpRelay } from './servic
 import type { RdpDesktopSize } from '../shared/rdp'
 import type { TunnelConfig, TunnelSshConfig } from '../shared/tunnel'
 import { knownHostList, knownHostForget } from './services/knownhosts'
-import { askToUseDatabase, askToUseRecord, confirmRecord, confirmSecretOwner, heldRecords, pendingWorkspace } from './services/syncTrust'
+import { askToUseDatabase, askToUseRecord, confirmRecord, confirmSecretOwner, heldRecords, pendingWorkspace, seedLinkMarks } from './services/syncTrust'
 import { keychainOnly, moveCredentialsToVault } from './services/credentialMove'
+import { credentialToStore, vaultLinkOf } from './services/credentialLink'
 import {
   setVpnPrompter,
   vpnAttachRenderer,
@@ -5894,24 +5895,24 @@ ipcMain.handle('wslock:delete', (_e, id: string) => wsLockDelete(id))
 
 // ---- Secrets ----
 
-/** The vault entry a stored credential blob names, for a server's or a
- *  database's (password or connection-string) credential. */
-function vaultLinkOf(raw: string | null): string | null {
-  if (!raw) return null
-  try {
-    const b = JSON.parse(raw) as { vaultEntryId?: unknown; vaultUriEntryId?: unknown }
-    const id = b.vaultEntryId ?? b.vaultUriEntryId
-    return typeof id === 'string' && id !== '' ? id : null
-  } catch {
-    return null
-  }
-}
 ipcMain.handle('secrets:available', () => secretsAvailable())
 ipcMain.handle('secrets:set', (_e, id: string, value: string) => {
-  const ok = setSecret(id, value)
+  /**
+   * RE-SAVING THE SYNCED LINK IS NOT A CHOICE MADE HERE.
+   *
+   * On a device with no credential of its own, the editor shows the entry the
+   * synced record links to, and any save writes it straight back -- which
+   * stored it as this device's own and confirmed the record, so opening Edit
+   * to rename a held server released a link and an address nobody here had
+   * looked at. Such a blob is stored without the entry id (it stays the
+   * record's, and stays judged) and confirms nothing. Choosing a different
+   * entry, or typing a password, is still a decision, and still counts.
+   */
+  const { store, confirms } = credentialToStore(id, value)
+  const ok = store === null ? true : setSecret(id, store)
   // A credential typed in on this device for a record is the person saying
   // where it goes, so the record is confirmed as it stands. See syncTrust.ts.
-  if (ok) confirmSecretOwner(id)
+  if (ok && confirms) confirmSecretOwner(id)
   // A credential that names a vault entry is told to the renderer, which puts
   // the entry's id on the synced record -- how the user's other devices learn
   // which entry this server logs in with. Every screen that saves one comes
@@ -6568,6 +6569,9 @@ app.whenReady().then(() => {
   // Primed once at launch so the MCP bridge can resolve server/workspace
   // names even before the renderer's first data:save call.
   refreshMcpDataCache(boot)
+  // Before the renderer exists, so its load-time link backfill (persist.ts)
+  // cannot be mistaken for links that arrived by sync. See seedLinkMarks.
+  seedLinkMarks(boot)
   // And the CI connections, for the same reason one line up: an agent can call
   // a ci_* tool before any window has opened the CI tab, and an empty list
   // there reads to the agent as "this user has no CI connections" rather than

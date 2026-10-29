@@ -83,6 +83,8 @@ interface TrustFile {
   v: 1
   marks: Record<string, Mark>
   hostKeys: Record<string, HostMark>
+  /** `seedLinkMarks` has run on this device. */
+  linksSeeded?: true
   /** The file existed and could not be read: everything is held. */
   unreadable?: true
 }
@@ -96,7 +98,7 @@ function read(): TrustFile {
   try {
     const raw = JSON.parse(readFileSync(FILE(), 'utf8')) as Partial<TrustFile>
     if (raw && typeof raw.marks === 'object' && raw.marks && typeof raw.hostKeys === 'object' && raw.hostKeys) {
-      return { v: 1, marks: raw.marks, hostKeys: raw.hostKeys }
+      return { v: 1, marks: raw.marks, hostKeys: raw.hostKeys, ...(raw.linksSeeded === true ? { linksSeeded: true as const } : {}) }
     }
   } catch {
     /* below */
@@ -214,7 +216,9 @@ export function fieldsOf(kind: HeldKind, rec: Rec): Record<string, string> | nul
         tls: rec.ssl === true ? '1' : '0',
         vpn: str(rec.vpnProfileId),
         ws: str(rec.workspaceId),
-        credential: str(rec.vaultEntryId)
+        // With the `uri` flag, which decides whether the entry is read as a
+        // password or as a whole connection string (see credentialLink.ts).
+        credential: rec.vaultEntryId ? `${rec.uri === true ? 'u' : 'p'}|${str(rec.vaultEntryId)}` : ''
       }
     case 'cicd':
       return {
@@ -339,9 +343,38 @@ export function markHostKeyArrivals(local: unknown, incoming: unknown): void {
 /** Stands for "sync removed this entry" in a host-key mark. */
 const REMOVED = '-removed-'
 
+/**
+ * Hold every vault link already on disk, once, on the first launch of the
+ * version that reads them.
+ *
+ * `markArrivals` marks what changes WHEN sync lands it, and a link landed by a
+ * build that did not judge links was marked as nothing: an older build keeps
+ * the field (the store spreads records) without looking at it. No build before
+ * this one writes the field itself, so every link present now came by sync and
+ * nobody here confirmed it. A device that stores its own credential for the
+ * record does not use the link, and `ownCredentialAside` keeps this mark from
+ * troubling it.
+ */
+export function seedLinkMarks(data: unknown = loadData()): void {
+  if (read().linksSeeded) return
+  mutate((t) => {
+    for (const kind of ['server', 'database'] as const) {
+      for (const rec of recordsOf(data, kind)) {
+        const credential = fieldsOf(kind, rec)?.credential
+        if (!credential) continue
+        const key = `${kind}:${rec.id as string}`
+        const prev = t.marks[key]
+        t.marks = { ...t.marks, [key]: { ...prev, fields: { ...prev?.fields, credential: hashOf(kind, rec.id as string, 'credential', credential) } } }
+      }
+    }
+    t.linksSeeded = true
+  })
+}
+
 /** Clear every mark: a restored backup is the person's own choice of state. */
 export function clearAllMarks(): void {
-  if (existsSync(FILE())) atomicWriteFileSync(FILE(), JSON.stringify({ v: 1, marks: {}, hostKeys: {} }))
+  // Seeded too: the links a restore brings are as much its choice as the rest.
+  if (existsSync(FILE())) atomicWriteFileSync(FILE(), JSON.stringify({ v: 1, marks: {}, hostKeys: {}, linksSeeded: true }))
 }
 
 /** Confirm one record: its marks go, workspace move included. */
@@ -355,16 +388,20 @@ export function confirmRecord(kind: HeldKind, id: string): void {
  *  a record is the person saying where it goes, so its destination marks go. */
 export function confirmSecretOwner(secretId: string): void {
   const id = secretId.replace(/:rdp$/, '')
+  // A desktop password says where THAT password goes. It says nothing about
+  // which vault entry the SSH side would use, so a held link stays held.
+  const keep = secretId.endsWith(':rdp') ? ['credential'] : []
   for (const kind of ['server', 'database'] as const) {
-    if (read().marks[`${kind}:${id}`]?.fields) clearFields(kind, id)
+    if (read().marks[`${kind}:${id}`]?.fields) clearFields(kind, id, keep)
   }
 }
 
-function clearFields(kind: HeldKind, id: string): void {
+function clearFields(kind: HeldKind, id: string, keep: string[] = []): void {
   mutate((t) => {
     const m = t.marks[`${kind}:${id}`]
     if (!m) return
-    if (m.ws) t.marks[`${kind}:${id}`] = { fields: {}, ws: m.ws }
+    const kept = Object.fromEntries(Object.entries(m.fields).filter(([f]) => keep.includes(f)))
+    if (m.ws || Object.keys(kept).length) t.marks[`${kind}:${id}`] = { fields: kept, ...(m.ws ? { ws: m.ws } : {}) }
     else delete t.marks[`${kind}:${id}`]
   })
 }
@@ -406,7 +443,11 @@ export function heldFields(kind: HeldKind, id: string, now: Record<string, strin
 export function serverFieldsNow(serverId: string, dialled: string): Record<string, string> {
   const id = serverId.replace(/:rdp$/, '')
   const rec = recordsOf(loadData(), 'server').find((r) => r.id === id)
-  return ownCredentialAside(id, fieldsOf('server', rec ?? { host: dialled }) ?? { host: norm(dialled) })
+  const fields = ownCredentialAside(id, fieldsOf('server', rec ?? { host: dialled }) ?? { host: norm(dialled) })
+  // A desktop's own password never uses the link, so a held link is not a
+  // reason to hold it.
+  if (serverId.endsWith(':rdp')) delete fields.credential
+  return fields
 }
 
 /** Whether a server's stored credential may be used without asking. */

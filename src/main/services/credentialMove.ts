@@ -119,6 +119,9 @@ export function moveCredentialsToVault(ids: string[]): MoveResult {
       // On an `sshkey` entry the secret slot is the key's passphrase.
       secret.password = blob.passphrase ?? ''
     } else if (kind === 'database' && blob.uri) {
+      // A `key` entry: what the connection-string picker lists, and what the
+      // resolver reads a `vaultUriEntryId` from.
+      entryKind = 'key'
       secret.password = blob.uri
       slot = 'vaultUriEntryId'
     } else if (blob.password) {

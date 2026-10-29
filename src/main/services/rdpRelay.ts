@@ -384,8 +384,12 @@ export async function rdpMintTicket(
   // A person opening a desktop, so an address that sync changed is asked
   // about here; on a No the resolver below leaves the password off, exactly
   // as it does for every other caller. See services/syncTrust.ts.
-  if ((storedCredential(server.id) || getSecret(rdpSecretId(server.id))) && serverCredentialHeld(server.id, server.host)) {
-    await askToUse('server', server.id, server.name, serverFieldsNow(server.id, server.host), `${rdpUser}@${server.host}`)
+  // Judged as the desktop's own password when it has one, which never uses
+  // the SSH side's vault link; otherwise as the server's credential it falls
+  // back to.
+  const secretId = getSecret(rdpSecretId(server.id)) ? rdpSecretId(server.id) : server.id
+  if (storedCredential(secretId) && serverCredentialHeld(secretId, server.host)) {
+    await askToUse('server', server.id, server.name, serverFieldsNow(secretId, server.host), `${rdpUser}@${server.host}`)
   }
   let password: string | undefined
   try {

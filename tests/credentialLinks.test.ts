@@ -50,7 +50,7 @@ const { SOURCES } = await import('../src/main/services/addy/collections')
 const { saveData } = await import('../src/main/services/store')
 const trust = await import('../src/main/services/syncTrust')
 const { resolveSecrets, resolveDbSecrets, credentialSourceFor } = await import('../src/main/services/credentialResolver')
-const { storedCredential } = await import('../src/main/services/credentialLink')
+const { storedCredential, credentialToStore } = await import('../src/main/services/credentialLink')
 const { keychainOnly, moveCredentialsToVault } = await import('../src/main/services/credentialMove')
 
 const userData = app.getPath('userData')
@@ -191,7 +191,8 @@ describe('moving keychain-only credentials into the vault', () => {
     expect(made('s1')).toMatchObject({ kind: 'login', password: 'hunter2', username: 'root', workspaceId: 'w1' })
     expect(made('s2')).toMatchObject({ kind: 'sshkey', password: 'pp' })
     expect(made('s2').privateKey).toContain('PRIVATE KEY')
-    expect(made('d1')).toMatchObject({ password: 'postgres://x' })
+    // A `key` entry: the kind the connection-string picker lists.
+    expect(made('d1')).toMatchObject({ kind: 'key', password: 'postgres://x' })
     // The values are gone from the keychain; what is not the credential stays.
     expect(JSON.parse(secrets.get('s1')!)).toEqual({ kbAnswer: '1', vaultEntryId: id('s1') })
     expect(JSON.parse(secrets.get('s2')!)).toEqual({ certificatePath: '/c-cert.pub', vaultEntryId: id('s2') })
@@ -218,5 +219,54 @@ describe('moving keychain-only credentials into the vault', () => {
     expect(r.moved).toEqual([])
     expect(r.skipped[0]!.reason).toContain('could not be read as a private key')
     expect(vaultSave).not.toHaveBeenCalled()
+  })
+})
+
+describe('review findings, 2026-10-29', () => {
+  it('re-saving the linked entry in the editor stores no link and confirms nothing', () => {
+    land('servers', [server({ host: 'evil.example', vaultEntryId: 'v-prod' })])
+    // What the editor sends on Save when it showed the synced link.
+    expect(credentialToStore('s1', JSON.stringify({ vaultEntryId: 'v-prod' }))).toEqual({ store: null, confirms: false })
+    // A certificate path is kept, over what this device stores, still without the link.
+    secrets.set('s1', JSON.stringify({ kbAnswer: '9' }))
+    const withCert = credentialToStore('s1', JSON.stringify({ vaultEntryId: 'v-prod', certificatePath: '/c' }))
+    expect(withCert.confirms).toBe(false)
+    expect(JSON.parse(withCert.store!)).toEqual({ kbAnswer: '9', certificatePath: '/c' })
+    // Picking a different entry, or typing a password, is a choice made here.
+    expect(credentialToStore('s1', JSON.stringify({ vaultEntryId: 'v-other' })).confirms).toBe(true)
+    expect(credentialToStore('s1', JSON.stringify({ password: 'x' })).confirms).toBe(true)
+  })
+
+  it('a desktop password confirms the address but leaves a held link held', () => {
+    land('servers', [server({ vaultEntryId: 'v-prod' })])
+    secrets.set('s1:rdp', JSON.stringify({ password: 'desk' }))
+    trust.confirmSecretOwner('s1:rdp')
+    expect(trust.serverCredentialHeld('s1', 'prod.example')).toBe(true)
+    // And the desktop's own password is not held by the SSH link.
+    expect(trust.serverCredentialHeld('s1:rdp', 'prod.example')).toBe(false)
+  })
+
+  it('links already on disk when this version first runs are held, once', () => {
+    // Written by an older build that kept the field and judged nothing.
+    saveData({ servers: [server({ vaultEntryId: 'v-other' })], databases: [] })
+    expect(trust.serverCredentialHeld('s1', 'prod.example')).toBe(false)
+    trust.seedLinkMarks()
+    expect(trust.serverCredentialHeld('s1', 'prod.example')).toBe(true)
+    trust.confirmRecord('server', 's1')
+    trust.seedLinkMarks()
+    expect(trust.serverCredentialHeld('s1', 'prod.example')).toBe(false)
+  })
+
+  it('a synced flip of a database between password and connection string is held', () => {
+    const db = { id: 'd1', workspaceId: 'w1', name: 'payroll', host: 'db.example', port: 5432, ssl: true, uri: false, vaultEntryId: 'v-other' }
+    saveData({ databases: [db] })
+    land('databases', [{ ...db, uri: true }])
+    expect(() => resolveDbSecrets({ id: 'd1', host: 'db.example', port: 5432 } as never)).toThrow(trust.SyncHeldError)
+  })
+
+  it('a legacy bare-password blob is this device own credential, not hidden by a link', () => {
+    secrets.set('d1', 'plain-old-password')
+    land('databases', [{ id: 'd1', name: 'x', host: 'db.example', vaultEntryId: 'v-other' }])
+    expect(storedCredential('d1')).toBe('plain-old-password')
   })
 })
