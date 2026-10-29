@@ -170,7 +170,7 @@ export const NOT_SYNCED: Readonly<Record<string, string>> = {
    * all four, and the reason is the point.
    */
   secrets:
-    'device-local: safeStorage credentials for servers and databases, including which vault entry each one uses. They do NOT reach another device by sync: the vault syncs, but the link from a server or database to its entry lives here, so a second device has to be given it again. They travel only in a backup bundle -- a sync path carrying unsealed credentials would be a second way to lose them',
+    'device-local: safeStorage credentials for servers and databases. A password, key path or connection string kept here does NOT reach another device. A credential that is a vault entry does, by another route: the record carries the entry id (`Server.vaultEntryId`), the vault syncs, and a second device uses the link once a person there confirms it -- see main/services/credentialLink.ts. The blob itself travels only in a backup bundle -- a sync path carrying unsealed credentials would be a second way to lose them',
   wslocks:
     'device-local: workspace lock passwords protect a workspace on THIS machine; syncing them would make one machine unlock decision apply everywhere',
   mcpSessions:

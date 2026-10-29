@@ -12,6 +12,7 @@ import { verifyRdpCertificate } from './rdpTrust'
 import { rdpSecretId } from '../../shared/rdp'
 import { askToUse, serverCredentialHeld, serverFieldsNow } from './syncTrust'
 import { getSecret } from './secrets'
+import { storedCredential } from './credentialLink'
 import type { RdpTicket, RdpTicketResult, RdpDesktopSize } from '../../shared/rdp'
 import type { SshHop } from '../../shared/ssh'
 import { loopbackUpgradeAllowed, refuseNonLoopback, rendererOrigins } from './loopbackGuard'
@@ -383,7 +384,7 @@ export async function rdpMintTicket(
   // A person opening a desktop, so an address that sync changed is asked
   // about here; on a No the resolver below leaves the password off, exactly
   // as it does for every other caller. See services/syncTrust.ts.
-  if ((getSecret(server.id) || getSecret(rdpSecretId(server.id))) && serverCredentialHeld(server.id, server.host)) {
+  if ((storedCredential(server.id) || getSecret(rdpSecretId(server.id))) && serverCredentialHeld(server.id, server.host)) {
     await askToUse('server', server.id, server.name, serverFieldsNow(server.id, server.host), `${rdpUser}@${server.host}`)
   }
   let password: string | undefined

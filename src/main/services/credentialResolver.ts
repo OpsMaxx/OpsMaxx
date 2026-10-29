@@ -1,4 +1,5 @@
 import { getSecret, setSecret } from './secrets'
+import { storedCredential } from './credentialLink'
 import { getCachedServer } from './mcpDataCache'
 import type { CredentialShape } from '../../shared/credentialShape'
 import { vaultEntriesForResolve, vaultStatus } from './vault'
@@ -110,7 +111,7 @@ export function resolveSecrets<T extends SshHop & { serverId?: string }>(cfg: T)
     cfg.auth = 'certificate'
   }
   if (cfg.serverId && !cfg.password && !cfg.privateKey && !cfg.keyPath) {
-    const raw = getSecret(cfg.serverId)
+    const raw = storedCredential(cfg.serverId)
     /**
      * NOT ATTACHED TO AN ADDRESS THIS DEVICE NEVER CONFIRMED.
      *
@@ -176,7 +177,7 @@ export function credentialResolvable(id: string): boolean {
 // Which store a server's credential actually comes from, for the UI to show
 // without ever reading the credential itself.
 export function credentialSourceFor(serverId: string): { source: CredentialSource; vaultEntryId?: string } {
-  const raw = getSecret(serverId)
+  const raw = storedCredential(serverId)
   if (!raw) return { source: 'none' }
   try {
     // `vaultUriEntryId` is the database URI shape, which lives in the same
@@ -223,7 +224,7 @@ import { envSecretRefsForServer } from './envSecretRegistry'
  * connection editor, and nothing else here could identify a secret.
  */
 export function credentialShapeForServer(serverId: string): CredentialShape {
-  const raw = getSecret(serverId)
+  const raw = storedCredential(serverId)
   if (!raw) return { kind: 'none' }
   let blob: SecretBlob | null = null
   try {
@@ -287,7 +288,7 @@ export function forgetKbAnswer(serverId: string): boolean {
 }
 
 export function knownSecretValuesForServer(serverId: string): string[] {
-  const raw = getSecret(serverId)
+  const raw = storedCredential(serverId)
   if (!raw) return []
   try {
     const blob = JSON.parse(raw) as SecretBlob
@@ -373,7 +374,7 @@ export function resolveDbSecrets<T extends { id: string; password?: string; uri?
   cfg: T
 ): T {
   if (!cfg.password && !cfg.uri) {
-    const raw = getSecret(cfg.id)
+    const raw = storedCredential(cfg.id)
     // Refused outright rather than left off, unlike a server's: a database
     // dialled with no password fails as "authentication failed", which sends
     // somebody to check a credential that is fine. Bound to the host and the

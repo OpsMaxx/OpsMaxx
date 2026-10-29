@@ -741,6 +741,10 @@ interface AppState {
   addServer: (input: Partial<Server> & { name: string; host: string }) => string
   setServerStatus: (serverId: string, status: Server['status']) => void
   updateServer: (id: string, patch: Partial<Omit<Server, 'id' | 'workspaceId'>>) => void
+  /** Put vault-entry links on servers and databases by id, as main reports
+   *  them. No `rev` bump: nothing about the credential THIS device uses
+   *  changed, so no connection needs retiring. */
+  linkVaultEntries: (links: Record<string, string>) => void
   deleteServer: (id: string) => void
   // `workspaceId` is optional: the dialogs add to the workspace on screen, and
   // an agent adds to the one it named, which need not be the one on screen.
@@ -2114,6 +2118,11 @@ export const useApp = create<AppState>((set, get) => ({
     return id
   },
 
+  linkVaultEntries: (links) => {
+    const linked = <T extends { id: string; vaultEntryId?: string }>(r: T): T =>
+      links[r.id] && links[r.id] !== r.vaultEntryId ? { ...r, vaultEntryId: links[r.id] } : r
+    set((s) => ({ servers: s.servers.map(linked), databases: s.databases.map(linked) }))
+  },
   updateServer: (id, patch) => {
     // Editing a server has to retire the connections made to the old one.
     //

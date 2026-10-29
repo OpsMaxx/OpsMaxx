@@ -9,7 +9,7 @@ import type { CloudTarget } from '../../shared/cloud'
 import { agentForHop } from '../../shared/sshAgent'
 import { debugRecord } from './debugLog'
 import { askedWithoutWindow, verifyHostKey } from './knownhosts'
-import { getSecret } from './secrets'
+import { storedCredential } from './credentialLink'
 import { resolveSecrets } from './credentialResolver'
 import { askToUse, serverCredentialHeld, serverFieldsNow, SyncHeldError } from './syncTrust'
 // Names only, and only for an error message: a hop is addressed by the
@@ -404,7 +404,7 @@ async function connectClient(
    * still be offered to whoever answers. See services/syncTrust.ts.
    */
   const serverId = (hop as SshHop & { serverId?: string }).serverId
-  if (serverId && getSecret(serverId) && serverCredentialHeld(serverId, hop.host)) {
+  if (serverId && storedCredential(serverId) && serverCredentialHeld(serverId, hop.host)) {
     const name = getCachedServer(serverId)?.name ?? hop.host
     const allowed =
       allowPrompt &&

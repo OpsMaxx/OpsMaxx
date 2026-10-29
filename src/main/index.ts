@@ -249,6 +249,7 @@ import type { RdpDesktopSize } from '../shared/rdp'
 import type { TunnelConfig, TunnelSshConfig } from '../shared/tunnel'
 import { knownHostList, knownHostForget } from './services/knownhosts'
 import { askToUseDatabase, askToUseRecord, confirmRecord, confirmSecretOwner, heldRecords, pendingWorkspace } from './services/syncTrust'
+import { keychainOnly, moveCredentialsToVault } from './services/credentialMove'
 import {
   setVpnPrompter,
   vpnAttachRenderer,
@@ -5892,13 +5893,46 @@ ipcMain.handle('wslock:remove', (_e, id: string, current: string) => wsLockRemov
 ipcMain.handle('wslock:delete', (_e, id: string) => wsLockDelete(id))
 
 // ---- Secrets ----
+
+/** The vault entry a stored credential blob names, for a server's or a
+ *  database's (password or connection-string) credential. */
+function vaultLinkOf(raw: string | null): string | null {
+  if (!raw) return null
+  try {
+    const b = JSON.parse(raw) as { vaultEntryId?: unknown; vaultUriEntryId?: unknown }
+    const id = b.vaultEntryId ?? b.vaultUriEntryId
+    return typeof id === 'string' && id !== '' ? id : null
+  } catch {
+    return null
+  }
+}
 ipcMain.handle('secrets:available', () => secretsAvailable())
 ipcMain.handle('secrets:set', (_e, id: string, value: string) => {
   const ok = setSecret(id, value)
   // A credential typed in on this device for a record is the person saying
   // where it goes, so the record is confirmed as it stands. See syncTrust.ts.
   if (ok) confirmSecretOwner(id)
+  // A credential that names a vault entry is told to the renderer, which puts
+  // the entry's id on the synced record -- how the user's other devices learn
+  // which entry this server logs in with. Every screen that saves one comes
+  // through here, so none of them has to remember. See credentialLink.ts.
+  const link = ok ? vaultLinkOf(value) : null
+  if (link && !id.endsWith(':rdp')) mainWindow?.webContents.send('secrets:vaultLinked', id, link)
   return ok
+})
+const stringIds = (ids: unknown): string[] =>
+  Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string' && id !== '') : []
+ipcMain.handle('secrets:keychainOnly', (_e, ids: unknown) => keychainOnly(stringIds(ids)))
+ipcMain.handle('secrets:moveToVault', (_e, ids: unknown) => moveCredentialsToVault(stringIds(ids)))
+ipcMain.handle('secrets:vaultLinks', (_e, ids: unknown) => {
+  const out: Record<string, string> = {}
+  if (!Array.isArray(ids)) return out
+  for (const id of ids) {
+    if (typeof id !== 'string' || id === '') continue
+    const link = vaultLinkOf(getSecret(id))
+    if (link) out[id] = link
+  }
+  return out
 })
 ipcMain.handle('secrets:delete', (_e, id: string) => deleteSecret(id))
 // Ids and dates, never values — see shared/machineGrants.ts. A standing

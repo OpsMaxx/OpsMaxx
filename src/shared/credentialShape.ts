@@ -89,3 +89,14 @@ export function credentialNote(shape: CredentialShape | null): string | null {
       return null
   }
 }
+
+/** What moving keychain-only credentials into the vault did. See
+ *  main/services/credentialMove.ts. */
+export interface CredentialMoveResult {
+  ok: boolean
+  /** Set when nothing was moved because the vault is not open. Carries the
+   *  VAULT_LOCKED marker, which the renderer answers with the unlock prompt. */
+  error?: string
+  moved: { id: string; vaultEntryId: string }[]
+  skipped: { id: string; reason: string }[]
+}

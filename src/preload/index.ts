@@ -5,6 +5,7 @@ import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
 import type { BackupAlarm } from '../shared/backup'
 import type { MachineGrant } from '../shared/machineGrants'
+import type { CredentialMoveResult } from '../shared/credentialShape'
 import type { HttpRequestSpec, HttpResult } from '../shared/httpClient'
 import type { HistoryEntry } from '../shared/httpHistory'
 import { socketBridge, type SocketIpc } from '../shared/httpSocket'
@@ -2167,7 +2168,22 @@ const api = {
      * existed on users' machines with no screen listing them. An authorisation
      * nothing enumerates cannot be withdrawn.
      */
-    machineGrants: (): Promise<MachineGrant[]> => ipcRenderer.invoke('secrets:machineGrants')
+    machineGrants: (): Promise<MachineGrant[]> => ipcRenderer.invoke('secrets:machineGrants'),
+    /**
+     * The vault entry each of `ids` logs in with ON THIS DEVICE, read from its
+     * own stored credential. Ids with none are absent. Pointers only.
+     */
+    vaultLinks: (ids: string[]): Promise<Record<string, string>> => ipcRenderer.invoke('secrets:vaultLinks', ids),
+    /** Of `ids`, those whose credential is stored only on this device. */
+    keychainOnly: (ids: string[]): Promise<string[]> => ipcRenderer.invoke('secrets:keychainOnly', ids),
+    /** Move those credentials into the vault (it must be open). Values stay in main. */
+    moveToVault: (ids: string[]): Promise<CredentialMoveResult> => ipcRenderer.invoke('secrets:moveToVault', ids),
+    /** A credential naming a vault entry was just saved here, by any screen. */
+    onVaultLinked: (cb: (id: string, vaultEntryId: string) => void): (() => void) => {
+      const h = (_e: Electron.IpcRendererEvent, id: string, vaultEntryId: string): void => cb(id, vaultEntryId)
+      ipcRenderer.on('secrets:vaultLinked', h)
+      return () => ipcRenderer.removeListener('secrets:vaultLinked', h)
+    }
   },
   data: {
     load: <T>(): Promise<T | null> => ipcRenderer.invoke('data:load'),
