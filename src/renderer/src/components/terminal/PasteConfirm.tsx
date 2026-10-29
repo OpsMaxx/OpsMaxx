@@ -174,10 +174,12 @@ export function ImagePasteConfirm({
         </span>
         <div className="row" style={{ gap: 8 }}>
           <span className="spacer" />
-          <button className="btn sm" onClick={onCancel}>
+          {/* Cancel holds the focus. Ctrl+V then a reflexive Enter would
+              otherwise send a screenshot nobody looked at to the server. */}
+          <button className="btn sm" onClick={onCancel} autoFocus>
             Cancel
           </button>
-          <button className="btn primary sm" onClick={onConfirm} autoFocus>
+          <button className="btn primary sm" onClick={onConfirm}>
             <ClipboardPaste size={14} /> Copy and paste path
           </button>
         </div>
