@@ -182,6 +182,27 @@ async function hydrate(): Promise<void> {
     if (!st.isWorkspaceAccessible(st.activeWorkspaceId)) st.lockWorkspace(st.activeWorkspaceId)
   }
 
+  /**
+   * Which vault entry each server and database logs in with, on the record.
+   *
+   * Main announces every credential saved here that names an entry, whichever
+   * screen saved it; the link then syncs, and is how the user's other devices
+   * learn which entry to use (see main/services/credentialLink.ts). Once at
+   * load, records with no link yet take the one this device stores -- every
+   * server set up before links existed. Only where there is none: a link that
+   * differs came from another device, and this device's own credential wins
+   * here without needing to overwrite it everywhere else.
+   */
+  window.opsmaxx?.secrets?.onVaultLinked?.((id, vaultEntryId) =>
+    useApp.getState().linkVaultEntries({ [id]: vaultEntryId })
+  )
+  {
+    const st = useApp.getState()
+    const unlinked = [...st.servers, ...st.databases].filter((r) => !r.vaultEntryId).map((r) => r.id)
+    const links = unlinked.length ? await window.opsmaxx?.secrets?.vaultLinks?.(unlinked) : undefined
+    if (links && Object.keys(links).length) useApp.getState().linkVaultEntries(links)
+  }
+
   // Main owns the vault's idle timer, same as the connection pool below.
   void window.opsmaxx?.vault?.setAutoLock?.(useApp.getState().settings.vaultAutoLockMinutes)
 

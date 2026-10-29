@@ -249,7 +249,9 @@ import { rdpAdvisory, rdpLastError, rdpMintTicket, stopRdpRelay } from './servic
 import type { RdpDesktopSize } from '../shared/rdp'
 import type { TunnelConfig, TunnelSshConfig } from '../shared/tunnel'
 import { knownHostList, knownHostForget } from './services/knownhosts'
-import { askToUseDatabase, askToUseRecord, confirmRecord, confirmSecretOwner, heldRecords, pendingWorkspace } from './services/syncTrust'
+import { askToUseDatabase, askToUseRecord, confirmRecord, confirmSecretOwner, heldRecords, pendingWorkspace, seedLinkMarks } from './services/syncTrust'
+import { keychainOnly, moveCredentialsToVault } from './services/credentialMove'
+import { credentialToStore, vaultLinkOf } from './services/credentialLink'
 import {
   setVpnPrompter,
   vpnAttachRenderer,
@@ -5919,13 +5921,46 @@ ipcMain.handle('wslock:remove', (_e, id: string, current: string) => wsLockRemov
 ipcMain.handle('wslock:delete', (_e, id: string) => wsLockDelete(id))
 
 // ---- Secrets ----
+
 ipcMain.handle('secrets:available', () => secretsAvailable())
 ipcMain.handle('secrets:set', (_e, id: string, value: string) => {
-  const ok = setSecret(id, value)
+  /**
+   * RE-SAVING THE SYNCED LINK IS NOT A CHOICE MADE HERE.
+   *
+   * On a device with no credential of its own, the editor shows the entry the
+   * synced record links to, and any save writes it straight back -- which
+   * stored it as this device's own and confirmed the record, so opening Edit
+   * to rename a held server released a link and an address nobody here had
+   * looked at. Such a blob is stored without the entry id (it stays the
+   * record's, and stays judged) and confirms nothing. Choosing a different
+   * entry, or typing a password, is still a decision, and still counts.
+   */
+  const { store, confirms } = credentialToStore(id, value)
+  const ok = store === null ? true : setSecret(id, store)
   // A credential typed in on this device for a record is the person saying
   // where it goes, so the record is confirmed as it stands. See syncTrust.ts.
-  if (ok) confirmSecretOwner(id)
+  if (ok && confirms) confirmSecretOwner(id)
+  // A credential that names a vault entry is told to the renderer, which puts
+  // the entry's id on the synced record -- how the user's other devices learn
+  // which entry this server logs in with. Every screen that saves one comes
+  // through here, so none of them has to remember. See credentialLink.ts.
+  const link = ok ? vaultLinkOf(value) : null
+  if (link && !id.endsWith(':rdp')) mainWindow?.webContents.send('secrets:vaultLinked', id, link)
   return ok
+})
+const stringIds = (ids: unknown): string[] =>
+  Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string' && id !== '') : []
+ipcMain.handle('secrets:keychainOnly', (_e, ids: unknown) => keychainOnly(stringIds(ids)))
+ipcMain.handle('secrets:moveToVault', (_e, ids: unknown) => moveCredentialsToVault(stringIds(ids)))
+ipcMain.handle('secrets:vaultLinks', (_e, ids: unknown) => {
+  const out: Record<string, string> = {}
+  if (!Array.isArray(ids)) return out
+  for (const id of ids) {
+    if (typeof id !== 'string' || id === '') continue
+    const link = vaultLinkOf(getSecret(id))
+    if (link) out[id] = link
+  }
+  return out
 })
 ipcMain.handle('secrets:delete', (_e, id: string) => deleteSecret(id))
 // Ids and dates, never values — see shared/machineGrants.ts. A standing
@@ -6561,6 +6596,9 @@ app.whenReady().then(() => {
   // Primed once at launch so the MCP bridge can resolve server/workspace
   // names even before the renderer's first data:save call.
   refreshMcpDataCache(boot)
+  // Before the renderer exists, so its load-time link backfill (persist.ts)
+  // cannot be mistaken for links that arrived by sync. See seedLinkMarks.
+  seedLinkMarks(boot)
   // And the CI connections, for the same reason one line up: an agent can call
   // a ci_* tool before any window has opened the CI tab, and an empty list
   // there reads to the agent as "this user has no CI connections" rather than

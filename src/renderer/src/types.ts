@@ -77,6 +77,19 @@ export interface Server {
    * Absent means never edited, which is every record saved before this.
    */
   rev?: number
+  /**
+   * The vault entry this server logs in with, when its credential is one.
+   *
+   * A POINTER, NEVER A VALUE, and the only part of a credential that syncs:
+   * the keychain is per machine, so without this a second device received the
+   * server with nothing to log in with. A device with a credential of its own
+   * stored for the server uses that instead, and one that receives a new or
+   * changed link by sync holds it until a person there confirms it. See
+   * main/services/credentialLink.ts. Set by main whenever a credential naming
+   * an entry is saved; never cleared by saving a non-vault one, which would
+   * take the server away from every other device relying on it.
+   */
+  vaultEntryId?: string
   status: ServerStatus
   tags: string[]
   favorite: boolean
@@ -270,6 +283,9 @@ export interface DatabaseConn {
   // bastion above and composable with it: with both, the VPN carries the
   // *bastion*, and the database is reached from there as it always was.
   vpnProfileId: UUID | null
+  /** The vault entry holding this database's password, or its connection
+   *  string when `uri` is true. Same contract as `Server.vaultEntryId`. */
+  vaultEntryId?: string
 }
 
 /**
