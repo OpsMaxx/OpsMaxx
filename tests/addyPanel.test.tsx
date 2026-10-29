@@ -608,32 +608,3 @@ describe('the Sync now button', () => {
     await waitFor(() => expect(status.mock.calls.length).toBeGreaterThan(1))
   })
 })
-
-describe('connections whose credential is stored only on this computer', () => {
-  it('offers to move them, reloads the vault copy first, then links the records', async () => {
-    const order: string[] = []
-    const moveToVault = vi.fn().mockResolvedValue({ ok: true, moved: [{ id: 's1', vaultEntryId: 'v-new' }], skipped: [] })
-    const list = vi.fn(async () => (order.push('vault reloaded'), { ok: true, entries: [] }))
-    stubBridge({
-      addy: { status: vi.fn().mockResolvedValue(healthy()) },
-      secrets: { keychainOnly: vi.fn().mockResolvedValue(['s1']), moveToVault },
-      vault: { status: vi.fn().mockResolvedValue({ exists: true, unlocked: true, stage: 'open' }), list }
-    })
-    const { useVault } = await import('../src/renderer/src/store/vault')
-    useVault.setState({ stage: 'open', unlocked: true })
-    useApp.setState({
-      servers: [{ id: 's1', name: 'Chain305', host: 'h', port: 22, username: 'root' } as never],
-      databases: []
-    })
-    const link = useApp.getState().linkVaultEntries
-    useApp.setState({ linkVaultEntries: (l) => (order.push('linked'), link(l)) })
-
-    render(<AddyPanel />)
-    fireEvent.click(await screen.findByRole('button', { name: /Move to the vault/ }))
-    await waitFor(() => expect(useApp.getState().servers[0]!.vaultEntryId).toBe('v-new'))
-    expect(moveToVault).toHaveBeenCalledWith(['s1'])
-    // The vault store saves its whole list back on the next edit; a copy that
-    // missed the new entry would erase it.
-    expect(order).toEqual(['vault reloaded', 'linked'])
-  })
-})

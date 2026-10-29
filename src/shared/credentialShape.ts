@@ -74,7 +74,9 @@ export function credentialNote(shape: CredentialShape | null): string | null {
     case 'none':
       // The case worth the whole file. Every method failed because none was
       // offered, which no amount of checking the username will reveal.
-      return 'OpsMaxx has no credential saved for this connection, so it offered none. Add a key, a password or an agent in Edit connection.'
+      // The second sentence is for a synced server: its credential sits in the
+      // keychain of the device that saved it, which this one cannot read.
+      return 'OpsMaxx has no credential saved for this connection, so it offered none. Add a key, a password or an agent in Edit connection. If it is saved on another of your devices, move it into the vault there (Vault, Move into the vault) and this device can use it.'
     case 'vault':
       return shape.vaultLocked === true
         ? 'This connection authenticates from the vault, and the vault is locked, so nothing could be offered. Unlock it and try again.'

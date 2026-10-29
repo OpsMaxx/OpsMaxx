@@ -20,8 +20,6 @@ import { PanelShell, NoteWhy } from '../monitor/PanelShell'
 import { EmptyState } from '../common/EmptyState'
 import { Sparkline } from '../common/Sparkline'
 import { useApp } from '../../store/app'
-import { useVault } from '../../store/vault'
-import { useVaultPrompt } from '../../store/vaultPrompt'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { errorText } from '../../lib/connectionError'
@@ -198,7 +196,6 @@ export function AddyPanel(): React.JSX.Element {
 
       <AddyKpis status={status} supported={supported} relay={relay} />
       <HeldRecords lastSyncAt={status?.sync?.lastSyncAt ?? null} />
-      {status?.enrolled && <KeychainOnly lastSyncAt={status.sync?.lastSyncAt ?? null} />}
 
       <h3 className="ui-section-title addy-h">Where you are</h3>
       <ol className="addy-journey">
@@ -1227,78 +1224,6 @@ function HeldRecords({ lastSyncAt }: { lastSyncAt: number | null }): React.JSX.E
             </li>
           ))}
         </ul>
-      </div>
-    </div>
-  )
-}
-
-/**
- * Connections whose credential is stored only on this computer.
- *
- * The keychain does not sync, so these are servers and databases every other
- * device of the account can see and cannot log in to — which reads as sync
- * having failed, when it is the one thing sync deliberately does not carry.
- * Moving them makes each credential a vault entry; the record then names that
- * entry, and the other devices use it once a person there confirms it. See
- * main/services/credentialMove.ts and credentialLink.ts.
- */
-function KeychainOnly({ lastSyncAt }: { lastSyncAt: number | null }): React.JSX.Element | null {
-  const servers = useApp((s) => s.servers)
-  const databases = useApp((s) => s.databases)
-  const linkVaultEntries = useApp((s) => s.linkVaultEntries)
-  const [ids, setIds] = useState<string[]>([])
-  const [busy, setBusy] = useState(false)
-  const key = [...servers, ...databases].map((r) => r.id).join(',')
-  useEffect(() => {
-    const all = [...servers, ...databases].map((r) => r.id)
-    void window.opsmaxx?.secrets?.keychainOnly?.(all).then((r) => setIds(r ?? []))
-    // Keyed on the ids, not the arrays: a status flip on any server would
-    // otherwise ask main again on every render of the sidebar.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, lastSyncAt])
-  if (ids.length === 0) return null
-
-  const move = async (): Promise<void> => {
-    setBusy(true)
-    try {
-      if (useVault.getState().stage !== 'open') {
-        const opened = await useVaultPrompt
-          .getState()
-          .request('Moving these credentials into the vault needs your master password.')
-        if (!opened) return
-      }
-      const r = await window.opsmaxx?.secrets?.moveToVault?.(ids)
-      if (!r) return
-      if (!r.ok) {
-        toast(r.error ?? 'The vault would not take them, so nothing was moved.', 'error')
-        return
-      }
-      // The vault store holds its own copy of the entries while open and saves
-      // the whole list back; reloading it is what keeps the next edit there
-      // from erasing what main just added.
-      await useVault.getState().refresh()
-      linkVaultEntries(Object.fromEntries(r.moved.map((m) => [m.id, m.vaultEntryId])))
-      const names = new Map([...servers, ...databases].map((x) => [x.id, x.name]))
-      if (r.moved.length) toast(`${r.moved.length} moved to the vault. Your other devices can use them once you confirm there.`, 'ok')
-      for (const sk of r.skipped) toast(`${names.get(sk.id) ?? sk.id} was not moved: ${sk.reason}.`, 'error')
-      setIds(r.skipped.map((sk) => sk.id))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  return (
-    <div className="addy-note" role="status">
-      <AlertTriangle size={15} aria-hidden />
-      <div>
-        <p>
-          {ids.length === 1 ? 'One connection logs' : `${ids.length} connections log`} in with a credential stored
-          only on this computer, so your other devices can see {ids.length === 1 ? 'it' : 'them'} and cannot sign
-          in. Moving {ids.length === 1 ? 'it' : 'them'} into the vault lets them, after you confirm on each device.
-        </p>
-        <button className="btn size-24" disabled={busy} onClick={() => void move()}>
-          {busy ? <Loader2 size={13} className="spin" /> : null} Move to the vault
-        </button>
       </div>
     </div>
   )
