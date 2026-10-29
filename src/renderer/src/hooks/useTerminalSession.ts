@@ -16,6 +16,8 @@ import { parseOsc133, parseOsc7 } from '../../../shared/shellIntegration'
 import { parseOsc52 } from '../../../shared/osc52'
 import { NO_PROMPT, applyMark, movementFor, isClickNotDrag, type PromptState } from '../lib/clickToMove'
 import type { TerminalTransport } from '../lib/transport'
+import type { ClipboardImage } from '../../../shared/ssh'
+import { toast } from '../store/toast'
 
 // The xterm primitives live here rather than in TerminalView because the hook
 // is their only real consumer; TerminalView imports them back for the demo
@@ -226,7 +228,13 @@ export function setupTerminalUX(
   term: Terminal,
   host: HTMLDivElement,
   onFind?: () => void,
-  onConfirmPaste?: (text: string, lines: number) => void
+  onConfirmPaste?: (text: string, lines: number) => void,
+  /**
+   * Offer the clipboard's image to the session, resolving false when there is
+   * none. Only passed where an image can be delivered (see
+   * TerminalTransport.pasteImage); without it nothing below changes.
+   */
+  onImage?: () => Promise<boolean>
 ): () => void {
   const copySel = (): void => {
     const sel = term.getSelection()
@@ -236,7 +244,11 @@ export function setupTerminalUX(
   // right-click read the clipboard themselves, and a DOM paste event (the
   // Edit menu, Cmd+V when the shortcut is unbound) hands over its own text.
   const guardedPaste = (t: string): void => {
-    if (!t) return
+    // No text may still be a screenshot.
+    if (!t) {
+      void onImage?.().catch(() => undefined)
+      return
+    }
     // A pasted block runs line by line the moment it lands. Confirm anything
     // multi-line so a stray paste cannot execute a script on a production box.
     //
@@ -298,6 +310,17 @@ export function setupTerminalUX(
       e.preventDefault()
       return false
     }
+    // Ctrl+V is how Claude Code is asked to take an image -- on macOS too,
+    // where Cmd+V is text. Remotely it reads the server's clipboard and finds
+    // nothing, so with an image on this one the key offers that instead. With
+    // no image it is the plain ^V it always was (vim's block select, a shell's
+    // quoted insert), sent a clipboard read later.
+    if (onImage && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'v') {
+      e.preventDefault()
+      const plain = (): void => term.input('\x16')
+      void onImage().then((offered) => offered || plain(), plain)
+      return false
+    }
     return true // everything else goes to the shell
   })
 
@@ -349,7 +372,9 @@ export function useTerminalSession(
    * app launched. `reconnect` is the way out, and it is the same control a
    * dropped connection already offers.
    */
-  dormant?: boolean
+  dormant?: boolean,
+  /** Ask before an image is copied to the server. See pasteImage below. */
+  onConfirmImage?: (image: ClipboardImage) => void
 ): {
   termRef: React.RefObject<Terminal | null>
   searchRef: React.RefObject<SearchAddon | null>
@@ -358,6 +383,8 @@ export function useTerminalSession(
   /** The automatic recovery run, when one is under way. */
   recovery: RecoveryState
   cancelRecovery: () => void
+  /** Copy a confirmed image to the server and paste its path. */
+  pasteImage: (png: Uint8Array) => Promise<void>
 } {
   const setTabSession = useApp((s) => s.setTabSession)
   const setTabCwd = useApp((s) => s.setTabCwd)
@@ -438,7 +465,16 @@ export function useTerminalSession(
       term,
       hostRef.current,
       () => onFind(),
-      (text, lines) => onConfirmPaste(text, lines)
+      (text, lines) => onConfirmPaste(text, lines),
+      transport.pasteImage && onConfirmImage
+        ? async () => {
+            if (!sessionRef.current) return false
+            const image = await window.opsmaxx?.clipboard.readImage()
+            if (!image) return false
+            onConfirmImage(image)
+            return true
+          }
+        : undefined
     )
 
     // Report cwd changes to the store (for SFTP follow) if the shell emits
@@ -724,5 +760,25 @@ export function useTerminalSession(
     dial()
   }, [cancelRecovery, dial])
 
-  return { termRef, searchRef, dead, reconnect, recovery, cancelRecovery }
+  /**
+   * The path is pasted, not typed, so it arrives bracketed: Claude Code treats
+   * a pasted image path as the image, and a shell leaves it on the line
+   * without running anything. Checked against the session that asked, so a
+   * reconnect while uploading does not paste a path that is not on the new one.
+   */
+  const pasteImage = useCallback(
+    async (png: Uint8Array): Promise<void> => {
+      const id = sessionRef.current
+      if (!id || !transport.pasteImage) return
+      try {
+        const path = await transport.pasteImage(id, png)
+        if (sessionRef.current === id) termRef.current?.paste(path)
+      } catch (err) {
+        toast(`Image not pasted: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      }
+    },
+    [transport]
+  )
+
+  return { termRef, searchRef, dead, reconnect, recovery, cancelRecovery, pasteImage }
 }

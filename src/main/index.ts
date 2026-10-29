@@ -22,6 +22,7 @@ import {
   sshWrite,
   sshResize,
   sshClose,
+  sshPasteImage,
   sshDisposeAll,
   setSshPrompter,
   setStoredKbAnswer,
@@ -1308,6 +1309,32 @@ ipcMain.handle('ssh:pool-idle', (_e, minutes: number) => setPoolIdle(minutes))
 ipcMain.handle('clipboard:read', () => clipboard.readText())
 ipcMain.on('clipboard:write', (_e, text: unknown) => {
   if (typeof text === 'string') clipboard.writeText(text)
+})
+// The clipboard's image, for a terminal to offer to a server -- only when it
+// holds no text. Finder's Copy puts a file's icon on the clipboard beside its
+// name, and the name is what was meant. `preview` is a small data URL for the
+// confirmation, which is all the renderer's img-src allows.
+ipcMain.handle('clipboard:readImage', () => {
+  if (clipboard.readText()) return null
+  const img = clipboard.readImage()
+  if (img.isEmpty()) return null
+  const { width, height } = img.getSize()
+  return {
+    png: img.toPNG(),
+    width,
+    height,
+    preview: (width > 480 ? img.resize({ width: 480 }) : img).toDataURL()
+  }
+})
+// Copies it to the machine a live terminal is logged in to, over that
+// terminal's connection. The renderer asks only after the user confirmed.
+ipcMain.handle('ssh:pasteImage', async (_e, id: unknown, png: unknown) => {
+  try {
+    if (typeof id !== 'string') throw new Error('No terminal.')
+    return { ok: true as const, path: await sshPasteImage(id, png) }
+  } catch (err) {
+    return { ok: false as const, error: err instanceof Error ? err.message : String(err) }
+  }
 })
 ipcMain.on('ssh:write', (_e, id: string, data: string) => sshWrite(id, data))
 ipcMain.on('ssh:resize', (_e, id: string, cols: number, rows: number) => sshResize(id, cols, rows))
