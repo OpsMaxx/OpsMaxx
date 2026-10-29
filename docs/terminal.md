@@ -67,6 +67,20 @@ waits for Enter. A carriage return on its own counts as a line break, because
 the shell treats it as Enter. Single-line pastes, including one with a trailing
 line break, go straight through.
 
+**Pasting an image into a server.** A program on a server, such as Claude Code,
+reads the server's clipboard, which never has what you copied here. So in an SSH
+terminal, pasting with an image and no text on the clipboard — by any paste route,
+or <kbd>Ctrl</kbd>+<kbd>V</kbd>, which is Claude Code's image key — shows the image
+and asks before copying it. Confirming writes it over that terminal's own
+connection to a new directory in `/tmp` on that server, readable only by the
+account you logged in as, and pastes its path; Claude Code takes a pasted image
+path as the image. The file is deleted when the terminal closes (a connection that
+drops first, or quitting the app, leaves it for the server's own `/tmp` cleanup).
+The server needs SFTP. Container shells and shells on this computer are not
+offered this: a container cannot see the host's `/tmp`, and a local program
+reads this clipboard itself. With no image on the clipboard,
+<kbd>Ctrl</kbd>+<kbd>V</kbd> is sent to the shell as usual.
+
 **Run a saved job template here.** With the Jobs module on, the command palette
 (<kbd>Ctrl</kbd>+<kbd>K</kbd>) lists every template saved in the Jobs composer as
 *Run in this terminal: name* while a live session is on screen. It opens the same confirmation, showing every

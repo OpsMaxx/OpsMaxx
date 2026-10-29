@@ -61,6 +61,10 @@ export interface TerminalTransport {
   onClose(sessionId: string, cb: (reason: string) => void): () => void
   // Only SSH has one; local sessions do not touch Server.status.
   onLifecycle?(phase: 'connecting' | 'online' | 'offline'): void
+  // Copy a clipboard image to the machine this session is on and resolve with
+  // its path there. Only a remote login shell has one: a local program reads
+  // this clipboard itself, and a container cannot see the host's files.
+  pasteImage?(sessionId: string, png: Uint8Array): Promise<string>
 }
 
 /**
@@ -172,6 +176,12 @@ export function sshTransport(
         else if (s.phase === 'error') cb({ phase: 'error', message: s.message ?? 'unknown error' })
       }) ?? ((): void => {}),
     onClose: (id, cb) => api()?.onClose(id, (info) => cb(sshCloseReason(info))) ?? ((): void => {}),
+    pasteImage: async (id, png) => {
+      const r = await api()?.pasteImage(id, png)
+      if (!r) throw new Error('This terminal is not connected.')
+      if (!r.ok) throw new Error(r.error)
+      return r.path
+    },
     onLifecycle: (phase) => {
       if (phase === 'connecting') setServerStatus(server.id, 'connecting')
       else setServerStatus(server.id, phase === 'online' ? 'online' : 'offline')
@@ -255,6 +265,8 @@ export function containerTransport(
     // connection is shared and refcounted, so the host's own sessions keep it
     // alive regardless of what happens in here.
     onLifecycle: undefined,
+    // The image would land in the host's /tmp, which the container cannot see.
+    pasteImage: undefined,
     // Distinct from the server's own key so a container shell and a shell on
     // the host are different sessions rather than one stealing the other.
     key: `container:${server.id}:${server.rev ?? 0}:${containerRef}`,

@@ -15,6 +15,7 @@ import { askToUse, serverCredentialHeld, serverFieldsNow, SyncHeldError } from '
 // Names only, and only for an error message: a hop is addressed by the
 // friendly name of a saved server, so that is what a failure has to say.
 import { getCachedServer } from './mcpDataCache'
+import { isPastableImage, removePastedImages, uploadPastedImage } from './pastedImage'
 import { isEncryptedPrivateKey, isSecurityKeyPrivateKey, defaultIdentityPath } from './sshKeys'
 import {
   assertCertificateUsable,
@@ -28,6 +29,10 @@ interface Session {
   stream: ClientChannel | null
   /** The saved server this terminal is to, when it is one. */
   serverId?: string
+  /** A shell inside a container, whose filesystem is not the host's /tmp. */
+  container?: boolean
+  /** Images pasted into this terminal, removed from the server when it closes. */
+  pastedImages?: string[]
 }
 
 /**
@@ -1657,7 +1662,12 @@ export function poolDisposeAll(): void {
 export async function sshConnect(wc: WebContents, cfg: SshConnectConfig): Promise<void> {
   const { sessionId } = cfg
   const serverId = (cfg as { serverId?: unknown }).serverId
-  sessions.set(sessionId, { conn: null, stream: null, ...(typeof serverId === 'string' && serverId ? { serverId } : {}) })
+  sessions.set(sessionId, {
+    conn: null,
+    stream: null,
+    ...(typeof serverId === 'string' && serverId ? { serverId } : {}),
+    ...(cfg.initialCommand ? { container: true } : {})
+  })
 
   try {
     status(wc, sessionId, 'connecting')
@@ -1759,6 +1769,30 @@ export function sshResize(sessionId: string, cols: number, rows: number): void {
 
 export function sshClose(sessionId: string): void {
   cleanup(sessionId)
+}
+
+/**
+ * Put a clipboard image on the machine this terminal is logged in to, and
+ * return the path to paste. See pastedImage.ts.
+ *
+ * Only ever over this session's own connection: the image goes to the host the
+ * user opened this terminal to and to no other. A container shell is refused
+ * rather than handed a path on the host that does not exist inside it.
+ */
+export async function sshPasteImage(sessionId: string, png: unknown): Promise<string> {
+  const s = sessions.get(sessionId)
+  if (!s?.stream || !s.conn) throw new Error('This terminal is not connected.')
+  if (s.container) throw new Error('Images cannot be pasted into a container shell: it cannot see files on the host.')
+  if (!isPastableImage(png)) throw new Error('The clipboard image is not a PNG, or is larger than 20 MB.')
+  const client = s.conn.client
+  const path = await uploadPastedImage(client, png)
+  if (sessions.get(sessionId) !== s) {
+    // Closed while uploading: its cleanup has already run without this one.
+    void removePastedImages(client, [path])
+    throw new Error('The terminal closed before the image was copied.')
+  }
+  ;(s.pastedImages ??= []).push(path)
+  return path
 }
 
 
@@ -2210,8 +2244,12 @@ function cleanup(sessionId: string): void {
   } catch {
     /* ignore */
   }
-  // The connection itself is shared, so hand it back rather than closing it.
-  if (s.conn) release(s.conn)
+  // The connection itself is shared, so hand it back rather than closing it --
+  // after the pasted images are off the server, which needs it a moment longer.
+  const conn = s.conn
+  if (conn && s.pastedImages?.length)
+    void removePastedImages(conn.client, s.pastedImages).finally(() => release(conn))
+  else if (conn) release(conn)
 }
 
 /**

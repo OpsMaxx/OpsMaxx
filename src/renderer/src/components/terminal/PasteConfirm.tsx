@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 import { Modal } from '../common/Modal'
 import { ClipboardPaste, AlertTriangle } from 'lucide-react'
 import { useApp } from '../../store/app'
+import { bytes } from '../../lib/format'
+import type { ClipboardImage } from '../../../../shared/ssh'
 
 /**
  * Make this pane a paste target while its session is live, and hand it any
@@ -127,6 +129,56 @@ export function PasteConfirm({
           </button>
           <button className="btn primary sm" onClick={onConfirm} autoFocus={!full}>
             <ClipboardPaste size={14} /> {full || bracketed ? 'Paste' : 'Paste and run'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  )
+}
+
+/**
+ * An image is about to leave this computer for a server, so it is shown first.
+ *
+ * Pasting it copies the file to the server and pastes its path: Claude Code
+ * picks that up as the image, and anything else sees a path. Asked every time,
+ * because a screenshot left on the clipboard is easy to forget about and this
+ * would otherwise put it on a machine somebody else may administer.
+ */
+export function ImagePasteConfirm({
+  image,
+  server,
+  onConfirm,
+  onCancel
+}: {
+  image: ClipboardImage
+  server: string
+  onConfirm: () => void
+  onCancel: () => void
+}): React.JSX.Element {
+  return (
+    <Modal
+      title={`Copy this image to ${server}?`}
+      subtitle="Its path is pasted, which Claude Code takes as the image"
+      onClose={onCancel}
+    >
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <img
+          src={image.preview}
+          alt="The image on the clipboard"
+          style={{ maxWidth: '100%', maxHeight: 240, objectFit: 'contain', alignSelf: 'center' }}
+        />
+        <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
+          {image.width} × {image.height} PNG, {bytes(image.png.byteLength)}. Written to /tmp on{' '}
+          {server}, readable only by the account you are logged in as, and deleted when this
+          terminal closes.
+        </span>
+        <div className="row" style={{ gap: 8 }}>
+          <span className="spacer" />
+          <button className="btn sm" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="btn primary sm" onClick={onConfirm} autoFocus>
+            <ClipboardPaste size={14} /> Copy and paste path
           </button>
         </div>
       </div>

@@ -4,7 +4,7 @@ import { RECOVERY_BUDGET_MS, type RecoveryState } from '../../hooks/useSessionRe
 import { credentialNote, type CredentialShape } from '../../../../shared/credentialShape'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { TerminalSearch } from './TerminalSearch'
-import { PasteConfirm, useTerminalPasteRequest } from './PasteConfirm'
+import { ImagePasteConfirm, PasteConfirm, useTerminalPasteRequest } from './PasteConfirm'
 import { EmptyState } from '../common/EmptyState'
 import { useApp } from '../../store/app'
 import {
@@ -17,6 +17,7 @@ import {
 import { adviseOnError, classifyConnectionError } from '../../lib/connectionError'
 import { clsx } from '../../lib/format'
 import type { TerminalTransport } from '../../lib/transport'
+import type { ClipboardImage } from '../../../../shared/ssh'
 import type { Server } from '../../types'
 import { resolveScheme } from '../../../../shared/terminalTheme'
 
@@ -408,14 +409,18 @@ function RealTerminal({
   })
   const wakeTab = useApp((s) => s.wakeTab)
 
-  const { termRef, searchRef, dead, reconnect, recovery, cancelRecovery } = useTerminalSession(
-    transport,
-    hostRef,
-    () => setFinding(true),
-    (text, lines) => setPending({ text, lines }),
-    tabId,
-    dormant
-  )
+  const [pendingImage, setPendingImage] = useState<ClipboardImage | null>(null)
+
+  const { termRef, searchRef, dead, reconnect, recovery, cancelRecovery, pasteImage } =
+    useTerminalSession(
+      transport,
+      hostRef,
+      () => setFinding(true),
+      (text, lines) => setPending({ text, lines }),
+      tabId,
+      dormant,
+      setPendingImage
+    )
 
   // A saved job template run "in this terminal". It goes through the same
   // confirmation a multi-line paste does, and it asks even for one line: the
@@ -614,6 +619,21 @@ function RealTerminal({
           onConfirm={() => {
             termRef.current?.paste(pending.text)
             setPending(null)
+            termRef.current?.focus()
+          }}
+        />
+      )}
+      {pendingImage && (
+        <ImagePasteConfirm
+          image={pendingImage}
+          server={transport.title}
+          onCancel={() => {
+            setPendingImage(null)
+            termRef.current?.focus()
+          }}
+          onConfirm={() => {
+            void pasteImage(pendingImage.png)
+            setPendingImage(null)
             termRef.current?.focus()
           }}
         />

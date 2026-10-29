@@ -399,3 +399,12 @@ export function isLoopbackHostKeyId(id: string): boolean {
     /^127\.\d+\.\d+\.\d+$/.test(host)
   )
 }
+
+/** An image on this computer's clipboard, as main hands it to a terminal. */
+export interface ClipboardImage {
+  png: Uint8Array
+  width: number
+  height: number
+  /** A data URL no wider than 480px, for the confirmation. */
+  preview: string
+}

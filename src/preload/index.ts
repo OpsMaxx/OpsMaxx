@@ -35,7 +35,8 @@ import type {
   SftpDownloadSummary,
   MetricsResult,
   SshCloseInfo,
-  OnDemandTarget
+  OnDemandTarget,
+  ClipboardImage
 } from '../shared/ssh'
 import type {
   AccessChangePreview,
@@ -662,6 +663,8 @@ const api = {
   // that follows it.
   clipboard: {
     read: (): Promise<string> => ipcRenderer.invoke('clipboard:read'),
+    /** The clipboard's image as PNG, or null when it holds text or no image. */
+    readImage: (): Promise<ClipboardImage | null> => ipcRenderer.invoke('clipboard:readImage'),
     write: (text: string): void => ipcRenderer.send('clipboard:write', text)
   },
   /**
@@ -760,6 +763,12 @@ const api = {
     resize: (id: string, cols: number, rows: number): void =>
       ipcRenderer.send('ssh:resize', id, cols, rows),
     close: (id: string): void => ipcRenderer.send('ssh:close', id),
+    /** Copy a clipboard image to this terminal's server; the path to paste comes back. */
+    pasteImage: (
+      id: string,
+      png: Uint8Array
+    ): Promise<{ ok: true; path: string } | { ok: false; error: string }> =>
+      ipcRenderer.invoke('ssh:pasteImage', id, png),
     /** Dial, then hang up. Nothing is pooled and nothing is saved. */
     test: (cfg: SshConnectConfig & { serverId?: string }): Promise<{ ok: boolean; error?: string }> =>
       ipcRenderer.invoke('ssh:test', cfg),
