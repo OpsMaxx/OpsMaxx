@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { KeychainOnly } from './KeychainOnly'
 import {
   Check,
   Circle,
@@ -514,6 +515,7 @@ function VaultBrowser(): React.JSX.Element {
       </div>
 
       <BiometricOffer />
+      <KeychainOnly />
 
       {/* While the change-password form is open it shows the failure beside the
           field that caused it, so the same sentence is not also floated at the

@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import { atomicWriteFileSync } from './atomicWrite'
 import { askInWindow } from './promptWindow'
 import { getSecret } from './secrets'
+import { hasOwnCredential, storedCredential } from './credentialLink'
+import { vaultEntriesForResolve } from './vault'
 import { loadData } from './store'
 import type { HeldRecord, HeldKind } from '../../shared/addy'
 import { UNKNOWN_WORKSPACE } from './policyEngine'
@@ -81,6 +83,8 @@ interface TrustFile {
   v: 1
   marks: Record<string, Mark>
   hostKeys: Record<string, HostMark>
+  /** `seedLinkMarks` has run on this device. */
+  linksSeeded?: true
   /** The file existed and could not be read: everything is held. */
   unreadable?: true
 }
@@ -94,7 +98,7 @@ function read(): TrustFile {
   try {
     const raw = JSON.parse(readFileSync(FILE(), 'utf8')) as Partial<TrustFile>
     if (raw && typeof raw.marks === 'object' && raw.marks && typeof raw.hostKeys === 'object' && raw.hostKeys) {
-      return { v: 1, marks: raw.marks, hostKeys: raw.hostKeys }
+      return { v: 1, marks: raw.marks, hostKeys: raw.hostKeys, ...(raw.linksSeeded === true ? { linksSeeded: true as const } : {}) }
     }
   } catch {
     /* below */
@@ -177,9 +181,12 @@ export function vpnConnectionKey(spec: unknown): string {
  * The values that decide where a record's credential goes, or null when the
  * record carries no credential reference at all.
  *
- * Servers and databases are judged on the destination only: their credential
- * is stored on this device under the record's id, so the id IS the reference
- * and only the address can move it. The host alone for a server, because the
+ * Servers and databases are judged on the destination, and on the vault entry
+ * the synced record links to (`credential`): a device with no credential of
+ * its own logs in with that entry, so a synced change to it decides which
+ * secret is sent exactly as a changed address decides where. On a device that
+ * stores its own credential the link is unused, and `ownCredentialAside` drops
+ * it before anything is judged. The host alone for a server, because the
  * host is what decides who receives the password — a port or account change
  * keeps it on the same machine, and the host-key check, keyed by host:port,
  * still stands in front of it.
@@ -196,7 +203,8 @@ export function fieldsOf(kind: HeldKind, rec: Rec): Record<string, string> | nul
       return {
         host: norm(rec.host),
         cloud: stable(rec.cloud),
-        rdp: `${str(rdp.kdcProxyUrl)}|${rdp.nla === false ? 0 : 1}|${str(rdp.domain)}`
+        rdp: `${str(rdp.kdcProxyUrl)}|${rdp.nla === false ? 0 : 1}|${str(rdp.domain)}`,
+        credential: str(rec.vaultEntryId)
       }
     }
     case 'database':
@@ -207,7 +215,10 @@ export function fieldsOf(kind: HeldKind, rec: Rec): Record<string, string> | nul
         via: str(rec.sshServerId),
         tls: rec.ssl === true ? '1' : '0',
         vpn: str(rec.vpnProfileId),
-        ws: str(rec.workspaceId)
+        ws: str(rec.workspaceId),
+        // With the `uri` flag, which decides whether the entry is read as a
+        // password or as a whole connection string (see credentialLink.ts).
+        credential: rec.vaultEntryId ? `${rec.uri === true ? 'u' : 'p'}|${str(rec.vaultEntryId)}` : ''
       }
     case 'cicd':
       return {
@@ -332,9 +343,38 @@ export function markHostKeyArrivals(local: unknown, incoming: unknown): void {
 /** Stands for "sync removed this entry" in a host-key mark. */
 const REMOVED = '-removed-'
 
+/**
+ * Hold every vault link already on disk, once, on the first launch of the
+ * version that reads them.
+ *
+ * `markArrivals` marks what changes WHEN sync lands it, and a link landed by a
+ * build that did not judge links was marked as nothing: an older build keeps
+ * the field (the store spreads records) without looking at it. No build before
+ * this one writes the field itself, so every link present now came by sync and
+ * nobody here confirmed it. A device that stores its own credential for the
+ * record does not use the link, and `ownCredentialAside` keeps this mark from
+ * troubling it.
+ */
+export function seedLinkMarks(data: unknown = loadData()): void {
+  if (read().linksSeeded) return
+  mutate((t) => {
+    for (const kind of ['server', 'database'] as const) {
+      for (const rec of recordsOf(data, kind)) {
+        const credential = fieldsOf(kind, rec)?.credential
+        if (!credential) continue
+        const key = `${kind}:${rec.id as string}`
+        const prev = t.marks[key]
+        t.marks = { ...t.marks, [key]: { ...prev, fields: { ...prev?.fields, credential: hashOf(kind, rec.id as string, 'credential', credential) } } }
+      }
+    }
+    t.linksSeeded = true
+  })
+}
+
 /** Clear every mark: a restored backup is the person's own choice of state. */
 export function clearAllMarks(): void {
-  if (existsSync(FILE())) atomicWriteFileSync(FILE(), JSON.stringify({ v: 1, marks: {}, hostKeys: {} }))
+  // Seeded too: the links a restore brings are as much its choice as the rest.
+  if (existsSync(FILE())) atomicWriteFileSync(FILE(), JSON.stringify({ v: 1, marks: {}, hostKeys: {}, linksSeeded: true }))
 }
 
 /** Confirm one record: its marks go, workspace move included. */
@@ -348,21 +388,38 @@ export function confirmRecord(kind: HeldKind, id: string): void {
  *  a record is the person saying where it goes, so its destination marks go. */
 export function confirmSecretOwner(secretId: string): void {
   const id = secretId.replace(/:rdp$/, '')
+  // A desktop password says where THAT password goes. It says nothing about
+  // which vault entry the SSH side would use, so a held link stays held.
+  const keep = secretId.endsWith(':rdp') ? ['credential'] : []
   for (const kind of ['server', 'database'] as const) {
-    if (read().marks[`${kind}:${id}`]?.fields) clearFields(kind, id)
+    if (read().marks[`${kind}:${id}`]?.fields) clearFields(kind, id, keep)
   }
 }
 
-function clearFields(kind: HeldKind, id: string): void {
+function clearFields(kind: HeldKind, id: string, keep: string[] = []): void {
   mutate((t) => {
     const m = t.marks[`${kind}:${id}`]
     if (!m) return
-    if (m.ws) t.marks[`${kind}:${id}`] = { fields: {}, ws: m.ws }
+    const kept = Object.fromEntries(Object.entries(m.fields).filter(([f]) => keep.includes(f)))
+    if (m.ws || Object.keys(kept).length) t.marks[`${kind}:${id}`] = { fields: kept, ...(m.ws ? { ws: m.ws } : {}) }
     else delete t.marks[`${kind}:${id}`]
   })
 }
 
 // ------------------------------------------------------------ checking
+
+/**
+ * `fields` without the vault link when this device stores a credential of its
+ * own for the record: that credential wins (see credentialLink.ts), so the
+ * link is not what would be sent, and a synced change to it is not a reason
+ * to stop this device using the one somebody typed in here.
+ */
+function ownCredentialAside(id: string, fields: Record<string, string>): Record<string, string> {
+  if (!('credential' in fields) || !hasOwnCredential(id)) return fields
+  const rest = { ...fields }
+  delete rest.credential
+  return rest
+}
 
 /** Which of `now` are still the values sync brought and nobody here
  *  confirmed. Empty means usable. */
@@ -386,7 +443,11 @@ export function heldFields(kind: HeldKind, id: string, now: Record<string, strin
 export function serverFieldsNow(serverId: string, dialled: string): Record<string, string> {
   const id = serverId.replace(/:rdp$/, '')
   const rec = recordsOf(loadData(), 'server').find((r) => r.id === id)
-  return fieldsOf('server', rec ?? { host: dialled }) ?? { host: norm(dialled) }
+  const fields = ownCredentialAside(id, fieldsOf('server', rec ?? { host: dialled }) ?? { host: norm(dialled) })
+  // A desktop's own password never uses the link, so a held link is not a
+  // reason to hold it.
+  if (serverId.endsWith(':rdp')) delete fields.credential
+  return fields
 }
 
 /** Whether a server's stored credential may be used without asking. */
@@ -400,7 +461,7 @@ export function databaseFieldsNow(cfg: { id?: string; host?: string; ssh?: { ser
   // VPN and workspace, which the dialled config may not carry.
   const rec = recordsOf(loadData(), 'database').find((r) => r.id === cfg.id)
   const stored = rec ? (fieldsOf('database', rec) ?? {}) : {}
-  return { ...stored, host: norm(cfg.host), via: str(cfg.ssh?.serverId) }
+  return ownCredentialAside(str(cfg.id), { ...stored, host: norm(cfg.host), via: str(cfg.ssh?.serverId) })
 }
 
 /**
@@ -466,6 +527,17 @@ function describeChange(fields: string[], arrived: boolean): string {
   return `Its ${list} ${names.length === 1 ? 'was' : 'were'} changed on another of your devices.`
 }
 
+/**
+ * Which vault entry a confirmation would release, named — the half of the
+ * question an address alone does not answer. A link that pointed at another
+ * of the user's entries would send THAT secret to the address above.
+ */
+function signsInWith(entryId: string | undefined): string {
+  if (!entryId) return ''
+  const entry = vaultEntriesForResolve()?.find((e) => e.id === entryId)
+  return entry ? ` It signs in with your vault entry "${entry.name}".` : ' It signs in with an entry from your vault.'
+}
+
 const asking = new Map<string, Promise<boolean>>()
 
 /**
@@ -492,7 +564,8 @@ export function askToUse(
     title: 'Confirm a change from another device',
     message: `Use "${name}" on this device?`,
     detail:
-      `${describeChange(fields, read().marks[key]?.arrived === true)}\n\nIt now points at ${destination}.\n\n` +
+      `${describeChange(fields, read().marks[key]?.arrived === true)}\n\nIt now points at ${destination}.` +
+      `${signsInWith(now.credential)}\n\n` +
       'OpsMaxx does not send its saved credential anywhere new until you confirm it here. ' +
       'If you did not make this change, choose Deny and check the devices listed in Sync & devices.',
     buttons: ['Allow', 'Deny'],
@@ -525,7 +598,7 @@ export async function askToUseDatabase(cfg: {
   port: number
   ssh?: { serverId?: string }
 }): Promise<void> {
-  if (!getSecret(cfg.id)) return
+  if (!storedCredential(cfg.id)) return
   await askToUse('database', cfg.id, cfg.name || cfg.host, databaseFieldsNow(cfg), `${cfg.host}:${cfg.port}`)
 }
 
@@ -547,8 +620,9 @@ export function heldRecords(data: unknown = loadData()): HeldRecord[] {
     for (const rec of recordsOf(data, kind)) {
       const id = rec.id as string
       const f = fieldsOf(kind, rec)
-      let changed = f ? heldFields(kind, id, f).map((c) => LABEL[c] ?? c) : []
-      if ((kind === 'server' || kind === 'database') && !getSecret(id) && !getSecret(`${id}:rdp`)) changed = []
+      const judged = f && (kind === 'server' || kind === 'database') ? ownCredentialAside(id, f) : f
+      let changed = judged ? heldFields(kind, id, judged).map((c) => LABEL[c] ?? c) : []
+      if ((kind === 'server' || kind === 'database') && !storedCredential(id) && !getSecret(`${id}:rdp`)) changed = []
       if (kind === 'server' && pendingWorkspace(id, str(rec.workspaceId))) changed = [...changed, 'workspace']
       if (changed.length === 0) continue
       out.push({

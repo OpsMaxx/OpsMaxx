@@ -1,4 +1,4 @@
-import { app } from 'electron'
+import { app, clipboard } from 'electron'
 import { askInWindow } from './promptWindow'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
@@ -112,22 +112,7 @@ export function verifyHostKey(
   if (trusted === fp) return Promise.resolve(true)
   const expected = trusted ?? (known && known.fingerprint !== fp ? known.fingerprint : undefined)
 
-  if (expected) {
-    // A changed key is either a rebuilt server or an interception. Never decide
-    // this silently — refuse and make the user act.
-    return askInWindow({
-        type: 'error',
-        title: 'Host key changed',
-        message: `The host key for ${id} does not match the one previously trusted.`,
-        detail:
-          `Expected: ${expected}\nReceived: ${fp}\n\n` +
-          'This happens when a server is rebuilt — but it is also what an interception looks like. ' +
-          'The connection has been refused. If you are certain the server changed, forget the saved key in Settings → Security and reconnect.',
-        buttons: ['OK'],
-        defaultId: 0
-      })
-      .then(() => false)
-  }
+  if (expected) return changedKey(id, expected, fp, allowPrompt)
 
   // An unattended caller never prompts. It refuses and lets its own layer
   // report why.
@@ -209,4 +194,77 @@ export function verifyHostKey(
 
   pending.set(id, prompt)
   return prompt
+}
+
+/**
+ * A key that differs from the one this device trusted: a rebuilt server, or an
+ * interception. Never decided silently — but never a dead end either.
+ *
+ * The old dialog refused and pointed at a settings page, which left a person
+ * who had just reinstalled a server hunting for the one control that fixes it.
+ * Now, when a person is connecting, it offers that control here: replace the
+ * trusted key, behind a second question that says plainly what the first one
+ * risks, with Cancel the default on both. Copy puts both fingerprints on the
+ * clipboard, to compare against the server's console.
+ *
+ * A BACKGROUND CALLER GETS NO REPLACE BUTTON. A sampler raising "trust this new
+ * key?" at a moment nobody chose is the dialog the first-sighting branch above
+ * refuses to show, and for the same reason: it teaches the click that lets an
+ * interception through. It says what to do instead — open the server — and
+ * that connection asks with the button.
+ *
+ * One dialog per host at a time, joined by every connection that hits it: a
+ * terminal, SFTP and the sampler meeting the same rebuilt server stacked three
+ * modals before.
+ */
+function changedKey(id: string, expected: string, fp: string, person: boolean): Promise<boolean> {
+  const key = `changed:${id}`
+  const inFlight = pending.get(key)
+  if (inFlight) return inFlight
+  const compare =
+    `Trusted: ${expected}\nPresented now: ${fp}\n\n` +
+    'A rebuilt server, or regenerated keys, looks like this — so does an interception. ' +
+    'To tell which, read the key on the server itself, from its console rather than over SSH: ' +
+    'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub'
+  const copy = (): void => clipboard.writeText(`${id}\ntrusted: ${expected}\npresented: ${fp}\n`)
+  const ask = async (): Promise<boolean> => {
+    for (;;) {
+      const r = await askInWindow({
+        type: 'error',
+        title: 'Host key changed',
+        message: `${id} presented a different host key, so the connection was stopped.`,
+        detail: person
+          ? `${compare}\n\nIf it matches what the server shows, replace the trusted key and connect.`
+          : `${compare}\n\nA background check found this, so nothing is offered here. If you rebuilt the server, open it from the sidebar: that connection lets you replace the key.`,
+        buttons: person ? ['Cancel', 'Copy fingerprints', 'Replace the trusted key…'] : ['OK', 'Copy fingerprints'],
+        defaultId: 0,
+        cancelId: 0
+      })
+      if (r?.response === 1) {
+        copy()
+        continue
+      }
+      if (!person || r?.response !== 2) return false
+      const sure = await askInWindow({
+        type: 'warning',
+        title: 'Replace the trusted key?',
+        message: `Trust the new key for ${id}?`,
+        detail:
+          `New key: ${fp}\n\nOnly if you rebuilt this server or regenerated its keys, or checked the key on its console. ` +
+          'If neither is true, someone may be between you and the server, and anything you type next goes to them.',
+        buttons: ['Cancel', 'Replace and connect'],
+        defaultId: 0,
+        cancelId: 0
+      })
+      if (sure?.response !== 1) return false
+      const current = read()
+      current[id] = { id, fingerprint: fp, addedAt: new Date().toISOString() }
+      write(current)
+      clearHostKeyMark(id)
+      return true
+    }
+  }
+  const p = ask().finally(() => pending.delete(key))
+  pending.set(key, p)
+  return p
 }

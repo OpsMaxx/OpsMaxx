@@ -31,6 +31,15 @@ export const shell = {
   openExternal: async (_url: string): Promise<void> => undefined
 }
 
+// What was last written, so a test can read back what a dialog copied.
+let clipboardText = ''
+export const clipboard = {
+  writeText: (t: string): void => {
+    clipboardText = t
+  },
+  readText: (): string => clipboardText
+}
+
 // A no-op "encryption" so secrets.ts can be exercised without a real OS
 // keychain. Good enough for tests that only check the shape of the flow.
 export const safeStorage = {
