@@ -361,7 +361,9 @@ describe('the panel', () => {
     }
     const settings = readFileSync(join(ROOT, 'src/renderer/src/components/settings/Settings.tsx'), 'utf8')
     expect(settings).not.toContain('<h3>addy</h3>')
-    expect(settings).toContain('<h3>Sync &amp; devices</h3>')
+    expect(settings).toContain("<h3>{t('settingsPage.sync.heading')}</h3>")
+    const en = JSON.parse(readFileSync(join(ROOT, 'src/shared/locales/en.json'), 'utf8'))
+    expect(en['settingsPage.sync.heading']).toBe('Sync & devices')
   })
 
   it('labels the re-key box', async () => {

@@ -2,6 +2,8 @@ import { Component, type ErrorInfo, type ReactNode } from 'react'
 import { AlertTriangle, Copy, RotateCcw } from 'lucide-react'
 import { bridgeHas } from '../../lib/bridge'
 import { forwardDebugError } from '../../lib/debugForward'
+import { t } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 interface Props {
   children: ReactNode
@@ -94,11 +96,8 @@ export class ErrorBoundary extends Component<Props, State> {
           <div className="crash-icon">
             <AlertTriangle size={24} />
           </div>
-          <h2>Something broke in the interface</h2>
-          <p className="faint">
-            Your servers, credentials and vault are stored on disk and are unaffected. Reloading
-            rebuilds the window — any open SSH sessions will be reconnected.
-          </p>
+          <h2>{t('ui.errorBoundary.title')}</h2>
+          <p className="faint">{t('ui.errorBoundary.body')}</p>
 
           <pre className="crash-detail selectable">{error.message}</pre>
 
@@ -116,7 +115,7 @@ export class ErrorBoundary extends Component<Props, State> {
               className="btn"
               onClick={() => window.opsmaxx?.clipboard.write(this.report())}
             >
-              <Copy size={14} /> Copy details
+              <Copy size={14} /> {t('ui.errorBoundary.copyDetails')}
             </button>
             {bridgeHas(window.opsmaxx?.diagnostics as Record<string, unknown> | undefined, 'text') && (
               <button
@@ -124,11 +123,11 @@ export class ErrorBoundary extends Component<Props, State> {
                 disabled={diagnostics === null}
                 onClick={this.copyDiagnostics}
               >
-                <Copy size={14} /> Copy diagnostics
+                <Copy size={14} /> {t('ui.errorBoundary.copyDiagnostics')}
               </button>
             )}
             <button className="btn primary" onClick={() => window.location.reload()}>
-              <RotateCcw size={14} /> Reload
+              <RotateCcw size={14} /> {t('ui.errorBoundary.reload')}
             </button>
           </div>
 
@@ -143,12 +142,7 @@ export class ErrorBoundary extends Component<Props, State> {
               Copy details promises nothing and has to say so: it is the raw
               throw, which is the point of having it. */}
           <p className="faint" style={{ fontSize: 11, marginTop: 12 }}>
-            <strong>Copy details</strong> copies this error exactly as it was thrown, full paths
-            and all — redact hostnames and usernames yourself before posting it.{' '}
-            <strong>Copy diagnostics</strong> is the one to send: it adds your versions and
-            settings, trims paths and strips secrets, and only becomes available once that text is
-            on screen above. It copies that text and nothing else, so glance over it for hostnames
-            first.
+            <Trans i18nKey="ui.errorBoundary.footnote" components={{ strong: <strong /> }} />
           </p>
         </div>
       </div>

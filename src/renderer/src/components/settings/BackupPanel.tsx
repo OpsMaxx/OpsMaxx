@@ -5,9 +5,12 @@ import { BackupDestinations } from './BackupDestinations'
 import { toast } from '../../store/toast'
 import { MIN_PASSPHRASE } from '../../../../shared/backup'
 import type { BackupResult, BackupSummary } from '../../../../shared/backup'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { Translate } from '../../../../shared/i18n'
 
-function when(iso: string | null): string {
-  if (!iso) return 'never'
+function when(t: Translate, iso: string | null): string {
+  if (!iso) return t('settings.backupPanel.never')
   return new Date(iso).toLocaleString()
 }
 
@@ -29,6 +32,7 @@ interface PanelError {
 }
 
 export function BackupPanel(): React.JSX.Element {
+  const t = useT()
   const settings = useApp((s) => s.settings)
   const setSettings = useApp((s) => s.setSettings)
 
@@ -61,15 +65,17 @@ export function BackupPanel(): React.JSX.Element {
     if (failed(r)) {
       setError({
         where: 'export',
-        text: `Nothing was written: ${r?.error ?? 'the file could not be saved.'} Your passphrase is still in the fields above.`,
-        actions: [{ label: 'Try again', run: () => void runExport() }]
+        text: t('settings.backupPanel.error.exportFailed', {
+          error: r?.error ?? t('settings.backupPanel.error.exportFallback')
+        }),
+        actions: [{ label: t('settings.backupPanel.error.tryAgain'), run: () => void runExport() }]
       })
       return
     }
     setSettings({ backupDirty: false, lastBackupAt: new Date().toISOString(), lastBackupTo: null })
     setExportPw('')
     setExportPw2('')
-    toast(`Backup saved to ${r?.path}`, 'ok')
+    toast(t('settings.backupPanel.toast.saved', { path: r?.path ?? '' }), 'ok')
   }
 
   // `path` re-reads a file already chosen, which is what makes "try again after
@@ -86,11 +92,13 @@ export function BackupPanel(): React.JSX.Element {
       setError({
         where: 'import',
         text: file
-          ? `${fileName(file)} did not open. ${r?.error ?? ''} The passphrase is the one chosen when that backup was made — not your vault master password.`
-          : `That backup did not open. ${r?.error ?? ''}`,
+          ? t('settings.backupPanel.error.fileDidNotOpen', { file: fileName(file), error: r?.error ?? '' })
+          : t('settings.backupPanel.error.backupDidNotOpen', { error: r?.error ?? '' }),
         actions: [
-          ...(file ? [{ label: 'Try this file again', run: () => void runInspect(file) }] : []),
-          { label: 'Choose a different file', run: () => void runInspect() }
+          ...(file
+            ? [{ label: t('settings.backupPanel.error.tryThisFileAgain'), run: () => void runInspect(file) }]
+            : []),
+          { label: t('settings.backupPanel.error.chooseDifferentFile'), run: () => void runInspect() }
         ]
       })
       return
@@ -109,15 +117,18 @@ export function BackupPanel(): React.JSX.Element {
         where: 'import',
         // Not "nothing happened": a restore can fail after it has already
         // written some files, so the wording must not promise otherwise.
-        text: `${fileName(staged.path)} was not fully restored. ${r?.error ?? 'The restore could not be completed.'}`,
+        text: t('settings.backupPanel.error.notFullyRestored', {
+          name: fileName(staged.path),
+          error: r?.error ?? t('settings.backupPanel.error.restoreFallback')
+        }),
         actions: [
-          { label: 'Try again', run: () => void runImport() },
-          { label: 'Choose a different file', run: () => void runInspect() }
+          { label: t('settings.backupPanel.error.tryAgain'), run: () => void runImport() },
+          { label: t('settings.backupPanel.error.chooseDifferentFile'), run: () => void runInspect() }
         ]
       })
       return
     }
-    toast('Backup restored — restarting', 'ok')
+    toast(t('settings.backupPanel.toast.restored'), 'ok')
     setTimeout(() => void window.opsmaxx?.backup.relaunch(), 700)
   }
 
@@ -133,12 +144,14 @@ export function BackupPanel(): React.JSX.Element {
         // failure, it continues and reports which paths it could not remove.
         // So the wording names what is LEFT rather than claiming it gave up
         // part of the way through.
-        text: `The rest was deleted, but some of it is still there. ${r?.error ?? 'A file could not be removed.'} Run it again to finish, or restore the backup above.`,
-        actions: [{ label: 'Try again', run: () => void runDeleteAll() }]
+        text: t('settings.backupPanel.error.deletePartial', {
+          error: r?.error ?? t('settings.backupPanel.error.deleteFallback')
+        }),
+        actions: [{ label: t('settings.backupPanel.error.tryAgain'), run: () => void runDeleteAll() }]
       })
       return
     }
-    toast('All data deleted — restarting', 'ok')
+    toast(t('settings.backupPanel.toast.deleted'), 'ok')
     setTimeout(() => void window.opsmaxx?.backup.relaunch(), 700)
   }
 
@@ -162,41 +175,44 @@ export function BackupPanel(): React.JSX.Element {
         {settings.backupDirty ? <AlertTriangle size={16} /> : <CheckCircle2 size={16} />}
         <div>
           <div className="s-title">
-            {settings.backupDirty ? 'Backup out of date' : 'Backup up to date'}
+            {settings.backupDirty
+              ? t('settings.backupPanel.status.outOfDate')
+              : t('settings.backupPanel.status.upToDate')}
           </div>
           <div className="s-desc">
             {settings.backupDirty
-              ? 'Your connections have changed since the last export. Download a new backup and store it somewhere safe so this configuration can be recovered — or set up a destination below to have one written on a schedule.'
+              ? t('settings.backupPanel.status.dirtyDesc')
               : settings.lastBackupTo
                 ? // Named, because this one was not exported by hand: the user
                   // has no memory of choosing a folder for it, and the place it
                   // landed is what makes the reassurance something they can go
                   // and verify.
-                  `Last backed up ${when(settings.lastBackupAt)} to ${settings.lastBackupTo}.`
-                : `Last exported ${when(settings.lastBackupAt)}.`}
+                  t('settings.backupPanel.status.lastBackedUpTo', {
+                    when: when(t, settings.lastBackupAt),
+                    to: settings.lastBackupTo
+                  })
+                : t('settings.backupPanel.status.lastExported', { when: when(t, settings.lastBackupAt) })}
           </div>
         </div>
       </div>
 
-      <h3 className="backup-h">Download backup</h3>
+      <h3 className="backup-h">{t('settings.backupPanel.download.heading')}</h3>
       <p className="s-desc" style={{ marginBottom: 10 }}>
-        Writes a single encrypted file containing your workspaces, servers, databases, tunnels,
-        stored credentials, vault and trusted host keys. Credentials are re-encrypted under this
-        passphrase, so the file restores on any machine — and is unreadable without it.
+        {t('settings.backupPanel.download.desc')}
       </p>
       <div className="row" style={{ gap: 8 }}>
         <input
           className="input grow"
           ref={exportPwRef}
           type="password"
-          placeholder={`Backup passphrase (min ${MIN_PASSPHRASE} characters)`}
+          placeholder={t('settings.backupPanel.download.passphrasePlaceholder', { min: MIN_PASSPHRASE })}
           value={exportPw}
           onChange={(e) => setExportPw(e.target.value)}
         />
         <input
           className="input grow"
           type="password"
-          placeholder="Confirm passphrase"
+          placeholder={t('settings.backupPanel.download.confirmPlaceholder')}
           value={exportPw2}
           onChange={(e) => setExportPw2(e.target.value)}
         />
@@ -205,40 +221,36 @@ export function BackupPanel(): React.JSX.Element {
           disabled={!exportReady || busy !== null}
           title={
             exportReady
-              ? 'Choose where to save the backup'
+              ? t('settings.backupPanel.download.readyTitle')
               : exportPw.length < MIN_PASSPHRASE
-                ? `Pick a passphrase of at least ${MIN_PASSPHRASE} characters first`
-                : 'The two passphrases must match'
+                ? t('settings.backupPanel.download.tooShortTitle', { min: MIN_PASSPHRASE })
+                : t('settings.backupPanel.download.mismatchTitle')
           }
           onClick={() => void runExport()}
         >
           {busy === 'export' ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
-          Download
+          {t('settings.backupPanel.download.button')}
         </button>
       </div>
       {exportPw2.length > 0 && exportPw !== exportPw2 && (
-        <div className="s-desc" style={{ color: 'var(--danger)' }}>Passphrases do not match.</div>
+        <div className="s-desc" style={{ color: 'var(--danger)' }}>
+          {t('settings.backupPanel.download.mismatch')}
+        </div>
       )}
       <div className="s-desc" style={{ marginTop: 6 }}>
-        <ShieldCheck size={12} /> Choose a passphrase you can find again — there is no way to open
-        the file without it, and nothing here can reset it.
+        <ShieldCheck size={12} /> {t('settings.backupPanel.download.passphraseNote')}
       </div>
       {errorFor('export')}
 
-      <h3 className="backup-h">Restore from backup</h3>
+      <h3 className="backup-h">{t('settings.backupPanel.restore.heading')}</h3>
       <p className="s-desc" style={{ marginBottom: 10 }}>
-        Replaces everything currently in this app with the contents of the backup file. Type the
-        passphrase for that backup first, then choose the file — you get to see what is inside it
-        before anything is replaced, and the app restarts once the restore completes. The recorded
-        history of the servers already on this machine is cleared as part of the restore: a backup
-        does not carry history, and keeping the old estate's would leave two estates in one
-        timeline.
+        {t('settings.backupPanel.restore.desc')}
       </p>
       <div className="row" style={{ gap: 8 }}>
         <input
           className="input grow"
           type="password"
-          placeholder="Passphrase used for that backup"
+          placeholder={t('settings.backupPanel.restore.passphrasePlaceholder')}
           value={importPw}
           onChange={(e) => {
             setImportPw(e.target.value)
@@ -250,11 +262,15 @@ export function BackupPanel(): React.JSX.Element {
         <button
           className="btn"
           disabled={!importPw || busy !== null}
-          title={importPw ? 'Pick the backup file to read' : 'Type the backup passphrase first'}
+          title={
+            importPw
+              ? t('settings.backupPanel.restore.chooseTitle')
+              : t('settings.backupPanel.restore.needPassphraseTitle')
+          }
           onClick={() => void runInspect()}
         >
           {busy === 'inspect' ? <Loader2 size={14} className="spin" /> : <Upload size={14} />}
-          Choose file…
+          {t('settings.backupPanel.restore.chooseFile')}
         </button>
       </div>
       {errorFor('import')}
@@ -263,22 +279,24 @@ export function BackupPanel(): React.JSX.Element {
         <div className="backup-banner warn" style={{ marginTop: 12 }}>
           <AlertTriangle size={16} />
           <div style={{ flex: 1 }}>
-            <div className="s-title">Replace current data?</div>
+            <div className="s-title">{t('settings.backupPanel.staged.title')}</div>
             <div className="s-desc">
               {staged.path}
               <br />
-              Created {when(staged.summary.createdAt)} · {staged.summary.workspaces} workspaces ·{' '}
-              {staged.summary.servers} servers · {staged.summary.databases} databases ·{' '}
-              {staged.summary.secrets} credentials
-              {staged.summary.hasVault ? ' · vault included' : ''}
+              {t('settings.backupPanel.staged.created', { when: when(t, staged.summary.createdAt) })} ·{' '}
+              {t('settings.backupPanel.summary.workspaces', { count: staged.summary.workspaces })} ·{' '}
+              {t('settings.backupPanel.summary.servers', { count: staged.summary.servers })} ·{' '}
+              {t('settings.backupPanel.summary.databases', { count: staged.summary.databases })} ·{' '}
+              {t('settings.backupPanel.summary.credentials', { count: staged.summary.secrets })}
+              {staged.summary.hasVault ? ` · ${t('settings.backupPanel.summary.vaultIncluded')}` : ''}
             </div>
           </div>
           <button className="btn sm" onClick={() => setStaged(null)}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button className="btn sm danger fill" disabled={busy !== null} onClick={() => void runImport()}>
             {busy === 'import' ? <Loader2 size={13} className="spin" /> : null}
-            Restore and restart
+            {t('settings.backupPanel.staged.restoreAndRestart')}
           </button>
         </div>
       )}
@@ -286,25 +304,18 @@ export function BackupPanel(): React.JSX.Element {
       <BackupDestinations />
 
       <h3 className="backup-h" style={{ color: 'var(--danger)' }}>
-        Danger zone
+        {t('settings.backupPanel.danger.heading')}
       </h3>
       <p className="s-desc" style={{ marginBottom: 10 }}>
-        Permanently deletes every workspace, server, database, tunnel, stored credential, the
-        vault, trusted host keys and AI/MCP configuration — everything a backup covers, gone from
-        this machine. It also deletes the recorded history: every sample, event and observed fact
-        about your servers. This cannot be undone from within the app, and a backup does not
-        contain the history — only what a backup covers can be brought back.
+        {t('settings.backupPanel.danger.desc')}
       </p>
 
       {settings.backupDirty ? (
         <div className="backup-banner warn">
           <AlertTriangle size={16} />
           <div style={{ flex: 1 }}>
-            <div className="s-title">Back up first</div>
-            <div className="s-desc">
-              Your data has changed since the last backup — download one before deleting anything,
-              or whatever changed since then is gone for good.
-            </div>
+            <div className="s-title">{t('settings.backupPanel.danger.backUpFirstTitle')}</div>
+            <div className="s-desc">{t('settings.backupPanel.danger.backUpFirstDesc')}</div>
           </div>
           {/* "Above" is a direction, not a next step. This puts the cursor in
               the field that does it. */}
@@ -315,20 +326,26 @@ export function BackupPanel(): React.JSX.Element {
               exportPwRef.current?.focus()
             }}
           >
-            Back up now
+            {t('settings.backupPanel.backUpNow')}
           </button>
         </div>
       ) : !confirmDelete ? (
         <button className="btn danger outline" onClick={() => setConfirmDelete(true)}>
-          <Trash2 size={14} /> Delete all data
+          <Trash2 size={14} /> {t('settings.backupPanel.danger.deleteAll')}
         </button>
       ) : (
         <div className="backup-banner warn">
           <AlertTriangle size={16} />
           <div style={{ flex: 1 }}>
-            <div className="s-title">This deletes everything on this machine</div>
+            <div className="s-title">{t('settings.backupPanel.danger.confirmTitle')}</div>
             <div className="s-desc" style={{ marginBottom: 8 }}>
-              Type <strong>DELETE</strong> to confirm. The app restarts once it's done.
+              {/* The typed word is what runDeleteAll compares against, so it is
+                  passed in rather than translated. */}
+              <Trans
+                i18nKey="settings.backupPanel.danger.confirmDesc"
+                values={{ word: 'DELETE' }}
+                components={{ strong: <strong /> }}
+              />
             </div>
             <input
               className="input"
@@ -346,7 +363,7 @@ export function BackupPanel(): React.JSX.Element {
               setDeleteTyped('')
             }}
           >
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             className="btn sm danger fill"
@@ -354,7 +371,7 @@ export function BackupPanel(): React.JSX.Element {
             onClick={() => void runDeleteAll()}
           >
             {busy === 'delete' ? <Loader2 size={13} className="spin" /> : <Trash2 size={13} />}
-            Delete everything
+            {t('settings.backupPanel.danger.deleteEverything')}
           </button>
         </div>
       )}

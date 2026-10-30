@@ -135,8 +135,13 @@ describe('a manual export still says it was an export', () => {
 
   it('reads differently depending on which one it was', () => {
     const panel = SRC('src/renderer/src/components/settings/BackupPanel.tsx')
-    expect(panel).toContain('Last backed up ${when(settings.lastBackupAt)} to ${settings.lastBackupTo}')
-    expect(panel).toContain('Last exported ${when(settings.lastBackupAt)}')
+    const en = JSON.parse(SRC('src/shared/locales/en.json')) as Record<string, string>
+    expect(en['settings.backupPanel.status.lastBackedUpTo']).toBe('Last backed up {{when}} to {{to}}.')
+    expect(en['settings.backupPanel.status.lastExported']).toBe('Last exported {{when}}.')
+    expect(panel).toMatch(
+      /t\('settings\.backupPanel\.status\.lastBackedUpTo', \{\s*when: when\(t, settings\.lastBackupAt\),\s*to: settings\.lastBackupTo/
+    )
+    expect(panel).toContain("t('settings.backupPanel.status.lastExported', { when: when(t, settings.lastBackupAt) })")
   })
 })
 
@@ -144,8 +149,12 @@ describe('the nag points somewhere useful', () => {
   // "Make one by hand" was the only advice on offer, to a user whose complaint
   // is having to make one by hand.
   it('mentions the schedule as the way out', () => {
-    expect(SRC('src/renderer/src/components/settings/BackupPanel.tsx')).toMatch(
+    const en = JSON.parse(SRC('src/shared/locales/en.json')) as Record<string, string>
+    expect(en['settings.backupPanel.status.dirtyDesc']).toMatch(
       /set up a destination below to have one written on a schedule/
+    )
+    expect(SRC('src/renderer/src/components/settings/BackupPanel.tsx')).toContain(
+      "t('settings.backupPanel.status.dirtyDesc')"
     )
   })
 })

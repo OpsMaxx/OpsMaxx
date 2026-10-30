@@ -33,6 +33,9 @@ import type {
   BackupTargetsFile,
   DumpEngine
 } from '../../../../shared/backup'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { Translate } from '../../../../shared/i18n'
 
 
 function uid(): string {
@@ -59,26 +62,49 @@ function blank(kind: BackupDestinationKind): BackupDestination {
   }
 }
 
-function when(ms: number | undefined): string {
-  return ms ? new Date(ms).toLocaleString() : 'never'
+function when(t: Translate, ms: number | undefined): string {
+  return ms ? new Date(ms).toLocaleString() : t('settings.backupPanel.never')
 }
 
 /** What the last run actually proved, in the words of what was checked. Never
  *  "backed up" for a run that was not read back — see describeRun in shared. */
-function outcome(report: BackupRunReport | undefined): { ok: boolean; text: string } | null {
+function outcome(
+  t: Translate,
+  report: BackupRunReport | undefined
+): { ok: boolean; text: string } | null {
   if (!report) return null
   if (!report.ok) {
-    const stage = report.failedStage ? BACKUP_STAGE_LABEL[report.failedStage] : 'running'
-    return { ok: false, text: `Failed while ${stage}: ${report.error ?? 'no reason given'}` }
+    const stage = report.failedStage
+      ? BACKUP_STAGE_LABEL[report.failedStage]
+      : t('settings.backupDest.status.stageRunning')
+    return {
+      ok: false,
+      text: t('settings.backupDest.status.failed', {
+        stage,
+        error: report.error ?? t('settings.backupDest.noReason')
+      })
+    }
   }
-  const proved = report.restoreTested
-    ? 'read back off the destination and test-restored'
-    : 'read back off the destination and matched'
-  const removed = report.removed.length ? `, ${report.removed.length} older removed` : ''
-  return { ok: true, text: `${report.name} — ${proved}${removed}` }
+  const name = report.name ?? ''
+  const count = report.removed.length
+  if (report.restoreTested) {
+    return {
+      ok: true,
+      text: count
+        ? t('settings.backupDest.status.testRestoredRemoved', { name, count })
+        : t('settings.backupDest.status.testRestored', { name })
+    }
+  }
+  return {
+    ok: true,
+    text: count
+      ? t('settings.backupDest.status.matchedRemoved', { name, count })
+      : t('settings.backupDest.status.matched', { name })
+  }
 }
 
 export function BackupDestinations(): React.JSX.Element {
+  const t = useT()
   const servers = useApp((s) => s.servers)
   const vaultUnlocked = useVault((s) => s.unlocked)
   const vaultEntries = useVault((s) => s.entries)
@@ -124,12 +150,18 @@ export function BackupDestinations(): React.JSX.Element {
     if (!report) return
     if (report.ok) {
       setRunPw((p) => ({ ...p, [dest.id]: '' }))
-      toast(`${dest.name}: ${report.name} written and verified`, 'ok')
+      toast(t('settings.backupDest.toast.written', { dest: dest.name, file: report.name ?? '' }), 'ok')
     } else {
       // Deliberately not a toast that says "check the panel": the reason is
       // already on the card, and the toast that hides it is how a failing
       // backup becomes a backup nobody thinks about.
-      toast(`${dest.name} failed — ${report.error ?? 'no reason given'}`, 'error')
+      toast(
+        t('settings.backupDest.toast.failed', {
+          name: dest.name,
+          error: report.error ?? t('settings.backupDest.noReason')
+        }),
+        'error'
+      )
     }
   }
 
@@ -142,7 +174,7 @@ export function BackupDestinations(): React.JSX.Element {
     if (!r?.ok) {
       setBrowsing(dest.id)
       setGenerations([])
-      setBrowseError(r?.error ?? 'That destination could not be read.')
+      setBrowseError(r?.error ?? t('settings.backupDest.browse.unreadable'))
       return
     }
     setBrowsing(dest.id)
@@ -156,7 +188,7 @@ export function BackupDestinations(): React.JSX.Element {
     const r = await window.opsmaxx?.backup.inspectRemote?.(dest.id, name, password)
     setBusy(null)
     if (!r?.ok || !r.path || !r.summary) {
-      setBrowseError(r?.error ?? 'That backup did not open.')
+      setBrowseError(r?.error ?? t('settings.backupDest.browse.didNotOpen'))
       setStaged(null)
       return
     }
@@ -173,10 +205,12 @@ export function BackupDestinations(): React.JSX.Element {
     )
     setBusy(null)
     if (!r?.ok) {
-      setBrowseError(`${staged.name} was not fully restored. ${r?.error ?? ''}`)
+      setBrowseError(
+        t('settings.backupPanel.error.notFullyRestored', { name: staged.name, error: r?.error ?? '' })
+      )
       return
     }
-    toast('Backup restored — restarting', 'ok')
+    toast(t('settings.backupPanel.toast.restored'), 'ok')
     setTimeout(() => void window.opsmaxx?.backup.relaunch(), 700)
   }
 
@@ -189,8 +223,10 @@ export function BackupDestinations(): React.JSX.Element {
     setDumpResult((p) => ({
       ...p,
       [dest.id]: r?.ok
-        ? `${r.name} written and read back (${r.bytes} bytes).`
-        : `Nothing was written: ${r?.error ?? 'the dump could not be taken.'}`
+        ? t('settings.backupDest.dump.written', { name: r.name ?? '', count: r.bytes ?? 0 })
+        : t('settings.backupDest.dump.failed', {
+            error: r?.error ?? t('settings.backupDest.dump.fallback')
+          })
     }))
   }
 
@@ -201,23 +237,16 @@ export function BackupDestinations(): React.JSX.Element {
 
   return (
     <div>
-      <h3 className="backup-h">Backup destinations</h3>
+      <h3 className="backup-h">{t('settings.backupDest.heading')}</h3>
       <p className="s-desc" style={{ marginBottom: 10 }}>
-        Somewhere for a backup to go that is not this machine, written on a schedule and checked
-        after every write. Each generation is read back off the destination and decrypted before
-        the run is called a success, and older generations are only deleted once the new one has
-        passed both.
+        {t('settings.backupDest.intro')}
       </p>
 
       <div className="backup-banner warn" style={{ marginBottom: 12 }}>
         <ShieldAlert size={16} />
         <div>
-          <div className="s-title">A backup is your whole vault, wherever you send it</div>
-          <div className="s-desc">
-            Every file written here contains your stored credentials, your vault and your trusted
-            host keys, encrypted under one passphrase. Choosing a destination is choosing somewhere
-            for those to live.
-          </div>
+          <div className="s-title">{t('settings.backupDest.exposure.title')}</div>
+          <div className="s-desc">{t('settings.backupDest.exposure.desc')}</div>
         </div>
       </div>
 
@@ -225,10 +254,9 @@ export function BackupDestinations(): React.JSX.Element {
         <div className="backup-banner warn" style={{ marginBottom: 12 }}>
           <AlertTriangle size={16} />
           <div>
-            <div className="s-title">Your destinations could not be read</div>
+            <div className="s-title">{t('settings.backupDest.corrupt.title')}</div>
             <div className="s-desc">
-              {file.corrupt} Saving a destination from here moves the unreadable file aside rather
-              than writing over it, so what was in it stays recoverable by hand.
+              {t('settings.backupDest.corrupt.desc', { reason: file.corrupt })}
             </div>
           </div>
         </div>
@@ -240,7 +268,7 @@ export function BackupDestinations(): React.JSX.Element {
         // "no destinations yet" then is a claim about where the backups are
         // going, made before anyone looked.
         <p className="s-desc state-unknown" style={{ marginBottom: 10 }}>
-          Reading your backup destinations…
+          {t('settings.backupDest.reading')}
         </p>
       )}
 
@@ -252,14 +280,14 @@ export function BackupDestinations(): React.JSX.Element {
         // not a title.
         <EmptyState
           compact
-          title="No destinations yet"
-          message="Backups still work through the file you download above; a destination is what makes them happen on a schedule and get checked afterwards."
+          title={t('settings.backupDest.empty.title')}
+          message={t('settings.backupDest.empty.message')}
         />
       )}
 
       {destinations.map((dest) => {
         const report = file?.lastReport[dest.id]
-        const status = outcome(report)
+        const status = outcome(t, report)
         const problem = destinationProblem(dest)
         const password = runPw[dest.id] ?? ''
         return (
@@ -275,20 +303,37 @@ export function BackupDestinations(): React.JSX.Element {
             )}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="s-title">
-                {dest.name || '(unnamed)'} · {BACKUP_DESTINATION_LABEL[dest.kind]}
+                {t('settings.backupDest.card.title', {
+                  name: dest.name || t('settings.backupDest.card.unnamed'),
+                  kind: BACKUP_DESTINATION_LABEL[dest.kind]
+                })}
               </div>
               <div className="s-desc">
                 {dest.kind === 'local' && dest.directory}
                 {dest.kind === 'sftp' &&
-                  `${servers.find((s) => s.id === dest.serverId)?.name ?? 'a server that no longer exists'}:${dest.directory}`}
-                {dest.kind === 's3' && `${dest.bucket}/${dest.prefix} at ${dest.endpoint}`}
-                {dest.kind === 'addy' && 'the relay this device is enrolled on'}
+                  `${servers.find((s) => s.id === dest.serverId)?.name ?? t('settings.backupDest.card.missingServer')}:${dest.directory}`}
+                {dest.kind === 's3' &&
+                  t('settings.backupDest.card.s3Location', {
+                    bucket: dest.bucket,
+                    prefix: dest.prefix,
+                    endpoint: dest.endpoint
+                  })}
+                {dest.kind === 'addy' && t('settings.backupDest.card.addyLocation')}
               </div>
               <div className="s-desc">
-                {dest.everyHours > 0 ? `Every ${dest.everyHours}h` : 'Manual only'} ·{' '}
-                {dest.keep > 0 ? `keeps ${dest.keep}` : 'keeps everything'} ·{' '}
-                {dest.restoreTest ? 'test-restores each write' : 'no restore test'} · last attempt{' '}
-                {when(file?.lastRunAt[dest.id])}
+                {dest.everyHours > 0
+                  ? t('settings.backupDest.card.everyHours', { hours: dest.everyHours })
+                  : t('settings.backupDest.card.manualOnly')}{' '}
+                ·{' '}
+                {dest.keep > 0
+                  ? t('settings.backupDest.card.keeps', { count: dest.keep })
+                  : t('settings.backupDest.card.keepsAll')}{' '}
+                ·{' '}
+                {dest.restoreTest
+                  ? t('settings.backupDest.card.restoreTests')
+                  : t('settings.backupDest.card.noRestoreTest')}{' '}
+                ·{' '}
+                {t('settings.backupDest.card.lastAttempt', { when: when(t, file?.lastRunAt[dest.id]) })}
               </div>
               {problem && (
                 <div className="s-desc" style={{ color: 'var(--danger)' }}>
@@ -307,7 +352,7 @@ export function BackupDestinations(): React.JSX.Element {
                 <input
                   className="input grow"
                   type="password"
-                  placeholder={`Backup passphrase (min ${MIN_PASSPHRASE})`}
+                  placeholder={t('settings.backupDest.card.passphrasePlaceholder', { min: MIN_PASSPHRASE })}
                   value={password}
                   onChange={(e) => setRunPw((p) => ({ ...p, [dest.id]: e.target.value }))}
                 />
@@ -317,23 +362,23 @@ export function BackupDestinations(): React.JSX.Element {
                   title={
                     problem ??
                     (password.length < MIN_PASSPHRASE
-                      ? 'Type the passphrase to encrypt this backup with'
-                      : 'Write a backup here now and verify it')
+                      ? t('settings.backupDest.card.needPassphraseTitle')
+                      : t('settings.backupDest.card.backUpNowTitle'))
                   }
                   onClick={() => void runNow(dest)}
                 >
                   {busy === dest.id ? <Loader2 size={13} className="spin" /> : <CloudUpload size={13} />}
-                  Back up now
+                  {t('settings.backupPanel.backUpNow')}
                 </button>
                 <button className="btn secondary size-28" disabled={busy !== null} onClick={() => void browse(dest)}>
-                  <RotateCcw size={13} /> Restore from here
+                  <RotateCcw size={13} /> {t('settings.backupDest.card.restoreFromHere')}
                 </button>
                 <button className="btn secondary size-28" onClick={() => setEditing(dest)}>
-                  Edit
+                  {t('common.edit')}
                 </button>
                 <button
                   className="btn danger outline size-28"
-                  title="Removes this destination from OpsMaxx. The backups already at it are left alone."
+                  title={t('settings.backupDest.card.removeTitle')}
                   onClick={() => void persist(destinations.filter((d) => d.id !== dest.id))}
                 >
                   <Trash2 size={13} />
@@ -348,7 +393,7 @@ export function BackupDestinations(): React.JSX.Element {
                       value={dumpChoice[dest.id] ?? ''}
                       onChange={(e) => setDumpChoice((p) => ({ ...p, [dest.id]: e.target.value }))}
                     >
-                      <option value="">Dump a database here…</option>
+                      <option value="">{t('settings.backupDest.dump.choose')}</option>
                       {databases.map((d) => (
                         <option key={d.id} value={d.id}>
                           {d.name} ({d.engine})
@@ -360,18 +405,14 @@ export function BackupDestinations(): React.JSX.Element {
                       disabled={!dumpChoice[dest.id] || busy !== null}
                       onClick={() => void dump(dest)}
                     >
-                      <Database size={13} /> Dump now
+                      <Database size={13} /> {t('settings.backupDest.dump.button')}
                     </button>
                   </div>
                   {/* Said at the button, not in documentation: a dump is not a
                       OpsMaxx bundle and nothing encrypts it. Somebody who
                       assumed otherwise has just put a database in a bucket in
                       the clear. */}
-                  <div className="s-desc">
-                    A dump is plain SQL, written alongside the backups and encrypted by nothing.
-                    Retention does not touch it, and a restore cannot read it — it is for the
-                    database, not for this app.
-                  </div>
+                  <div className="s-desc">{t('settings.backupDest.dump.note')}</div>
                   {dumpResult[dest.id] && (
                     <div className="s-desc" style={{ marginTop: 4 }}>{dumpResult[dest.id]}</div>
                   )}
@@ -384,24 +425,25 @@ export function BackupDestinations(): React.JSX.Element {
                     <div className="vault-error">{browseError}</div>
                   )}
                   {!browseError && generations.length === 0 && (
-                    <div className="s-desc">No OpsMaxx backups at this destination yet.</div>
+                    <div className="s-desc">{t('settings.backupDest.browse.empty')}</div>
                   )}
                   {generations.map((g) => (
                     <div key={g.name} className="row" style={{ gap: 8, marginTop: 4 }}>
                       <span className="grow s-desc">
-                        {g.name} · {new Date(g.modified).toLocaleString()} · {g.size} bytes
+                        {g.name} · {new Date(g.modified).toLocaleString()} ·{' '}
+                        {t('settings.backupDest.browse.size', { count: g.size })}
                       </span>
                       <button
                         className="btn secondary size-24"
                         disabled={!password || busy !== null}
                         title={
                           password
-                            ? 'Download it and show what is inside before anything is replaced'
-                            : 'Type the passphrase used for that backup first'
+                            ? t('settings.backupDest.browse.openTitle')
+                            : t('settings.backupDest.browse.needPassphraseTitle')
                         }
                         onClick={() => void inspect(dest, g.name)}
                       >
-                        Open
+                        {t('common.open')}
                       </button>
                     </div>
                   ))}
@@ -409,16 +451,22 @@ export function BackupDestinations(): React.JSX.Element {
                     <div className="backup-banner warn" style={{ marginTop: 10 }}>
                       <AlertTriangle size={16} />
                       <div style={{ flex: 1 }}>
-                        <div className="s-title">Replace current data?</div>
+                        <div className="s-title">{t('settings.backupPanel.staged.title')}</div>
                         <div className="s-desc">
-                          {staged.name} · created {new Date(staged.summary.createdAt).toLocaleString()} ·{' '}
-                          {staged.summary.workspaces} workspaces · {staged.summary.servers} servers ·{' '}
-                          {staged.summary.databases} databases · {staged.summary.secrets} credentials
-                          {staged.summary.hasVault ? ' · vault included' : ''}
+                          {staged.name} ·{' '}
+                          {t('settings.backupDest.staged.created', {
+                            when: new Date(staged.summary.createdAt).toLocaleString()
+                          })}{' '}
+                          ·{' '}
+                          {t('settings.backupPanel.summary.workspaces', { count: staged.summary.workspaces })} ·{' '}
+                          {t('settings.backupPanel.summary.servers', { count: staged.summary.servers })} ·{' '}
+                          {t('settings.backupPanel.summary.databases', { count: staged.summary.databases })} ·{' '}
+                          {t('settings.backupPanel.summary.credentials', { count: staged.summary.secrets })}
+                          {staged.summary.hasVault ? ` · ${t('settings.backupPanel.summary.vaultIncluded')}` : ''}
                         </div>
                       </div>
                       <button className="btn secondary size-28" onClick={cancelStaged}>
-                        Cancel
+                        {t('common.cancel')}
                       </button>
                       {/* Filled rather than outlined: this replaces every
                           workspace, server, credential and vault entry on the
@@ -429,7 +477,7 @@ export function BackupDestinations(): React.JSX.Element {
                         disabled={busy !== null}
                         onClick={() => void restore()}
                       >
-                        Restore and restart
+                        {t('settings.backupPanel.staged.restoreAndRestart')}
                       </button>
                     </div>
                   )}
@@ -476,6 +524,7 @@ interface EditorProps {
 }
 
 function DestinationEditor(props: EditorProps): React.JSX.Element {
+  const t = useT()
   const [dest, setDest] = useState<BackupDestination>(props.value)
   /**
    * Whether a machine-held passphrase exists — never what it is.
@@ -505,10 +554,10 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
     if (r?.ok) {
       setMachineSet(true)
       setMachinePw('')
-      toast('Passphrase stored on this machine', 'ok')
+      toast(t('settings.backupDest.editor.machineStored'), 'ok')
       return
     }
-    toast(r?.error ?? 'This machine would not store the passphrase.', 'error')
+    toast(r?.error ?? t('settings.backupDest.editor.machineRefused'), 'error')
   }
   const patch = (p: Partial<BackupDestination>): void =>
     setDest((d) => ({ ...d, ...p }) as BackupDestination)
@@ -530,7 +579,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
         <div className="row" style={{ gap: 8, marginBottom: 6 }}>
           <input
             className="input grow"
-            placeholder="Name this destination"
+            placeholder={t('settings.backupDest.editor.namePlaceholder')}
             value={dest.name}
             onChange={(e) => patch({ name: e.target.value })}
           />
@@ -540,7 +589,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
           <div className="row" style={{ gap: 8, marginBottom: 6 }}>
             <input
               className="input grow"
-              placeholder="Folder to write backups into"
+              placeholder={t('settings.backupDest.editor.folderPlaceholder')}
               value={dest.directory}
               onChange={(e) => patch({ directory: e.target.value })}
             />
@@ -552,7 +601,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
                 })
               }}
             >
-              <FolderOpen size={13} /> Choose…
+              <FolderOpen size={13} /> {t('settings.backupDest.editor.chooseFolder')}
             </button>
           </div>
         )}
@@ -564,7 +613,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
               value={dest.serverId}
               onChange={(e) => patch({ serverId: e.target.value })}
             >
-              <option value="">Choose a server…</option>
+              <option value="">{t('settings.backupDest.editor.chooseServer')}</option>
               {props.servers.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -573,7 +622,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
             </select>
             <input
               className="input grow"
-              placeholder="Remote directory, e.g. /srv/opsmaxx-backups"
+              placeholder={t('settings.backupDest.editor.remoteDirPlaceholder')}
               value={dest.directory}
               onChange={(e) => patch({ directory: e.target.value })}
             />
@@ -582,20 +631,13 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
 
         {dest.kind === 'sftp' && (
           <div className="s-desc" style={{ marginBottom: 6 }}>
-            Uploads over that server&apos;s existing credentials — this destination stores none of
-            its own, and an unattended run refuses an unknown host key rather than asking.
+            {t('settings.backupDest.editor.sftpNote')}
           </div>
         )}
 
         {dest.kind === 'addy' && (
           <div className="s-desc" style={{ marginBottom: 6 }}>
-            Writes to the relay this device is already enrolled on. There is nothing to configure
-            and no credential to store: it authenticates with this device&apos;s own key, and the
-            relay address and account come from the enrolment.
-            <br />
-            The bundle is encrypted with the passphrase like every other destination, and sealed a
-            second time under your account key on the way out — so the relay holds something it
-            cannot read even if the passphrase leaks.
+            <Trans i18nKey="settings.backupDest.editor.addyNote" components={{ br: <br /> }} />
           </div>
         )}
 
@@ -604,14 +646,14 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
             <div className="row" style={{ gap: 8, marginBottom: 6 }}>
               <input
                 className="input grow"
-                placeholder="Endpoint, e.g. https://s3.eu-west-1.amazonaws.com"
+                placeholder={t('settings.backupDest.editor.endpointPlaceholder')}
                 value={dest.endpoint}
                 onChange={(e) => patch({ endpoint: e.target.value })}
               />
               <input
                 className="input"
                 style={{ maxWidth: 140 }}
-                placeholder="Region"
+                placeholder={t('settings.backupDest.editor.regionPlaceholder')}
                 value={dest.region}
                 onChange={(e) => patch({ region: e.target.value })}
               />
@@ -619,13 +661,13 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
             <div className="row" style={{ gap: 8, marginBottom: 6 }}>
               <input
                 className="input grow"
-                placeholder="Bucket"
+                placeholder={t('settings.backupDest.editor.bucketPlaceholder')}
                 value={dest.bucket}
                 onChange={(e) => patch({ bucket: e.target.value })}
               />
               <input
                 className="input grow"
-                placeholder="Key prefix (optional)"
+                placeholder={t('settings.backupDest.editor.prefixPlaceholder')}
                 value={dest.prefix}
                 onChange={(e) => patch({ prefix: e.target.value })}
               />
@@ -635,7 +677,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
                   checked={dest.pathStyle}
                   onChange={(e) => patch({ pathStyle: e.target.checked })}
                 />
-                Path-style
+                {t('settings.backupDest.editor.pathStyle')}
               </label>
             </div>
             <div className="row" style={{ gap: 8, marginBottom: 6 }}>
@@ -645,7 +687,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
                 disabled={!props.vaultUnlocked}
                 onChange={(e) => patch({ vaultEntryId: e.target.value })}
               >
-                <option value="">Vault entry holding the access key…</option>
+                <option value="">{t('settings.backupDest.editor.accessKeyEntry')}</option>
                 {props.vaultEntries.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.name}
@@ -654,13 +696,11 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
               </select>
             </div>
             <div className="s-desc" style={{ marginBottom: 6 }}>
-              The access key id goes in that entry&apos;s username and the secret key in its secret.
-              It has to be a vault entry: application settings travel inside every backup written
-              here, so a secret key kept there would be sitting in the bucket it unlocks.
+              {t('settings.backupDest.editor.accessKeyNote')}
               {!props.vaultUnlocked && (
                 <>
                   {' '}
-                  <UnlockVaultButton reason="Unlocking lets you choose the vault entry holding this bucket's keys." />
+                  <UnlockVaultButton reason={t('settings.backupDest.editor.unlockReason')} />
                 </>
               )}
             </div>
@@ -669,28 +709,38 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
 
         <div className="row" style={{ gap: 8, marginBottom: 6 }}>
           <label className="s-desc" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            Run every
-            <input
-              className="input"
-              style={{ width: 70 }}
-              type="number"
-              min={0}
-              value={dest.everyHours}
-              onChange={(e) => patch({ everyHours: Math.max(0, Number(e.target.value) || 0) })}
+            <Trans
+              i18nKey="settings.backupDest.editor.runEvery"
+              components={{
+                hours: (
+                  <input
+                    className="input"
+                    style={{ width: 70 }}
+                    type="number"
+                    min={0}
+                    value={dest.everyHours}
+                    onChange={(e) => patch({ everyHours: Math.max(0, Number(e.target.value) || 0) })}
+                  />
+                )
+              }}
             />
-            hours (0 = manual)
           </label>
           <label className="s-desc" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            Keep
-            <input
-              className="input"
-              style={{ width: 70 }}
-              type="number"
-              min={0}
-              value={dest.keep}
-              onChange={(e) => patch({ keep: Math.max(0, Number(e.target.value) || 0) })}
+            <Trans
+              i18nKey="settings.backupDest.editor.keep"
+              components={{
+                keep: (
+                  <input
+                    className="input"
+                    style={{ width: 70 }}
+                    type="number"
+                    min={0}
+                    value={dest.keep}
+                    onChange={(e) => patch({ keep: Math.max(0, Number(e.target.value) || 0) })}
+                  />
+                )
+              }}
             />
-            generations (0 = all)
           </label>
           <label className="s-desc" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
             <input
@@ -698,7 +748,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
               checked={dest.restoreTest}
               onChange={(e) => patch({ restoreTest: e.target.checked })}
             />
-            Test-restore every write
+            {t('settings.backupDest.editor.restoreTest')}
           </label>
         </div>
 
@@ -715,7 +765,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
                   checked={(dest.passphraseSource ?? 'vault') === 'vault'}
                   onChange={() => patch({ passphraseSource: 'vault' })}
                 />
-                Passphrase from the vault
+                {t('settings.backupDest.editor.passphraseFromVault')}
               </label>
               <label className="s-desc" style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <input
@@ -723,7 +773,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
                   checked={dest.passphraseSource === 'machine'}
                   onChange={() => patch({ passphraseSource: 'machine' })}
                 />
-                Keep it on this machine
+                {t('settings.backupDest.editor.passphraseOnMachine')}
               </label>
             </div>
 
@@ -736,7 +786,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
                     disabled={!props.vaultUnlocked}
                     onChange={(e) => patch({ passphraseVaultEntryId: e.target.value || undefined })}
                   >
-                    <option value="">Vault entry holding the backup passphrase…</option>
+                    <option value="">{t('settings.backupDest.editor.passphraseEntry')}</option>
                     {props.vaultEntries.map((e) => (
                       <option key={e.id} value={e.id}>
                         {e.name}
@@ -745,10 +795,7 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
                   </select>
                 </div>
                 <div className="s-desc" style={{ marginBottom: 6 }}>
-                  Nobody is present at 3am to type a passphrase, so a scheduled run reads one from
-                  the vault. The vault keeps resolving after the idle timeout, so this survives a
-                  screen left alone — but not a restart, until somebody unlocks. A run skipped for
-                  that reason says so in the status bar rather than quietly not happening.
+                  {t('settings.backupDest.editor.vaultNote')}
                 </div>
               </>
             ) : (
@@ -758,7 +805,9 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
                     className="input grow"
                     type="password"
                     placeholder={
-                      machineSet ? 'Stored on this machine — type to replace' : 'Backup passphrase'
+                      machineSet
+                        ? t('settings.backupDest.editor.machineStoredPlaceholder')
+                        : t('settings.backupDest.editor.machinePlaceholder')
                     }
                     value={machinePw}
                     onChange={(e) => setMachinePw(e.target.value)}
@@ -768,19 +817,19 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
                     disabled={machinePw.length < 8}
                     onClick={() => void saveMachinePw()}
                   >
-                    {machineSet ? 'Replace' : 'Store'}
+                    {machineSet
+                      ? t('settings.backupDest.editor.replace')
+                      : t('settings.backupDest.editor.store')}
                   </button>
                 </div>
                 {/* Said here, where the choice is made, and not in a document
                     nobody opens. Both sentences are consequences the operator
                     cannot discover later by looking at the panel. */}
                 <div className="s-desc" style={{ marginBottom: 6 }}>
-                  Kept in this machine&rsquo;s keychain, so runs continue after a restart with
-                  nobody present. It is deliberately left out of every backup — a passphrase
-                  inside the file it protects would protect nothing — which means{' '}
-                  <strong>restoring onto another machine does not bring it back</strong>. Write it
-                  down somewhere a lost laptop does not take with it. Anyone with this machine can
-                  open every generation this destination has written.
+                  <Trans
+                    i18nKey="settings.backupDest.editor.machineNote"
+                    components={{ strong: <strong /> }}
+                  />
                 </div>
               </>
             )}
@@ -797,14 +846,14 @@ function DestinationEditor(props: EditorProps): React.JSX.Element {
         <div className="inline-panel-footer">
           {problem && <span className="footer-note field-error">{problem}</span>}
           <button className="btn secondary size-28" onClick={props.onCancel}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             className="btn primary size-28"
             disabled={problem !== null}
             onClick={() => props.onSave(dest)}
           >
-            Save destination
+            {t('settings.backupDest.editor.save')}
           </button>
         </div>
       </div>

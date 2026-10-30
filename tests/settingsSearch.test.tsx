@@ -62,12 +62,15 @@ describe('the words people actually type reach the setting', () => {
   })
 
   // The index doubles as the jump target: a result finds its row again by
-  // matching this string against the rendered `.s-title`. A title invented here
-  // navigates to the right page and then silently highlights nothing.
+  // matching its title against the rendered `.s-title`. A title invented here
+  // navigates to the right page and then silently highlights nothing. Index and
+  // row share one key, so the key appears at least twice: once in the index and
+  // once where the row renders it.
   it('indexes the label the row actually renders', () => {
     const src = readSettingsSource()
     for (const entry of searchSettings('background checking')) {
-      expect(src, entry.title).toContain(entry.title)
+      const uses = src.split(`'${entry.titleKey}'`).length - 1
+      expect(uses, entry.titleKey).toBeGreaterThan(1)
     }
   })
 })

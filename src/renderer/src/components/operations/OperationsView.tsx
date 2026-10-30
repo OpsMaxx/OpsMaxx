@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Wrench } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import {
   moduleEnabled,
   modulesOnSurface,
@@ -131,6 +132,7 @@ export function OperationsView({
    */
   hidden: boolean
 }): React.JSX.Element {
+  const t = useT()
   const tab = useNav((s) => s.operationsTab)
   const setTab = useNav((s) => s.setOperationsTab)
   const jump = useNav((s) => s.operationsJump)
@@ -201,7 +203,7 @@ export function OperationsView({
                   className={clsx('ops-rail-btn', activeTab === m.id && 'active')}
                   onClick={() => setTab(id)}
                 >
-                  <span className="ops-rail-label">{m.label}</span>
+                  <span className="ops-rail-label">{t(m.labelKey)}</span>
                   <span className="ops-rail-consequence">{CONSEQUENCE[id]}</span>
                 </button>
               )
@@ -212,7 +214,7 @@ export function OperationsView({
 
       {asked !== undefined && asked !== null && (
         <div className="panel-note is-unknown" data-testid="ops-tab-off">
-          <b>{asked.label}</b> is switched off, so this is not it. {asked.detail}{' '}
+          <b>{t(asked.labelKey)}</b> is switched off, so this is not it. {t(asked.detailKey)}{' '}
           <button className="btn ghost sm" onClick={() => openSettings('modules')}>
             Choose modules
           </button>
@@ -228,7 +230,7 @@ export function OperationsView({
           <div className="s-title">Nothing here can change a server yet.</div>
           {off.map((m) => (
             <div key={m.id} className="s-desc" style={{ marginTop: 8 }}>
-              <b>{m.label}</b> — {m.detail}
+              <b>{t(m.labelKey)}</b> — {t(m.detailKey)}
             </div>
           ))}
           <div style={{ marginTop: 12 }}>
@@ -311,7 +313,7 @@ export function OperationsView({
               and Jobs and Revoke a key", which reads as a machine listing rather
               than a sentence somebody wrote. */}
           {off
-            .map((m) => m.label)
+            .map((m) => t(m.labelKey))
             .reduce((acc, label, i) =>
               i === off.length - 1 ? `${acc} and ${label}` : `${acc}, ${label}`
             )}{' '}

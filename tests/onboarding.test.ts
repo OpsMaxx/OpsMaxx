@@ -7,6 +7,7 @@ import {
   walkthroughFor
 } from '../src/renderer/src/components/onboarding/tourSteps'
 import { defaultModuleState } from '../src/shared/modules'
+import { englishT } from '../src/shared/i18n'
 
 const store = new Map<string, string>()
 
@@ -206,8 +207,8 @@ describe('the steps themselves', () => {
 
   it('gives every step something to read', () => {
     for (const s of TOUR_STEPS) {
-      expect(s.title.length, s.id).toBeGreaterThan(0)
-      expect(s.body.length, s.id).toBeGreaterThan(40)
+      expect(englishT(s.titleKey).length, s.id).toBeGreaterThan(0)
+      expect(englishT(s.bodyKey).length, s.id).toBeGreaterThan(40)
     }
   })
 

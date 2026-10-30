@@ -19,9 +19,9 @@ import { findLocalTab, useApp } from '../../store/app'
 import { useClickOutside } from '../../hooks/useClickOutside'
 import {
   AI_SECTIONS,
-  AI_SECTION_LABELS,
+  AI_SECTION_LABEL_KEYS,
   SETTINGS_SECTIONS,
-  SETTINGS_SECTION_LABELS,
+  SETTINGS_SECTION_LABEL_KEYS,
   openAi,
   openMonitor,
   openOperations,
@@ -34,6 +34,7 @@ import { reportBug } from '../../lib/reportBug'
 import { fuzzyScore } from '../../lib/fuzzy'
 import { templateTerminalText, type JobTemplate } from '../../../../shared/jobCompose'
 import { httpPaletteCommands } from '../http/paletteCommands'
+import { useT } from '../../lib/i18n'
 
 interface Cmd {
   id: string
@@ -45,6 +46,7 @@ interface Cmd {
 }
 
 export function CommandPalette(): React.JSX.Element {
+  const t = useT()
   const store = useApp()
   const close = (): void => store.togglePalette(false)
   const ref = useRef<HTMLDivElement>(null)
@@ -69,7 +71,7 @@ export function CommandPalette(): React.JSX.Element {
     let live = true
     void window.opsmaxx?.jobTemplates
       ?.list()
-      .then((t) => live && setTemplates(t?.templates ?? []))
+      .then((r) => live && setTemplates(r?.templates ?? []))
       .catch(() => undefined)
     return () => {
       live = false
@@ -83,9 +85,9 @@ export function CommandPalette(): React.JSX.Element {
       .forEach((w) =>
         list.push({
           id: `ws-${w.id}`,
-          group: 'Workspaces',
+          group: t('palette.group.workspaces'),
           title: w.name,
-          sub: 'Switch workspace',
+          sub: t('palette.switchWorkspace'),
           icon: <Layers size={16} />,
           run: () => store.setWorkspace(w.id)
         })
@@ -95,7 +97,7 @@ export function CommandPalette(): React.JSX.Element {
       .forEach((s) =>
         list.push({
           id: `s-${s.id}`,
-          group: 'Servers',
+          group: t('palette.group.servers'),
           title: s.name,
           sub: `${s.username}@${s.host}`,
           icon: <ServerIcon size={16} />,
@@ -123,13 +125,13 @@ export function CommandPalette(): React.JSX.Element {
         const open = findLocalTab(tabs, ws, sh.id)
         list.push({
           id: `local-${sh.id}`,
-          group: 'Local Shells',
+          group: t('palette.group.localShells'),
           title: sh.label,
           // The path, never the id: ids are opaque and mean nothing to a reader.
           sub: open
-            ? `${sh.path} · open`
+            ? t('palette.shellOpen', { path: sh.path })
             : sh.isDefault
-              ? `${sh.path} · default`
+              ? t('palette.shellDefault', { path: sh.path })
               : sh.path,
           icon: <TerminalIcon size={16} />,
           run: () => {
@@ -145,9 +147,9 @@ export function CommandPalette(): React.JSX.Element {
         if (open)
           list.push({
             id: `local-new-${sh.id}`,
-            group: 'Local Shells',
-            title: `New ${sh.label} Session`,
-            sub: 'Opens an additional shell instead of focusing the open one',
+            group: t('palette.group.localShells'),
+            title: t('palette.newShellSession', { label: sh.label }),
+            sub: t('palette.newShellSessionSub'),
             icon: <Plus size={16} />,
             run: () => {
               store.setActivity('connections')
@@ -158,17 +160,17 @@ export function CommandPalette(): React.JSX.Element {
     }
     store
       .workspaceTunnels()
-      .forEach((t) =>
+      .forEach((tn) =>
         list.push({
-          id: `t-${t.id}`,
-          group: 'Tunnels',
-          title: t.name,
-          sub: `${t.listen} → ${t.target}`,
+          id: `t-${tn.id}`,
+          group: t('palette.group.tunnels'),
+          title: tn.name,
+          sub: `${tn.listen} → ${tn.target}`,
           icon: <Network size={16} />,
           // The entry is titled with this tunnel's name, so it has to land on
           // this tunnel. Opening the page and leaving the user to find it again
           // in the list is what a row named after one thing must not do.
-          run: () => openTunnels({ kind: 'select', tunnelId: t.id })
+          run: () => openTunnels({ kind: 'select', tunnelId: tn.id })
         })
       )
 
@@ -179,13 +181,13 @@ export function CommandPalette(): React.JSX.Element {
     // live session -- not a demo shell, not a dead or dormant one.
     const paneId = current ? (store.panes[current.id]?.activePaneId ?? current.id) : null
     if (current?.view === 'terminal' && paneId && store.pasteTargets[paneId]) {
-      templates.forEach((t) => {
-        const text = templateTerminalText(t)
+      templates.forEach((tpl) => {
+        const text = templateTerminalText(tpl)
         list.push({
-          id: `tpl-${t.id}`,
-          group: 'Job templates',
-          title: `Run in this terminal: ${t.name}`,
-          sub: `${text.split('\n').length} line(s) · asks first`,
+          id: `tpl-${tpl.id}`,
+          group: t('palette.group.jobTemplates'),
+          title: t('palette.runTemplate', { name: tpl.name }),
+          sub: t('palette.runTemplateSub', { count: text.split('\n').length }),
           icon: <ListChecks size={16} />,
           run: () => store.requestTerminalPaste(paneId, text)
         })
@@ -198,23 +200,23 @@ export function CommandPalette(): React.JSX.Element {
         ? [
             {
               id: 'a-dup',
-              group: 'Actions',
-              title: 'Duplicate Current Tab',
+              group: t('palette.group.actions'),
+              title: t('palette.duplicateTab'),
               sub: current.title,
               icon: <Copy size={16} />,
               run: () => store.duplicateTab(current.id)
             }
           ]
         : []),
-      { id: 'a-add', group: 'Actions', title: 'Add Server', icon: <Plus size={16} />, run: () => store.setModal('add-server') },
-      { id: 'a-ws', group: 'Actions', title: 'New Workspace', icon: <Plus size={16} />, run: () => store.setModal('workspaces') },
-      { id: 'a-mon', group: 'Actions', title: 'Open Fleet Monitor', icon: <Activity size={16} />, run: () => openMonitor('overview') },
-      { id: 'a-term', group: 'Actions', title: 'Open Connections', icon: <TerminalIcon size={16} />, run: () => store.setActivity('connections') },
+      { id: 'a-add', group: t('palette.group.actions'), title: t('palette.addServer'), icon: <Plus size={16} />, run: () => store.setModal('add-server') },
+      { id: 'a-ws', group: t('palette.group.actions'), title: t('palette.newWorkspace'), icon: <Plus size={16} />, run: () => store.setModal('workspaces') },
+      { id: 'a-mon', group: t('palette.group.actions'), title: t('palette.openFleetMonitor'), icon: <Activity size={16} />, run: () => openMonitor('overview') },
+      { id: 'a-term', group: t('palette.group.actions'), title: t('palette.openConnections'), icon: <TerminalIcon size={16} />, run: () => store.setActivity('connections') },
       {
         id: 'a-import',
-        group: 'Actions',
-        title: 'Import Servers from ~/.ssh/config',
-        sub: 'Bulk-import servers you already have, ProxyJump included',
+        group: t('palette.group.actions'),
+        title: t('palette.importSsh'),
+        sub: t('palette.importSshSub'),
         icon: <Download size={16} />,
         run: () => {
           store.setActivity('connections')
@@ -227,13 +229,13 @@ export function CommandPalette(): React.JSX.Element {
       // without opening, or opening without either.
       {
         id: 'a-bug',
-        group: 'Actions',
-        title: 'Report a bug',
-        sub: 'Saves and copies your diagnostics and opens the issue form',
+        group: t('palette.group.actions'),
+        title: t('palette.reportBug'),
+        sub: t('palette.reportBugSub'),
         icon: <Bug size={16} />,
         run: () => void reportBug()
       },
-      { id: 'a-set', group: 'Settings', title: 'Open Settings', icon: <Settings size={16} />, run: () => store.setActivity('settings') }
+      { id: 'a-set', group: t('common.settings'), title: t('palette.openSettings'), icon: <Settings size={16} />, run: () => store.setActivity('settings') }
     ]
 
     /**
@@ -249,8 +251,8 @@ export function CommandPalette(): React.JSX.Element {
      */
     const destinations: Cmd[] = ACTIVITY_ITEMS.map((a) => ({
       id: `go-${a.id}`,
-      group: 'Go to',
-      title: a.label,
+      group: t('palette.group.goTo'),
+      title: t(a.labelKey),
       icon: a.icon,
       run: () => (a.id === 'monitor' ? openMonitor('overview') : store.setActivity(a.id))
     }))
@@ -261,8 +263,8 @@ export function CommandPalette(): React.JSX.Element {
     const modules: Cmd[] = MODULES.filter((m) => moduleEnabled(store.settings.modules, m.id)).map(
       (m) => ({
         id: `mod-${m.id}`,
-        group: isOperateModule(m.id) ? 'Operations' : 'Monitoring',
-        title: m.label,
+        group: t(isOperateModule(m.id) ? 'palette.group.operations' : 'palette.group.monitoring'),
+        title: t(m.labelKey),
         icon: <Activity size={16} />,
         run: () =>
           isOperateModule(m.id) ? openOperations(m.id as never) : openMonitor(m.id as never)
@@ -274,24 +276,24 @@ export function CommandPalette(): React.JSX.Element {
     // and Approvals and Active Sessions had no pointer anywhere in the app.
     const aiPages: Cmd[] = AI_SECTIONS.map((id) => ({
       id: `ai-${id}`,
-      group: 'AI & MCP',
-      title: AI_SECTION_LABELS[id],
-      sub: 'AI & MCP',
+      group: t('palette.group.ai'),
+      title: t(AI_SECTION_LABEL_KEYS[id]),
+      sub: t('palette.group.ai'),
       icon: <Bot size={16} />,
       run: () => openAi(id)
     }))
 
     const settingsPages: Cmd[] = SETTINGS_SECTIONS.map((id) => ({
       id: `set-${id}`,
-      group: 'Settings',
-      title: SETTINGS_SECTION_LABELS[id],
-      sub: 'Settings',
+      group: t('common.settings'),
+      title: t(SETTINGS_SECTION_LABEL_KEYS[id]),
+      sub: t('common.settings'),
       icon: <Settings size={16} />,
       run: () => openSettings(id)
     }))
 
     return [...actions, ...destinations, ...modules, ...aiPages, ...settingsPages, ...list, ...httpPaletteCommands(store)]
-  }, [store, templates])
+  }, [store, templates, t])
 
   const filtered = useMemo(() => {
     const query = q.trim()
@@ -341,12 +343,12 @@ export function CommandPalette(): React.JSX.Element {
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onKey}
-            placeholder="Search servers, workspaces, tunnels, actions…"
+            placeholder={t('palette.placeholder')}
           />
           <span className="kbd">Esc</span>
         </div>
         <div className="palette-list">
-          {filtered.length === 0 && <div className="palette-empty">No results for “{q}”</div>}
+          {filtered.length === 0 && <div className="palette-empty">{t('palette.noResults', { query: q })}</div>}
           {filtered.map((c, i) => {
             const showGroup = c.group !== lastGroup
             lastGroup = c.group

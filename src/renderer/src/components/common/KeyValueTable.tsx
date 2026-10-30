@@ -7,6 +7,8 @@ import { Popover } from './Popover'
 import { VaultPicker } from '../http/fields/VaultPicker'
 import { toast } from '../../store/toast'
 import { isMac } from '../../lib/shortcuts'
+import { useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 import './primitives.css'
 
 export interface KeyValueTableProps {
@@ -23,11 +25,11 @@ export interface KeyValueTableProps {
   onShowDescription?: (show: boolean) => void
 }
 
-const KEY_LABEL: Record<KeyValueTableProps['kind'], string> = {
-  params: 'Key',
-  headers: 'Header',
-  form: 'Key',
-  vars: 'Variable'
+const KEY_LABEL: Record<KeyValueTableProps['kind'], { label: MessageKey; fresh: MessageKey }> = {
+  params: { label: 'ui.kv.colKey', fresh: 'ui.kv.newKey' },
+  headers: { label: 'ui.kv.colHeader', fresh: 'ui.kv.newHeader' },
+  form: { label: 'ui.kv.colKey', fresh: 'ui.kv.newKey' },
+  vars: { label: 'ui.kv.colVariable', fresh: 'ui.kv.newVariable' }
 }
 
 /** `key: value` per line; a `#` prefix marks a disabled row. */
@@ -76,6 +78,7 @@ type Menu = { x: number; y: number; entries: MenuEntry[] }
  */
 export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
   const { rows, onChange, kind, showDescription, readOnly } = props
+  const t = useT()
   const [bulk, setBulk] = useState<string | null>(null)
   const [menu, setMenu] = useState<Menu | null>(null)
   const [vaultFor, setVaultFor] = useState<{ id: string; at: DOMRect } | null>(null)
@@ -146,24 +149,24 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
 
   const rowMenu = (row: Row): MenuEntry[] => {
     const copies: MenuEntry[] = [
-      { label: 'Copy key', onClick: () => copy(row.key) },
-      { label: 'Copy value', onClick: () => copy(row.value) },
-      { label: 'Copy as "key: value"', onClick: () => copy(`${row.key}: ${row.value}`) }
+      { label: t('ui.kv.copyKey'), onClick: () => copy(row.key) },
+      { label: t('ui.kv.copyValue'), onClick: () => copy(row.value) },
+      { label: t('ui.kv.copyAsKeyValue'), onClick: () => copy(`${row.key}: ${row.value}`) }
     ]
     const at = rows.findIndex((r) => r.id === row.id)
     if (readOnly) return copies
     return [
-      { label: row.enabled ? 'Disable row' : 'Enable row', shortcut: 'Space', onClick: () => patch(row.id, { enabled: !row.enabled }) },
+      { label: t(row.enabled ? 'ui.kv.disableRow' : 'ui.kv.enableRow'), shortcut: 'Space', onClick: () => patch(row.id, { enabled: !row.enabled }) },
       {
-        label: 'Duplicate row',
+        label: t('ui.kv.duplicateRow'),
         onClick: () => insertRows(row.id, [{ ...row, id: newId('row') }])
       },
-      { label: 'Insert row below', onClick: () => insertBelow(row.id) },
-      { label: 'Move up', shortcut: alt + '↑', disabled: at === 0, onClick: () => move(row.id, -1) },
-      { label: 'Move down', shortcut: alt + '↓', disabled: at === rows.length - 1, onClick: () => move(row.id, 1) },
+      { label: t('ui.kv.insertRowBelow'), onClick: () => insertBelow(row.id) },
+      { label: t('ui.kv.moveUp'), shortcut: alt + '↑', disabled: at === 0, onClick: () => move(row.id, -1) },
+      { label: t('ui.kv.moveDown'), shortcut: alt + '↓', disabled: at === rows.length - 1, onClick: () => move(row.id, 1) },
       ...copies,
       {
-        label: 'Read value from vault…',
+        label: t('ui.kv.readFromVaultMenu'),
         onClick: () => {
           const el = body.current?.querySelector(`[data-row="${row.id}"]`)
           setVaultFor({ id: row.id, at: el?.getBoundingClientRect() ?? new DOMRect() })
@@ -171,28 +174,28 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
       },
       ...(props.extraRowMenu?.(row) ?? []),
       { separator: true, label: '' },
-      { label: 'Delete row', shortcut: `${mod}⌫`, danger: true, onClick: () => remove(row.id) }
+      { label: t('ui.kv.deleteRow'), shortcut: `${mod}⌫`, danger: true, onClick: () => remove(row.id) }
     ]
   }
 
   const tableMenu = (): MenuEntry[] => [
-    { label: 'Bulk edit', checked: bulk !== null, disabled: readOnly && bulk === null, onClick: () => setBulkMode(bulk === null) },
+    { label: t('ui.kv.bulkEdit'), checked: bulk !== null, disabled: readOnly && bulk === null, onClick: () => setBulkMode(bulk === null) },
     ...(props.onShowDescription
-      ? [{ label: 'Show description', checked: showDescription, onClick: () => props.onShowDescription!(!showDescription) }]
+      ? [{ label: t('ui.kv.showDescription'), checked: showDescription, onClick: () => props.onShowDescription!(!showDescription) }]
       : []),
     ...(readOnly
       ? []
       : [
           { separator: true, label: '' },
           {
-            label: 'Delete all',
+            label: t('ui.kv.deleteAll'),
             danger: true,
             disabled: rows.length === 0,
             onClick: () => {
               const before = rows
               onChange([])
-              toast(`Deleted ${before.length} ${before.length === 1 ? 'row' : 'rows'}`, 'info', {
-                label: 'Undo',
+              toast(t('ui.kv.deletedRows', { count: before.length }), 'info', {
+                label: t('ui.kv.undo'),
                 run: () => onChange(before)
               }, { key: `kv-delete-all-${pendingId}` })
             }
@@ -221,13 +224,13 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
     else create({ [cell]: next })
   }
 
-  const keyLabel = KEY_LABEL[kind]
+  const keyLabel = t(KEY_LABEL[kind].label)
   const renderRow = (row: Row | null, index: number): ReactNode => {
     const id = row?.id ?? pendingId
     const warn = row ? (props.warnFor?.(row) ?? null) : null
     const set = (cell: 'key' | 'value' | 'description') => (e: React.ChangeEvent<HTMLInputElement>) =>
       row ? patch(row.id, { [cell]: e.target.value }) : create({ [cell]: e.target.value })
-    const name = row?.key || `row ${index + 1}`
+    const name = row?.key || t('ui.kv.rowName', { n: index + 1 })
     return (
       <tr
         key={id}
@@ -258,7 +261,7 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
           {row && (
             <input
               type="checkbox"
-              aria-label={`Enable ${name}`}
+              aria-label={t('ui.kv.enableName', { name })}
               checked={row.enabled}
               disabled={readOnly}
               onChange={() => patch(row.id, { enabled: !row.enabled })}
@@ -269,7 +272,7 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
           <input
             className="hc-kv-input hc-mono"
             data-cell="key"
-            aria-label={row ? `${keyLabel}, ${name}` : `New ${keyLabel.toLowerCase()}`}
+            aria-label={row ? t('ui.kv.keyName', { label: keyLabel, name }) : t(KEY_LABEL[kind].fresh)}
             placeholder={row ? '' : keyLabel}
             value={row?.key ?? ''}
             readOnly={readOnly}
@@ -291,8 +294,8 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
               <input
                 className="hc-kv-input hc-mono"
                 data-cell="value"
-                aria-label={row ? `Value, ${name}` : 'New value'}
-                placeholder={row ? '' : 'Value'}
+                aria-label={row ? t('ui.kv.valueName', { name }) : t('ui.kv.newValue')}
+                placeholder={row ? '' : t('ui.kv.value')}
                 value={row?.value ?? ''}
                 readOnly={readOnly}
                 onChange={set('value')}
@@ -311,8 +314,8 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
             <input
               className="hc-kv-input"
               data-cell="description"
-              aria-label={row ? `Description, ${name}` : 'New description'}
-              placeholder={row ? '' : 'Description'}
+              aria-label={row ? t('ui.kv.descriptionName', { name }) : t('ui.kv.newDescription')}
+              placeholder={row ? '' : t('ui.kv.description')}
               value={row?.description ?? ''}
               readOnly={readOnly}
               onChange={set('description')}
@@ -326,8 +329,8 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
               type="button"
               tabIndex={-1}
               className="hc-icon-btn"
-              aria-label={`Actions for ${name}`}
-              title="Row actions"
+              aria-label={t('ui.kv.actionsFor', { name })}
+              title={t('ui.kv.rowActions')}
               onClick={(e) => openAt(e.currentTarget, rowMenu(row))}
             >
               <MoreHorizontal size={13} aria-hidden="true" />
@@ -342,15 +345,15 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
     <div className="hc-kv" data-kind={kind}>
       {bulk !== null && (
         <div className="hc-kv-head">
-          <span className="ui-label">One &quot;key: value&quot; per line · # disables a row</span>
+          <span className="ui-label">{t('ui.kv.bulkHint')}</span>
           <button type="button" className="btn ghost sm" onClick={() => setBulkMode(false)}>
-            Key-value edit
+            {t('ui.kv.keyValueEdit')}
           </button>
           <button
             type="button"
             className="hc-icon-btn"
-            aria-label="Table options"
-            title="Table options"
+            aria-label={t('ui.kv.tableOptions')}
+            title={t('ui.kv.tableOptions')}
             aria-haspopup="menu"
             onClick={(e) => openAt(e.currentTarget, tableMenu())}
           >
@@ -361,7 +364,7 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
       {bulk !== null ? (
         <textarea
           className="hc-kv-bulk hc-mono"
-          aria-label="Bulk edit"
+          aria-label={t('ui.kv.bulkEdit')}
           spellCheck={false}
           value={bulk}
           readOnly={readOnly}
@@ -373,17 +376,17 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
           <thead>
             <tr>
               <th className="hc-kv-check">
-                <span className="hc-sr-only">Enabled</span>
+                <span className="hc-sr-only">{t('common.enabled')}</span>
               </th>
               <th className="ui-label">{keyLabel}</th>
-              <th className="ui-label">Value</th>
-              {showDescription && <th className="ui-label">Description</th>}
+              <th className="ui-label">{t('ui.kv.value')}</th>
+              {showDescription && <th className="ui-label">{t('ui.kv.description')}</th>}
               <th className="hc-kv-more">
                 <button
                   type="button"
                   className="hc-icon-btn"
-                  aria-label="Table options"
-                  title="Table options"
+                  aria-label={t('ui.kv.tableOptions')}
+                  title={t('ui.kv.tableOptions')}
                   aria-haspopup="menu"
                   onClick={(e) => openAt(e.currentTarget, tableMenu())}
                 >
@@ -403,7 +406,7 @@ export function KeyValueTable(props: KeyValueTableProps): React.JSX.Element {
         anchor={vaultFor?.at ?? null}
         open={vaultFor !== null}
         onClose={() => setVaultFor(null)}
-        ariaLabel="Read value from vault"
+        ariaLabel={t('ui.kv.readFromVault')}
       >
         <VaultPicker
           onPick={(ref) => {

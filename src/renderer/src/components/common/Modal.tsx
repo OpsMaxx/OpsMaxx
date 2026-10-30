@@ -2,6 +2,7 @@ import { ReactNode, RefObject, useEffect, useLayoutEffect, useRef, useState } fr
 import { X } from 'lucide-react'
 import { approvalShowing, inLayerAbove, useClickOutside } from '../../hooks/useClickOutside'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 
 /**
  * The one dialog primitive.
@@ -242,13 +243,14 @@ export function Modal({
   onClose,
   children,
   confirm,
-  cancelLabel = 'Cancel',
+  cancelLabel,
   footerNote,
   footer,
   size = 'md',
   priority = 0,
   dismissible = true
 }: ModalProps): React.JSX.Element {
+  const t = useT()
   const ref = useRef<HTMLDivElement>(null)
   const { layer, top } = useModalLayer(priority)
   // Only the dialog in front. Both of these listen on `document`, so without
@@ -265,7 +267,7 @@ export function Modal({
             <h2>{title}</h2>
             {subtitle && <div className="sub">{subtitle}</div>}
           </div>
-          <button className="icon-btn close" onClick={onClose} aria-label="Close">
+          <button className="icon-btn close" onClick={onClose} aria-label={t('common.close')}>
             <X size={16} />
           </button>
         </div>
@@ -276,7 +278,7 @@ export function Modal({
             {footer}
             {cancelLabel !== null && (
               <button className="btn secondary size-28" onClick={onClose}>
-                {cancelLabel}
+                {cancelLabel ?? t('common.cancel')}
               </button>
             )}
             {confirm && (
@@ -323,11 +325,12 @@ interface FieldProps {
  * colour. Here it is one prop.
  */
 export function Field({ label, required, error, hint, children }: FieldProps): React.JSX.Element {
+  const t = useT()
   return (
     <label className="field">
       <span className="field-label">
         {label}
-        {required && <span className="field-req">Required</span>}
+        {required && <span className="field-req">{t('ui.field.required')}</span>}
       </span>
       <span className={clsx('field-control', error && 'invalid')}>{children}</span>
       {error ? (

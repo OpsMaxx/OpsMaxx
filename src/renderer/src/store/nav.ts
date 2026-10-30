@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { useApp } from './app'
 import { isOperateModule, type ModuleId, type OperateModuleId } from '../../../shared/modules'
 import type { LogPriority } from '../../../shared/logtail'
+import type { MessageKey } from '../../../shared/i18n'
 
 // Which page of AI & MCP, and which page of Settings, is open. Both used to be
 // local `useState` inside their panel, which meant nothing outside the panel
@@ -20,18 +21,18 @@ export type AiSection = 'overview' | 'agents' | 'groups' | 'sessions' | 'approva
  * a private list inside AiPanel, which is how all seven of these stayed out of
  * the command palette — the palette reads this, and so does the panel.
  */
-export const AI_SECTION_LABELS: Record<AiSection, string> = {
-  overview: 'Overview',
-  agents: 'AI Agents',
-  groups: 'Access Groups',
-  sessions: 'Active Sessions',
-  approvals: 'Approvals',
-  audit: 'Audit Log',
-  security: 'Security'
+export const AI_SECTION_LABEL_KEYS: Record<AiSection, MessageKey> = {
+  overview: 'nav.ai.overview',
+  agents: 'nav.ai.agents',
+  groups: 'nav.ai.groups',
+  sessions: 'nav.ai.sessions',
+  approvals: 'nav.ai.approvals',
+  audit: 'nav.ai.audit',
+  security: 'nav.ai.security'
 }
 
 /** Every page, in the order AI & MCP lists them. */
-export const AI_SECTIONS = Object.keys(AI_SECTION_LABELS) as AiSection[]
+export const AI_SECTIONS = Object.keys(AI_SECTION_LABEL_KEYS) as AiSection[]
 
 export type SettingsSection =
   | 'general'
@@ -56,25 +57,25 @@ export type SettingsSection =
  * command palette lists these pages too and a second copy of fourteen strings
  * is fourteen chances for the two lists to disagree about what a page is named.
  */
-export const SETTINGS_SECTION_LABELS: Record<SettingsSection, string> = {
-  general: 'General',
-  appearance: 'Appearance',
-  terminal: 'Terminal',
-  connections: 'Connections',
-  ssh: 'SSH',
-  security: 'Security',
-  sftp: 'SFTP',
-  monitoring: 'Monitoring',
-  modules: 'Modules',
-  editor: 'Editor',
-  shortcuts: 'Keyboard Shortcuts',
-  backup: 'Backup & Restore',
-  notifications: 'Notifications',
-  advanced: 'Advanced'
+export const SETTINGS_SECTION_LABEL_KEYS: Record<SettingsSection, MessageKey> = {
+  general: 'nav.settings.general',
+  appearance: 'nav.settings.appearance',
+  terminal: 'nav.settings.terminal',
+  connections: 'nav.settings.connections',
+  ssh: 'nav.settings.ssh',
+  security: 'nav.settings.security',
+  sftp: 'nav.settings.sftp',
+  monitoring: 'nav.settings.monitoring',
+  modules: 'nav.settings.modules',
+  editor: 'nav.settings.editor',
+  shortcuts: 'nav.settings.shortcuts',
+  backup: 'nav.settings.backup',
+  notifications: 'nav.settings.notifications',
+  advanced: 'nav.settings.advanced'
 }
 
 /** Every page, in the order Settings lists them. */
-export const SETTINGS_SECTIONS = Object.keys(SETTINGS_SECTION_LABELS) as SettingsSection[]
+export const SETTINGS_SECTIONS = Object.keys(SETTINGS_SECTION_LABEL_KEYS) as SettingsSection[]
 
 /** Which panel of the Fleet Monitor is showing. `overview` and `alerts` are
  *  fixed; the rest are whichever optional modules are enabled.

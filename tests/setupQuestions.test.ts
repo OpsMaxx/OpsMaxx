@@ -11,6 +11,7 @@ import {
   prefSummary,
   setupPatch
 } from '../src/renderer/src/components/onboarding/setupQuestions'
+import { englishT } from '../src/shared/i18n'
 import { MODULES, defaultModuleState, moduleEnabled } from '../src/shared/modules'
 import type { ModuleId } from '../src/shared/modules'
 
@@ -144,8 +145,8 @@ describe('personas', () => {
 
   it('gives every persona a label and a readable line', () => {
     for (const p of PERSONAS) {
-      expect(p.label.length, p.id).toBeGreaterThan(0)
-      expect(p.detail.length, p.id).toBeGreaterThan(20)
+      expect(englishT(p.labelKey).length, p.id).toBeGreaterThan(0)
+      expect(englishT(p.detailKey).length, p.id).toBeGreaterThan(20)
     }
   })
 

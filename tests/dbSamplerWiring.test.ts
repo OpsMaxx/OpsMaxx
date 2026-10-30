@@ -42,7 +42,9 @@ describe('the database size sampler', () => {
     expect(settings).toContain('dbSizeSamplingEnabled')
     // Indexed too: a switch that settings-search cannot find is most of the way
     // back to not being reachable.
-    expect(settings).toContain('Record how large each database is')
+    const en = JSON.parse(read('src/shared/locales/en.json')) as Record<string, string>
+    const key = Object.keys(en).find((k) => en[k] === 'Record how large each database is')
+    expect(settings).toContain(`titleKey: '${key}'`)
   })
 
   it('is off by default', () => {

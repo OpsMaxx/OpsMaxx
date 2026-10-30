@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { clsx, duration } from '../../lib/format'
 import { useApp } from '../../store/app'
+import { useT } from '../../lib/i18n'
 import type { WebhookConfig, WebhookDeliveryStatus } from '../../../../shared/webhook'
 import { Switch } from '../common/Switch'
 
@@ -15,6 +16,7 @@ import { Switch } from '../common/Switch'
 type Tone = 'ok' | 'warn' | 'danger'
 
 export function WebhookAlertSettings(): React.JSX.Element {
+  const t = useT()
   const [cfg, setCfg] = useState<WebhookConfig>({
     enabled: false,
     hasUrl: false,
@@ -46,10 +48,10 @@ export function WebhookAlertSettings(): React.JSX.Element {
       })
     }
     read()
-    const t = setInterval(read, 10_000)
+    const timer = setInterval(read, 10_000)
     return () => {
       live = false
-      clearInterval(t)
+      clearInterval(timer)
     }
   }, [])
 
@@ -76,8 +78,11 @@ export function WebhookAlertSettings(): React.JSX.Element {
     if (!res) return
     setSaveMsg(
       res.ok
-        ? { tone: 'ok', text: draft.trim() === '' ? 'Webhook URL removed.' : 'Saved.' }
-        : { tone: 'danger', text: res.error ?? 'Could not save.' }
+        ? {
+            tone: 'ok',
+            text: draft.trim() === '' ? t('settings.webhooks.urlRemoved') : t('settings.webhooks.saved')
+          }
+        : { tone: 'danger', text: res.error ?? t('settings.webhooks.saveFailed') }
     )
     if (res.ok) {
       setDraft('')
@@ -102,7 +107,7 @@ export function WebhookAlertSettings(): React.JSX.Element {
     setTesting(false)
     if (!r) return
     if (!r.ok) {
-      setTestMsg({ tone: 'danger', text: r.error ?? 'Delivery failed.' })
+      setTestMsg({ tone: 'danger', text: r.error ?? t('settings.webhooks.deliveryFailed') })
       return
     }
     // The test posts whatever the switches say, because a URL is worth checking
@@ -110,15 +115,20 @@ export function WebhookAlertSettings(): React.JSX.Element {
     // omission: the message lands in the channel, the user concludes alerting
     // is wired, and nothing is ever sent again.
     const off: string[] = []
-    if (!alertsEnabled) off.push('Alerts')
-    if (!cfg.enabled) off.push('Send alerts to a webhook')
-    const delivered = `Delivered${r.status ? ` (HTTP ${r.status})` : ''}. Check the channel.`
+    if (!alertsEnabled) off.push(t('settings.webhooks.alertsSwitch'))
+    if (!cfg.enabled) off.push(t('settings.webhooks.title'))
+    const delivered = r.status
+      ? t('settings.webhooks.deliveredHttp', { status: r.status })
+      : t('settings.webhooks.delivered')
     setTestMsg(
       off.length === 0
         ? { tone: 'ok', text: delivered }
         : {
             tone: 'warn',
-            text: `${delivered} Nothing else will be sent, though — the test ignores the switches, and ${off.join(' and ')} ${off.length === 1 ? 'is' : 'are'} off.`
+            text:
+              off.length === 1
+                ? t('settings.webhooks.testIgnoresOne', { delivered, a: off[0] })
+                : t('settings.webhooks.testIgnoresBoth', { delivered, a: off[0], b: off[1] })
           }
     )
   }
@@ -127,18 +137,12 @@ export function WebhookAlertSettings(): React.JSX.Element {
     <>
       <SettingRowSwitchLike>
         <div className="s-info">
-          <div className="s-title">Send alerts to a webhook</div>
+          <div className="s-title">{t('settings.webhooks.title')}</div>
           <div className="s-desc">
-            POSTs a small JSON message to any HTTPS endpoint — Slack, Discord, Teams and most
-            alerting systems accept one. Only the server&rsquo;s name, what fired and when are sent;
-            never a server, an IP, a log line or command output.
-            {!cfg.hasUrl && ' Add a URL below to enable this.'}
+            {t('settings.webhooks.desc')}
+            {!cfg.hasUrl && ` ${t('settings.webhooks.addUrlHint')}`}
           </div>
-          <div className="s-desc">
-            It carries what Alerts raises, so that switch has to be on too. And nothing is raised
-            while you are elsewhere unless servers are checked in the background — so with that off,
-            this stays silent in exactly the case you set it up for.
-          </div>
+          <div className="s-desc">{t('settings.webhooks.dependsOnAlerts')}</div>
         </div>
         {/* The shared Switch, not a <label><input type=checkbox>: `.switch`
             draws from an `.on` class, with no `:checked` selector anywhere, so
@@ -147,18 +151,16 @@ export function WebhookAlertSettings(): React.JSX.Element {
         <Switch
           checked={cfg.enabled}
           disabled={!cfg.hasUrl}
-          label="Send alerts to a webhook"
+          label={t('settings.webhooks.title')}
           onChange={(v) => void apply({ enabled: v })}
         />
       </SettingRowSwitchLike>
 
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Webhook URL</div>
+          <div className="s-title">{t('settings.webhooks.url.title')}</div>
           <div className="s-desc">
-            {cfg.hasUrl
-              ? 'A URL is saved. It is stored with your other secrets and is never shown again — paste a new one to replace it, or save an empty field to remove it.'
-              : 'Stored with your other secrets, not in settings or backups. https only, since the URL is itself a credential.'}
+            {cfg.hasUrl ? t('settings.webhooks.url.saved') : t('settings.webhooks.url.notSaved')}
           </div>
           {saveMsg && <div className={clsx('s-desc', saveMsg.tone)}>{saveMsg.text}</div>}
         </div>
@@ -166,7 +168,11 @@ export function WebhookAlertSettings(): React.JSX.Element {
           <input
             className="input"
             type="password"
-            placeholder={cfg.hasUrl ? '••••••••  paste to replace' : 'https://hooks.slack.com/services/…'}
+            placeholder={
+              cfg.hasUrl
+                ? t('settings.webhooks.url.replacePlaceholder')
+                : 'https://hooks.slack.com/services/…'
+            }
             value={draft}
             onChange={(e) => {
               setDraft(e.target.value)
@@ -174,36 +180,32 @@ export function WebhookAlertSettings(): React.JSX.Element {
             }}
           />
           <button className="btn" onClick={() => void saveUrl()}>
-            Save
+            {t('common.save')}
           </button>
         </div>
       </div>
 
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Test delivery</div>
-          <div className="s-desc">
-            Sends one sample alert now, so a wrong URL is found here rather than during an incident.
-          </div>
+          <div className="s-title">{t('settings.webhooks.test.title')}</div>
+          <div className="s-desc">{t('settings.webhooks.test.desc')}</div>
           {testMsg && <div className={clsx('s-desc', testMsg.tone)}>{testMsg.text}</div>}
           <DeliveryLines delivery={delivery} hasUrl={cfg.hasUrl} />
         </div>
         <button className="btn" disabled={!cfg.hasUrl || testing} onClick={() => void test()}>
-          {testing ? 'Sending…' : 'Send test'}
+          {testing ? t('settings.webhooks.test.sending') : t('settings.webhooks.test.send')}
         </button>
       </div>
 
       <SettingRowSwitchLike>
         <div className="s-info">
-          <div className="s-title">Also send when it recovers</div>
-          <div className="s-desc">
-            An alert with no resolution leaves the reader working out whether it is still happening.
-          </div>
+          <div className="s-title">{t('settings.webhooks.resolved.title')}</div>
+          <div className="s-desc">{t('settings.webhooks.resolved.desc')}</div>
         </div>
         <Switch
           checked={cfg.notifyOnResolved && cfg.enabled}
           disabled={!cfg.enabled}
-          label="Also send when it recovers"
+          label={t('settings.webhooks.resolved.title')}
           onChange={(v) => void apply({ notifyOnResolved: v })}
         />
       </SettingRowSwitchLike>
@@ -222,23 +224,30 @@ function DeliveryLines({
   delivery: WebhookDeliveryStatus | null
   hasUrl: boolean
 }): React.JSX.Element | null {
+  const t = useT()
   if (!delivery || !hasUrl) return null
   const lines: { tone?: Tone; text: string }[] = []
   if (delivery.dropped > 0) {
     lines.push({
       tone: 'danger',
-      text: `${delivery.dropped} alert${delivery.dropped === 1 ? '' : 's'} dropped since launch. More than 30 in one minute are discarded rather than queued, so those were never delivered.`
+      text: t('settings.webhooks.delivery.dropped', { count: delivery.dropped })
     })
   }
   if (delivery.lastError) {
-    lines.push({ tone: 'danger', text: `Last delivery failed: ${delivery.lastError}` })
+    lines.push({
+      tone: 'danger',
+      text: t('settings.webhooks.delivery.lastFailed', { error: delivery.lastError })
+    })
   } else if (delivery.lastSentAt) {
-    lines.push({ tone: 'ok', text: `Last alert delivered ${duration(delivery.lastSentAt)} ago.` })
+    lines.push({
+      tone: 'ok',
+      text: t('settings.webhooks.delivery.lastSent', { ago: duration(delivery.lastSentAt) })
+    })
   } else if (delivery.dropped === 0) {
     // Uncoloured on purpose: nothing has fired is the ordinary state, not a
     // warning. It is here so a quiet endpoint reads as quiet rather than
     // unknown.
-    lines.push({ text: 'No alert has been delivered since launch.' })
+    lines.push({ text: t('settings.webhooks.delivery.none') })
   }
   return (
     <>

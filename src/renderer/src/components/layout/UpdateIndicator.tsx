@@ -3,6 +3,8 @@ import { useUpdater } from '../../store/updater'
 import { openSettings } from '../../store/nav'
 import { clsx } from '../../lib/format'
 import type { UpdaterStatus } from '../../../../shared/updater'
+import { useT } from '../../lib/i18n'
+import type { Translate } from '../../../../shared/i18n'
 
 // The running version, on screen at all times, plus an update chip whenever one
 // is waiting.
@@ -15,49 +17,54 @@ import type { UpdaterStatus } from '../../../../shared/updater'
 // Colour and wording per state. The chip is deliberately quieter than
 // `resource-alert` and `backup-warn`: an available update is news, not a
 // problem, and it must not compete with a host that is falling over.
-function chip(status: UpdaterStatus): { tone: string; label: string } | null {
+function chip(status: UpdaterStatus, t: Translate): { tone: string; label: string } | null {
   switch (status.state) {
     case 'available':
-      return { tone: 'avail', label: 'Update available' }
+      return { tone: 'avail', label: t('layout.update.available') }
     case 'downloading':
-      return { tone: 'busy', label: `Downloading ${Math.round(status.percent)}%` }
+      return { tone: 'busy', label: t('layout.update.downloading', { percent: Math.round(status.percent) }) }
     case 'downloaded':
-      return { tone: 'ready', label: 'Restart to update' }
+      return { tone: 'ready', label: t('layout.update.restart') }
     case 'manual':
       // Nothing will happen on its own here, so the label names the action the
       // user has to take rather than repeating "available".
-      return { tone: 'manual', label: `Download v${status.version}` }
+      return { tone: 'manual', label: t('layout.update.download', { version: status.version }) }
     default:
       return null
   }
 }
 
-function describe(status: UpdaterStatus, version: string | null, beta: boolean): string {
-  const build = version ? `OpsMaxx v${version}${beta ? ' (beta build)' : ''}.` : 'OpsMaxx.'
+function describe(status: UpdaterStatus, version: string | null, beta: boolean, t: Translate): string {
+  const build = version
+    ? t(beta ? 'layout.update.buildBeta' : 'layout.update.build', { version })
+    : t('layout.update.buildUnknown')
   const detail = ((): string => {
     switch (status.state) {
       case 'checking':
-        return 'Checking for updates.'
+        return t('layout.update.checking')
       case 'available':
-        return `Version ${status.version} is available.`
+        return t('layout.update.versionAvailable', { version: status.version })
       case 'downloading':
-        return `Downloading version ${status.version ?? 'update'} — ${Math.round(status.percent)}% done.`
+        return status.version != null
+          ? t('layout.update.downloadingVersion', { version: status.version, percent: Math.round(status.percent) })
+          : t('layout.update.downloadingUnknown', { percent: Math.round(status.percent) })
       case 'downloaded':
-        return `Version ${status.version} has been downloaded and installs when you restart.`
+        return t('layout.update.downloaded', { version: status.version })
       case 'manual':
-        return `Version ${status.version} is available, but this build cannot install it itself.`
+        return t('layout.update.manual', { version: status.version })
       case 'error':
-        return `The last update check failed: ${status.message}`
+        return t('layout.update.error', { message: status.message })
       case 'not-available':
-        return 'This is the latest version.'
+        return t('layout.update.latest')
       default:
-        return 'No update is waiting.'
+        return t('layout.update.none')
     }
   })()
-  return `${build} ${detail}\nClick to open update settings.`
+  return t('layout.update.tooltip', { build, detail })
 }
 
 export function UpdateIndicator(): React.JSX.Element | null {
+  const t = useT()
   const init = useUpdater((s) => s.init)
   const status = useUpdater((s) => s.status)
   const capabilities = useUpdater((s) => s.capabilities)
@@ -74,16 +81,16 @@ export function UpdateIndicator(): React.JSX.Element | null {
   if (!capabilities) return null
 
   const beta = capabilities.runningChannel === 'beta'
-  const c = notify ? chip(status) : null
+  const c = notify ? chip(status, t) : null
 
   return (
     <button
       className={clsx('item update-indicator', c && `pending ${c.tone}`)}
-      title={describe(status, capabilities.currentVersion, beta)}
+      title={describe(status, capabilities.currentVersion, beta, t)}
       onClick={() => openSettings('general')}
     >
       <span>v{capabilities.currentVersion}</span>
-      {beta && <span className="build-tag">beta</span>}
+      {beta && <span className="build-tag">{t('layout.update.betaTag')}</span>}
       {c && (
         <>
           <span className="update-dot" />

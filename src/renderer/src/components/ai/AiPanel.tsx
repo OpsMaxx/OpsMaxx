@@ -8,7 +8,8 @@ import { AiAuthorizations } from './AiAuthorizations'
 import { AiAuditLog } from './AiAuditLog'
 import { AiSecurity } from './AiSecurity'
 import { ConnectAgent } from './ConnectAgent'
-import { useNav, AI_SECTIONS, AI_SECTION_LABELS } from '../../store/nav'
+import { useNav, AI_SECTIONS, AI_SECTION_LABEL_KEYS } from '../../store/nav'
+import { useT } from '../../lib/i18n'
 import type { AiSection } from '../../store/nav'
 import type { McpAgentSession, ApprovalRequest } from '../../../../shared/mcp'
 
@@ -97,6 +98,7 @@ export function AiPanel(): React.JSX.Element {
   // can send the user straight to the page that fixes it.
   const section = useNav((s) => s.aiSection)
   const setSection = useNav((s) => s.setAiSection)
+  const t = useT()
 
   return (
     <div className="main">
@@ -109,7 +111,7 @@ export function AiPanel(): React.JSX.Element {
               onClick={() => setSection(id)}
             >
               {SECTION_ICONS[id]}
-              {AI_SECTION_LABELS[id]}
+              {t(AI_SECTION_LABEL_KEYS[id])}
             </button>
           ))}
         </nav>

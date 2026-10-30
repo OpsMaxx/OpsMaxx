@@ -23,6 +23,17 @@ const SRC = readFileSync(
   'utf8'
 )
 
+const EN = JSON.parse(
+  readFileSync(join(__dirname, '../src/shared/locales/en.json'), 'utf8')
+) as Record<string, string>
+
+/** The English blurb a group shows, through the key its entry names. */
+function groupDetail(id: string, nextId: string): string {
+  const entry = SRC.slice(SRC.indexOf(`id: '${id}'`), SRC.indexOf(`id: '${nextId}'`))
+  const key = /detailKey: '([^']+)'/.exec(entry)?.[1]
+  return key ? EN[key] : ''
+}
+
 /** The predicates the page uses, restated. Kept in step by the assertions below. */
 const GROUPS: ((m: (typeof MODULES)[number]) => boolean)[] = [
   (m) => isPromotedModule(m.id),
@@ -71,7 +82,7 @@ describe('the Modules page groups', () => {
     // A group label may describe its members. It may not make an absolute claim
     // about what they cannot do -- the registry is the place for that, where a
     // per-module exception can be written next to the module.
-    const group = SRC.slice(SRC.indexOf("id: 'read'"), SRC.indexOf("id: 'operate'"))
+    const group = groupDetail('read', 'operate')
     expect(group).not.toMatch(/None of these can change a server/)
     // And having named the exception once, keep naming it: `rules` is the member
     // that breaks the general sentence, so the general sentence has to mention it.
@@ -81,7 +92,7 @@ describe('the Modules page groups', () => {
   it('warns that switching a promoted module off removes its icon', () => {
     // The one visible consequence on this page that is bigger than "a panel goes
     // away", and the reason the promoted modules are broken out first.
-    const group = SRC.slice(SRC.indexOf("id: 'promoted'"), SRC.indexOf("id: 'read'"))
+    const group = groupDetail('promoted', 'read')
     expect(group).toMatch(/icon/i)
   })
 })

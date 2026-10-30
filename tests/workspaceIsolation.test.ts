@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { FULL_WALKTHROUGH } from '../src/renderer/src/components/onboarding/tourSteps'
+import { englishT } from '../src/shared/i18n'
 
 // What is workspace-scoped and what is not, pinned so the claim and the code
 // cannot drift apart again. The onboarding text said every vault entry belonged
@@ -36,15 +37,15 @@ describe('the walkthrough does not overclaim isolation', () => {
   it('explains that an entry can be shared rather than implying total isolation', () => {
     // The vault is filtered by workspace, not cryptographically separated, and
     // nothing the user is shown may imply otherwise.
-    const text = FULL_WALKTHROUGH.map((s) => s.body).join(' ')
+    const text = FULL_WALKTHROUGH.map((s) => englishT(s.bodyKey)).join(' ')
     expect(text).toMatch(/marked shared/i)
   })
 
   it('still tells people workspaces can be password-protected', () => {
     // The real isolation is worth keeping; only the vault claim was wrong.
-    const step = FULL_WALKTHROUGH.find((s) => /workspace/i.test(s.title))
+    const step = FULL_WALKTHROUGH.find((s) => /workspace/i.test(englishT(s.titleKey)))
     expect(step, 'the walkthrough no longer explains workspaces at all').toBeDefined()
-    expect(step!.body).toMatch(/password-protect/i)
+    expect(englishT(step!.bodyKey)).toMatch(/password-protect/i)
   })
 })
 

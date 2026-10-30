@@ -10,6 +10,7 @@ import { Switch } from '../src/renderer/src/components/common/Switch'
 import { Settings } from '../src/renderer/src/components/settings/Settings'
 import { AddDatabaseModal } from '../src/renderer/src/components/databases/AddDatabaseModal'
 import { useApp } from '../src/renderer/src/store/app'
+import { englishT } from '../src/shared/i18n'
 import { useNav } from '../src/renderer/src/store/nav'
 import { MODULES, moduleEnabled } from '../src/shared/modules'
 
@@ -76,14 +77,14 @@ describe('Settings modules', () => {
   it('toggles a module from the keyboard', async () => {
     render(<Settings />)
     const m = MODULES[0]
-    const sw = screen.getByRole('switch', { name: m.label })
+    const sw = screen.getByRole('switch', { name: englishT(m.labelKey) })
     const before = sw.getAttribute('aria-checked')
     sw.focus()
     await userEvent.keyboard(' ')
     expect(sw.getAttribute('aria-checked')).not.toBe(before)
     expect(String(moduleEnabled(useApp.getState().settings.modules, m.id))).toBe(sw.getAttribute('aria-checked'))
     // Every module row has one, named after it.
-    for (const mod of MODULES) expect(within(document.body).getByRole('switch', { name: mod.label })).toBeTruthy()
+    for (const mod of MODULES) expect(within(document.body).getByRole('switch', { name: englishT(mod.labelKey) })).toBeTruthy()
   })
 })
 

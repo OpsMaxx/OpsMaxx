@@ -4,6 +4,7 @@ import { useOnboarding } from '../../store/onboarding'
 import { useNav } from '../../store/nav'
 import { useApp } from '../../store/app'
 import { tipsFor } from './tourSteps'
+import { useT } from '../../lib/i18n'
 
 // The six tour steps that used to be shown before the user had done anything,
 // arriving instead the first time they open the view each one is about.
@@ -25,6 +26,7 @@ import { tipsFor } from './tourSteps'
 // note beside it, not a gate in front of it. Dismissing is the only interaction
 // and it is permanent.
 export function FeatureTipCard(): React.JSX.Element | null {
+  const t = useT()
   const activity = useApp((s) => s.activity)
   // Monitoring and Operations are two rail destinations sharing ONE
   // ActivityView — deliberately, because they are one mounted tree and a split
@@ -101,17 +103,17 @@ export function FeatureTipCard(): React.JSX.Element | null {
   }
 
   return (
-    <div className="tip-card" role="note" aria-label={tip.title}>
+    <div className="tip-card" role="note" aria-label={t(tip.titleKey)}>
       <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
         <Compass size={15} style={{ color: 'var(--accent-ink)', flex: 'none', marginTop: 1 }} />
         <div style={{ minWidth: 0 }}>
-          <b>{tip.title}</b>
+          <b>{t(tip.titleKey)}</b>
           <p className="s-desc" style={{ margin: '6px 0 0' }}>
-            {tip.body}
+            {t(tip.bodyKey)}
           </p>
-          {tip.action && (
+          {tip.actionKey && (
             <p className="s-desc" style={{ margin: '6px 0 0', color: 'var(--accent-ink)' }}>
-              {tip.action}
+              {t(tip.actionKey)}
             </p>
           )}
         </div>
@@ -120,8 +122,8 @@ export function FeatureTipCard(): React.JSX.Element | null {
         <button
           className="icon-btn"
           style={{ flex: 'none' }}
-          title="Got it — do not show this again"
-          aria-label="Dismiss tip"
+          title={t('onboarding.tips.dismissTitle')}
+          aria-label={t('onboarding.tips.dismissAria')}
           onClick={dismiss}
         >
           <X size={14} />
@@ -129,7 +131,7 @@ export function FeatureTipCard(): React.JSX.Element | null {
       </div>
       <div className="row" style={{ justifyContent: 'flex-end', marginTop: 8 }}>
         <button className="btn sm" onClick={dismiss}>
-          Got it
+          {t('onboarding.tips.gotIt')}
         </button>
       </div>
     </div>

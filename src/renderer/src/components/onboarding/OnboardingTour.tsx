@@ -5,6 +5,7 @@ import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { TOUR_STEPS, walkthroughFor } from './tourSteps'
 import { approvalShowing } from '../../hooks/useClickOutside'
+import { useT } from '../../lib/i18n'
 
 // A first-run walkthrough, mounted once at the app root.
 //
@@ -13,6 +14,7 @@ import { approvalShowing } from '../../hooks/useClickOutside'
 // while it is explained. A tour that hides the app while describing it teaches
 // nothing you can act on.
 export function OnboardingTour(): React.JSX.Element | null {
+  const t = useT()
   const open = useOnboarding((s) => s.open)
   const step = useOnboarding((s) => s.step)
   const next = useOnboarding((s) => s.next)
@@ -73,23 +75,23 @@ export function OnboardingTour(): React.JSX.Element | null {
   const last = step === steps.length - 1
 
   return (
-    <div className="tour-card" role="dialog" aria-label="OpsMaxx walkthrough">
+    <div className="tour-card" role="dialog" aria-label={t('onboarding.tour.ariaLabel')}>
       <div className="row" style={{ gap: 8, alignItems: 'center' }}>
         <Compass size={16} style={{ color: 'var(--accent-ink)' }} />
-        <b>{current.title}</b>
+        <b>{t(current.titleKey)}</b>
         <span className="spacer" />
         <span className="server-meta">
-          {step + 1} / {steps.length}
+          {t('onboarding.tour.stepCount', { step: step + 1, total: steps.length })}
         </span>
       </div>
 
       <div className="s-desc" style={{ marginTop: 8 }}>
-        {current.body}
+        {t(current.bodyKey)}
       </div>
 
-      {current.action && (
+      {current.actionKey && (
         <div className="tour-action">
-          <Check size={12} /> {current.action}
+          <Check size={12} /> {t(current.actionKey)}
         </div>
       )}
 
@@ -98,7 +100,7 @@ export function OnboardingTour(): React.JSX.Element | null {
           <button
             key={s.id}
             className={clsx('tour-dot', i === step && 'active')}
-            aria-label={s.title}
+            aria-label={t(s.titleKey)}
             onClick={() => goTo(i)}
           />
         ))}
@@ -106,23 +108,23 @@ export function OnboardingTour(): React.JSX.Element | null {
 
       <div className="row" style={{ gap: 8, marginTop: 10 }}>
         <button className="btn sm" disabled={step === 0} onClick={back}>
-          <ArrowLeft size={13} /> Back
+          <ArrowLeft size={13} /> {t('common.back')}
         </button>
         <button className="btn sm primary" onClick={() => (last ? finish() : next())}>
           {last ? (
             <>
-              <Check size={13} /> Done
+              <Check size={13} /> {t('common.done')}
             </>
           ) : (
             <>
-              Next <ArrowRight size={13} />
+              {t('common.next')} <ArrowRight size={13} />
             </>
           )}
         </button>
         <span className="spacer" />
         {!last && (
           <button className="btn sm ghost" onClick={finish}>
-            Skip
+            {t('common.skip')}
           </button>
         )}
       </div>

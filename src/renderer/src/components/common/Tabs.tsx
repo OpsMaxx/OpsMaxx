@@ -1,5 +1,7 @@
 import { useRef, type ReactNode } from 'react'
 import './primitives.css'
+import { useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
 export interface TabItem {
   id: string
@@ -22,7 +24,7 @@ export interface TabsProps {
   idPrefix?: string
 }
 
-const DOT_TEXT = { set: 'set', problem: 'has a problem' } as const
+const DOT_TEXT: Record<'set' | 'problem', MessageKey> = { set: 'ui.tabs.dotSet', problem: 'ui.tabs.dotProblem' }
 
 /**
  * A tablist. Arrow keys move and select (automatic activation), Home and End
@@ -30,6 +32,7 @@ const DOT_TEXT = { set: 'set', problem: 'has a problem' } as const
  * shown only when it is above zero.
  */
 export function Tabs({ tabs, active, onChange, trailing, ariaLabel, idPrefix }: TabsProps): React.JSX.Element {
+  const tr = useT()
   const list = useRef<HTMLDivElement>(null)
   const go = (index: number): void => {
     const t = tabs[(index + tabs.length) % tabs.length]
@@ -75,8 +78,8 @@ export function Tabs({ tabs, active, onChange, trailing, ariaLabel, idPrefix }: 
               {t.label}
               {!!t.count && t.count > 0 && <span className="hc-tab-count">{t.count}</span>}
               {t.dot && (
-                <span className={`hc-tab-dot hc-tab-dot--${t.dot}`} title={DOT_TEXT[t.dot]}>
-                  <span className="hc-sr-only">{`, ${DOT_TEXT[t.dot]}`}</span>
+                <span className={`hc-tab-dot hc-tab-dot--${t.dot}`} title={tr(DOT_TEXT[t.dot])}>
+                  <span className="hc-sr-only">{`, ${tr(DOT_TEXT[t.dot])}`}</span>
                 </span>
               )}
             </button>

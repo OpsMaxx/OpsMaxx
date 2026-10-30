@@ -16,6 +16,7 @@ import { ServerMonitorCard } from './ServerMonitorCard'
 import { fleetTotals, useFleet } from '../../store/fleet'
 import { bridgeHas } from '../../lib/bridge'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import type { MonitorGroup, Server } from '../../types'
 import { AlertsPanel } from './AlertsPanel'
 import { useAlerts } from '../../store/alerts'
@@ -261,6 +262,7 @@ function GroupSection({
  * Every one of those was being thrown away by a trip to another icon.
  */
 export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JSX.Element {
+  const t = useT()
   const servers = useWorkspaceServers()
   const openServerTab = useApp((s) => s.openServer)
   const setModal = useApp((s) => s.setModal)
@@ -604,7 +606,7 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
                 covers the first rows of the table. Reused rather than
                 reinvented. */}
             <h1 className="ui-page-title">
-              <PanelAbout title={promoted.label}>{promoted.detail}</PanelAbout>
+              <PanelAbout title={t(promoted.labelKey)}>{t(promoted.detailKey)}</PanelAbout>
             </h1>
           </div>
         ) : (
@@ -649,7 +651,7 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
               className={clsx('seg-btn', activeTab === m.id && 'active')}
               onClick={() => setTab(m.id)}
             >
-              {m.label}
+              {t(m.labelKey)}
             </button>
           ))}
 
@@ -683,7 +685,7 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
                         setMoreOpen(false)
                       }}
                     >
-                      <span className="s-title">{m.label}</span>
+                      <span className="s-title">{t(m.labelKey)}</span>
                     </button>
                   ))}
                 </div>
@@ -724,8 +726,8 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
                   </div>
                   {offTabs.map((m) => (
                     <div key={m.id} className="mon-pop-row static">
-                      <span className="s-title">{m.label}</span>
-                      <span className="s-desc">{m.detail}</span>
+                      <span className="s-title">{t(m.labelKey)}</span>
+                      <span className="s-desc">{t(m.detailKey)}</span>
                     </div>
                   ))}
                   <button

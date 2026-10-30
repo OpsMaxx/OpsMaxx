@@ -12,21 +12,24 @@ import { VaultSidebar } from '../vault/VaultSidebar'
 import { useVault } from '../../store/vault'
 import { openTunnels, useNav } from '../../store/nav'
 import { MODULES, isPromotedModule, type ModuleId } from '../../../../shared/modules'
+import { useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
-const titles: Record<string, string> = {
-  connections: 'Connections',
-  databases: 'Databases',
-  tunnels: 'Tunnels & VPN',
-  http: 'HTTP Client',
+const titles: Record<string, MessageKey> = {
+  connections: 'layout.activity.connections',
+  databases: 'layout.activity.databases',
+  tunnels: 'layout.activity.tunnels',
+  http: 'layout.activity.http',
   // Overridden below when the Operations rail is showing, and again when a
   // promoted module is: all of them share one ActivityView, so this map alone
   // titled the Operations sidebar "Fleet Monitor" while the page beside it said
   // Operations — and would now do the same to Docker and Kubernetes.
-  monitor: 'Fleet Monitor',
-  vault: 'Vault'
+  monitor: 'layout.sidebar.fleetMonitor',
+  vault: 'layout.activity.vault'
 }
 
 export function Sidebar(): React.JSX.Element | null {
+  const t = useT()
   const activity = useApp((s) => s.activity)
   const fleetRail = useNav((s) => s.fleetRail)
   const monitorTab = useNav((s) => s.monitorTab)
@@ -64,16 +67,17 @@ export function Sidebar(): React.JSX.Element | null {
 
   // What the header says. Three cases share `activity === 'monitor'`: the
   // Operations rail, a promoted module's own destination, and Monitoring itself.
-  // The registry `label` is used for a promoted module rather than a second copy
-  // of the four names, so renaming a module renames its sidebar with it.
-  const promotedTitle =
+  // The registry `labelKey` is used for a promoted module rather than a second
+  // copy of the four names, so renaming a module renames its sidebar with it.
+  const promotedKey =
     activity === 'monitor' && fleetRail === 'monitor' && isPromotedModule(monitorTab as ModuleId)
-      ? (MODULES.find((m) => m.id === monitorTab)?.label ?? null)
-      : null
+      ? MODULES.find((m) => m.id === monitorTab)?.labelKey
+      : undefined
+  const promotedTitle = promotedKey ? t(promotedKey) : null
   const title =
     activity === 'monitor' && fleetRail === 'operations'
-      ? 'Operations'
-      : (promotedTitle ?? titles[activity] ?? '')
+      ? t('layout.activity.operations')
+      : (promotedTitle ?? (titles[activity] ? t(titles[activity]) : ''))
 
   return (
     <aside className="sidebar" style={{ width }}>
@@ -84,30 +88,30 @@ export function Sidebar(): React.JSX.Element | null {
         <div className="sidebar-actions">
           {activity === 'connections' && (
             <>
-              <button className="icon-btn" title="New folder" onClick={() => addFolder('New folder')}>
+              <button className="icon-btn" title={t('layout.sidebar.newFolder')} onClick={() => addFolder(t('layout.sidebar.newFolderName'))}>
                 <FolderPlus size={15} />
               </button>
               <button
                 className="icon-btn"
-                title="Import from ~/.ssh/config"
+                title={t('layout.sidebar.importSsh')}
                 onClick={() => setModal('import-ssh')}
               >
                 <Download size={15} />
               </button>
-              <button className="icon-btn" title="Add server" onClick={() => setModal('add-server')}>
+              <button className="icon-btn" title={t('layout.sidebar.addServer')} onClick={() => setModal('add-server')}>
                 <Plus size={16} />
               </button>
             </>
           )}
           {activity === 'databases' && (
-            <button className="icon-btn" title="Add database" onClick={() => setModal('add-database')}>
+            <button className="icon-btn" title={t('layout.sidebar.addDatabase')} onClick={() => setModal('add-database')}>
               <Plus size={16} />
             </button>
           )}
           {activity === 'tunnels' && (
             <button
               className="icon-btn"
-              title="New tunnel"
+              title={t('layout.sidebar.newTunnel')}
               onClick={() => openTunnels({ kind: 'create' })}
             >
               <Network size={15} />
@@ -120,14 +124,14 @@ export function Sidebar(): React.JSX.Element | null {
           {activity === 'monitor' && fleetRail === 'monitor' && (
             <button
               className="icon-btn"
-              title="New monitor group"
-              onClick={() => addMonitorGroup('New group')}
+              title={t('layout.sidebar.newMonitorGroup')}
+              onClick={() => addMonitorGroup(t('layout.sidebar.newMonitorGroupName'))}
             >
               <FolderPlus size={15} />
             </button>
           )}
           {activity === 'vault' && vaultUnlocked && (
-            <button className="icon-btn" title="New entry" onClick={() => void addVaultEntry()}>
+            <button className="icon-btn" title={t('layout.sidebar.newEntry')} onClick={() => void addVaultEntry()}>
               <Plus size={16} />
             </button>
           )}

@@ -1,6 +1,8 @@
 import type { ModuleId, ModuleState } from '../../../../shared/modules'
 import type { UpdateChannel, CheckIntervalHours, UpdatePrefs } from '../../../../shared/updater'
 import type { ThemeMode } from '../../store/app'
+import type { MessageKey } from '../../../../shared/i18n'
+import { t } from '../../lib/i18n'
 
 /**
  * The questions a first run asks before the app is handed over.
@@ -57,11 +59,11 @@ import type { ThemeMode } from '../../store/app'
 export interface SetupQuestion {
   id: string
   /** Asked in the second person, answerable without knowing the product. */
-  question: string
+  questionKey: MessageKey
   /** What answering yes turns on, in the user's terms rather than module ids. */
-  detail: string
+  detailKey: MessageKey
   /** The honest cost, shown whether or not it flatters the answer. */
-  cost: string
+  costKey: MessageKey
   modules: ModuleId[]
   /**
    * The answer this question's screen opens on.
@@ -77,35 +79,35 @@ export interface SetupQuestion {
 export const SETUP_QUESTIONS: SetupQuestion[] = [
   {
     id: 'containers',
-    question: 'Do you work with containers?',
-    detail: 'Docker and Kubernetes panels on every server.',
-    cost: 'Reads only, and nothing runs until you open the panel.',
+    questionKey: 'onboarding.questions.containers.question',
+    detailKey: 'onboarding.questions.containers.detail',
+    costKey: 'onboarding.questions.containers.cost',
     modules: ['docker', 'kubernetes'],
     preselected: true
   },
   {
     id: 'fleet',
-    question: 'Do you look after a fleet, or a couple of machines?',
-    detail: 'Inventory, drift, a change log and security posture across the workspace.',
-    cost: 'These read every host on a schedule, including running its package manager once an hour.',
+    questionKey: 'onboarding.questions.fleet.question',
+    detailKey: 'onboarding.questions.fleet.detail',
+    costKey: 'onboarding.questions.fleet.cost',
     modules: ['inventory', 'drift', 'changeLog', 'posture'],
     preselected: false
   },
   {
     id: 'operate',
-    question: 'Do you change servers from here, or only watch them?',
-    detail: 'Run commands across many servers, apply package updates, leave jobs running.',
-    cost: 'This is the half of the app that writes to your servers.',
+    questionKey: 'onboarding.questions.operate.question',
+    detailKey: 'onboarding.questions.operate.detail',
+    costKey: 'onboarding.questions.operate.cost',
     modules: ['broadcast', 'patch', 'jobs'],
     preselected: false
   },
   {
     id: 'cicd',
-    question: 'Do your servers get changed by a pipeline?',
-    detail: 'Jenkins, GitLab CI or GitHub Actions, beside the server the run changed.',
+    questionKey: 'onboarding.questions.cicd.question',
+    detailKey: 'onboarding.questions.cicd.detail',
     // Two costs, because there are two and hiding either would flatter the
     // answer: the traffic leaves the machine, and the token is long-lived.
-    cost: 'This one talks to a service outside your estate, on a timer, with a token you paste in.',
+    costKey: 'onboarding.questions.cicd.cost',
     // `cicd` only. `cicdTrigger` is a module this card deliberately cannot
     // reach, for the reason `keyRevoke` cannot: "do you use CI" is a question
     // about what you have, and starting builds on infrastructure OpsMaxx does
@@ -215,9 +217,9 @@ export type SettingsPatch = Partial<{
 /** One option on a preference control. */
 export interface PrefOption<T> {
   value: T
-  label: string
+  labelKey: MessageKey
   /** The cost or consequence, where there is one worth stating. */
-  detail?: string
+  detailKey?: MessageKey
   /**
    * How this option reads in the COLLAPSED group header, where it has no label
    * beside it to make sense of.
@@ -229,7 +231,7 @@ export interface PrefOption<T> {
    * string means "leave me out of the summary entirely", which is the right answer
    * for a default that is already implied by its neighbour.
    */
-  short?: string
+  shortKey?: MessageKey | ''
 }
 
 /**
@@ -241,9 +243,9 @@ export interface PrefOption<T> {
  */
 export interface PrefControl {
   key: keyof PrefAnswers
-  label: string
+  labelKey: MessageKey
   /** What it does, in the user's terms. */
-  detail: string
+  detailKey: MessageKey
   /** Shown as radio buttons when there are two or three, a dropdown beyond. */
   options: PrefOption<string | number | boolean>[]
   /** The value the app behaves as today, so the card can show it as current. */
@@ -254,160 +256,152 @@ export interface PrefControl {
 
 export interface PrefGroup {
   id: string
-  label: string
+  labelKey: MessageKey
   /** One line, shown under the group title when it is open. */
-  detail: string
+  detailKey: MessageKey
   controls: PrefControl[]
 }
 
 export const PREF_GROUPS: PrefGroup[] = [
   {
     id: 'updates',
-    label: 'Updates & releases',
-    detail:
-      'How OpsMaxx finds and takes new versions. Everything here is also in Settings › General.',
+    labelKey: 'onboarding.prefs.updates.label',
+    detailKey: 'onboarding.prefs.updates.detail',
     controls: [
       {
         key: 'updateChannel',
-        label: 'Which builds to be offered',
-        detail:
-          'Beta cascades — a beta user is offered betas and stable releases, whichever is newer.',
+        labelKey: 'onboarding.prefs.updateChannel.label',
+        detailKey: 'onboarding.prefs.updateChannel.detail',
         fallback: 'stable',
         options: [
-          { value: 'stable', label: 'Stable only', short: 'Stable' },
-          { value: 'beta', label: 'Beta and stable', detail: 'Earlier features, less proving.', short: 'Beta' }
+          { value: 'stable', labelKey: 'onboarding.prefs.updateChannel.stable', shortKey: 'onboarding.prefs.updateChannel.stableShort' },
+          { value: 'beta', labelKey: 'onboarding.prefs.updateChannel.beta', detailKey: 'onboarding.prefs.updateChannel.betaDetail', shortKey: 'onboarding.prefs.updateChannel.betaShort' }
         ]
       },
       {
         key: 'updateAutoCheck',
-        label: 'Check automatically',
-        detail: 'Off means OpsMaxx only ever looks when you press the button.',
+        labelKey: 'onboarding.prefs.updateAutoCheck.label',
+        detailKey: 'onboarding.prefs.updateAutoCheck.detail',
         fallback: true,
         options: [
           // Omitted when on: the interval line beside it already says checking
           // happens, and "Yes" beside "every 6 hours" is a word with no subject.
-          { value: true, label: 'Yes', short: '' },
-          { value: false, label: 'No — I will check', short: 'manual checks only' }
+          { value: true, labelKey: 'common.yes', shortKey: '' },
+          { value: false, labelKey: 'onboarding.prefs.updateAutoCheck.no', shortKey: 'onboarding.prefs.updateAutoCheck.noShort' }
         ]
       },
       {
         key: 'updateCheckIntervalHours',
-        label: 'How often',
-        detail: 'Zero means only at launch; anything else is additionally re-checked while open.',
+        labelKey: 'onboarding.prefs.updateCheckIntervalHours.label',
+        detailKey: 'onboarding.prefs.updateCheckIntervalHours.detail',
         fallback: 6,
         requires: { key: 'updateAutoCheck', is: true },
         options: [
-          { value: 0, label: 'Only at launch', short: 'checked at launch' },
-          { value: 6, label: 'Every 6 hours', short: 'checked every 6 hours' },
-          { value: 24, label: 'Once a day', short: 'checked daily' }
+          { value: 0, labelKey: 'onboarding.prefs.updateCheckIntervalHours.launch', shortKey: 'onboarding.prefs.updateCheckIntervalHours.launchShort' },
+          { value: 6, labelKey: 'onboarding.prefs.updateCheckIntervalHours.sixHours', shortKey: 'onboarding.prefs.updateCheckIntervalHours.sixHoursShort' },
+          { value: 24, labelKey: 'onboarding.prefs.updateCheckIntervalHours.daily', shortKey: 'onboarding.prefs.updateCheckIntervalHours.dailyShort' }
         ]
       },
       {
         key: 'updateAutoDownload',
-        label: 'Download in the background',
-        detail:
-          'Nothing installs itself either way — applying an update is always a separate press.',
+        labelKey: 'onboarding.prefs.updateAutoDownload.label',
+        detailKey: 'onboarding.prefs.updateAutoDownload.detail',
         fallback: true,
         requires: { key: 'updateAutoCheck', is: true },
         options: [
-          { value: true, label: 'Yes', short: 'downloaded automatically' },
-          { value: false, label: 'Tell me first', short: 'asks before downloading' }
+          { value: true, labelKey: 'common.yes', shortKey: 'onboarding.prefs.updateAutoDownload.yesShort' },
+          { value: false, labelKey: 'onboarding.prefs.updateAutoDownload.ask', shortKey: 'onboarding.prefs.updateAutoDownload.askShort' }
         ]
       }
     ]
   },
   {
     id: 'fleet',
-    label: 'Watching the estate',
-    detail:
-      'Whether OpsMaxx samples your servers when nobody is looking at them. Off by default, and this is the switch worth understanding before you leave it.',
+    labelKey: 'onboarding.prefs.fleet.label',
+    detailKey: 'onboarding.prefs.fleet.detail',
     controls: [
       {
         key: 'fleetSamplingEnabled',
-        label: 'Sample servers in the background',
+        labelKey: 'onboarding.prefs.fleetSamplingEnabled.label',
         // The honest cost, stated the way the module questions state theirs.
-        detail:
-          'On means OpsMaxx keeps connections to every server in the workspace open on a schedule, whether or not the monitor is on screen — so alerts and capacity trends keep working while the window is closed. Off means a server is only measured while you are looking at it.',
+        detailKey: 'onboarding.prefs.fleetSamplingEnabled.detail',
         fallback: false,
         options: [
-          { value: false, label: 'Only while I am looking', short: 'only while open' },
-          { value: true, label: 'Keep watching in the background', short: 'watched in the background' }
+          { value: false, labelKey: 'onboarding.prefs.fleetSamplingEnabled.whileLooking', shortKey: 'onboarding.prefs.fleetSamplingEnabled.whileLookingShort' },
+          { value: true, labelKey: 'onboarding.prefs.fleetSamplingEnabled.background', shortKey: 'onboarding.prefs.fleetSamplingEnabled.backgroundShort' }
         ]
       },
       {
         key: 'fleetSamplingIntervalMs',
-        label: 'How often',
-        detail: 'Every sample is one connection per server. More often is not more accurate.',
+        labelKey: 'onboarding.prefs.fleetSamplingIntervalMs.label',
+        detailKey: 'onboarding.prefs.fleetSamplingIntervalMs.detail',
         fallback: 120000,
         requires: { key: 'fleetSamplingEnabled', is: true },
         options: [
-          { value: 60000, label: 'Every minute', short: 'every minute' },
-          { value: 120000, label: 'Every 2 minutes', short: 'every 2 minutes' },
-          { value: 300000, label: 'Every 5 minutes', short: 'every 5 minutes' },
-          { value: 900000, label: 'Every 15 minutes', short: 'every 15 minutes' }
+          { value: 60000, labelKey: 'onboarding.prefs.fleetSamplingIntervalMs.oneMinute', shortKey: 'onboarding.prefs.fleetSamplingIntervalMs.oneMinuteShort' },
+          { value: 120000, labelKey: 'onboarding.prefs.fleetSamplingIntervalMs.twoMinutes', shortKey: 'onboarding.prefs.fleetSamplingIntervalMs.twoMinutesShort' },
+          { value: 300000, labelKey: 'onboarding.prefs.fleetSamplingIntervalMs.fiveMinutes', shortKey: 'onboarding.prefs.fleetSamplingIntervalMs.fiveMinutesShort' },
+          { value: 900000, labelKey: 'onboarding.prefs.fleetSamplingIntervalMs.fifteenMinutes', shortKey: 'onboarding.prefs.fleetSamplingIntervalMs.fifteenMinutesShort' }
         ]
       }
     ]
   },
   {
     id: 'alerts',
-    label: 'Alerts',
-    detail:
-      'The master switch for every alert and every webhook: CPU and memory over the threshold, full disks, failed systemd units, load average.',
+    labelKey: 'onboarding.prefs.alerts.label',
+    detailKey: 'onboarding.prefs.alerts.detail',
     controls: [
       {
         key: 'resourceAlertsEnabled',
-        label: 'Tell me when a server is struggling',
-        detail:
-          'Covers failed units and full disks as well as CPU and memory. Switching it off also takes down any alerts already showing.',
+        labelKey: 'onboarding.prefs.resourceAlertsEnabled.label',
+        detailKey: 'onboarding.prefs.resourceAlertsEnabled.detail',
         fallback: true,
         options: [
           // Omitted when on: the threshold beside it carries the meaning.
-          { value: true, label: 'Yes', short: '' },
-          { value: false, label: 'No alerts', short: 'off' }
+          { value: true, labelKey: 'common.yes', shortKey: '' },
+          { value: false, labelKey: 'onboarding.prefs.resourceAlertsEnabled.off', shortKey: 'onboarding.prefs.resourceAlertsEnabled.offShort' }
         ]
       },
       {
         key: 'resourceAlertThreshold',
-        label: 'At what point',
-        detail:
-          'The same figure applies to CPU and to memory. Disk has its own, fixed at 85%. Per-server overrides live in Settings.',
+        labelKey: 'onboarding.prefs.resourceAlertThreshold.label',
+        detailKey: 'onboarding.prefs.resourceAlertThreshold.detail',
         fallback: 80,
         requires: { key: 'resourceAlertsEnabled', is: true },
         options: [
-          { value: 70, label: '70% — tell me early', short: 'over 70%' },
-          { value: 80, label: '80%', short: 'over 80%' },
-          { value: 90, label: '90% — only when it is serious', short: 'over 90%' }
+          { value: 70, labelKey: 'onboarding.prefs.resourceAlertThreshold.early', shortKey: 'onboarding.prefs.resourceAlertThreshold.earlyShort' },
+          { value: 80, labelKey: 'onboarding.prefs.resourceAlertThreshold.normal', shortKey: 'onboarding.prefs.resourceAlertThreshold.normalShort' },
+          { value: 90, labelKey: 'onboarding.prefs.resourceAlertThreshold.serious', shortKey: 'onboarding.prefs.resourceAlertThreshold.seriousShort' }
         ]
       }
     ]
   },
   {
     id: 'look',
-    label: 'Look & feel',
-    detail: 'Both of these are instant and both are in Settings › Appearance afterwards.',
+    labelKey: 'onboarding.prefs.look.label',
+    detailKey: 'onboarding.prefs.look.detail',
     controls: [
       {
         key: 'theme',
-        label: 'Theme',
-        detail: 'System follows your operating system, including when it changes at sunset.',
+        labelKey: 'onboarding.prefs.theme.label',
+        detailKey: 'onboarding.prefs.theme.detail',
         fallback: 'opsmaxx',
         options: [
-          { value: 'opsmaxx', label: 'OpsMaxx' },
-          { value: 'opsmaxx-light', label: 'OpsMaxx Light' },
-          { value: 'dark', label: 'Classic dark' },
-          { value: 'light', label: 'Classic light' },
-          { value: 'system', label: 'Match my system' }
+          { value: 'opsmaxx', labelKey: 'onboarding.prefs.theme.opsmaxx' },
+          { value: 'opsmaxx-light', labelKey: 'onboarding.prefs.theme.opsmaxxLight' },
+          { value: 'dark', labelKey: 'onboarding.prefs.theme.dark' },
+          { value: 'light', labelKey: 'onboarding.prefs.theme.light' },
+          { value: 'system', labelKey: 'onboarding.prefs.theme.system' }
         ]
       },
       {
         key: 'compactDensity',
-        label: 'Density',
-        detail: 'Compact tightens row heights and padding across every table in the app.',
+        labelKey: 'onboarding.prefs.compactDensity.label',
+        detailKey: 'onboarding.prefs.compactDensity.detail',
         fallback: false,
         options: [
-          { value: false, label: 'Comfortable' },
-          { value: true, label: 'Compact' }
+          { value: false, labelKey: 'onboarding.prefs.compactDensity.comfortable' },
+          { value: true, labelKey: 'onboarding.prefs.compactDensity.compact' }
         ]
       }
     ]
@@ -446,10 +440,10 @@ export function prefSummary(g: PrefGroup, answers: PrefAnswers): string {
     const v = prefValue(c, answers)
     const opt = c.options.find((o) => o.value === v)
     if (!opt) continue
-    // `short` where the option carries one -- including an empty one, which means
-    // "omit me". Only fall back to the label when nothing was said.
-    const text = opt.short !== undefined ? opt.short : opt.label.replace(/ —.*$/, '')
-    if (text) parts.push(text)
+    // `shortKey` where the option carries one -- including an empty one, which
+    // means "omit me". Only fall back to the label when nothing was said.
+    const key = opt.shortKey !== undefined ? opt.shortKey : opt.labelKey
+    if (key) parts.push(t(key))
   }
   return parts.join(' · ')
 }
@@ -534,9 +528,9 @@ export function setupPatch(answers: PrefAnswers): {
 
 export interface Persona {
   id: string
-  label: string
+  labelKey: MessageKey
   /** One line, in the second person, recognisable without knowing the product. */
-  detail: string
+  detailKey: MessageKey
   /** Answers to SETUP_QUESTIONS. Ids not named here are left false. */
   answers: Record<string, boolean>
   /** Preference answers. Kept minimal on purpose — see above. */
@@ -546,29 +540,29 @@ export interface Persona {
 export const PERSONAS: Persona[] = [
   {
     id: 'devops',
-    label: 'DevOps engineer',
-    detail: 'Containers and pipelines, and you change the servers as well as watching them.',
+    labelKey: 'onboarding.personas.devops.label',
+    detailKey: 'onboarding.personas.devops.detail',
     answers: { containers: true, cicd: true, operate: true, fleet: false },
     prefs: {}
   },
   {
     id: 'cloud',
-    label: 'Cloud / platform engineer',
-    detail: 'Mostly Kubernetes, with an eye on what the estate is made of and where it is heading.',
+    labelKey: 'onboarding.personas.cloud.label',
+    detailKey: 'onboarding.personas.cloud.detail',
     answers: { containers: true, cicd: true, fleet: true, operate: false },
     prefs: { fleetSamplingEnabled: true }
   },
   {
     id: 'infra',
-    label: 'Infrastructure / sysadmin',
-    detail: 'You own the machines: what is on them, what needs patching, who can get in.',
+    labelKey: 'onboarding.personas.infra.label',
+    detailKey: 'onboarding.personas.infra.detail',
     answers: { fleet: true, operate: true, containers: false, cicd: false },
     prefs: { fleetSamplingEnabled: true }
   },
   {
     id: 'sre',
-    label: 'SRE / on-call',
-    detail: 'You need to know something is wrong before somebody tells you. Mostly reading.',
+    labelKey: 'onboarding.personas.sre.label',
+    detailKey: 'onboarding.personas.sre.detail',
     answers: { containers: true, fleet: true, cicd: false, operate: false },
     prefs: { fleetSamplingEnabled: true }
   }

@@ -32,12 +32,26 @@ import { join } from 'node:path'
  * status-bar chip and Settings, and both offer the unlock — checking the store
  * would demand an affordance from a file that renders nothing.
  */
+// The sentence now lives in en.json and a component names it by key, so a
+// file "says" it when it uses one of those keys as much as when it spells it
+// out. Plural forms fold to the base key the component actually passes.
+const LOCKED = /vault is locked|vault locked/i
+const en: Record<string, string> = JSON.parse(readFileSync('src/shared/locales/en.json', 'utf8'))
+const lockedKeys = [
+  ...new Set(
+    Object.entries(en)
+      .filter(([, v]) => LOCKED.test(v))
+      .map(([k]) => k.replace(/_(zero|one|two|few|many|other)$/, ''))
+  )
+]
+const PATTERN = ['vault is locked', 'vault locked', ...lockedKeys.map((k) => `['"\`]${k.replace(/\./g, '\\.')}['"\`]`)].join('|')
+
 function offenders(): string[] {
   let hits = ''
   try {
     hits = execFileSync(
       'git',
-      ['grep', '-l', '-i', '-E', 'vault is locked|vault locked', '--', 'src/renderer/src/components'],
+      ['grep', '-l', '-i', '-E', PATTERN, '--', 'src/renderer/src/components'],
       { encoding: 'utf8' }
     )
   } catch (e) {
@@ -56,7 +70,7 @@ function offenders(): string[] {
         .replace(/\{\/\*[\s\S]*?\*\/\}/g, '')
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .replace(/^\s*\/\/.*$/gm, '')
-      return /vault is locked|vault locked/i.test(prose)
+      return new RegExp(PATTERN, 'i').test(prose)
     })
 }
 

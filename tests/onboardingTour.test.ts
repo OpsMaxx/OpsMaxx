@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 
 import { FEATURE_TIPS, FULL_WALKTHROUGH, TOUR_STEPS } from '../src/renderer/src/components/onboarding/tourSteps'
+import { englishT } from '../src/shared/i18n'
 
 // The tour was eight panels shown before the user had done anything. Its only
 // actionable step was third; step four parked them in front of a live "Master
@@ -18,19 +19,19 @@ describe('first run asks for one thing', () => {
   // else is a thing to learn when they get there.
   it('opens on the only step a new user can act on', () => {
     expect(TOUR_STEPS[0].view).toBe('connections')
-    expect(TOUR_STEPS[0].action).toMatch(/add a server|import/i)
+    expect(englishT(TOUR_STEPS[0].actionKey!)).toMatch(/add a server|import/i)
   })
 
   // THE assertion. A password chosen to get past a tour panel is chosen
   // carelessly, and it cannot be recovered.
   it('never asks for a master password before the user has done anything', () => {
-    const text = TOUR_STEPS.map((s) => `${s.title} ${s.body} ${s.action ?? ''}`).join(' ')
+    const text = TOUR_STEPS.map((s) => `${englishT(s.titleKey)} ${englishT(s.bodyKey)} ${s.actionKey ? englishT(s.actionKey) : ''}`).join(' ')
     expect(text.toLowerCase()).not.toContain('master password')
     expect(TOUR_STEPS.some((s) => s.view === 'vault')).toBe(false)
   })
 
   it('ends on the shortcut that reaches everything else', () => {
-    expect(TOUR_STEPS[1].body).toMatch(/Cmd\/Ctrl\+K/)
+    expect(englishT(TOUR_STEPS[1].bodyKey)).toMatch(/Cmd\/Ctrl\+K/)
   })
 })
 
@@ -46,7 +47,7 @@ describe('the six deferred steps are deferred, not deleted', () => {
   it('anchors every tip to a view', () => {
     for (const t of FEATURE_TIPS) {
       expect(t.view, t.id).toBeTruthy()
-      expect(t.body.length, t.id).toBeGreaterThan(40)
+      expect(englishT(t.bodyKey).length, t.id).toBeGreaterThan(40)
     }
   })
 

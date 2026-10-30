@@ -314,8 +314,8 @@ describe('a promoted module gets its own page, not Monitoring\'s', () => {
   })
 
   it('renders the module label and detail as the page title', () => {
-    expect(FM).toMatch(/\{promoted\.label\}/)
-    expect(FM).toMatch(/\{promoted\.detail\}/)
+    expect(FM).toMatch(/t\(promoted\.labelKey\)/)
+    expect(FM).toMatch(/t\(promoted\.detailKey\)/)
   })
 
   it('only offers a header for a module that is actually mounted', () => {

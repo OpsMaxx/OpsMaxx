@@ -7,8 +7,8 @@ documents:
     visibility: internal
     title: Translate the UI with a small in-house translator that reads i18next-format packs
     status: draft
-    hash: a99fe82071205360
-    lines: 114
+    hash: 776f724576208570
+    lines: 120
   claude:
     path: CLAUDE.md
     type: unknown

@@ -79,9 +79,12 @@ language packs in the file format i18next reads.
 - Weblate and Crowdin read these packs as they are.
 
 **Harder:**
-- There is no `<Trans>` yet. Sentences that wrap `<b>`, `<code>` or `<a>` (about 128 in the
-  renderer) need one before they can be extracted.
+- Sentences with markup go through `src/renderer/src/lib/Trans.tsx`, which has
+  react-i18next's props but no nesting: a tag inside a tag needs splitting.
 - There is no ICU `select` yet for gender or variant forms.
+- English singular wording that differs from the plural in more than grammar ("Remove it"
+  against "Remove all ({{count}})") cannot survive a language with no `_one` form, such as
+  Chinese. Those need a separate key chosen in code.
 - A string missing from a pack shows in English with no runtime warning. Coverage is
   visible only by comparing pack sizes.
 
@@ -90,9 +93,12 @@ this file:
 - the translator needs more than `<Trans>` and a `select`, or
 - a contributor workflow needs i18next-specific tooling.
 
-**Known gap:** Settings search finds the row to scroll to by comparing its English title
-with the rendered text. In a translated UI it still opens the right section, but it no
-longer scrolls to the row.
+**Settings search** matches the translated title and description, plus the English title and
+the English aliases, so English technical terms still find a row in any language. The jump to
+a row compares the row's title with the translated title of the same key.
+
+**Rail labels** under the activity-bar icons have their own `*Rail` keys, and
+`tests/activityBarLabels.test.tsx` holds every language to the width English was measured at.
 
 ## Security implications
 

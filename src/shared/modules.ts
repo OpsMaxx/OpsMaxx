@@ -1,3 +1,4 @@
+import type { MessageKey } from './i18n'
 // Optional first-party modules — plugin system, part (a).
 //
 // Features that ship with the app but are off until enabled, and whose weight
@@ -97,9 +98,10 @@ export const READ_SURFACE_WRITE_EXCEPTIONS: ModuleId[] = []
 
 export interface ModuleDef {
   id: ModuleId
-  label: string
+  /** What it is called, in shared/locales. */
+  labelKey: MessageKey
   /** What enabling it actually gives you. Shown in Settings. */
-  detail: string
+  detailKey: MessageKey
   /** See ModuleSurface. `read` may not write to a server; `operate` exists to. */
   surface: ModuleSurface
   /**
@@ -121,17 +123,15 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'fleetSearch',
     surface: 'read',
-    label: 'Fleet-wide search',
-    detail:
-      'Search systemd units, listening ports and servers across the workspace, from data the monitor already collects.',
+    labelKey: 'modules.fleetSearch.label',
+    detailKey: 'modules.fleetSearch.detail',
     defaultEnabled: true
   },
   {
     id: 'inventory',
     surface: 'read',
-    label: 'Inventory',
-    detail:
-      'What every server is — distribution, architecture, CPU, virtualisation — and what it needs: pending updates, security updates where the distribution publishes them, and whether a reboot is owed. Read-only, and nothing is refreshed: package caches are read, never updated, and their age is reported alongside the counts.',
+    labelKey: 'modules.inventory.label',
+    detailKey: 'modules.inventory.detail',
     // OFF for a fresh install too, not merely for upgrades.
     //
     // Enabling it means running the host's package manager on every host once
@@ -146,9 +146,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'patch',
     surface: 'operate',
-    label: 'Patch and update management',
-    detail:
-      'What every server needs — pending updates, security updates where the distribution publishes them, and whether a reboot is owed — and applying them in waves, with a health check between waves and a hard refusal to restart a server other servers connect through. It never patches on a schedule and never decides for you.',
+    labelKey: 'modules.patch.label',
+    detailKey: 'modules.patch.detail',
     // OFF by default, and not merely for upgrades.
     //
     // This is the only module that can INSTALL SOFTWARE ON YOUR SERVERS. The
@@ -162,9 +161,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'access',
     surface: 'read',
-    label: 'Fleet keys and access',
-    detail:
-      'Which key opens which server and whose it is: every authorized_keys file across the estate, fingerprinted, with locked and expired accounts and administrative group membership alongside. A server whose files could not be read is shown as unreadable and excluded from every count — never as a server with no keys. Reading is the whole of it: nothing on this tab writes to a server, and removing a key is a separate module on the Operations side.',
+    labelKey: 'modules.access.label',
+    detailKey: 'modules.access.detail',
     // OFF by default, and this one's toggle gates the COLLECTION rather than
     // just the panel — see FleetSamplerDeps.accessEnabled.
     //
@@ -183,9 +181,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'keyRevoke',
     surface: 'operate',
-    label: 'Revoke a key',
-    detail:
-      'Remove one SSH key from every account across the estate that trusts it. Each server takes a timestamped backup, arms its own rollback before OpsMaxx lets go, and keeps the change only once a second, independent session has authenticated against the changed file. Accounts it may not touch are listed by name with the reason, and a key is never reported as gone from an estate that could not be fully read.',
+    labelKey: 'modules.keyRevoke.label',
+    detailKey: 'modules.keyRevoke.detail',
     // A module of its own rather than a sub-tab, and the case is different from
     // the other two splits.
     //
@@ -211,9 +208,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'capacity',
     surface: 'read',
-    label: 'Capacity trends',
-    detail:
-      'How full a server is getting and when it runs out — "this disk fills in eleven days" — drawn from the samples the monitor already writes. It stores nothing of its own, schedules nothing and evaluates nothing in the background: every line is derived on demand from history that exists whether or not this is on. A forecast is never stated without the window it was drawn from and how much of that window was sampled. A gap where nothing was measured is left as a hole in the line rather than drawn across; disk and memory are still forecast ACROSS such gaps, because a disk keeps filling while nobody is watching, while CPU is not.',
+    labelKey: 'modules.capacity.label',
+    detailKey: 'modules.capacity.detail',
     // ON for a fresh install. This is the cheapest module in the list: it reads
     // the local history store, opens no connection, schedules nothing and
     // evaluates nothing in the background. It was off for symmetry with its
@@ -225,9 +221,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'changeLog',
     surface: 'read',
-    label: 'Change log',
-    detail:
-      '"What did I change on Tuesday" — one timeline over four records that already exist: shells run on this machine, what you confirmed before a job or a broadcast ran, what an agent did through the MCP bridge, and the alerts, jobs and store events the durable history keeps. Metadata only: commands and targets, never output. It reads; it stores nothing of its own and writes nothing.',
+    labelKey: 'modules.changeLog.label',
+    detailKey: 'modules.changeLog.detail',
     // OFF by default, and this one's toggle gates the READ rather than the tab
     // — see the `changelog:read` handler in main/index.ts, which returns a page
     // saying "switched off" without opening a file.
@@ -244,9 +239,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'rules',
     surface: 'read',
-    label: 'Rules',
-    detail:
-      'When an alert fires, run a job or post to the webhook \u2014 with a ceiling on how often it may act. A rule runs the job it was confirmed with, on the servers it was confirmed for, and refuses if either has changed. It is not a workflow language: one trigger, one filter, one action, one rate limit.',
+    labelKey: 'modules.rules.label',
+    detailKey: 'modules.rules.detail',
     // OFF by default, and this is the module the default matters most for.
     //
     // Every other module here is something a person presses. This one acts on
@@ -286,9 +280,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'drift',
     surface: 'read',
-    label: 'Configuration drift',
-    detail:
-      'Compare a watched configuration file across the estate and say where it diverges \u2014 "all twelve web servers have this nginx.conf, three do not". Every file is compared under normalisation rules that are named on screen, so two files that differ and are called the same say which rule ate the difference. A server that could not be read is never reported as a server that matches. Read-only: it never writes a file back to bring a server into line.',
+    labelKey: 'modules.drift.label',
+    detailKey: 'modules.drift.detail',
     // OFF by default, and this one's toggle gates the COLLECTION rather than
     // just the panel \u2014 see FleetSamplerDeps.driftEnabled.
     //
@@ -307,9 +300,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'posture',
     surface: 'read',
-    label: 'Security posture',
-    detail:
-      'What every server already knows about its own exposure: which firewall is active and the shape of its rules, whether SELinux or AppArmor is enforcing, how sshd compares with a hardening baseline, and how many logins have failed. Read-only, and emphatically not a vulnerability scanner — the pending security update count comes from the Inventory probe, which asks the server\'s own package manager, rather than from a CVE feed. A check that could not run is shown as unread, never as passed.',
+    labelKey: 'modules.posture.label',
+    detailKey: 'modules.posture.detail',
     // OFF by default, and this one's toggle gates the COLLECTION rather than
     // just the panel — see FleetSamplerDeps.postureEnabled.
     //
@@ -328,40 +320,36 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'broadcast',
     surface: 'operate',
-    label: 'Run a command on many servers',
-    detail:
-      'Run one command across selected servers, with confirmation that scales to how many servers and how dangerous the command is.',
+    labelKey: 'modules.broadcast.label',
+    detailKey: 'modules.broadcast.detail',
     defaultEnabled: false
   },
   {
     id: 'httpChecks',
     surface: 'read',
-    label: 'Service checks',
-    detail:
-      'Watch any URL from the outside and see whether it answers, how fast, and how often it has been up. External on purpose: a server can be perfectly healthy while the service in front of it returns 502.',
+    labelKey: 'modules.httpChecks.label',
+    detailKey: 'modules.httpChecks.detail',
     defaultEnabled: true
   },
   {
     id: 'netTools',
     surface: 'read',
-    label: 'Network tools',
-    detail:
-      'Run ping and traceroute from this machine or from any server. "Can this server reach that service" is a different question from "can my laptop reach it", and it is usually the one that matters.',
+    labelKey: 'modules.netTools.label',
+    detailKey: 'modules.netTools.detail',
     defaultEnabled: true
   },
   {
     id: 'logTail',
     surface: 'read',
-    label: 'Live log tailing',
-    detail: 'Follow a systemd unit or a log file on several servers at once, interleaved by server.',
+    labelKey: 'modules.logTail.label',
+    detailKey: 'modules.logTail.detail',
     defaultEnabled: true
   },
   {
     id: 'cron',
     surface: 'read',
-    label: 'Scheduled jobs',
-    detail:
-      'Read crontabs, /etc/cron.d and systemd timers across the estate, and say which of those sources this account was actually allowed to read. Read-only: changing a schedule is a write, and it lives on the Operations side under Jobs.',
+    labelKey: 'modules.cron.label',
+    detailKey: 'modules.cron.detail',
     defaultEnabled: true
   },
   {
@@ -369,9 +357,8 @@ export const MODULES: ModuleDef[] = [
     // The clearest `operate` module in the registry: it composes multi-step
     // work, picks the servers and runs it in waves.
     surface: 'operate',
-    label: 'Jobs',
-    detail:
-      'Compose a multi-step job, pick the servers, run it in waves and watch it. Every job asks for the confirmation its own risk demands, and the answer is recorded before anything runs.',
+    labelKey: 'modules.jobs.label',
+    detailKey: 'modules.jobs.detail',
     // OFF by default, and more deliberately than the read-only modules above:
     // this one WRITES. It is the surface the job engine shipped without, and a
     // module that switches itself on is a module that decided for the operator.
@@ -383,9 +370,8 @@ export const MODULES: ModuleDef[] = [
     // used to be the third entry in READ_SURFACE_WRITE_EXCEPTIONS; see the note
     // on that array for what happened to all three.
     surface: 'read',
-    label: 'Server services',
-    detail:
-      'Read what each server supervises for your account with `systemd --user` — what is running, what has failed, and whether it survives you logging out. Read-only: nothing is started, stopped or written, and installing a new unit is a write that lives on the Operations side under Jobs.',
+    labelKey: 'modules.services.label',
+    detailKey: 'modules.services.detail',
     // OFF by default like the rest. It reads only, but it reads something most
     // operators have never looked at, and a module that switches itself on is a
     // module that decides for them.
@@ -394,9 +380,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'processes',
     surface: 'read',
-    label: 'Local processes',
-    detail:
-      'Run, watch, restart and read the logs of a long-lived process on THIS machine \u2014 a dev server, a worker, a script that should outlive its terminal. Restart policies, exponential backoff, crash-loop detection and a bounded log ring, from the supervisor that already keeps VPN engines alive. Nothing runs on a remote server, nothing starts by itself, and a value that looks like a secret has to come from the vault rather than the process list.',
+    labelKey: 'modules.processes.label',
+    detailKey: 'modules.processes.detail',
     // OFF by default, and this is the module whose default matters most in the
     // whole registry.
     //
@@ -417,9 +402,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'docker',
     surface: 'read',
-    label: 'Docker',
-    detail:
-      'List containers on a server, read their logs, and open a shell inside a running one. Uses the docker binary already on the server — a container shell is arbitrary code execution there.',
+    labelKey: 'modules.docker.label',
+    detailKey: 'modules.docker.detail',
     // ON for a fresh install. Listing and log-reading start nothing; the panel
     // is inert until it is opened. The container shell is real power, but it is
     // the same power the terminal tab beside it already grants on the same
@@ -431,9 +415,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'cicd',
     surface: 'read',
-    label: 'CI/CD',
-    detail:
-      'Connect a Jenkins, GitLab or GitHub Actions account and read what it did: pipelines, run history, and the log of the step that failed, beside the server the run changed. This module reads only. Starting a build, cancelling one, and enabling or disabling a job are the separate "Start a build" module, and its controls appear on this tab only while that one is switched on.',
+    labelKey: 'modules.cicd.label',
+    detailKey: 'modules.cicd.detail',
     // OFF by default, and the reason is not the one the other read modules
     // give. Every module above reads a machine the user administers, over a
     // connection they already opened. Enabling this POLLS A THIRD PARTY'S API
@@ -471,9 +454,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'cicdTrigger',
     surface: 'operate',
-    label: 'Start a build',
-    detail:
-      'Start, re-run and cancel builds on a CI server OpsMaxx does not administer, and enable or disable a job. What runs is the pipeline definition already in that repository — not anything composed here — so it can deploy, migrate or restart whatever that file says. Once a run has started OpsMaxx cannot stop it: cancelling is a request to a third party that may already have finished.',
+    labelKey: 'modules.cicdTrigger.label',
+    detailKey: 'modules.cicdTrigger.detail',
     // `operate` rather than `read`, and the contract on ModuleSurface does not
     // settle it: what this writes to is a third party's API, not an estate
     // host, and the surface field is worded about servers. The split is taken
@@ -487,9 +469,8 @@ export const MODULES: ModuleDef[] = [
   {
     id: 'kubernetes',
     surface: 'read',
-    label: 'Kubernetes',
-    detail:
-      'List contexts, namespaces and pods and read pod logs, using the kubectl already on the server. Reading only: it never switches your context, never execs into a pod, and never applies or deletes anything.',
+    labelKey: 'modules.kubernetes.label',
+    detailKey: 'modules.kubernetes.detail',
     // ON for a fresh install, and of the three flipped it is the easiest call:
     // it never execs, never applies and never deletes, so the worst an unwanted
     // one does is occupy a tab.
@@ -501,9 +482,8 @@ export const MODULES: ModuleDef[] = [
     // module never opens a connection to a server at all. What it reads is this
     // app's own account on a relay.
     surface: 'read',
-    label: 'Sync & devices',
-    detail:
-      'Your own machines, and what has reached them. OpsMaxx can carry servers, workspaces, tunnels and the vault between your devices through an addy relay you run yourself — every object sealed before it leaves, and the relay holding no key. This panel is the readout and the way in: which relay this device is enrolled on, which devices are on the account, and when anything last synced. It reads only, and it touches no server in the estate.',
+    labelKey: 'modules.addy.label',
+    detailKey: 'modules.addy.detail',
     // ON for a fresh install, and the argument is discoverability rather than
     // appetite. The panel is a READOUT plus the existing setup flow: it mints
     // no account, joins nothing and sends nothing anywhere until a person

@@ -21,6 +21,8 @@ import { clsx } from '../../lib/format'
 import { reportBug } from '../../lib/reportBug'
 import { openMonitor, openOperations, useNav } from '../../store/nav'
 import { MODULES, PROMOTED_MODULE_IDS, moduleEnabled, type ModuleId } from '../../../../shared/modules'
+import { useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 import type { ActivityView } from '../../types'
 
 /**
@@ -33,7 +35,7 @@ import type { ActivityView } from '../../types'
 export const ACTIVITY_ITEMS: {
   id: ActivityView
   icon: React.ReactNode
-  label: string
+  labelKey: MessageKey
   /**
    * What the rail prints under the icon, when that is not the full label.
    *
@@ -43,15 +45,15 @@ export const ACTIVITY_ITEMS: {
    * tooltip and the accessible name, which is what a person reads when they
    * are unsure; this is the one they read when they already know.
    */
-  rail?: string
+  railKey?: MessageKey
 }[] = [
-  { id: 'connections', icon: <Server size={20} />, label: 'Connections' },
-  { id: 'databases', icon: <Database size={20} />, label: 'Databases' },
-  { id: 'tunnels', icon: <Network size={20} />, label: 'Tunnels & VPN', rail: 'Tunnels' },
-  { id: 'http', icon: <Globe size={20} />, label: 'HTTP Client', rail: 'HTTP' },
-  { id: 'monitor', icon: <Activity size={20} />, label: 'Monitoring' },
-  { id: 'vault', icon: <KeyRound size={20} />, label: 'Vault' },
-  { id: 'ai', icon: <Bot size={20} />, label: 'AI & MCP' }
+  { id: 'connections', icon: <Server size={20} />, labelKey: 'layout.activity.connections', railKey: 'layout.activity.connectionsRail' },
+  { id: 'databases', icon: <Database size={20} />, labelKey: 'layout.activity.databases', railKey: 'layout.activity.databasesRail' },
+  { id: 'tunnels', icon: <Network size={20} />, labelKey: 'layout.activity.tunnels', railKey: 'layout.activity.tunnelsRail' },
+  { id: 'http', icon: <Globe size={20} />, labelKey: 'layout.activity.http', railKey: 'layout.activity.httpRail' },
+  { id: 'monitor', icon: <Activity size={20} />, labelKey: 'layout.activity.monitor', railKey: 'layout.activity.monitorRail' },
+  { id: 'vault', icon: <KeyRound size={20} />, labelKey: 'layout.activity.vault' },
+  { id: 'ai', icon: <Bot size={20} />, labelKey: 'layout.activity.ai' }
 ]
 
 /**
@@ -102,32 +104,33 @@ const PROMOTED_ICONS: Record<string, React.ReactNode> = {
  * the subject distinction has to be legible: "Monitoring — reading the estate"
  * sits two buttons up, and `processes` is here precisely because it is not that.
  */
-const PROMOTED_RAIL: Record<string, string> = {
-  docker: 'Docker',
-  kubernetes: 'Kubernetes',
-  cicd: 'CI/CD',
+const PROMOTED_RAIL: Record<string, MessageKey> = {
+  docker: 'layout.activity.promoted.dockerRail',
+  kubernetes: 'layout.activity.promoted.kubernetesRail',
+  cicd: 'layout.activity.promoted.cicdRail',
   // The registry calls it "Local processes", which is the right name in a list
   // of twenty modules and one word too many under an icon. The distinction it
   // is drawing against Monitoring lives in the tooltip.
-  processes: 'Processes',
+  processes: 'layout.activity.promoted.processesRail',
   // "Sync" rather than "Devices", which is the other half of the registry
   // label: in this app a "connection" and a "server" are already estate
   // machines, and a rail button called Devices beside them would read as a
   // third word for the same thing. Nothing else here says Sync.
-  addy: 'Sync'
+  addy: 'layout.activity.promoted.addyRail'
 }
 
-const PROMOTED_TITLES: Record<string, string> = {
-  docker: 'Docker — containers, compose projects and images',
-  kubernetes: 'Kubernetes — clusters, pods and workloads',
-  cicd: 'CI/CD — pipelines and run history',
-  processes: 'Local processes — programs running on this machine',
-  addy: 'Sync & devices — your own machines, and what has reached them'
+const PROMOTED_TITLES: Record<string, MessageKey> = {
+  docker: 'layout.activity.promoted.dockerTitle',
+  kubernetes: 'layout.activity.promoted.kubernetesTitle',
+  cicd: 'layout.activity.promoted.cicdTitle',
+  processes: 'layout.activity.promoted.processesTitle',
+  addy: 'layout.activity.promoted.addyTitle'
 }
 
 const items = ACTIVITY_ITEMS
 
 export function ActivityBar(): React.JSX.Element {
+  const t = useT()
   const activity = useApp((s) => s.activity)
   const setActivity = useApp((s) => s.setActivity)
   const toggleSidebar = useApp((s) => s.toggleSidebar)
@@ -165,12 +168,12 @@ export function ActivityBar(): React.JSX.Element {
     <div className="activitybar">
       <button
         className="activity-btn"
-        title="Toggle sidebar"
-        aria-label="Toggle sidebar"
+        title={t('layout.activity.toggleSidebar')}
+        aria-label={t('layout.activity.toggleSidebar')}
         onClick={toggleSidebar}
       >
         <PanelLeft size={20} />
-        <RailLabel>Sidebar</RailLabel>
+        <RailLabel>{t('layout.activity.sidebarRail')}</RailLabel>
       </button>
       <div style={{ height: 8 }} />
       {/* The destinations scroll; the sidebar toggle above and Report a bug and
@@ -215,20 +218,20 @@ export function ActivityBar(): React.JSX.Element {
                 'activity-btn',
                 activity === 'monitor' && rail === 'monitor' && !onPromotedTab && 'active'
               )}
-              title="Monitoring — reading the estate"
-              aria-label="Monitoring — reading the estate"
+              title={t('layout.activity.monitorTitle')}
+              aria-label={t('layout.activity.monitorTitle')}
               onClick={() => openMonitor(onPromotedTab ? 'overview' : monitorTab)}
             >
               <Activity size={20} />
-              <RailLabel>Monitoring</RailLabel>
+              <RailLabel>{t('layout.activity.monitorRail')}</RailLabel>
             </button>
             <button
               className={clsx(
                 'activity-btn',
                 activity === 'monitor' && rail === 'operations' && 'active'
               )}
-              title="Operations — changing the estate"
-              aria-label="Operations — changing the estate"
+              title={t('layout.activity.operationsTitle')}
+              aria-label={t('layout.activity.operationsTitle')}
               onClick={() => openOperations(operationsTab)}
             >
               {/* A spanner rather than another waveform. The two rails differ by
@@ -236,7 +239,7 @@ export function ActivityBar(): React.JSX.Element {
                   than hue — an operator glancing at a 44px column reads the
                   silhouette and nothing else. */}
               <Wrench size={20} />
-              <RailLabel>Operations</RailLabel>
+              <RailLabel>{t('layout.activity.operations')}</RailLabel>
             </button>
             {/* The promoted modules, immediately after the two fleet buttons.
                 Here rather than at the top of the rail because they ARE fleet
@@ -252,12 +255,12 @@ export function ActivityBar(): React.JSX.Element {
                   'activity-btn',
                   activity === 'monitor' && rail === 'monitor' && monitorTab === m.id && 'active'
                 )}
-                title={PROMOTED_TITLES[m.id] ?? m.label}
-                aria-label={PROMOTED_TITLES[m.id] ?? m.label}
+                title={PROMOTED_TITLES[m.id] ? t(PROMOTED_TITLES[m.id]) : t(m.labelKey)}
+                aria-label={PROMOTED_TITLES[m.id] ? t(PROMOTED_TITLES[m.id]) : t(m.labelKey)}
                 onClick={() => openMonitor(m.id)}
               >
                 {PROMOTED_ICONS[m.id]}
-                <RailLabel>{PROMOTED_RAIL[m.id] ?? m.label}</RailLabel>
+                <RailLabel>{PROMOTED_RAIL[m.id] ? t(PROMOTED_RAIL[m.id]) : t(m.labelKey)}</RailLabel>
               </button>
             ))}
           </div>
@@ -265,12 +268,12 @@ export function ActivityBar(): React.JSX.Element {
           <button
             key={it.id}
             className={clsx('activity-btn', activity === it.id && 'active')}
-            title={it.label}
-            aria-label={it.label}
+            title={t(it.labelKey)}
+            aria-label={t(it.labelKey)}
             onClick={() => setActivity(it.id)}
           >
             {it.icon}
-            <RailLabel>{it.rail ?? it.label}</RailLabel>
+            <RailLabel>{t(it.railKey ?? it.labelKey)}</RailLabel>
           </button>
         )
       )}
@@ -299,21 +302,13 @@ export function ActivityBar(): React.JSX.Element {
         // It is on THIS button rather than in the status bar because it has to
         // be true wherever the user is when they notice, and because the control
         // that turns it off is the one it is attached to.
-        title={
-          recording
-            ? 'Report a bug — debug mode is recording what the app does. Press to stop recording and build a report.'
-            : 'Report a bug — collects a report you can read before you send it'
-        }
-        aria-label={
-          recording
-            ? 'Report a bug — debug mode is recording what the app does. Press to stop recording and build a report.'
-            : 'Report a bug — collects a report you can read before you send it'
-        }
+        title={t(recording ? 'layout.activity.reportBugRecording' : 'layout.activity.reportBug')}
+        aria-label={t(recording ? 'layout.activity.reportBugRecording' : 'layout.activity.reportBug')}
         onClick={() => reportBug()}
       >
         <Bug size={20} />
         {recording && <span className="activity-badge" aria-hidden />}
-        <RailLabel>Report bug</RailLabel>
+        <RailLabel>{t('layout.activity.reportBugRail')}</RailLabel>
       </button>
       <button
         className={clsx('activity-btn', activity === 'settings' && 'active')}
@@ -327,21 +322,13 @@ export function ActivityBar(): React.JSX.Element {
         // the export is the whole fix. It does NOT promise to open Backup &
         // Restore — this button opens Settings where it left off, and the
         // status-bar chip is the one that lands on the page.
-        title={
-          backupDirty
-            ? 'Settings — backup out of date: stored connections have changed since the last export'
-            : 'Settings'
-        }
-        aria-label={
-          backupDirty
-            ? 'Settings — backup out of date: stored connections have changed since the last export'
-            : 'Settings'
-        }
+        title={t(backupDirty ? 'layout.activity.settingsBackupDirty' : 'common.settings')}
+        aria-label={t(backupDirty ? 'layout.activity.settingsBackupDirty' : 'common.settings')}
         onClick={() => setActivity('settings')}
       >
         <Settings size={20} />
         {backupDirty && <span className="activity-badge" aria-hidden />}
-        <RailLabel>Settings</RailLabel>
+        <RailLabel>{t('layout.activity.settingsRail')}</RailLabel>
       </button>
     </div>
   )

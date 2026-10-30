@@ -1,5 +1,6 @@
 import { LockOpen } from 'lucide-react'
 import { useVaultPrompt } from '../../store/vaultPrompt'
+import { useT } from '../../lib/i18n'
 
 /**
  * "The vault is locked" — with the unlock attached to it.
@@ -21,7 +22,7 @@ import { useVaultPrompt } from '../../store/vaultPrompt'
  */
 export function UnlockVaultButton({
   reason,
-  label = 'Unlock vault',
+  label,
   className = 'btn sm',
   onUnlocked
 }: {
@@ -32,6 +33,7 @@ export function UnlockVaultButton({
   /** Run only on a successful unlock — never after a cancelled prompt. */
   onUnlocked?: () => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <button
       className={className}
@@ -44,7 +46,7 @@ export function UnlockVaultButton({
           })
       }}
     >
-      <LockOpen size={13} /> {label}
+      <LockOpen size={13} /> {label ?? t('ui.unlockVault.label')}
     </button>
   )
 }

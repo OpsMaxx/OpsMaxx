@@ -5,6 +5,8 @@ import { issueUrl } from '../../lib/reportBug'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
 import type { DebugBundle } from '../../../../shared/debug'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 /**
  * The dialog the bug button opens.
@@ -55,6 +57,7 @@ import type { DebugBundle } from '../../../../shared/debug'
  * logs already.
  */
 export function ReportBugModal(): React.JSX.Element {
+  const t = useT()
   const close = useApp((s) => s.setModal)
   const settings = useApp((s) => s.settings)
   const setSettings = useApp((s) => s.setSettings)
@@ -107,8 +110,8 @@ export function ReportBugModal(): React.JSX.Element {
       window.open(issueUrl(bundle.version, bundle.os), '_blank', 'noopener,noreferrer')
       return
     }
-    if ('cancelled' in res) toast('Report not saved — you cancelled the dialog.', 'info')
-    else toast(`Could not save the report: ${res.error}`, 'error')
+    if ('cancelled' in res) toast(t('ui.reportBug.cancelled'), 'info')
+    else toast(t('ui.reportBug.saveFailed', { error: res.error }), 'error')
   }
 
   // A step may carry its own control, which is the whole point of step 1: the
@@ -142,20 +145,20 @@ export function ReportBugModal(): React.JSX.Element {
   const startRecording = (): void => {
     setSettings({ debugLogEnabled: true })
     close(null)
-    toast('Recording. Reproduce the problem, then press the bug button again.', 'ok')
+    toast(t('ui.reportBug.recordingToast'), 'ok')
   }
 
   return (
     <Modal
-      title="Report a bug"
-      subtitle="Nothing leaves this computer until you save the file and attach it yourself."
+      title={t('ui.reportBug.title')}
+      subtitle={t('ui.reportBug.subtitle')}
       onClose={() => close(null)}
       size="lg"
-      cancelLabel={savedPath === null ? 'Cancel' : 'Done'}
+      cancelLabel={t(savedPath === null ? 'common.cancel' : 'common.done')}
       confirm={
         savedPath === null
           ? {
-              label: busy ? 'Saving…' : 'Save report…',
+              label: t(busy ? 'common.saving' : 'ui.reportBug.save'),
               onClick: () => void save(),
               disabled: bundle === null || busy
             }
@@ -165,68 +168,49 @@ export function ReportBugModal(): React.JSX.Element {
         savedPath === null
           ? bundle === null
             ? failed
-              ? 'The report could not be collected. Settings \u2192 Advanced has the version block to paste by hand.'
-              : 'Collecting…'
-            : `${bundle.events} traced events`
-          : 'Attach the saved file to the issue — do not paste it.'
+              ? t('ui.reportBug.notCollectedNote')
+              : t('ui.reportBug.collecting')
+            : t('ui.reportBug.events', { count: bundle.events })
+          : t('ui.reportBug.attachNote')
       }
     >
       {step(
         1,
-        recording ? 'Reproduce it — recording was on' : 'Record what the app does',
+        t(recording ? 'ui.reportBug.recordTitleRecording' : 'ui.reportBug.recordTitle'),
         recording ? (
-          <>
-            The recording was running, and opening this dialog stopped it. Everything the app did
-            between starting it and now is in the report below.
-          </>
+          t('ui.reportBug.recordBodyRecording')
         ) : (
-          <>
-            A report without a recording says what this install <em>is</em> — versions, counts,
-            which features are on — but nothing about what it did. For anything that fails,
-            misbehaves or hangs, press <strong>Start recording</strong>, make the bug happen
-            again, then press the bug button again. Or send what is below as it stands.
-          </>
+          <Trans i18nKey="ui.reportBug.recordBody" components={{ em: <em />, strong: <strong /> }} />
         ),
         recording ? undefined : (
           <button className="btn sm" onClick={startRecording}>
-            Start recording
+            {t('ui.reportBug.startRecording')}
           </button>
         )
       )}
 
       {step(
         2,
-        'Read it',
-        <>
-          The trace names the internal operations that ran and the errors they raised. Errors
-          routinely carry <strong>hostnames, usernames, file paths and command text</strong> from
-          your machine and your servers. Passwords, keys and tokens are filtered out before
-          anything is written; a hostname cannot be, because no rule tells one from an ordinary
-          word. Read it, and delete any line you would rather not publish once you have attached
-          it.
-        </>
+        t('ui.reportBug.readTitle'),
+        <Trans i18nKey="ui.reportBug.readBody" components={{ strong: <strong /> }} />
       )}
 
       <pre className="paste-preview selectable">
         {bundle?.text ??
-          (failed ? 'The report could not be collected.' : 'Collecting…')}
+          t(failed ? 'ui.reportBug.notCollected' : 'ui.reportBug.collecting')}
       </pre>
 
       {step(
         3,
-        'Save it and attach it',
+        t('ui.reportBug.attachTitle'),
         savedPath === null ? (
-          <>
-            <strong>Save report…</strong> writes one text file and opens the issue form with your
-            version and operating system already filled in. Drag the file into the issue — an
-            attachment stays inert, while pasted text is rendered as Markdown and read by
-            automation.
-          </>
+          <Trans i18nKey="ui.reportBug.attachBody" components={{ strong: <strong /> }} />
         ) : (
-          <>
-            Saved to <code>{savedPath}</code>. The issue form is open in your browser — drag that
-            file into it.
-          </>
+          <Trans
+            i18nKey="ui.reportBug.savedBody"
+            values={{ path: savedPath }}
+            components={{ code: <code /> }}
+          />
         )
       )}
     </Modal>

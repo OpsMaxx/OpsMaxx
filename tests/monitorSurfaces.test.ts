@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { englishT } from '../src/shared/i18n'
 import {
   MODULES,
   OPERATE_MODULE_IDS,
@@ -185,7 +186,7 @@ describe('the read surface no longer writes anywhere', () => {
     // A false safety claim is worse than the write it was covering for.
     for (const id of READ_SURFACE_WRITE_EXCEPTIONS) {
       const m = MODULES.find((x) => x.id === id)!
-      expect(m.detail.toLowerCase(), `${id} still claims to be read-only`).not.toContain('read-only')
+      expect(englishT(m.detailKey).toLowerCase(), `${id} still claims to be read-only`).not.toContain('read-only')
     }
   })
 

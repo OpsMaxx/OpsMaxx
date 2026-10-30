@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { CheckCircle2, Info, AlertTriangle, X } from 'lucide-react'
 import { useToasts, useToastSlot } from '../../store/toast'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 
 /**
  * The place an approval dialog keeps for toasts, directly above itself. See
@@ -36,6 +37,7 @@ const frontSlot = (slots: HTMLElement[]): HTMLElement | undefined =>
   )
 
 export function Toasts(): React.JSX.Element {
+  const tr = useT()
   const toasts = useToasts((s) => s.toasts)
   const dismiss = useToasts((s) => s.dismiss)
   const slot = useToastSlot((s) => frontSlot(s.slots))
@@ -80,7 +82,7 @@ export function Toasts(): React.JSX.Element {
           {(t.sticky || t.action) && (
             <button
               className="icon-btn sm"
-              title="Dismiss"
+              title={tr('common.dismiss')}
               style={{ flexShrink: 0 }}
               onClick={(e) => {
                 e.stopPropagation()

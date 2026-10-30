@@ -19,7 +19,7 @@ import {
   DatabaseBackup, Compass, Lock, LockOpen, Blocks } from 'lucide-react'
 import { useApp } from '../../store/app'
 import type { ThemeMode } from '../../store/app'
-import { useNav, openMonitor, SETTINGS_SECTIONS, SETTINGS_SECTION_LABELS } from '../../store/nav'
+import { useNav, openMonitor, SETTINGS_SECTIONS, SETTINGS_SECTION_LABEL_KEYS } from '../../store/nav'
 import { isLoopbackHostKeyId } from '../../../../shared/ssh'
 import type { SettingsSection } from '../../store/nav'
 import { useVault } from '../../store/vault'
@@ -53,18 +53,22 @@ import { MODULES, isPromotedModule, moduleEnabled, type ModuleDef } from '../../
  * made up for itself would be a second opinion about what a module is, and the
  * first-run card would then be free to have a third.
  */
-const MODULE_GROUPS: { id: string; label: string; detail: string; match: (m: ModuleDef) => boolean }[] =
+const MODULE_GROUPS: {
+  id: string
+  labelKey: MessageKey
+  detailKey: MessageKey
+  match: (m: ModuleDef) => boolean
+}[] =
   [
     {
       id: 'promoted',
-      label: 'Main features',
-      detail:
-        'These have their own icon in the sidebar on the left. Switching one off here removes its icon as well as its panel.',
+      labelKey: 'settingsPage.modules.groups.promoted.label',
+      detailKey: 'settingsPage.modules.groups.promoted.detail',
       match: (m) => isPromotedModule(m.id)
     },
     {
       id: 'read',
-      label: 'Reading your estate',
+      labelKey: 'settingsPage.modules.groups.read.label',
       // NOT "none of these can change a server", which is what this said first
       // and which is false. That sentence is the registry's CONTRACT for the
       // `read` surface, and repeating it here turned a design invariant into a
@@ -75,15 +79,13 @@ const MODULE_GROUPS: { id: string; label: string; detail: string; match: (m: Mod
       // nonetheless filed here). Naming the exception is the whole fix: a group
       // label may describe the group, but it may not make a promise on behalf of
       // a member that breaks it.
-      detail:
-        'Panels under Monitoring. These read the estate rather than changing it — except Rules, which can run a job you approved in advance, on the servers you picked, while nobody is watching.',
+      detailKey: 'settingsPage.modules.groups.read.detail',
       match: (m) => m.surface === 'read' && !isPromotedModule(m.id)
     },
     {
       id: 'operate',
-      label: 'Changing your estate',
-      detail:
-        'Panels under Operations. These exist to write to servers: running commands across the fleet, installing updates, removing access. Every one ships off.',
+      labelKey: 'settingsPage.modules.groups.operate.label',
+      detailKey: 'settingsPage.modules.groups.operate.detail',
       match: (m) => m.surface === 'operate'
     }
   ]
@@ -92,17 +94,25 @@ import { SchemePicker } from './SchemePicker'
 import { useFleetStatus } from '../../store/fleetStatus'
 import { toast } from '../../store/toast'
 import { Switch } from '../common/Switch'
-import { useT } from '../../lib/i18n'
-import { LOCALES, LOCALE_NAMES, PSEUDO_LOCALE, parseLanguagePref } from '../../../../shared/i18n'
+import { useT, t as currentT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import {
+  LOCALES,
+  LOCALE_NAMES,
+  PSEUDO_LOCALE,
+  englishT,
+  parseLanguagePref,
+  type MessageKey
+} from '../../../../shared/i18n'
 
 // The OpsMaxx pair first, the classic pair after. Labelled rather than
 // capitalised, because "OpsMaxx" is not what capitalising "opsmaxx" gives.
-const THEME_OPTIONS: [ThemeMode, string][] = [
-  ['opsmaxx', 'OpsMaxx'],
-  ['opsmaxx-light', 'OpsMaxx Light'],
-  ['dark', 'Classic dark'],
-  ['light', 'Classic light'],
-  ['system', 'System']
+const THEME_OPTIONS: [ThemeMode, MessageKey][] = [
+  ['opsmaxx', 'settingsPage.appearance.theme.opsmaxx'],
+  ['opsmaxx-light', 'settingsPage.appearance.theme.opsmaxxLight'],
+  ['dark', 'settingsPage.appearance.theme.classicDark'],
+  ['light', 'settingsPage.appearance.theme.classicLight'],
+  ['system', 'settingsPage.appearance.theme.system']
 ]
 
 // Keyed by the nav store's union rather than by a list that describes itself,
@@ -128,8 +138,8 @@ const SECTION_ICONS: Record<SettingsSection, React.JSX.Element> = {
 
 // The label comes from nav.ts, which is where the palette reads it too.
 const SECTION_META = Object.fromEntries(
-  SETTINGS_SECTIONS.map((id) => [id, { label: SETTINGS_SECTION_LABELS[id], icon: SECTION_ICONS[id] }])
-) as Record<SettingsSection, { label: string; icon: React.JSX.Element }>
+  SETTINGS_SECTIONS.map((id) => [id, { labelKey: SETTINGS_SECTION_LABEL_KEYS[id], icon: SECTION_ICONS[id] }])
+) as Record<SettingsSection, { labelKey: MessageKey; icon: React.JSX.Element }>
 
 const SECTIONS: SettingsSection[] = [
   'general',
@@ -166,9 +176,10 @@ const SECTIONS: SettingsSection[] = [
  * carefully. Rewording the row to satisfy a search box would be the tail
  * wagging the dog.
  *
- * `title` is the row's `.s-title` text VERBATIM, because that string is also
+ * `titleKey` is the key the row's `.s-title` renders, because that text is also
  * how a result finds its row again after jumping to the section — see the jump
- * effect in `Settings`. Change a label, change it here.
+ * effect in `Settings`. Index and row share one key, so no translation can
+ * split them; a row in a sub-panel has its own key here and must read the same.
  *
  * This is a hand-kept list because there is no registry to drive it from:
  * SECTION_META keys the sections, and the rows themselves are literal JSX. It
@@ -178,11 +189,12 @@ const SECTIONS: SettingsSection[] = [
  */
 interface SettingEntry {
   section: SettingsSection
-  /** The row's `.s-title`, exactly. */
-  title: string
+  /** The key the row's `.s-title` renders, exactly. */
+  titleKey: MessageKey
   /** What the row is about, in roughly the row's own words. */
-  desc: string
-  /** What people type that the visible copy does not say. */
+  descKey: MessageKey
+  /** What people type that the visible copy does not say. English in every
+   *  language: technical terms get typed in English whatever the UI is in. */
   aliases?: string
 }
 
@@ -190,83 +202,83 @@ const SETTING_INDEX: SettingEntry[] = [
   // General
   {
     section: 'general',
-    title: 'Show the walkthrough',
-    desc: 'A short tour of what is here and where it lives.',
+    titleKey: 'settingsPage.walkthrough.title',
+    descKey: 'settingsPage.walkthrough.sub',
     aliases: 'tour onboarding guide intro help getting started'
   },
   {
     section: 'general',
-    title: 'Check for updates automatically',
-    desc: 'Look for a newer OpsMaxx on a schedule.',
+    titleKey: 'settings.updatePanel.auto.checkLabel',
+    descKey: 'settingsPage.index.checkUpdates.desc',
     aliases: 'auto update upgrade version release'
   },
   {
     section: 'general',
-    title: 'Download updates automatically',
-    desc: 'Fetch an update in the background once one is found.',
+    titleKey: 'settings.updatePanel.auto.downloadLabel',
+    descKey: 'settingsPage.index.downloadUpdates.desc',
     aliases: 'auto update upgrade download'
   },
-  { section: 'general', title: 'Install on quit', desc: 'Apply a downloaded update when you quit.', aliases: 'update upgrade restart' },
-  { section: 'general', title: 'Channel', desc: 'Which release channel updates come from.', aliases: 'beta stable release channel update' },
+  { section: 'general', titleKey: 'settings.updatePanel.auto.installLabel', descKey: 'settingsPage.index.installOnQuit.desc', aliases: 'update upgrade restart' },
+  { section: 'general', titleKey: 'settings.updatePanel.channel.title', descKey: 'settingsPage.index.channel.desc', aliases: 'beta stable release channel update' },
   // Appearance
-  { section: 'appearance', title: 'Theme', desc: 'OpsMaxx is the default look. The classic dark and light themes are still here.', aliases: 'opsmaxx dark light system colour color' },
+  { section: 'appearance', titleKey: 'settingsPage.appearance.theme.title', descKey: 'settingsPage.appearance.theme.desc', aliases: 'opsmaxx dark light system colour color' },
   {
     section: 'appearance',
-    title: 'Start when I log in',
-    desc: 'Launch OpsMaxx with your machine, so background checking and alerts run from login.',
+    titleKey: 'settingsPage.autoStart.title',
+    descKey: 'settingsPage.index.autoStart.desc',
     aliases: 'autostart auto start login item startup boot'
   },
   {
     section: 'appearance',
-    title: 'Start in the background',
-    desc: 'Launch without opening a window. Checks still run and alerts still fire.',
+    titleKey: 'settingsPage.autoStart.hidden.title',
+    descKey: 'settingsPage.index.startHidden.desc',
     aliases: 'autostart hidden headless tray dock'
   },
   {
     section: 'appearance',
-    title: 'Allow adding and revoking keys on servers',
-    desc: 'Whether OpsMaxx may write authorized_keys on your machines.',
+    titleKey: 'settingsPage.security.accessWrite.title',
+    descKey: 'settingsPage.index.accessWrite.desc',
     aliases: 'access write authorized keys revoke'
   },
   {
     section: 'appearance',
-    title: 'Ask for Touch ID when the vault is locked',
-    desc: 'Raise the fingerprint prompt when you open a locked vault.',
+    titleKey: 'settingsPage.vault.touchId.title',
+    descKey: 'settingsPage.index.touchId.desc',
     aliases: 'biometrics touchid fingerprint face id unlock'
   },
   {
     section: 'appearance',
-    title: 'Language',
-    desc: 'The language OpsMaxx uses.',
+    titleKey: 'settings.language.title',
+    descKey: 'settingsPage.index.language.desc',
     aliases: 'language locale translation chinese french spanish german 中文 français español deutsch'
   },
-  { section: 'appearance', title: 'Compact density', desc: 'Tighter rows and padding across trees, lists and the docked monitor.', aliases: 'dense spacing compact size' },
+  { section: 'appearance', titleKey: 'settingsPage.appearance.compact.title', descKey: 'settingsPage.index.compact.desc', aliases: 'dense spacing compact size' },
   // Terminal
   {
     section: 'terminal',
-    title: 'Colour scheme',
-    desc: 'The sixteen ANSI colours the terminal draws with.',
+    titleKey: 'settingsPage.terminal.scheme.title',
+    descKey: 'settingsPage.index.colourScheme.desc',
     aliases: 'color colours palette theme solarized dracula nord gruvbox one dark iterm'
   },
   {
     section: 'terminal',
-    title: 'Shell integration',
-    desc: 'Local shells report where each prompt begins and how each command exited.',
+    titleKey: 'settingsPage.terminal.shellIntegration.title',
+    descKey: 'settingsPage.index.shellIntegration.desc',
     aliases: 'osc 133 prompt marks shell integration zsh bash fish exit status'
   },
   {
     section: 'terminal',
-    title: 'Click to move the cursor',
-    desc: 'Click inside the line you are typing to move the shell cursor there.',
+    titleKey: 'settingsPage.terminal.clickToMove.title',
+    descKey: 'settingsPage.index.clickToMove.desc',
     aliases: 'mouse click cursor position move caret cmux'
   },
-  { section: 'terminal', title: 'Font family', desc: 'Monospace font used in the terminal.', aliases: 'typeface monospace' },
-  { section: 'terminal', title: 'Font size', desc: 'Terminal text size. Also Ctrl + / Ctrl - / Ctrl 0.', aliases: 'zoom bigger smaller text size' },
-  { section: 'terminal', title: 'Cursor blink', desc: 'Blink the terminal cursor.', aliases: 'caret' },
+  { section: 'terminal', titleKey: 'settingsPage.terminal.fontFamily.title', descKey: 'settingsPage.terminal.fontFamily.desc', aliases: 'typeface monospace' },
+  { section: 'terminal', titleKey: 'settingsPage.terminal.fontSize.title', descKey: 'settingsPage.index.fontSize.desc', aliases: 'zoom bigger smaller text size' },
+  { section: 'terminal', titleKey: 'settingsPage.terminal.cursorBlink.title', descKey: 'settingsPage.terminal.cursorBlink.desc', aliases: 'caret' },
   {
     section: 'terminal',
-    title: 'Allow this machine as a target',
-    desc: 'Whether a shell and the panels may run against this computer.',
+    titleKey: 'settingsPage.terminal.localTarget.title',
+    descKey: 'settingsPage.index.localTarget.desc',
     // What someone types when they want this off: the words they know the
     // feature by, not the words the row happens to use.
     aliases: 'local terminal this machine localhost kill switch disable local shell docker kubernetes files own computer'
@@ -274,30 +286,30 @@ const SETTING_INDEX: SettingEntry[] = [
   // Shortcuts
   {
     section: 'shortcuts',
-    title: 'Include hidden workspaces in Ctrl+1…9',
-    desc: 'Whether hidden workspaces take their place in the switching numbers.',
+    titleKey: 'settingsPage.shortcuts.hiddenWorkspaces.title',
+    descKey: 'settingsPage.index.hiddenWorkspaces.desc',
     aliases: 'keyboard shortcut workspace switch'
   },
   // Editor
-  { section: 'editor', title: 'External editor command', desc: 'Run to open a remote file — code, subl, nvim, and so on.', aliases: 'vscode vim editor open with' },
-  { section: 'editor', title: 'Open files externally by default', desc: 'Double-clicking a file uses the external editor instead of the inline one.', aliases: 'editor default double click' },
+  { section: 'editor', titleKey: 'settingsPage.editor.external.title', descKey: 'settingsPage.index.externalEditor.desc', aliases: 'vscode vim editor open with' },
+  { section: 'editor', titleKey: 'settingsPage.editor.openExternally.title', descKey: 'settingsPage.index.openExternally.desc', aliases: 'editor default double click' },
   // Monitoring — the reported one, and its neighbours.
   {
     section: 'monitoring',
-    title: 'Alerts',
-    desc: 'The master switch for CPU, memory, disk, inode, load and failed-unit alerts, and for webhook delivery.',
+    titleKey: 'settingsPage.monitoring.alerts.title',
+    descKey: 'settingsPage.index.alerts.desc',
     aliases: 'notifications alarms warnings turn off alerts'
   },
   {
     section: 'monitoring',
-    title: 'Alert threshold',
-    desc: 'The percentage at which CPU and memory alert. Disk and inodes are fixed at 85%, load at 2 per core.',
+    titleKey: 'settingsPage.monitoring.threshold.title',
+    descKey: 'settingsPage.index.threshold.desc',
     aliases: 'percent percentage cpu memory limit'
   },
   {
     section: 'monitoring',
-    title: 'Check servers in the background',
-    desc: 'Sample every server in this workspace on a schedule, even when the monitor is not open, so failures and resource alerts are noticed while you are elsewhere.',
+    titleKey: 'settingsPage.monitoring.background.title',
+    descKey: 'settingsPage.index.background.desc',
     // The reported miss. "Background checking" is this app's own name for it
     // everywhere except the row itself.
     aliases:
@@ -305,55 +317,55 @@ const SETTING_INDEX: SettingEntry[] = [
   },
   {
     section: 'monitoring',
-    title: 'How often',
-    desc: 'How long between background checking passes.',
+    titleKey: 'settingsPage.monitoring.howOften.title',
+    descKey: 'settingsPage.index.howOften.desc',
     aliases: 'interval frequency cadence background checking schedule poll'
   },
-  { section: 'monitoring', title: 'Send alerts to a webhook', desc: 'Post every alert to a URL — Slack, Discord, or your own endpoint.', aliases: 'slack discord http post integration' },
-  { section: 'monitoring', title: 'Webhook URL', desc: 'Where alerts are posted.', aliases: 'slack discord endpoint url' },
-  { section: 'monitoring', title: 'Test delivery', desc: 'Send one webhook now to prove the URL works.', aliases: 'webhook test try' },
-  { section: 'monitoring', title: 'Also send when it recovers', desc: 'Post a second webhook when the condition clears.', aliases: 'webhook recovery resolved clear' },
-  { section: 'monitoring', title: 'Show monitor under the terminal', desc: 'Live CPU, memory, disk and network docked below the session.', aliases: 'strip docked graphs charts' },
+  { section: 'monitoring', titleKey: 'settings.webhooks.title', descKey: 'settingsPage.index.webhook.desc', aliases: 'slack discord http post integration' },
+  { section: 'monitoring', titleKey: 'settings.webhooks.url.title', descKey: 'settingsPage.index.webhookUrl.desc', aliases: 'slack discord endpoint url' },
+  { section: 'monitoring', titleKey: 'settings.webhooks.test.title', descKey: 'settingsPage.index.webhookTest.desc', aliases: 'webhook test try' },
+  { section: 'monitoring', titleKey: 'settings.webhooks.resolved.title', descKey: 'settingsPage.index.webhookRecover.desc', aliases: 'webhook recovery resolved clear' },
+  { section: 'monitoring', titleKey: 'settingsPage.monitoring.strip.title', descKey: 'settingsPage.index.strip.desc', aliases: 'strip docked graphs charts' },
   // SSH
   {
     section: 'ssh',
-    title: 'Keep authenticated connection',
-    desc: 'How long an authenticated SSH connection is reused before re-authenticating.',
+    titleKey: 'settings.sshSessions.keep.title',
+    descKey: 'settingsPage.index.keepAuth.desc',
     aliases: 'reuse multiplexing idle timeout 2fa two factor re-auth'
   },
-  { section: 'ssh', title: 'Shared connections', desc: 'The SSH connections currently held open.', aliases: 'sessions open connections multiplex' },
+  { section: 'ssh', titleKey: 'settings.sshSessions.shared.title', descKey: 'settingsPage.index.sharedConnections.desc', aliases: 'sessions open connections multiplex' },
   {
     section: 'ssh',
-    title: 'Let jobs keep running when the connection drops',
-    desc: 'Whether a long job survives a dropped connection instead of dying with it.',
+    titleKey: 'settingsPage.ssh.jobsDetached.title',
+    descKey: 'settingsPage.index.jobsDetached.desc',
     aliases: 'detached nohup background jobs apt dpkg'
   },
   // Security
-  // `title` must match the rendered `.s-title` verbatim — the contract at the
-  // top of this list. `lock` stays in the aliases: it is what people will
+  // `titleKey` must be the key the rendered `.s-title` uses — the contract at
+  // the top of this list. `lock` stays in the aliases: it is what people will
   // search for, and it is still what the control eventually leads to.
-  { section: 'monitoring', title: 'Record how large each database is', desc: 'Hourly database size samples, for growth charts.', aliases: 'database size sampler growth disk history' },
-  { section: 'security', title: 'Secure after inactivity', desc: 'How long the vault stays on screen without use.', aliases: 'vault auto lock secure timeout idle' },
-  { section: 'security', title: 'Trusted SSH host keys', desc: 'The host keys this machine has accepted.', aliases: 'known hosts fingerprint host key mismatch' },
-  { section: 'security', title: 'Store credentials in OS keychain', desc: 'Use the platform secure store — never plaintext.', aliases: 'keychain secrets password storage' },
-  { section: 'security', title: 'Auto-lock workspaces', desc: 'Lock password-protected workspaces after inactivity.', aliases: 'workspace lock idle' },
-  { section: 'security', title: 'Confirm destructive commands', desc: 'Require confirmation for rm, systemctl stop, etc.', aliases: 'confirmation dangerous guard' },
-  { section: 'security', title: 'API credential proxy', desc: 'A local proxy that injects vault credentials into outbound API calls.', aliases: 'proxy token api key injection' },
+  { section: 'monitoring', titleKey: 'settingsPage.monitoring.dbSize.title', descKey: 'settingsPage.index.dbSize.desc', aliases: 'database size sampler growth disk history' },
+  { section: 'security', titleKey: 'settingsPage.vault.autoLock.title', descKey: 'settingsPage.index.autoLock.desc', aliases: 'vault auto lock secure timeout idle' },
+  { section: 'security', titleKey: 'settingsPage.knownHosts.title', descKey: 'settingsPage.index.knownHosts.desc', aliases: 'known hosts fingerprint host key mismatch' },
+  { section: 'security', titleKey: 'settingsPage.index.keychain.title', descKey: 'settingsPage.index.keychain.desc', aliases: 'keychain secrets password storage' },
+  { section: 'security', titleKey: 'settingsPage.index.autoLockWorkspaces.title', descKey: 'settingsPage.index.autoLockWorkspaces.desc', aliases: 'workspace lock idle' },
+  { section: 'security', titleKey: 'settingsPage.index.confirmDestructive.title', descKey: 'settingsPage.index.confirmDestructive.desc', aliases: 'confirmation dangerous guard' },
+  { section: 'security', titleKey: 'settingsPage.credProxy.heading', descKey: 'settingsPage.index.credProxy.desc', aliases: 'proxy token api key injection' },
   // Backup
-  { section: 'backup', title: 'Backup & Restore', desc: 'Export an encrypted copy of everything, or restore from one.', aliases: 'export import archive restore snapshot' },
+  { section: 'backup', titleKey: 'settingsPage.backup.heading', descKey: 'settingsPage.backup.sub', aliases: 'export import archive restore snapshot' },
   // Modules
-  { section: 'modules', title: 'Modules', desc: 'Which subsystems are switched on for this workspace.', aliases: 'features enable disable subsystem' },
+  { section: 'modules', titleKey: 'settingsPage.modules.heading', descKey: 'settingsPage.index.modules.desc', aliases: 'features enable disable subsystem' },
   // Advanced
   {
     section: 'advanced',
-    title: 'Debug mode',
-    desc: 'Record which internal operations run and which fail, so a bug report can say what the app did.',
+    titleKey: 'settingsPage.debug.title',
+    descKey: 'settingsPage.index.debug.desc',
     aliases: 'debug log logging trace verbose bug report troubleshoot diagnose capture record'
   },
   {
     section: 'advanced',
-    title: 'Copy diagnostics',
-    desc: 'Versions, inventory counts and which features are switched on, as text to paste into a report.',
+    titleKey: 'settingsPage.diagnostics.title',
+    descKey: 'settingsPage.index.diagnostics.desc',
     aliases: 'bug report diagnostics support logs crash troubleshoot issue version paste'
   }
 ]
@@ -366,16 +378,31 @@ const SETTING_INDEX: SettingEntry[] = [
  * it causes: a query that quietly matches something else. Token containment
  * means "background checks" finds the row whose aliases say "background
  * checks", and "check servers" finds the row whose title says both words.
+ *
+ * The English title is in the haystack in every language, beside the
+ * translated one, for the same reason the aliases are English.
  */
 function settingMatches(entry: SettingEntry, query: string): boolean {
-  const hay = `${entry.title} ${entry.desc} ${entry.aliases ?? ''} ${SECTION_META[entry.section].label}`.toLowerCase()
+  const hay = [
+    currentT(entry.titleKey),
+    currentT(entry.descKey),
+    englishT(entry.titleKey),
+    entry.aliases ?? '',
+    currentT(SECTION_META[entry.section].labelKey)
+  ]
+    .join(' ')
+    .toLowerCase()
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   return words.length > 0 && words.every((w) => hay.includes(w))
 }
 
-export function searchSettings(query: string): SettingEntry[] {
+/** Matching entries, each with its title in the current language. */
+export function searchSettings(query: string): (SettingEntry & { title: string })[] {
   if (!query.trim()) return []
-  return SETTING_INDEX.filter((e) => settingMatches(e, query))
+  return SETTING_INDEX.filter((e) => settingMatches(e, query)).map((e) => ({
+    ...e,
+    title: currentT(e.titleKey)
+  }))
 }
 
 /**
@@ -425,6 +452,7 @@ function SettingSwitch({
  * disagreed with the machine.
  */
 function AutoStartSetting(): React.JSX.Element | null {
+  const t = useT()
   const [state, setState] = useState<AutoStartState | null>(null)
 
   useEffect(() => {
@@ -437,7 +465,7 @@ function AutoStartSetting(): React.JSX.Element | null {
     return (
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Start when I log in</div>
+          <div className="s-title">{t('settingsPage.autoStart.title')}</div>
           <div className="s-desc">{state.reason}</div>
         </div>
       </div>
@@ -453,15 +481,15 @@ function AutoStartSetting(): React.JSX.Element | null {
   return (
     <>
       <SettingSwitch
-        label="Start when I log in"
-        desc="Launch OpsMaxx with your machine, so background checking and alerts run from login rather than from whenever you next open the app."
+        label={t('settingsPage.autoStart.title')}
+        desc={t('settingsPage.autoStart.desc')}
         checked={state.openAtLogin}
         onChange={(v) => set({ openAtLogin: v })}
       />
       {state.openAtLogin && state.hiddenSupported && (
         <SettingSwitch
-          label="Start in the background"
-          desc="Launch without opening a window. Checks still run and alerts still fire — OpsMaxx is waiting in the Dock rather than in front of you."
+          label={t('settingsPage.autoStart.hidden.title')}
+          desc={t('settingsPage.autoStart.hidden.desc')}
           checked={state.openAsHidden}
           onChange={(v) => set({ openAsHidden: v })}
         />
@@ -478,6 +506,7 @@ function AutoStartSetting(): React.JSX.Element | null {
 // like a healthy one. fleet.status() is the only thing that can tell them
 // apart, and until this it was wired through IPC and read by nobody.
 function FleetSamplerLine(): React.JSX.Element | null {
+  const t = useT()
   const status = useFleetStatus((s) => s.status)
 
   // 'disabled' is the one idle reason the switch already explains.
@@ -490,25 +519,20 @@ function FleetSamplerLine(): React.JSX.Element | null {
       // vault is, unlock it, come back — for a state this screen can resolve
       // in one press, with Touch ID where the machine has it.
       <div className="panel-note is-watch">
-        <span className="grow">Paused — the vault is locked, so nothing is being checked.</span>
-        <UnlockVaultButton reason="Background checking needs the credentials in your vault." />
+        <span className="grow">{t('settingsPage.sampler.vaultLocked')}</span>
+        <UnlockVaultButton reason={t('settingsPage.sampler.unlockReason')} />
       </div>
     )
   }
   if (status.idleReason === 'no-targets') {
     return (
-      <div className="s-desc warn">
-        Nothing to check — this workspace has no servers that can be sampled.
-      </div>
+      <div className="s-desc warn">{t('settingsPage.sampler.noTargets')}</div>
     )
   }
   // Enabled, targets, vault open — and still not looping. Said plainly,
   // because the alternative is a settings screen that affirms everything is
   // fine while nothing has been sampled for hours.
   if (!status.running) {
-    const since = status.lastSweepAt
-      ? `nothing has been checked for ${duration(status.lastSweepAt)}`
-      : 'no pass has ever run'
     // No longer "turn this off and on again". That was a workaround for a
     // missing wire — unlocking the vault did not re-arm the sampler — and
     // telling someone to power-cycle a feature is an admission, not an
@@ -517,18 +541,23 @@ function FleetSamplerLine(): React.JSX.Element | null {
     // say so rather than to prescribe a ritual.
     return (
       <div className="s-desc danger">
-        {`Switched on, but nothing is scheduled — ${since}. This should not happen; ` +
-          'switching it off and on will restart it, and it is worth reporting.'}
+        {status.lastSweepAt
+          ? t('settingsPage.sampler.stalledSince', { duration: duration(status.lastSweepAt) })
+          : t('settingsPage.sampler.stalledNever')}
       </div>
     )
   }
 
-  const servers = `${status.targetCount} server${status.targetCount === 1 ? '' : 's'}`
+  const count = status.targetCount
   return (
     <div className="s-desc ok">
       {status.lastSweepAt
-        ? `Running · ${servers} · last pass ${duration(status.lastSweepAt)} ago, took ${sweepDuration(status.lastSweepMs)}`
-        : `Running · ${servers} · first pass has not finished yet`}
+        ? t('settingsPage.sampler.running', {
+            count,
+            ago: duration(status.lastSweepAt),
+            took: sweepDuration(status.lastSweepMs)
+          })
+        : t('settingsPage.sampler.runningFirst', { count })}
     </div>
   )
 }
@@ -541,6 +570,7 @@ function sweepDuration(ms: number | undefined): string {
 // Real data: the SSH host keys trusted on first use. Forgetting one is how a
 // user recovers after a server is legitimately rebuilt with a new key.
 function KnownHosts(): React.JSX.Element {
+  const t = useT()
   const [hosts, setHosts] = useState<{ id: string; fingerprint: string; addedAt: string }[]>([])
 
   const load = (): void => {
@@ -556,15 +586,15 @@ function KnownHosts(): React.JSX.Element {
     <div style={{ marginBottom: 18 }}>
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Trusted SSH host keys</div>
+          <div className="s-title">{t('settingsPage.knownHosts.title')}</div>
           <div className="s-desc">
             {hosts.length
-              ? 'Connections are refused if a server presents a different key than the one saved here.'
-              : 'No servers trusted yet — the first connection to a server will ask.'}
+              ? t('settingsPage.knownHosts.descSome')
+              : t('settingsPage.knownHosts.descNone')}
           </div>
         </div>
         <button className="btn sm" onClick={load}>
-          Refresh
+          {t('common.refresh')}
         </button>
       </div>
 
@@ -576,34 +606,21 @@ function KnownHosts(): React.JSX.Element {
         <div className="setting-row">
           <div className="s-info">
             <div className="s-title warn">
-              {stale.length === 1
-                ? '1 entry is saved against a loopback address'
-                : `${stale.length} entries are saved against loopback addresses`}
+              {t('settingsPage.knownHosts.stale.title', { count: stale.length })}
             </div>
             <div className="s-desc">
-              Before 0.36.2, a server reached through a VPN or tunnel had its host key saved under
-              the temporary local address the connection borrowed — a different one every time. That
-              is why those servers kept asking to be trusted again. The entries name no particular
-              machine, so an unrelated local service on the same port would inherit the trust.
-              <br />
-              If you deliberately trust an SSH server running on this machine, its entry looks the
-              same — remove that one individually instead.
+              <Trans i18nKey="settingsPage.knownHosts.stale.desc" components={{ br: <br /> }} />
             </div>
           </div>
           <button
             className="btn sm danger"
             onClick={async () => {
               for (const h of stale) await window.opsmaxx?.knownHosts.forget(h.id)
-              toast(
-                stale.length === 1
-                  ? 'Removed 1 stale entry.'
-                  : `Removed ${stale.length} stale entries.`,
-                'ok'
-              )
+              toast(t('settingsPage.knownHosts.stale.removedToast', { count: stale.length }), 'ok')
               load()
             }}
           >
-            Remove {stale.length === 1 ? 'it' : `all ${stale.length}`}
+            {t('settingsPage.knownHosts.stale.remove', { count: stale.length })}
           </button>
         </div>
       )}
@@ -619,11 +636,11 @@ function KnownHosts(): React.JSX.Element {
             className="btn sm danger"
             onClick={async () => {
               await window.opsmaxx?.knownHosts.forget(h.id)
-              toast(`Forgot the saved key for ${h.id}. The next connection to it will ask again.`, 'ok')
+              toast(t('settingsPage.knownHosts.forgotToast', { host: h.id }), 'ok')
               load()
             }}
           >
-            Forget
+            {t('settingsPage.knownHosts.forget')}
           </button>
         </div>
       ))}
@@ -638,6 +655,7 @@ function KnownHosts(): React.JSX.Element {
 // is the subject rather than a side effect, so it says so and offers the same
 // prompt rather than sending the user off to find the Vault view.
 function VaultState(): React.JSX.Element {
+  const t = useT()
   const exists = useVault((s) => s.exists)
   const unlocked = useVault((s) => s.unlocked)
   const refresh = useVault((s) => s.refresh)
@@ -653,7 +671,7 @@ function VaultState(): React.JSX.Element {
   }, [refresh])
 
   const unlock = async (): Promise<void> => {
-    await useVaultPrompt.getState().request('Unlocking makes your saved credentials usable again.')
+    await useVaultPrompt.getState().request(t('settingsPage.vault.unlockReason'))
     void refresh()
   }
 
@@ -663,34 +681,34 @@ function VaultState(): React.JSX.Element {
         <div className="s-title">
           {unlocked ? <LockOpen size={13} /> : <Lock size={13} />}{' '}
           {exists === null
-            ? 'Checking for a vault…'
+            ? t('settingsPage.vault.checking')
             : !exists
-              ? 'No vault on this computer yet'
+              ? t('settingsPage.vault.none')
               : unlocked
-                ? 'Vault unlocked'
-                : 'Vault locked'}
+                ? t('settingsPage.vault.unlocked')
+                : t('settingsPage.vault.locked')}
         </div>
         <div className="s-desc">
           {exists === null
-            ? 'Reading this machine\u2019s keychain. Nothing is decided until it answers.'
+            ? t('settingsPage.vault.checkingDesc')
             : !exists
-            ? 'A vault holds one copy of each credential and travels inside an encrypted backup. Without one, every server keeps its own.'
+            ? t('settingsPage.vault.noneDesc')
             : unlocked
-              ? 'Anything that needs a saved credential can use it until the timer below runs out.'
-              : 'Anything that needs a saved credential will ask you to unlock first.'}
+              ? t('settingsPage.vault.unlockedDesc')
+              : t('settingsPage.vault.lockedDesc')}
         </div>
       </div>
       {exists === null ? null : !exists ? (
         <button className="btn sm" onClick={() => setActivity('vault')}>
-          Set up a vault
+          {t('settingsPage.vault.setUp')}
         </button>
       ) : unlocked ? (
         <button className="btn sm" onClick={() => void useVault.getState().lock()}>
-          <Lock size={13} /> Lock now
+          <Lock size={13} /> {t('settingsPage.vault.lockNow')}
         </button>
       ) : (
         <button className="btn sm primary" onClick={() => void unlock()}>
-          <LockOpen size={13} /> Unlock vault
+          <LockOpen size={13} /> {t('settingsPage.vault.unlock')}
         </button>
       )}
     </div>
@@ -739,6 +757,7 @@ function VaultState(): React.JSX.Element {
  * See src/main/services/debugLog.ts.
  */
 function DebugPanel(): React.JSX.Element {
+  const t = useT()
   const settings = useApp((s) => s.settings)
   const setSettings = useApp((s) => s.setSettings)
   const [status, setStatus] = useState<DebugStatus | null>(null)
@@ -761,19 +780,26 @@ function DebugPanel(): React.JSX.Element {
   return (
     <>
       <SettingSwitch
-        label="Debug mode"
-        desc="Record which internal operations run and which fail, so a bug report can say what the app did and not only what it is. You do not need this page to start one — the bug icon in the left rail offers it, which is where a report begins. Those messages come from this machine and your servers, and they routinely name hostnames, usernames, file paths and commands; passwords, keys and tokens are filtered out before anything is written, a hostname cannot be. Nothing is sent anywhere: the trace stays on this computer, you read the whole report before it is written, and starting a new recording clears the old one."
+        label={t('settingsPage.debug.title')}
+        desc={t('settingsPage.debug.desc')}
         checked={settings.debugLogEnabled === true}
         onChange={(v) => setSettings({ debugLogEnabled: v })}
       />
       {status !== null && status.bytes > 0 && (
         <div className="setting-row">
           <div className="s-info">
-            <div className="s-title">Recorded trace</div>
+            <div className="s-title">{t('settingsPage.debug.traceTitle')}</div>
             <div className="s-desc">
-              {status.events > 0 ? `${status.events} events, ` : ''}
-              {kb} KB on disk{status.truncated ? ', cut at the 8 MB cap' : ''}. Yours to delete
-              whenever you like — reporting a bug does not remove it.
+              {status.events > 0
+                ? t(
+                    status.truncated
+                      ? 'settingsPage.debug.traceEventsSizeCapped'
+                      : 'settingsPage.debug.traceEventsSize',
+                    { events: status.events, kb }
+                  )
+                : t(status.truncated ? 'settingsPage.debug.traceSizeCapped' : 'settingsPage.debug.traceSize', {
+                    kb
+                  })}
             </div>
           </div>
           <button
@@ -782,10 +808,10 @@ function DebugPanel(): React.JSX.Element {
               const api = window.opsmaxx?.debug
               if (!bridgeHas(api as Record<string, unknown> | undefined, 'delete')) return
               void api?.delete().then(refresh)
-              toast('Debug trace deleted.')
+              toast(t('settingsPage.debug.deletedToast'))
             }}
           >
-            Delete
+            {t('common.delete')}
           </button>
         </div>
       )}
@@ -794,6 +820,7 @@ function DebugPanel(): React.JSX.Element {
 }
 
 function DiagnosticsPanel(): React.JSX.Element {
+  const t = useT()
   const [text, setText] = useState<string | null>(null)
 
   useEffect(() => {
@@ -802,8 +829,8 @@ function DiagnosticsPanel(): React.JSX.Element {
     let live = true
     void api
       ?.text()
-      .then((t) => {
-        if (live) setText(t)
+      .then((report) => {
+        if (live) setText(report)
       })
       .catch(() => {
         /* nothing to show; the Copy button stays disabled */
@@ -817,16 +844,8 @@ function DiagnosticsPanel(): React.JSX.Element {
     <>
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Copy diagnostics</div>
-          <div className="s-desc">
-            Your app version and update channel, this platform and its Electron, Chrome and Node
-            versions, how many servers, workspaces, databases, tunnels and VPN profiles exist, which
-            optional modules are on, and whether each configurable feature is switched on and
-            actually set up. Counts and on/off states only — no names, hostnames, addresses,
-            usernames, paths or credentials, and nothing read from any server. The crash screen
-            copies this same report with the error text added, which is worth a glance before
-            posting. Nothing is saved to disk.
-          </div>
+          <div className="s-title">{t('settingsPage.diagnostics.title')}</div>
+          <div className="s-desc">{t('settingsPage.diagnostics.desc')}</div>
         </div>
         <button
           className="btn sm"
@@ -834,13 +853,13 @@ function DiagnosticsPanel(): React.JSX.Element {
           onClick={() => {
             if (text === null) return
             window.opsmaxx?.clipboard.write(text)
-            toast('Diagnostics copied.')
+            toast(t('settingsPage.diagnostics.copiedToast'))
           }}
         >
-          Copy
+          {t('common.copy')}
         </button>
       </div>
-      <pre className="paste-preview">{text ?? 'Collecting…'}</pre>
+      <pre className="paste-preview">{text ?? t('settingsPage.diagnostics.collecting')}</pre>
     </>
   )
 }
@@ -870,7 +889,7 @@ export function Settings(): React.JSX.Element {
   // and no way to search it in the monitoring settings panel". See
   // SETTING_INDEX for why both halves of that are true.
   const [query, setQuery] = useState('')
-  const [jumpTo, setJumpTo] = useState<string | null>(null)
+  const [jumpTo, setJumpTo] = useState<MessageKey | null>(null)
   const results = searchSettings(query)
 
   // Landing on the section is most of the answer; landing on the ROW is the
@@ -881,11 +900,12 @@ export function Settings(): React.JSX.Element {
   // Found by title text rather than by threading a ref through forty rows in
   // six components, only one of which this change is allowed to touch. The
   // trade is that a renamed label silently stops jumping — which is why
-  // SETTING_INDEX says, at its `title` field, that the two are the same string.
+  // SETTING_INDEX says, at its `titleKey` field, that the two are the same key.
   useEffect(() => {
     if (!jumpTo) return undefined
+    const wanted = t(jumpTo)
     const title = [...document.querySelectorAll('.settings-content .s-title')].find(
-      (el) => el.textContent?.trim() === jumpTo
+      (el) => el.textContent?.trim() === wanted
     )
     const row = title?.closest('.setting-row')
     if (!row) return undefined
@@ -893,12 +913,12 @@ export function Settings(): React.JSX.Element {
     // Absent in jsdom, and a missing scroll is not worth an exception in a
     // renderer.
     row.scrollIntoView?.({ block: 'center' })
-    const t = setTimeout(() => row.classList.remove('setting-hit'), 2600)
+    const timer = setTimeout(() => row.classList.remove('setting-hit'), 2600)
     return () => {
-      clearTimeout(t)
+      clearTimeout(timer)
       row.classList.remove('setting-hit')
     }
-  }, [jumpTo, section])
+  }, [jumpTo, section, t])
 
   return (
     <div className="main">
@@ -907,28 +927,27 @@ export function Settings(): React.JSX.Element {
           <input
             className="input settings-search"
             type="search"
-            placeholder="Search settings"
-            aria-label="Search settings"
+            placeholder={t('settingsPage.search.label')}
+            aria-label={t('settingsPage.search.label')}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
           />
           {query.trim() !== '' && (
-            <div className="settings-results" role="listbox" aria-label="Search results">
+            <div className="settings-results" role="listbox" aria-label={t('settingsPage.search.results')}>
               {results.length === 0 ? (
                 // Said, rather than an empty box that looks broken.
                 <div className="field-hint" style={{ padding: 'var(--sp-2) var(--sp-3)' }}>
-                  No setting matches that. Try a word from what it does — “webhook”, “vault”,
-                  “background”.
+                  {t('settingsPage.search.noMatch')}
                 </div>
               ) : (
                 results.map((e) => (
                   <button
-                    key={`${e.section}:${e.title}`}
+                    key={`${e.section}:${e.titleKey}`}
                     className="nav-item result"
                     role="option"
                     onClick={() => {
                       setSection(e.section)
-                      setJumpTo(e.title)
+                      setJumpTo(e.titleKey)
                       // Clearing it puts the section list back, which is where
                       // the user now is. A result list left standing over the
                       // page they just jumped to is a second thing to dismiss.
@@ -936,7 +955,7 @@ export function Settings(): React.JSX.Element {
                     }}
                   >
                     <span className="result-title">{e.title}</span>
-                    <span className="result-section">{SECTION_META[e.section].label}</span>
+                    <span className="result-section">{t(SECTION_META[e.section].labelKey)}</span>
                   </button>
                 ))
               )}
@@ -949,7 +968,7 @@ export function Settings(): React.JSX.Element {
               onClick={() => setSection(id)}
             >
               {SECTION_META[id].icon}
-              {SECTION_META[id].label}
+              {t(SECTION_META[id].labelKey)}
             </button>
           ))}
         </nav>
@@ -959,18 +978,15 @@ export function Settings(): React.JSX.Element {
 
           {section === 'general' && (
             <div className="settings-section">
-              <h2>Walkthrough</h2>
-              <div className="sub">A short tour of what is here and where it lives.</div>
+              <h2>{t('settingsPage.walkthrough.heading')}</h2>
+              <div className="sub">{t('settingsPage.walkthrough.sub')}</div>
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Show the walkthrough</div>
-                  <div className="s-desc">
-                    Runs once on a first launch. Reopen it here whenever you want — it switches to
-                    each feature as it describes it, so nothing is hidden while you read.
-                  </div>
+                  <div className="s-title">{t('settingsPage.walkthrough.title')}</div>
+                  <div className="s-desc">{t('settingsPage.walkthrough.desc')}</div>
                 </div>
                 <button className="btn sm" onClick={() => startTour()}>
-                  <Compass size={13} /> Start walkthrough
+                  <Compass size={13} /> {t('settingsPage.walkthrough.start')}
                 </button>
               </div>
             </div>
@@ -978,59 +994,51 @@ export function Settings(): React.JSX.Element {
 
           {section === 'appearance' && (
             <div className="settings-section">
-              <h2>Appearance</h2>
-              <div className="sub">Theme and visual density.</div>
+              <h2>{t('settingsPage.appearance.heading')}</h2>
+              <div className="sub">{t('settingsPage.appearance.sub')}</div>
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Theme</div>
-                  <div className="s-desc">
-                    OpsMaxx is the default look. The classic dark and light themes are still here.
-                  </div>
+                  <div className="s-title">{t('settingsPage.appearance.theme.title')}</div>
+                  <div className="s-desc">{t('settingsPage.appearance.theme.desc')}</div>
                 </div>
                 <div className="segment">
-                  {THEME_OPTIONS.map(([t, label]) => (
+                  {THEME_OPTIONS.map(([mode, labelKey]) => (
                     <button
-                      key={t}
-                      className={clsx('seg-btn', theme === t && 'active')}
-                      onClick={() => setTheme(t)}
+                      key={mode}
+                      className={clsx('seg-btn', theme === mode && 'active')}
+                      onClick={() => setTheme(mode)}
                     >
-                      {label}
+                      {t(labelKey)}
                     </button>
                   ))}
                 </div>
               </div>
-              {/* Development builds only until the everyday screens are translated:
-                  offering German over a UI that is still English reads as broken.
-                  "Match system" already applies everywhere, and the one thing it
-                  changes today, the Edit and View menus, is fully translated. */}
-              {import.meta.env.DEV && (
-                <div className="setting-row">
-                  <div className="s-info">
-                    <div className="s-title">{t('settings.language.title')}</div>
-                    <div className="s-desc">{t('settings.language.desc')}</div>
-                  </div>
-                  <select
-                    className="select"
-                    style={{ width: 220 }}
-                    value={parseLanguagePref(settings.language)}
-                    onChange={(e) => setSettings({ language: parseLanguagePref(e.target.value) })}
-                  >
-                    <option value="system">{t('settings.language.system')}</option>
-                    {/* Each in its own language, never translated: someone who
-                        cannot read the current one is looking for theirs. */}
-                    {LOCALES.map((l) => (
-                      <option key={l} value={l}>
-                        {LOCALE_NAMES[l]}
-                      </option>
-                    ))}
-                    {import.meta.env.DEV && <option value={PSEUDO_LOCALE}>{LOCALE_NAMES[PSEUDO_LOCALE]}</option>}
-                  </select>
+              <div className="setting-row">
+                <div className="s-info">
+                  <div className="s-title">{t('settings.language.title')}</div>
+                  <div className="s-desc">{t('settings.language.desc')}</div>
                 </div>
-              )}
+                <select
+                  className="select"
+                  style={{ width: 220 }}
+                  value={parseLanguagePref(settings.language)}
+                  onChange={(e) => setSettings({ language: parseLanguagePref(e.target.value) })}
+                >
+                  <option value="system">{t('settings.language.system')}</option>
+                  {/* Each in its own language, never translated: someone who
+                      cannot read the current one is looking for theirs. */}
+                  {LOCALES.map((l) => (
+                    <option key={l} value={l}>
+                      {LOCALE_NAMES[l]}
+                    </option>
+                  ))}
+                  {import.meta.env.DEV && <option value={PSEUDO_LOCALE}>{LOCALE_NAMES[PSEUDO_LOCALE]}</option>}
+                </select>
+              </div>
               <AutoStartSetting />
               <SettingSwitch
-                label="Compact density"
-                desc="Tighter rows and padding across trees, lists and the docked monitor. Font sizes are unchanged."
+                label={t('settingsPage.appearance.compact.title')}
+                desc={t('settingsPage.appearance.compact.desc')}
                 checked={settings.compactDensity}
                 onChange={(v) => setSettings({ compactDensity: v })}
               />
@@ -1039,18 +1047,18 @@ export function Settings(): React.JSX.Element {
 
           {section === 'terminal' && (
             <div className="settings-section">
-              <h2>Terminal</h2>
-              <div className="sub">Font, cursor and scrollback behaviour.</div>
+              <h2>{t('settingsPage.terminal.heading')}</h2>
+              <div className="sub">{t('settingsPage.terminal.sub')}</div>
               <SettingSwitch
-                label="Close the pane when the shell exits"
-                desc="Typing exit ends the session, so the pane goes with it — the same as every other terminal. A shell that stopped for a reason keeps its pane and says why, whatever this is set to."
+                label={t('settingsPage.terminal.closeOnExit.title')}
+                desc={t('settingsPage.terminal.closeOnExit.desc')}
                 checked={settings.closeTabOnShellExit !== false}
                 onChange={(v) => setSettings({ closeTabOnShellExit: v })}
               />
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Font family</div>
-                  <div className="s-desc">Monospace font used in the terminal.</div>
+                  <div className="s-title">{t('settingsPage.terminal.fontFamily.title')}</div>
+                  <div className="s-desc">{t('settingsPage.terminal.fontFamily.desc')}</div>
                 </div>
                 <select
                   className="select"
@@ -1058,7 +1066,7 @@ export function Settings(): React.JSX.Element {
                   value={settings.terminalFontFamily}
                   onChange={(e) => setSettings({ terminalFontFamily: e.target.value })}
                 >
-                  <option value="">App default</option>
+                  <option value="">{t('settingsPage.terminal.fontFamily.appDefault')}</option>
                   <option value="JetBrains Mono">JetBrains Mono</option>
                   <option value="SF Mono">SF Mono</option>
                   <option value="Cascadia Code">Cascadia Code</option>
@@ -1067,10 +1075,9 @@ export function Settings(): React.JSX.Element {
               </div>
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Font size</div>
+                  <div className="s-title">{t('settingsPage.terminal.fontSize.title')}</div>
                   <div className="s-desc">
-                    Applies to open terminals immediately. Also <b>Ctrl +</b> / <b>Ctrl -</b> /{' '}
-                    <b>Ctrl 0</b>, or Ctrl+scroll inside a terminal.
+                    <Trans i18nKey="settingsPage.terminal.fontSize.desc" components={{ b: <b /> }} />
                   </div>
                 </div>
                 <div className="row" style={{ gap: 6 }}>
@@ -1084,19 +1091,16 @@ export function Settings(): React.JSX.Element {
                     +
                   </button>
                   <button className="btn sm" onClick={() => zoomTerminal('reset')}>
-                    Reset
+                    {t('common.reset')}
                   </button>
                 </div>
               </div>
               <div className="setting-row wrap">
                 <div className="s-info">
                   <div className="s-title" id="terminal-scheme-title">
-                    Colour scheme
+                    {t('settingsPage.terminal.scheme.title')}
                   </div>
-                  <div className="s-desc">
-                    Applies to open terminals immediately. A scheme without its own background keeps
-                    the app&apos;s, so it follows light and dark.
-                  </div>
+                  <div className="s-desc">{t('settingsPage.terminal.scheme.desc')}</div>
                 </div>
                 <div className="row" style={{ gap: 6 }}>
                   <button
@@ -1122,11 +1126,11 @@ export function Settings(): React.JSX.Element {
                           terminalCustomSchemes: [...rest, parsed.scheme],
                           terminalScheme: parsed.scheme.id
                         })
-                        toast(`${parsed.scheme.name} added`, 'ok')
+                        toast(t('settingsPage.terminal.scheme.added', { name: parsed.scheme.name }), 'ok')
                       })()
                     }}
                   >
-                    Import a file
+                    {t('settingsPage.terminal.scheme.import')}
                   </button>
                 </div>
                 <SchemePicker
@@ -1137,26 +1141,26 @@ export function Settings(): React.JSX.Element {
                 />
               </div>
               <SettingSwitch
-                label="Cursor blink"
-                desc="Blink the terminal cursor."
+                label={t('settingsPage.terminal.cursorBlink.title')}
+                desc={t('settingsPage.terminal.cursorBlink.desc')}
                 checked={settings.terminalCursorBlink !== false}
                 onChange={(v) => setSettings({ terminalCursorBlink: v })}
               />
               <SettingSwitch
-                label="Let remote programs copy to the clipboard"
-                desc="Programs running in a terminal — Claude Code, tmux, Neovim on a server — can put text on this computer's clipboard when you copy inside them. They can only write to it: a request to read your clipboard is never answered. Turn this off to stop any program in a terminal from changing your clipboard."
+                label={t('settingsPage.terminal.osc52.title')}
+                desc={t('settingsPage.terminal.osc52.desc')}
                 checked={settings.terminalOsc52 !== false}
                 onChange={(v) => setSettings({ terminalOsc52: v })}
               />
               <SettingSwitch
-                label="Shell integration"
-                desc="Start local shells so they report where each prompt begins and what each command exited with. Uses the shell's own startup options for the session OpsMaxx starts — your shell config files are never modified, and turning this off restores the previous behaviour exactly. zsh and bash get prompt and command marks; fish gets command marks only; a login bash and PowerShell are not supported."
+                label={t('settingsPage.terminal.shellIntegration.title')}
+                desc={t('settingsPage.terminal.shellIntegration.desc')}
                 checked={settings.shellIntegration === true}
                 onChange={(v) => setSettings({ shellIntegration: v })}
               />
               <SettingSwitch
-                label="Click to move the cursor"
-                desc="Click inside the line you are typing to put the shell cursor there. Needs shell integration, so it does nothing in a session without it, and stays out of the way while a command is running or a full-screen program is open."
+                label={t('settingsPage.terminal.clickToMove.title')}
+                desc={t('settingsPage.terminal.clickToMove.desc')}
                 checked={settings.terminalClickToMove === true}
                 onChange={(v) => setSettings({ terminalClickToMove: v })}
               />
@@ -1171,8 +1175,8 @@ export function Settings(): React.JSX.Element {
                   cron, host-facts, Files and metrics panels' "This machine"
                   option, and ends any local Files session already open. */}
               <SettingSwitch
-                label="Allow this machine as a target"
-                desc="Open a shell on this computer, and offer it alongside your servers in the Docker, Kubernetes, cron, Files and monitoring panels. When off, every one of those refuses locally and open local file sessions are closed. Never available to the AI bridge either way."
+                label={t('settingsPage.terminal.localTarget.title')}
+                desc={t('settingsPage.terminal.localTarget.desc')}
                 checked={settings.localTerminalEnabled !== false}
                 onChange={(v) => setSettings({ localTerminalEnabled: v })}
               />
@@ -1181,11 +1185,11 @@ export function Settings(): React.JSX.Element {
 
           {section === 'shortcuts' && (
             <div className="settings-section">
-              <h2>Keyboard Shortcuts</h2>
-              <div className="sub">Record a combination by clicking a shortcut. Conflicts are highlighted.</div>
+              <h2>{t('settingsPage.shortcuts.heading')}</h2>
+              <div className="sub">{t('settingsPage.shortcuts.sub')}</div>
               <SettingSwitch
-                label="Include hidden workspaces in Ctrl+1…9"
-                desc="When on, hidden workspaces take their place in the numbering and can be switched to by shortcut. When off, they are skipped and the numbers close up around them."
+                label={t('settingsPage.shortcuts.hiddenWorkspaces.title')}
+                desc={t('settingsPage.shortcuts.hiddenWorkspaces.desc')}
                 checked={settings.switchHiddenWorkspaces}
                 onChange={(v) => setSettings({ switchHiddenWorkspaces: v })}
               />
@@ -1195,28 +1199,26 @@ export function Settings(): React.JSX.Element {
 
           {section === 'editor' && (
             <div className="settings-section">
-              <h2>Editor</h2>
-              <div className="sub">How remote files open from the Files view.</div>
+              <h2>{t('settingsPage.editor.heading')}</h2>
+              <div className="sub">{t('settingsPage.editor.sub')}</div>
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">External editor command</div>
+                  <div className="s-title">{t('settingsPage.editor.external.title')}</div>
                   <div className="s-desc">
-                    Run to open a remote file — <code>code</code> for VS Code, <code>subl</code>,{' '}
-                    <code>nvim</code>, and so on. Leave empty to use the system default for the file
-                    type. Saving in the editor uploads the file back automatically.
+                    <Trans i18nKey="settingsPage.editor.external.desc" components={{ code: <code /> }} />
                   </div>
                 </div>
                 <input
                   className="input"
                   style={{ width: 180 }}
-                  placeholder="system default"
+                  placeholder={t('settingsPage.editor.external.placeholder')}
                   value={settings.externalEditorCommand}
                   onChange={(e) => setSettings({ externalEditorCommand: e.target.value })}
                 />
               </div>
               <SettingSwitch
-                label="Open files externally by default"
-                desc="Double-clicking a file in the Files view uses the external editor instead of the built-in inline editor."
+                label={t('settingsPage.editor.openExternally.title')}
+                desc={t('settingsPage.editor.openExternally.desc')}
                 checked={settings.openFilesExternally}
                 onChange={(v) => setSettings({ openFilesExternally: v })}
               />
@@ -1225,19 +1227,12 @@ export function Settings(): React.JSX.Element {
 
           {section === 'modules' && (
             <>
-              <h2>Modules</h2>
-              <p className="muted">
-                Features that ship with OpsMaxx but stay off until you turn them on. Everything
-                here is first-party code in the same repo, reviewed the same way — this is about not
-                carrying what you do not use, not about running anyone else&rsquo;s code.
-              </p>
+              <h2>{t('settingsPage.modules.heading')}</h2>
+              <p className="muted">{t('settingsPage.modules.intro')}</p>
               {/* A module added by an update is off until you switch it on,
                   even though a new install would have it on. An upgrade is not
                   consent — see backfillModules. */}
-              <p className="muted">
-                A module added by an update stays off on an existing install until you enable it
-                here.
-              </p>
+              <p className="muted">{t('settingsPage.modules.addedByUpdate')}</p>
               {/* Grouped by what a module DOES to a server, which is the one
                   division this registry already commits to: `surface` is
                   load-bearing, and "nothing on a read surface may write to a
@@ -1254,17 +1249,17 @@ export function Settings(): React.JSX.Element {
                 if (rows.length === 0) return null
                 return (
                   <div key={g.id} className="settings-group">
-                    <h3 className="settings-group-title">{g.label}</h3>
-                    <p className="muted settings-group-detail">{g.detail}</p>
+                    <h3 className="settings-group-title">{t(g.labelKey)}</h3>
+                    <p className="muted settings-group-detail">{t(g.detailKey)}</p>
                     {rows.map((m) => (
                       <div className="setting-row" key={m.id}>
                         <div className="s-info">
-                          <div className="s-title">{m.label}</div>
-                          <div className="s-desc">{m.detail}</div>
+                          <div className="s-title">{t(m.labelKey)}</div>
+                          <div className="s-desc">{t(m.detailKey)}</div>
                         </div>
                         <Switch
                           checked={moduleEnabled(settings.modules, m.id)}
-                          label={m.label}
+                          label={t(m.labelKey)}
                           onChange={(v) =>
                             setSettings({ modules: { ...settings.modules, [m.id]: v } })
                           }
@@ -1279,43 +1274,38 @@ export function Settings(): React.JSX.Element {
 
           {section === 'monitoring' && (
             <div className="settings-section">
-              <h2>Monitoring</h2>
-              <div className="sub">
-                Alerts, background checking, webhook delivery, and the monitor strip.
-              </div>
+              <h2>{t('settingsPage.monitoring.heading')}</h2>
+              <div className="sub">{t('settingsPage.monitoring.sub')}</div>
               {/* The settings KEY stays `resourceAlertsEnabled` so saved settings
                   still load, but the label was only ever half true: this switch
                   gates checkUnitAlerts as well as checkResourceAlerts, and every
                   webhook is posted from inside one of the two. */}
               <SettingSwitch
-                label="Alerts"
-                desc="The master switch. Covers CPU and memory at or above the threshold, a root filesystem more than 85% full by blocks OR by inodes, a load average at or above 2 per core, and systemd units that have failed — and, since every webhook is sent from an alert, webhook delivery too. CPU, memory and load repeat once a minute while the condition lasts; a full disk or inode table repeats every six hours, or sooner if it gets 5 points worse. They clear themselves on recovery: a filesystem as soon as it is back to 85% or below, CPU and memory once they are 5 points under the threshold, so a server sitting exactly on the line does not flicker on and off. A server that crosses the same line five times in six hours is announced once more and then held quiet until it has gone six hours without crossing again. Anything the server could not measure — no inode accounting, no /proc/loadavg, no df — raises nothing and clears nothing, because a reading nobody could take is not a reading of zero. Switching this off also takes down any alerts already showing."
+                label={t('settingsPage.monitoring.alerts.title')}
+                desc={t('settingsPage.monitoring.alerts.desc')}
                 checked={settings.resourceAlertsEnabled}
                 onChange={(v) => setSettings({ resourceAlertsEnabled: v })}
               />
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Alert threshold</div>
+                  <div className="s-title">{t('settingsPage.monitoring.threshold.title')}</div>
                   <div className="s-desc">
-                    The same figure applies to CPU and to memory. Disk has its own, fixed at{' '}
-                    <strong>85%</strong>: a root filesystem past that alerts, which is the same
-                    85% at which the Fleet Monitor lists the server as needing attention and turns
-                    its disk bar red. Inodes use the same 85% and load its own fixed{' '}
-                    <strong>2 per core</strong>. Only the root filesystem is measured, for blocks
-                    and for inodes alike — a server that has filled /var and has room on / raises
-                    nothing here.{' '}
+                    <Trans
+                      i18nKey="settingsPage.monitoring.threshold.desc"
+                      components={{ strong: <strong /> }}
+                    />{' '}
                     {alertCoverageText(fleetStatus?.running, settings.fleetSamplingEnabled)}
                   </div>
                 </div>
                 <div className="segment">
-                  {[70, 80, 90, 95].map((t) => (
+                  {[70, 80, 90, 95].map((pct) => (
                     <button
-                      key={t}
-                      className={clsx('seg-btn', settings.resourceAlertThreshold === t && 'active')}
+                      key={pct}
+                      className={clsx('seg-btn', settings.resourceAlertThreshold === pct && 'active')}
                       disabled={!settings.resourceAlertsEnabled}
-                      onClick={() => setSettings({ resourceAlertThreshold: t })}
+                      onClick={() => setSettings({ resourceAlertThreshold: pct })}
                     >
-                      {t}%
+                      {pct}%
                     </button>
                   ))}
                 </div>
@@ -1325,47 +1315,36 @@ export function Settings(): React.JSX.Element {
                   desc. Same markup, so it stays visually identical. */}
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Check servers in the background</div>
-                  <div className="s-desc">
-                    Sample every server in this workspace on a schedule, even when the monitor is
-                    not open, so failures and resource alerts are noticed while you are elsewhere.
-                    Opens one SSH exec channel per server per pass, separately from the monitor, so
-                    it is real load on the estate rather than a reuse of what is already sampled.
-                    Needs the vault unlocked; while it is locked, checking pauses rather than
-                    failing.
-                  </div>
+                  <div className="s-title">{t('settingsPage.monitoring.background.title')}</div>
+                  <div className="s-desc">{t('settingsPage.monitoring.background.desc')}</div>
                   {/* Stated before the switch is touched rather than after,
                       because this is the cost of turning it on and the whole
                       point is that it used to happen invisibly. */}
                   <div className="s-desc">
-                    While this is on, each checked server&rsquo;s connection is held open and never
-                    goes idle, so <strong>Keep authenticated connection</strong> under SSH sessions
-                    stops applying to them at any setting. On a server with two-factor
-                    authentication that means no new code is requested until you turn this off or
-                    quit.
+                    <Trans
+                      i18nKey="settingsPage.monitoring.background.keepAlive"
+                      components={{ strong: <strong /> }}
+                    />
                   </div>
                   <FleetSamplerLine />
                 </div>
                 <Switch
                   checked={settings.fleetSamplingEnabled}
-                  label="Check servers in the background"
+                  label={t('settingsPage.monitoring.background.title')}
                   onChange={(v) => setSettings({ fleetSamplingEnabled: v })}
                 />
               </div>
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">How often</div>
-                  <div className="s-desc">
-                    Measured from the end of one pass to the start of the next, so a slow estate
-                    slows the cadence instead of overlapping checks.
-                  </div>
+                  <div className="s-title">{t('settingsPage.monitoring.howOften.title')}</div>
+                  <div className="s-desc">{t('settingsPage.monitoring.howOften.desc')}</div>
                 </div>
                 <div className="segment">
                   {[
-                    { ms: 60_000, label: '1 min' },
-                    { ms: 120_000, label: '2 min' },
-                    { ms: 300_000, label: '5 min' },
-                    { ms: 900_000, label: '15 min' }
+                    { ms: 60_000, min: 1 },
+                    { ms: 120_000, min: 2 },
+                    { ms: 300_000, min: 5 },
+                    { ms: 900_000, min: 15 }
                   ].map((o) => (
                     <button
                       key={o.ms}
@@ -1373,21 +1352,21 @@ export function Settings(): React.JSX.Element {
                       disabled={!settings.fleetSamplingEnabled}
                       onClick={() => setSettings({ fleetSamplingIntervalMs: o.ms })}
                     >
-                      {o.label}
+                      {t('settingsPage.monitoring.howOften.minutes', { n: o.min })}
                     </button>
                   ))}
                 </div>
               </div>
               <SettingSwitch
-                label="Record how large each database is"
-                desc="Once an hour, ask each stored database connection for its size and keep the number, so growth can be charted and a disk filling up has a cause beside it. Off by default: unlike a server check, this opens a CONNECTION on the database itself."
+                label={t('settingsPage.monitoring.dbSize.title')}
+                desc={t('settingsPage.monitoring.dbSize.desc')}
                 checked={settings.dbSizeSamplingEnabled}
                 onChange={(v) => setSettings({ dbSizeSamplingEnabled: v })}
               />
               <WebhookAlertSettings />
               <SettingSwitch
-                label="Show monitor under the terminal"
-                desc="Live CPU, memory, disk and network docked below the session. Sampling only runs for the visible tab."
+                label={t('settingsPage.monitoring.strip.title')}
+                desc={t('settingsPage.monitoring.strip.desc')}
                 checked={settings.showMonitorStrip}
                 onChange={(v) => setSettings({ showMonitorStrip: v })}
               />
@@ -1396,8 +1375,8 @@ export function Settings(): React.JSX.Element {
 
           {section === 'ssh' && (
             <div className="settings-section">
-              <h2>SSH</h2>
-              <div className="sub">Connection reuse and re-authentication policy.</div>
+              <h2>{t('settingsPage.ssh.heading')}</h2>
+              <div className="sub">{t('settingsPage.ssh.sub')}</div>
               <SshSessions />
               {/* Spelled out rather than summarised, because it is the one
                   setting here that decides whether OpsMaxx writes anything
@@ -1406,45 +1385,35 @@ export function Settings(): React.JSX.Element {
                   "less is written", it is "a long command dies with the
                   connection, and apt and dpkg do not survive that". */}
               <SettingSwitch
-                label="Let jobs keep running when the connection drops"
+                label={t('settingsPage.ssh.jobsDetached.title')}
                 desc={JOB_DETACHED_SETTING_NOTE}
                 checked={settings.jobsDetached !== false}
                 onChange={(v) => setSettings({ jobsDetached: v })}
               />
 
-              <h3>SSH agent</h3>
-              <div className="sub">
-                Other tools on this machine can use the SSH keys in your vault, without a second
-                copy of them sitting in ~/.ssh.
-              </div>
+              <h3>{t('settingsPage.ssh.agent.heading')}</h3>
+              <div className="sub">{t('settingsPage.ssh.agent.sub')}</div>
               <AgentPanel />
             </div>
           )}
 
           {section === 'backup' && (
             <div className="settings-section">
-              <h2>Backup &amp; Restore</h2>
-              <div className="sub">Export an encrypted copy of everything, or restore from one.</div>
+              <h2>{t('settingsPage.backup.heading')}</h2>
+              <div className="sub">{t('settingsPage.backup.sub')}</div>
               <BackupPanel />
             </div>
           )}
 
           {section === 'security' && (
             <div className="settings-section">
-              <h2>Vault</h2>
-              <div className="sub">The encrypted store for passwords, SSH keys and API keys.</div>
+              <h2>{t('settingsPage.vault.heading')}</h2>
+              <div className="sub">{t('settingsPage.vault.sub')}</div>
               <VaultState />
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Secure after inactivity</div>
-                  <div className="s-desc">
-                    Clears the vault from this screen and asks for your master password before
-                    showing it again. Nothing else stops — connections, background checks,
-                    pipeline polling and scheduled backups keep using the credentials in it. The
-                    vault locks completely when you quit or your machine sleeps. The timer counts
-                    vault inactivity, not time since you started the app, and background work does
-                    not postpone it.
-                  </div>
+                  <div className="s-title">{t('settingsPage.vault.autoLock.title')}</div>
+                  <div className="s-desc">{t('settingsPage.vault.autoLock.desc')}</div>
                 </div>
                 <select
                   className="input"
@@ -1452,16 +1421,18 @@ export function Settings(): React.JSX.Element {
                   value={settings.vaultAutoLockMinutes}
                   onChange={(e) => setSettings({ vaultAutoLockMinutes: Number(e.target.value) })}
                 >
-                  <option value={5}>5 minutes</option>
-                  <option value={15}>15 minutes</option>
-                  <option value={30}>30 minutes</option>
-                  <option value={60}>1 hour</option>
-                  <option value={0}>Never</option>
+                  {[5, 15, 30].map((m) => (
+                    <option key={m} value={m}>
+                      {t('settingsPage.vault.autoLock.minutes', { count: m })}
+                    </option>
+                  ))}
+                  <option value={60}>{t('settingsPage.vault.autoLock.oneHour')}</option>
+                  <option value={0}>{t('common.never')}</option>
                 </select>
               </div>
               <SettingSwitch
-                label="Ask for Touch ID when the vault is locked"
-                desc="Whenever the vault has to be unlocked — opening the Vault, or anything that needs a stored credential — raise the fingerprint prompt without waiting for a click. Cancel it and the master password field is right there. Does nothing unless you have already set up biometric unlock."
+                label={t('settingsPage.vault.touchId.title')}
+                desc={t('settingsPage.vault.touchId.desc')}
                 checked={settings.vaultAutoBiometricPrompt}
                 onChange={(v) => setSettings({ vaultAutoBiometricPrompt: v })}
               />
@@ -1473,26 +1444,23 @@ export function Settings(): React.JSX.Element {
               next to each other. */}
           {section === 'security' && (
             <div className="settings-section">
-              <h2>Works without your master password</h2>
-              <div className="sub">
-                Standing permissions that let this machine keep working while nobody is here — and
-                the only place to take one back.
-              </div>
+              <h2>{t('settingsPage.machineGrants.heading')}</h2>
+              <div className="sub">{t('settingsPage.machineGrants.sub')}</div>
               <MachineGrants />
             </div>
           )}
 
           {section === 'security' && (
             <div className="settings-section">
-              <h2>Security</h2>
-              <div className="sub">Credential storage and workspace locking.</div>
+              <h2>{t('settingsPage.security.heading')}</h2>
+              <div className="sub">{t('settingsPage.security.sub')}</div>
               {/* Filed here rather than under Appearance, where it was. This
                   grants permission to rewrite authorized_keys on servers, and
                   a reader looking for it went to Security, found nothing, and
                   concluded the feature did not exist — which is exactly what
                   the screen that refuses without naming it also told them. */}
               <SettingSwitch
-                label="Allow adding and revoking keys on servers"
+                label={t('settingsPage.security.accessWrite.title')}
                 desc={ACCESS_WRITE_OPT_IN_NOTE}
                 checked={settings.accessWriteEnabled}
                 onChange={(v) => setSettings({ accessWriteEnabled: v })}
@@ -1507,14 +1475,10 @@ export function Settings(): React.JSX.Element {
                   absent, because the user believes they turned it off. */}
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Credential storage</div>
-                  <div className="s-desc">
-                    Passwords and key passphrases go to the vault, or to this platform's secure
-                    store when no vault is set up. Neither path writes plaintext to disk, and
-                    there is no setting that changes it.
-                  </div>
+                  <div className="s-title">{t('settingsPage.security.credentialStorage.title')}</div>
+                  <div className="s-desc">{t('settingsPage.security.credentialStorage.desc')}</div>
                 </div>
-                <span className="pill ok">Always on</span>
+                <span className="pill ok">{t('settingsPage.security.credentialStorage.alwaysOn')}</span>
               </div>
             </div>
           )}
@@ -1525,24 +1489,21 @@ export function Settings(): React.JSX.Element {
               answers for SSH. */}
           {section === 'security' && (
             <div className="settings-section">
-              <h2>API credential proxy</h2>
-              <div className="sub">
-                Let a script or an agent call a third-party API without ever holding the key.
-              </div>
+              <h2>{t('settingsPage.credProxy.heading')}</h2>
+              <div className="sub">{t('settingsPage.credProxy.sub')}</div>
               <CredProxyPanel />
 
               {/* The feature's one name. This heading said "addy" — the relay's
                   name — so the same feature was Sync on the rail, Sync &
                   devices on its page and addy here. */}
-              <h3>Sync &amp; devices</h3>
+              <h3>{t('settingsPage.sync.heading')}</h3>
               <div className="sub">
-                Carries your data between your devices through a relay you run yourself, which
-                cannot read any of it.
+                {t('settingsPage.sync.sub')}
                 {moduleEnabled(settings.modules, 'addy') && (
                   <>
                     {' '}
                     <button className="linklike" onClick={() => openMonitor('addy')}>
-                      Open Sync &amp; devices
+                      {t('settingsPage.sync.open')}
                     </button>
                   </>
                 )}
@@ -1553,15 +1514,15 @@ export function Settings(): React.JSX.Element {
                   file, so it silently took the device off the first one. */}
               <AddySetup />
 
-              <h3>Import from another password manager</h3>
+              <h3>{t('settingsPage.import.heading')}</h3>
               <BitwardenImport />
             </div>
           )}
 
           {section === 'advanced' && (
             <div className="settings-section">
-              <h2>Diagnostics</h2>
-              <div className="sub">What to include when you report a problem.</div>
+              <h2>{t('settingsPage.advanced.heading')}</h2>
+              <div className="sub">{t('settingsPage.advanced.sub')}</div>
               <DebugPanel />
               <DiagnosticsPanel />
             </div>
@@ -1588,18 +1549,20 @@ export function Settings(): React.JSX.Element {
             'advanced'
           ].includes(section) && (
             <div className="settings-section">
-              <h2>{SECTION_META[section].label}</h2>
-              <div className="sub">Configure {section} preferences for this workspace.</div>
+              <h2>{t(SECTION_META[section].labelKey)}</h2>
+              <div className="sub">{t('settingsPage.placeholder.sub', { section })}</div>
               <div className="setting-row">
                 <div className="s-info">
-                  <div className="s-title">Reset {section}</div>
-                  <div className="s-desc">Restore defaults for this section.</div>
+                  <div className="s-title">{t('settingsPage.placeholder.resetTitle', { section })}</div>
+                  <div className="s-desc">{t('settingsPage.placeholder.resetDesc')}</div>
                 </div>
                 <button
                   className="btn sm"
-                  onClick={() => toast(`Nothing to reset — ${SECTION_META[section].label} has no saved settings yet.`)}
+                  onClick={() =>
+                    toast(t('settingsPage.placeholder.nothingToReset', { section: t(SECTION_META[section].labelKey) }))
+                  }
                 >
-                  Reset
+                  {t('common.reset')}
                 </button>
               </div>
             </div>

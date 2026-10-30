@@ -3,6 +3,7 @@ import { Check } from 'lucide-react'
 import { TERMINAL_SCHEMES, type TerminalScheme } from '../../../../shared/terminalTheme'
 import { themeFromCss } from '../../hooks/useTerminalSession'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 
 /** The six a preview shows: enough to tell two palettes apart at a glance. */
 const SAMPLE = ['red', 'green', 'yellow', 'blue', 'magenta', 'cyan'] as const
@@ -33,12 +34,13 @@ export function SchemePicker({
   /** The id of the visible title the group is named by. */
   labelledBy: string
 }): React.JSX.Element {
+  const t = useT()
   // `''` is the app's own palette. Imported schemes follow the built-ins, as
   // they did under their own heading in the select this replaced.
   const options: { id: string; name: string; scheme?: TerminalScheme }[] = [
-    { id: '', name: 'App palette' },
+    { id: '', name: t('settings.scheme.appPalette') },
     ...TERMINAL_SCHEMES.map((s) => ({ id: s.id, name: s.name, scheme: s })),
-    ...custom.map((s) => ({ id: s.id, name: `${s.name} (imported)`, scheme: s }))
+    ...custom.map((s) => ({ id: s.id, name: t('settings.scheme.imported', { name: s.name }), scheme: s }))
   ]
   const refs = useRef<(HTMLDivElement | null)[]>([])
   const appAnsi = themeFromCss('')

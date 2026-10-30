@@ -2,10 +2,12 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { render, screen } from '@testing-library/react'
+import { act, render, screen } from '@testing-library/react'
 import { stubBridge } from './setup/renderer'
 import { useApp } from '../src/renderer/src/store/app'
 import { useNav } from '../src/renderer/src/store/nav'
+import { applyLanguage, t } from '../src/renderer/src/lib/i18n'
+import { LOCALES } from '../src/shared/i18n'
 import { defaultModuleState } from '../src/shared/modules'
 import { ActivityBar, ACTIVITY_ITEMS } from '../src/renderer/src/components/layout/ActivityBar'
 
@@ -91,8 +93,9 @@ describe('the label does not replace the sentence', () => {
   // The palette lists the same destinations in a full-width row, where the
   // honest name fits. `rail` is the rail's shorter form and must not leak.
   it('leaves the palette’s own labels alone', () => {
-    expect(ACTIVITY_ITEMS.find((i) => i.id === 'tunnels')?.label).toBe('Tunnels & VPN')
-    expect(ACTIVITY_ITEMS.find((i) => i.id === 'http')?.label).toBe('HTTP Client')
+    const label = (id: string): string => t(ACTIVITY_ITEMS.find((i) => i.id === id)!.labelKey)
+    expect(label('tunnels')).toBe('Tunnels & VPN')
+    expect(label('http')).toBe('HTTP Client')
   })
 })
 
@@ -118,6 +121,22 @@ describe('a label cannot break the column', () => {
     // pixels to spare. Anything longer has not been measured, and the rail is
     // not the place to find that out.
     for (const l of labels()) expect(l.length, l).toBeLessThanOrEqual(11)
+  })
+
+  // The same eleven, in every language the rail can be drawn in. German and
+  // French run longer than English, and a label only found to be cut off once
+  // somebody switches language is the case this exists for. A CJK character is
+  // about two Latin ones wide at this size.
+  it.each(LOCALES.filter((l) => l !== 'en'))('keeps every %s rail label inside the same width', async (locale) => {
+    const width = (s: string): number =>
+      [...s].reduce((n, ch) => n + (/[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 2 : 1), 0)
+    await act(() => applyLanguage(locale))
+    try {
+      render(<ActivityBar />)
+      expect(labels().filter((l) => width(l) > 11)).toEqual([])
+    } finally {
+      await act(() => applyLanguage('en'))
+    }
   })
 
   it('still gives each button a fixed height, so the rail scrolls rather than squashing', () => {

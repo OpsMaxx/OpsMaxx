@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { AlertTriangle, KeyRound, ShieldOff } from 'lucide-react'
 import { EmptyState } from '../common/EmptyState'
 import { toast } from '../../store/toast'
+import { useT } from '../../lib/i18n'
+import type { Translate } from '../../../../shared/i18n'
 import {
   MACHINE_GRANT_MEANING,
   machineGrantView,
@@ -37,17 +39,20 @@ type GrantsBridge = { machineGrants?: () => Promise<MachineGrant[]> }
 const grantsBridge = (): GrantsBridge | undefined =>
   window.opsmaxx?.secrets as unknown as GrantsBridge | undefined
 
-function granted(at: string | undefined): string {
+function granted(t: Translate, at: string | undefined): string {
   if (!at) {
     // Said, not hidden. Every grant made before OpsMaxx recorded the date has
     // none, and a blank cell reads as "just now" to anyone skimming.
-    return 'Granted before OpsMaxx recorded grant dates'
+    return t('settings.machineGrants.grantedUndated')
   }
   const d = new Date(at)
-  return Number.isNaN(d.getTime()) ? 'Grant date unreadable' : `Granted ${d.toLocaleDateString()}`
+  return Number.isNaN(d.getTime())
+    ? t('settings.machineGrants.dateUnreadable')
+    : t('settings.machineGrants.grantedOn', { date: d.toLocaleDateString() })
 }
 
 export function MachineGrants(): React.JSX.Element {
+  const t = useT()
   const [rows, setRows] = useState<MachineGrantView[] | null>(null)
   const [unavailable, setUnavailable] = useState(false)
 
@@ -73,15 +78,21 @@ export function MachineGrants(): React.JSX.Element {
     // The consequence is on screen already; the dialog repeats it, because a
     // button next to an explanation is still pressed without reading it and
     // this one is not undoable.
-    if (!window.confirm(`Revoke this grant?\n\n${row.title}\n\n${row.consequence}`)) return
+    const question = t('settings.machineGrants.revokeConfirm', {
+      title: row.title,
+      consequence: row.consequence
+    })
+    if (!window.confirm(question)) return
     try {
       await window.opsmaxx?.secrets?.delete(row.id)
-      toast('Revoked. This machine can no longer read that secret on its own.', 'ok')
+      toast(t('settings.machineGrants.revoked'), 'ok')
     } catch (err) {
       toast(
-        `It is still granted: ${err instanceof Error ? err.message : String(err)}`,
+        t('settings.machineGrants.stillGranted', {
+          error: err instanceof Error ? err.message : String(err)
+        }),
         'error',
-        { label: 'Try again', run: () => void revoke(row) }
+        { label: t('settings.machineGrants.tryAgain'), run: () => void revoke(row) }
       )
     }
     await load()
@@ -91,20 +102,20 @@ export function MachineGrants(): React.JSX.Element {
     return (
       <EmptyState
         compact
-        title="Grants cannot be listed right now"
-        message="The preload bridge on this build has no way to read them. Restart the app; if it persists, this version cannot show them and nothing can be revoked from here."
+        title={t('settings.machineGrants.unavailableTitle')}
+        message={t('settings.machineGrants.unavailableMessage')}
       />
     )
   }
 
-  if (rows === null) return <div className="s-desc">Reading this machine’s keychain…</div>
+  if (rows === null) return <div className="s-desc">{t('settings.machineGrants.reading')}</div>
 
   if (rows.length === 0) {
     return (
       <EmptyState
         compact
-        title="Nothing runs without your master password"
-        message="No secret on this machine is readable without it. Scheduled backups and addy will ask you to unlock after a restart."
+        title={t('settings.machineGrants.emptyTitle')}
+        message={t('settings.machineGrants.emptyMessage')}
       />
     )
   }
@@ -118,18 +129,17 @@ export function MachineGrants(): React.JSX.Element {
             <div className="s-title">
               <KeyRound size={13} /> {row.title}
             </div>
-            <div className="s-desc">{granted(row.grantedAt)}</div>
+            <div className="s-desc">{granted(t, row.grantedAt)}</div>
             {row.orphaned && (
               <div className="s-desc warn">
-                <AlertTriangle size={12} /> Orphaned — this authorises something that no longer
-                exists.
+                <AlertTriangle size={12} /> {t('settings.machineGrants.orphaned')}
               </div>
             )}
             {row.note && <div className="s-desc warn">{row.note}</div>}
             <div className="s-desc">{row.consequence}</div>
           </div>
           <button className="btn sm danger" onClick={() => void revoke(row)}>
-            <ShieldOff size={13} /> Revoke
+            <ShieldOff size={13} /> {t('settings.machineGrants.revoke')}
           </button>
         </div>
       ))}

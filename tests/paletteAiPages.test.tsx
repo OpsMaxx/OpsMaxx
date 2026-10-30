@@ -5,7 +5,8 @@ import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { CommandPalette } from '../src/renderer/src/components/palette/CommandPalette'
 import { useApp } from '../src/renderer/src/store/app'
-import { useNav, AI_SECTIONS, AI_SECTION_LABELS } from '../src/renderer/src/store/nav'
+import { useNav, AI_SECTIONS, AI_SECTION_LABEL_KEYS } from '../src/renderer/src/store/nav'
+import { englishT } from '../src/shared/i18n'
 import type { AiSection } from '../src/renderer/src/store/nav'
 
 // Ctrl+K reached AI & MCP as a single destination and then showed whichever
@@ -48,7 +49,7 @@ describe('every page of AI & MCP is reachable from the palette', () => {
     useNav.setState({ aiSection: id === 'overview' ? 'audit' : 'overview' })
     const { container } = render(<CommandPalette />)
 
-    await userEvent.click(aiEntry(container, AI_SECTION_LABELS[id]))
+    await userEvent.click(aiEntry(container, englishT(AI_SECTION_LABEL_KEYS[id])))
 
     expect(useApp.getState().activity).toBe('ai')
     expect(useNav.getState().aiSection).toBe(id)
@@ -74,6 +75,6 @@ describe('every page of AI & MCP is reachable from the palette', () => {
     const named = [...container.querySelectorAll('.palette-item')]
       .filter((el) => el.querySelector('.p-sub')?.textContent === 'AI & MCP')
       .map((el) => el.querySelector('.p-title')?.textContent)
-    expect(named).toEqual(AI_SECTIONS.map((id) => AI_SECTION_LABELS[id]))
+    expect(named).toEqual(AI_SECTIONS.map((id) => englishT(AI_SECTION_LABEL_KEYS[id])))
   })
 })

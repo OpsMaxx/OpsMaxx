@@ -46,6 +46,11 @@ function openingTags(src: string, tag: string): string[] {
 
 describe('every settings control writes somewhere', () => {
   const src = readFileSync(SETTINGS, 'utf8')
+  const en = JSON.parse(
+    readFileSync(join(process.cwd(), 'src/shared/locales/en.json'), 'utf8')
+  ) as Record<string, string>
+  // The English title of every search-index entry, through its key.
+  const indexed = [...src.matchAll(/titleKey: '([^']+)'/g)].map((m) => en[m[1]])
 
   it('has no placeholder switch component', () => {
     // The specific footgun: a second switch that looks like the real one.
@@ -69,15 +74,15 @@ describe('every settings control writes somewhere', () => {
       'Show status bar',
       'Animated transitions'
     ]) {
-      expect(src).not.toContain(`title: '${title}'`)
+      expect(indexed).not.toContain(title)
     }
   })
 
   it('still indexes the controls that do exist', () => {
     // The other half of the previous assertion: deleting the index wholesale
     // would also pass it.
-    expect(src).toContain("title: 'Font family'")
-    expect(src).toContain("title: 'Cursor blink'")
-    expect(src).toContain("title: 'Colour scheme'")
+    expect(indexed).toContain('Font family')
+    expect(indexed).toContain('Cursor blink')
+    expect(indexed).toContain('Colour scheme')
   })
 })

@@ -1,4 +1,6 @@
 import type { StoreAlertKind } from '../../../../shared/webhook'
+import type { MessageKey } from '../../../../shared/i18n'
+import { t } from '../../lib/i18n'
 
 // What the alert-threshold row is allowed to claim about coverage.
 //
@@ -30,18 +32,14 @@ export function alertCoverage(
   return 'foreground-only'
 }
 
-const COPY: Record<AlertCoverage, string> = {
-  running: 'Background checks are running, so alerts fire wherever you are in the app.',
-  'requested-not-running':
-    'Background checks are switched on but not running right now — see the reason below. ' +
-    'Until they are, a server is only sampled while its monitor is on screen.',
-  'foreground-only':
-    'Without background checks below, a server is only sampled while its monitor is on screen — ' +
-    'so an alert can only fire while you are already looking at it.'
+const COPY: Record<AlertCoverage, MessageKey> = {
+  running: 'settings.alertCoverage.running',
+  'requested-not-running': 'settings.alertCoverage.requestedNotRunning',
+  'foreground-only': 'settings.alertCoverage.foregroundOnly'
 }
 
 export function alertCoverageText(running: boolean | undefined, enabled: boolean): string {
-  return COPY[alertCoverage(running, enabled)]
+  return t(COPY[alertCoverage(running, enabled)])
 }
 
 // ---------------------------------------------------------------------------
@@ -148,22 +146,10 @@ export const COVERAGE_SOURCE: Record<StoreAlertKind, AlertCoverageSource> = {
 const KINDS_BY_SOURCE = (src: AlertCoverageSource): StoreAlertKind[] =>
   (Object.keys(COVERAGE_SOURCE) as StoreAlertKind[]).filter((k) => COVERAGE_SOURCE[k] === src)
 
-const NON_SAMPLER_COPY: Record<Exclude<AlertCoverageSource, 'sampler'>, string> = {
-  'app-root':
-    'Job failures and tunnels are watched from the moment the app starts, whether or not ' +
-    'background checks are on: a job reports its own steps, and tunnels are polled every ten ' +
-    'seconds.',
-  'read-on-demand':
-    'Database verdicts are the exception, and it is not a small one: they exist only because ' +
-    'somebody opened the Databases page and read it. Nothing produces them in the background, ' +
-    'so a database that goes into alarm overnight is not noticed until it is next read.',
-  'posture-sweep':
-    'OOM kills and certificate expiry are read by the security posture probe, about once an ' +
-    'hour. It has TWO switches, not one: it runs on the background sweep above, and only while ' +
-    'the Security posture module is on for this workspace. With either of those off nothing ' +
-    'reads them at all — not even while a monitor is on screen — until somebody presses Check ' +
-    'now on the Security posture panel. With both on they are read about once an hour and raise ' +
-    'with no screen open.'
+const NON_SAMPLER_COPY: Record<Exclude<AlertCoverageSource, 'sampler'>, MessageKey> = {
+  'app-root': 'settings.alertCoverage.appRoot',
+  'read-on-demand': 'settings.alertCoverage.readOnDemand',
+  'posture-sweep': 'settings.alertCoverage.postureSweep'
 }
 
 /** The sentences a screen listing every kind has to show, in the order they
@@ -175,16 +161,16 @@ export function alertCoverageLines(
 ): { source: AlertCoverageSource; kinds: StoreAlertKind[]; text: string }[] {
   return [
     { source: 'sampler', kinds: KINDS_BY_SOURCE('sampler'), text: alertCoverageText(running, enabled) },
-    { source: 'app-root', kinds: KINDS_BY_SOURCE('app-root'), text: NON_SAMPLER_COPY['app-root'] },
+    { source: 'app-root', kinds: KINDS_BY_SOURCE('app-root'), text: t(NON_SAMPLER_COPY['app-root']) },
     {
       source: 'read-on-demand',
       kinds: KINDS_BY_SOURCE('read-on-demand'),
-      text: NON_SAMPLER_COPY['read-on-demand']
+      text: t(NON_SAMPLER_COPY['read-on-demand'])
     },
     {
       source: 'posture-sweep',
       kinds: KINDS_BY_SOURCE('posture-sweep'),
-      text: NON_SAMPLER_COPY['posture-sweep']
+      text: t(NON_SAMPLER_COPY['posture-sweep'])
     }
   ]
 }

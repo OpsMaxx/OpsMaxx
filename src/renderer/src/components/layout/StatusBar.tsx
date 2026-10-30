@@ -9,6 +9,7 @@ import { openMonitor, openSettings } from '../../store/nav'
 import { resumeApprovals, startApprovalQueue, useApprovalFuse, useApprovalQueue } from '../../store/approvalQueue'
 import { colorVar } from './WorkspaceSwitcher'
 import { UpdateIndicator } from './UpdateIndicator'
+import { useT } from '../../lib/i18n'
 
 /**
  * "1 AI action waiting · 1:43", and the way back to a dialog that was put away.
@@ -24,6 +25,7 @@ import { UpdateIndicator } from './UpdateIndicator'
  * operator would actually plan around.
  */
 function ApprovalChip(): React.JSX.Element | null {
+  const t = useT()
   const pending = useApprovalQueue((s) => s.pending)
   const head = pending[0]
   const fuse = useApprovalFuse(head)
@@ -42,12 +44,16 @@ function ApprovalChip(): React.JSX.Element | null {
     <button
       className="item"
       style={{ color: 'var(--danger)', fontWeight: 600 }}
-      title={`${head.agentName} is blocked on "${head.action}" (${head.serverName}) and cannot continue until you answer. Click to bring the decision back up.`}
+      title={t('layout.status.approvalTitle', {
+        agent: head.agentName,
+        action: String(head.action),
+        server: String(head.serverName)
+      })}
       onClick={resumeApprovals}
     >
       <ShieldAlert size={12} />
       <span>
-        {pending.length} AI action{pending.length === 1 ? '' : 's'} waiting
+        {t('layout.status.approvalsWaiting', { count: pending.length })}
         {fuse.text !== null ? ` · ${fuse.text}` : ''}
       </span>
     </button>
@@ -65,6 +71,7 @@ function ApprovalChip(): React.JSX.Element | null {
  * and that is the chip telling you why before the terminals do.
  */
 function NetworkChip(): React.JSX.Element {
+  const t = useT()
   const [online, setOnline] = useState(() => navigator.onLine)
   useEffect(() => {
     const up = (): void => setOnline(true)
@@ -79,21 +86,18 @@ function NetworkChip(): React.JSX.Element {
   return (
     <div
       className={online ? 'item' : 'item state-alarm'}
-      title={
-        online
-          ? 'A network interface is up. This does not test whether any particular server is reachable.'
-          : 'This machine has no network connection. SSH sessions and background checks will fail until it returns.'
-      }
+      title={t(online ? 'layout.status.onlineTitle' : 'layout.status.offlineTitle')}
     >
       {/* Shape as well as colour: a disc for up, a square for down. */}
       <span className={online ? 'state-dot is-ok' : 'state-dot is-alarm'} aria-hidden="true" />
       {online ? <Wifi size={12} /> : <WifiOff size={12} />}
-      <span>{online ? 'Online' : 'Offline'}</span>
+      <span>{t(online ? 'layout.status.online' : 'layout.status.offline')}</span>
     </div>
   )
 }
 
 export function StatusBar(): React.JSX.Element {
+  const t = useT()
   const ws = useApp((s) => s.activeWorkspace())
   const tabs = useApp((s) => s.tabs)
   const backupDirty = useApp((s) => s.settings.backupDirty)
@@ -121,9 +125,7 @@ export function StatusBar(): React.JSX.Element {
       </div>
       <div className="item">
         <GitBranch size={12} />
-        <span>
-          {tabs.length} session{tabs.length === 1 ? '' : 's'}
-        </span>
+        <span>{t('layout.status.sessions', { count: tabs.length })}</span>
       </div>
       <div className="spacer" />
       {/* First of the warning chips, ahead of the alert count and the backup
@@ -141,14 +143,16 @@ export function StatusBar(): React.JSX.Element {
         // tooltip names the hosts; the click takes you to where they are.
         <button
           className="item resource-alert"
-          title={`${Object.values(alerts)
-            // The store's own labels and the store's own units, not a ternary
-            // and not a hard-coded percent sign here. A third kind made that
-            // ternary label every disk alert "Memory", and a hard-coded `%`
-            // showed a load average of 3.2 per core as "3%" — a wrong number
-            // rather than an ugly one.
-            .map((a) => `${a.serverName}: ${LABEL[a.kind]}${chipValue(a)}${a.detail ? ` — ${a.detail}` : ''}`)
-            .join('\n')}\n\nClick to open the alert inbox.`}
+          title={t('layout.status.alertsTitle', {
+            list: Object.values(alerts)
+              // The store's own labels and the store's own units, not a ternary
+              // and not a hard-coded percent sign here. A third kind made that
+              // ternary label every disk alert "Memory", and a hard-coded `%`
+              // showed a load average of 3.2 per core as "3%" — a wrong number
+              // rather than an ugly one.
+              .map((a) => `${a.serverName}: ${LABEL[a.kind]}${chipValue(a)}${a.detail ? ` — ${a.detail}` : ''}`)
+              .join('\n')
+          })}
           // The inbox, not merely the page it is on. The chip is the pointer to
           // it — a pointer that opened the Fleet Monitor on whatever tab was
           // last used would be a chip saying "it is in here somewhere", which
@@ -156,9 +160,7 @@ export function StatusBar(): React.JSX.Element {
           onClick={() => openMonitor('alerts')}
         >
           <AlertTriangle size={12} />
-          <span>
-            {Object.values(alerts).length} alert{Object.values(alerts).length === 1 ? '' : 's'}
-          </span>
+          <span>{t('layout.status.alerts', { count: Object.values(alerts).length })}</span>
         </button>
       )}
       {/* Sits before the backup warning because it is worse: a stale export
@@ -181,7 +183,7 @@ export function StatusBar(): React.JSX.Element {
             if (warning.kind.startsWith('vault')) {
               void useVaultPrompt
                 .getState()
-                .request('Unlocking resumes background checking, so alerts can be raised again.')
+                .request(t('layout.status.unlockReason'))
               return
             }
             openSettings('monitoring')
@@ -205,21 +207,21 @@ export function StatusBar(): React.JSX.Element {
             // cannot restart them is a chip that has reported a problem and
             // moved on.
             vaultPaused
-              ? `${paused[0].destinationName}: ${paused[0].reason} Click to unlock and resume.`
+              ? t('layout.status.backupPausedVaultTitle', { name: paused[0].destinationName, reason: paused[0].reason })
               : paused.length === 1
-                ? `${paused[0].destinationName}: ${paused[0].reason} Click to open Backup & Restore.`
-                : `${paused.length} scheduled backups are not running. ${paused[0].reason} Click to open Backup & Restore.`
+                ? t('layout.status.backupPausedTitle', { name: paused[0].destinationName, reason: paused[0].reason })
+                : t('layout.status.backupsPausedTitle', { count: paused.length, reason: paused[0].reason })
           }
           onClick={() => (vaultPaused ? void offerUnlockForBackups() : openSettings('backup'))}
         >
           <AlertTriangle size={12} />
-          <span>{vaultPaused ? 'Backups paused — unlock' : 'Backups paused'}</span>
+          <span>{t(vaultPaused ? 'layout.status.backupsPausedUnlock' : 'layout.status.backupsPaused')}</span>
         </button>
       ) : (
       backupDirty && (
         <button
           className="item backup-warn"
-          title="Stored connections have changed since the last export. Click to open Backup & Restore."
+          title={t('layout.status.backupDirtyTitle')}
           // The page, not just the activity. `setActivity('settings')` opened
           // Settings on whatever section was last selected, so the one chip
           // whose tooltip names its destination was the one that did not go
@@ -227,7 +229,7 @@ export function StatusBar(): React.JSX.Element {
           onClick={() => openSettings('backup')}
         >
           <AlertTriangle size={12} />
-          <span>Backup out of date</span>
+          <span>{t('layout.status.backupDirty')}</span>
         </button>
       )
       )}
@@ -237,7 +239,7 @@ export function StatusBar(): React.JSX.Element {
           above is the way in while something is, so the two never show at
           once — two buttons to one page is one too many. */}
       {Object.values(alerts).length === 0 && (
-        <button className="item" aria-label="Alert inbox" title="No active alerts. Click to open the alert inbox." onClick={() => openMonitor('alerts')}>
+        <button className="item" aria-label={t('layout.status.alertInbox')} title={t('layout.status.noAlertsTitle')} onClick={() => openMonitor('alerts')}>
           <Bell size={12} />
         </button>
       )}

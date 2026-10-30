@@ -30,9 +30,14 @@ describe('language packs', () => {
 
   it.each(LOCALES.filter((l) => l !== 'en'))('%s keeps every placeholder English has', (l) => {
     // A translated `{{count}}` comes out as the literal text "{{Anzahl}}".
+    // A singular form may say the number in words ("Jede Stunde") and drop
+    // `{{count}}`, as English "_one" forms already do; nothing else may go.
     const wrong = Object.entries(pack(l)).filter(([k, v]) => {
       const source = en[k] ?? en[`${base(k)}_other`] ?? en[base(k)]
-      return source !== undefined && vars(v).join() !== vars(source).join()
+      if (source === undefined) return false
+      const singular = PLURAL.test(k) && !k.endsWith('_other')
+      const strip = (names: string[]): string[] => (singular ? names.filter((n) => n !== 'count') : names)
+      return strip(vars(v)).join() !== strip(vars(source)).join()
     })
     expect(wrong.map(([k]) => k)).toEqual([])
   })

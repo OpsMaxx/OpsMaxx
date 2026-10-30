@@ -1,3 +1,5 @@
+import { t } from '../../lib/i18n'
+
 // Why "Keep authenticated connection" stops meaning anything while background
 // checking is on.
 //
@@ -31,9 +33,8 @@
 
 /** Human form of a background-checking interval. */
 export function intervalLabel(ms: number): string {
-  if (ms < 60_000) return `${Math.round(ms / 1000)} seconds`
-  const mins = Math.round(ms / 60_000)
-  return mins === 1 ? 'minute' : `${mins} minutes`
+  if (ms < 60_000) return t('settings.retention.intervalSeconds', { count: Math.round(ms / 1000) })
+  return t('settings.retention.intervalMinutes', { count: Math.round(ms / 60_000) })
 }
 
 /**
@@ -48,12 +49,9 @@ export function retentionOverrideNotice(
   intervalMs: number
 ): string | null {
   if (!fleetSamplingEnabled) return null
-  const every = intervalLabel(intervalMs)
-  const cadence = every.startsWith('minute') ? 'every minute' : `every ${every}`
-  return (
-    `Background checking is on, so every server in this workspace is contacted ${cadence}. ` +
-    'Their connection never sits idle long enough for this to expire, so it does not apply to ' +
-    'them at any setting — including Immediately. On a server with two-factor authentication, no ' +
-    'new code is requested while OpsMaxx is running.'
-  )
+  const contacted =
+    intervalMs < 60_000
+      ? t('settings.retention.contactedSeconds', { count: Math.round(intervalMs / 1000) })
+      : t('settings.retention.contactedMinutes', { count: Math.round(intervalMs / 60_000) })
+  return `${contacted} ${t('settings.retention.overrideNotice')}`
 }

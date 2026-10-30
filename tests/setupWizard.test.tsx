@@ -5,6 +5,7 @@ import userEvent from '@testing-library/user-event'
 
 import { SetupCard } from '../src/renderer/src/components/onboarding/SetupCard'
 import { SETUP_QUESTIONS } from '../src/renderer/src/components/onboarding/setupQuestions'
+import { englishT } from '../src/shared/i18n'
 import { useApp } from '../src/renderer/src/store/app'
 import { useOnboarding } from '../src/renderer/src/store/onboarding'
 import { useUpdater } from '../src/renderer/src/store/updater'
@@ -80,13 +81,13 @@ describe('one question per screen', () => {
   it('opens on the role question, not the modules', () => {
     render(<SetupCard />)
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('What do you do?')
-    for (const q of SETUP_QUESTIONS) expect(screen.queryByText(q.question)).toBeNull()
+    for (const q of SETUP_QUESTIONS) expect(screen.queryByText(englishT(q.questionKey))).toBeNull()
   })
 
   it('shows exactly one question at a time', () => {
     render(<SetupCard />)
     pressEnter(1)
-    const showing = SETUP_QUESTIONS.filter((q) => screen.queryByText(q.question) !== null)
+    const showing = SETUP_QUESTIONS.filter((q) => screen.queryByText(englishT(q.questionKey)) !== null)
     expect(showing).toHaveLength(1)
     expect(showing[0].id).toBe(SETUP_QUESTIONS[0].id)
   })
@@ -98,7 +99,7 @@ describe('one question per screen', () => {
     render(<SetupCard />)
     for (const q of SETUP_QUESTIONS) {
       pressEnter(1)
-      expect(screen.getByText(q.cost)).toBeTruthy()
+      expect(screen.getByText(englishT(q.costKey))).toBeTruthy()
     }
   })
 
@@ -112,7 +113,7 @@ describe('one question per screen', () => {
   it('moves focus to each new question', () => {
     render(<SetupCard />)
     pressEnter(1)
-    expect(document.activeElement?.textContent).toBe(SETUP_QUESTIONS[0].question)
+    expect(document.activeElement?.textContent).toBe(englishT(SETUP_QUESTIONS[0].questionKey))
   })
 })
 
@@ -133,7 +134,7 @@ describe('answering', () => {
     fireEvent.keyDown(no, { key: 'Enter' })
     fireEvent.click(no)
     // One screen on, and the answer went with it.
-    expect(screen.queryByText(SETUP_QUESTIONS[1].question)).toBeTruthy()
+    expect(screen.queryByText(englishT(SETUP_QUESTIONS[1].questionKey))).toBeTruthy()
     pressEnter(SCREENS - 2)
     expect(moduleEnabled(useApp.getState().settings.modules, 'docker')).toBe(false)
   })
@@ -164,10 +165,10 @@ describe('the review screen', () => {
     const user = userEvent.setup()
     render(<SetupCard />)
     pressEnter(SCREENS - 1)
-    for (const q of SETUP_QUESTIONS) expect(screen.getByText(q.question)).toBeTruthy()
-    await user.click(screen.getByText(SETUP_QUESTIONS[2].question))
+    for (const q of SETUP_QUESTIONS) expect(screen.getByText(englishT(q.questionKey))).toBeTruthy()
+    await user.click(screen.getByText(englishT(SETUP_QUESTIONS[2].questionKey)))
     expect(screen.getByRole('heading', { level: 1 }).textContent).toBe(
-      SETUP_QUESTIONS[2].question
+      englishT(SETUP_QUESTIONS[2].questionKey)
     )
   })
 })

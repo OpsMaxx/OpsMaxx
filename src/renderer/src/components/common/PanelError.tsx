@@ -1,5 +1,6 @@
 import { isVaultLocked } from '../../lib/withVaultUnlock'
 import { UnlockVaultButton } from './UnlockVaultButton'
+import { useT } from '../../lib/i18n'
 
 /**
  * A failed on-demand read, with the unlock attached when that is what failed.
@@ -58,6 +59,7 @@ export function PanelError({
    */
   onRetry?: () => void
 }): React.JSX.Element | null {
+  const t = useT()
   if (error === null || error === '') return null
 
   if (!isVaultLocked(error)) {
@@ -69,9 +71,7 @@ export function PanelError({
       {/* The reader's words, not the resolver's. What they need to know is
           which of their credentials is out of reach and that one action fixes
           it — the marker and the IPC channel name are neither. */}
-      <span className="grow">
-        This server signs in with a credential from the vault, and the vault is locked.
-      </span>
+      <span className="grow">{t('ui.panelError.vaultLocked')}</span>
       <UnlockVaultButton reason={reason} onUnlocked={onRetry} />
     </div>
   )
@@ -115,16 +115,19 @@ export function VaultLockedHosts({
   names: string[]
   reason: string
 }): React.JSX.Element | null {
+  const t = useT()
   if (names.length === 0) return null
-  const list = names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`
+  const list =
+    names.length <= 3
+      ? names.join(', ')
+      : t('ui.vaultLockedHosts.more', { names: names.slice(0, 3).join(', '), more: names.length - 3 })
   return (
     <div className="panel-note is-watch">
       <span className="grow">
         {/* "did not run" rather than "failed": nothing was attempted on these
             hosts, and an operator deciding what to do next needs that
             distinction more than they need the word failed. */}
-        {list} did not run — {names.length === 1 ? 'its' : 'their'} credential is in the vault, and
-        the vault is locked. Unlock it and run again.
+        {t('ui.vaultLockedHosts.didNotRun', { list, count: names.length })}
       </span>
       {/* No onUnlocked, deliberately. See the note above: a write gets a fresh
           confirmation, not an automatic second execution. */}

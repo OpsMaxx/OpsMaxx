@@ -10,18 +10,22 @@ import {
   displayCombo,
   findConflicts,
   findShadowed,
-  resolveBindings
+  resolveBindings,
+  type Scope
 } from '../../lib/shortcuts'
 import { approvalShowing } from '../../hooks/useClickOutside'
+import { useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
-const SCOPE_LABEL: Record<string, string> = {
-  app: 'Outside terminals',
-  global: 'Everywhere',
-  terminal: 'In terminals',
-  http: 'HTTP client'
+const SCOPE_LABEL: Record<Scope, MessageKey> = {
+  app: 'settings.shortcuts.scope.app',
+  global: 'settings.shortcuts.scope.global',
+  terminal: 'settings.shortcuts.scope.terminal',
+  http: 'settings.shortcuts.scope.http'
 }
 
 export function ShortcutManager(): React.JSX.Element {
+  const t = useT()
   const overrides = useApp((s) => s.settings.shortcuts)
   const setShortcut = useApp((s) => s.setShortcut)
   const resetShortcuts = useApp((s) => s.resetShortcuts)
@@ -66,7 +70,7 @@ export function ShortcutManager(): React.JSX.Element {
       'opsmaxx-shortcuts.json',
       JSON.stringify({ shortcuts: overrides }, null, 2)
     )
-    if (ok) toast('Shortcuts exported', 'ok')
+    if (ok) toast(t('settings.shortcuts.exported'), 'ok')
   }
 
   const importJson = async (): Promise<void> => {
@@ -74,8 +78,8 @@ export function ShortcutManager(): React.JSX.Element {
     if (!raw) return
     const parsed = parseShortcutFile(raw)
     if (!parsed) {
-      return toast('That file is not an OpsMaxx shortcut export.', 'error', {
-        label: 'Choose another file',
+      return toast(t('settings.shortcuts.notAnExport'), 'error', {
+        label: t('settings.shortcuts.chooseAnother'),
         run: () => void importJson()
       })
     }
@@ -83,14 +87,14 @@ export function ShortcutManager(): React.JSX.Element {
     if (count === 0) {
       // Importing it would silently reset every shortcut to its default, which
       // is not what "import" means to anybody.
-      return toast('That export has no shortcuts in it, so nothing was changed.', 'error', {
-        label: 'Choose another file',
+      return toast(t('settings.shortcuts.emptyExport'), 'error', {
+        label: t('settings.shortcuts.chooseAnother'),
         run: () => void importJson()
       })
     }
     resetShortcuts()
     for (const [id, keys] of Object.entries(parsed)) setShortcut(id, keys)
-    toast(`Imported ${count} shortcut(s). Anything not in the file is back to its default.`, 'ok')
+    toast(t('settings.shortcuts.imported', { count }), 'ok')
   }
 
   // A conflict badge that only says "conflict" leaves the user to scan the
@@ -116,23 +120,23 @@ export function ShortcutManager(): React.JSX.Element {
     <div>
       <div className="row" style={{ marginBottom: 16 }}>
         <span className="faint" style={{ fontSize: 12 }}>
-          Click a shortcut and press the keys you want. Backspace clears it, Esc cancels.
+          {t('settings.shortcuts.hint')}
         </span>
         <span className="spacer" />
         <button
           className="btn sm"
           onClick={() => {
             resetShortcuts()
-            toast('Every shortcut is back to its default.', 'ok')
+            toast(t('settings.shortcuts.resetDone'), 'ok')
           }}
         >
-          <RotateCcw size={13} /> Reset
+          <RotateCcw size={13} /> {t('common.reset')}
         </button>
         <button className="btn sm" onClick={() => void exportJson()}>
-          <Download size={13} /> Export
+          <Download size={13} /> {t('settings.shortcuts.export')}
         </button>
         <button className="btn sm" onClick={() => void importJson()}>
-          <Upload size={13} /> Import
+          <Upload size={13} /> {t('settings.shortcuts.import')}
         </button>
       </div>
 
@@ -150,9 +154,11 @@ export function ShortcutManager(): React.JSX.Element {
             const shadows = shadowed.get(id)?.map((x) => COMMANDS_BY_ID.get(x)?.name).filter(Boolean)
             const shadowedBy = [...shadowed].find(([, apps]) => apps.includes(id))?.[0]
             const shadowNote = shadows?.length
-              ? `In the HTTP client this replaces ${shadows.join(', ')}`
+              ? t('settings.shortcuts.replacesInHttp', { names: shadows.join(', ') })
               : shadowedBy
-                ? `Shadowed in the HTTP client by ${COMMANDS_BY_ID.get(shadowedBy)?.name}`
+                ? t('settings.shortcuts.shadowedInHttp', {
+                    name: String(COMMANDS_BY_ID.get(shadowedBy)?.name)
+                  })
                 : null
             return (
               <div
@@ -164,7 +170,7 @@ export function ShortcutManager(): React.JSX.Element {
                 <span className="sc-name">
                   {cmd.name}
                   <span className="faint" style={{ marginLeft: 8, fontSize: 11 }}>
-                    {SCOPE_LABEL[cmd.scope]}
+                    {t(SCOPE_LABEL[cmd.scope])}
                     {cmd.hint ? ` · ${cmd.hint}` : ''}
                     {shadowNote ? ` · ${shadowNote}` : ''}
                   </span>
@@ -174,20 +180,22 @@ export function ShortcutManager(): React.JSX.Element {
                     <button
                       className="sc-conflict"
                       style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
-                      title={`${otherName} uses the same keys — go to it`}
+                      title={t('settings.shortcuts.conflictGoTo', { name: otherName })}
                       onClick={() => jumpTo(other)}
                     >
-                      <AlertTriangle size={12} /> same keys as {otherName}
+                      <AlertTriangle size={12} /> {t('settings.shortcuts.sameKeysAs', { name: otherName })}
                     </button>
                   ) : (
                     <span className="sc-conflict">
-                      <AlertTriangle size={12} /> conflict
+                      <AlertTriangle size={12} /> {t('settings.shortcuts.conflict')}
                     </span>
                   ))}
                 {overridden && (
                   <button
                     className="icon-btn"
-                    title={`Restore default (${displayCombo(defaultKeys(cmd)).join(' ')})`}
+                    title={t('settings.shortcuts.restoreDefault', {
+                      keys: displayCombo(defaultKeys(cmd)).join(' ')
+                    })}
                     onClick={() => setShortcut(id, null)}
                   >
                     <RotateCcw size={12} />
@@ -196,12 +204,12 @@ export function ShortcutManager(): React.JSX.Element {
                 <button
                   className={`sc-record${recording === id ? ' recording' : ''}`}
                   disabled={cmd.fixed}
-                  title={cmd.fixed ? 'This shortcut cannot be changed' : 'Click, then press keys'}
+                  title={cmd.fixed ? t('settings.shortcuts.fixed') : t('settings.shortcuts.recordTitle')}
                   onClick={() => !cmd.fixed && setRecording(id)}
                   style={clash ? { borderColor: 'var(--danger)', color: 'var(--danger)' } : undefined}
                 >
                   {recording === id ? (
-                    'Press keys…'
+                    t('settings.shortcuts.pressKeys')
                   ) : keys ? (
                     displayCombo(keys).map((k, i) => (
                       <span className="kbd" key={i}>
@@ -210,7 +218,7 @@ export function ShortcutManager(): React.JSX.Element {
                     ))
                   ) : (
                     <span className="faint">
-                      <X size={12} /> unbound
+                      <X size={12} /> {t('settings.shortcuts.unbound')}
                     </span>
                   )}
                 </button>
