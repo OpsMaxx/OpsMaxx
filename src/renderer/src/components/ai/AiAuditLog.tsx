@@ -5,6 +5,8 @@ import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
 import { auditExport, auditOutcome } from './auditOutcome'
 import type { AuditOutcomeTone } from './auditOutcome'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 // Chip classes, not inline colour. This was
 // `var(--text-success, #3fb950)` — and `--text-success` does not exist, so
@@ -43,6 +45,7 @@ export function AiAuditLog(): React.JSX.Element {
   const [server, setServer] = useState(ALL)
   const [from, setFrom] = useState('')
   const [to, setTo] = useState('')
+  const t = useT()
 
   const load = (): void => {
     void window.opsmaxx?.aiMcp.listAudit(FETCH_LIMIT).then((e) => setEntries(e ?? []))
@@ -59,8 +62,8 @@ export function AiAuditLog(): React.JSX.Element {
   }
   useEffect(() => {
     load()
-    const t = setInterval(load, 5000)
-    return () => clearInterval(t)
+    const timer = setInterval(load, 5000)
+    return () => clearInterval(timer)
   }, [])
 
   const workspaceOptions = useMemo(
@@ -108,11 +111,8 @@ export function AiAuditLog(): React.JSX.Element {
 
   return (
     <div className="settings-section">
-      <h2>Audit Log</h2>
-      <div className="sub">
-        Every AI action OpsMaxx processed, whether allowed, approved, denied or failed. Never
-        includes passwords, keys or other secrets.
-      </div>
+      <h2>{t('nav.ai.audit')}</h2>
+      <div className="sub">{t('ai.audit.intro')}</div>
 
       {integrity?.state === 'broken' && (
         <div
@@ -126,9 +126,7 @@ export function AiAuditLog(): React.JSX.Element {
             fontSize: 'var(--fs-sm)'
           }}
         >
-          <strong>This log has been altered since it was written.</strong> Entries are
-          hash-chained and the most recent one is recorded outside the file; they no longer
-          agree. Treat what is below as unreliable.
+          <Trans i18nKey="ai.audit.altered" components={{ strong: <strong /> }} />
           <div style={{ marginTop: 6, color: 'var(--text-muted)' }}>{integrity.reason}</div>
         </div>
       )}
@@ -145,16 +143,14 @@ export function AiAuditLog(): React.JSX.Element {
             fontSize: 'var(--fs-sm)'
           }}
         >
-          <strong>This log has stopped recording.</strong> New AI actions are not being written to
-          it, so the entries below are not a complete record. Everything else about OpsMaxx is
-          working normally.
+          <Trans i18nKey="ai.audit.stopped" components={{ strong: <strong /> }} />
           <div style={{ marginTop: 6, color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
             {appendFailure}
           </div>
         </div>
       )}
 
-      {entries.length === 0 && <div className="s-desc">No AI activity recorded yet.</div>}
+      {entries.length === 0 && <div className="s-desc">{t('ai.audit.empty')}</div>}
 
       {entries.length > 0 && (
         <>
@@ -162,12 +158,12 @@ export function AiAuditLog(): React.JSX.Element {
             <input
               className="input"
               style={{ flex: '2 1 220px' }}
-              placeholder="Search agent, workspace, server or action…"
+              placeholder={t('ai.audit.searchPlaceholder')}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             <select className="input" style={{ flex: '1 1 160px' }} value={workspace} onChange={(e) => setWorkspace(e.target.value)}>
-              <option value={ALL}>All workspaces</option>
+              <option value={ALL}>{t('ai.audit.allWorkspaces')}</option>
               {workspaceOptions.map((w) => (
                 <option key={w} value={w}>
                   {w}
@@ -175,7 +171,7 @@ export function AiAuditLog(): React.JSX.Element {
               ))}
             </select>
             <select className="input" style={{ flex: '1 1 160px' }} value={server} onChange={(e) => setServer(e.target.value)}>
-              <option value={ALL}>All servers</option>
+              <option value={ALL}>{t('ai.audit.allServers')}</option>
               {serverOptions.map((s) => (
                 <option key={s} value={s}>
                   {s}
@@ -189,7 +185,7 @@ export function AiAuditLog(): React.JSX.Element {
               value={from}
               max={to || undefined}
               onChange={(e) => setFrom(e.target.value)}
-              aria-label="From date"
+              aria-label={t('ai.audit.fromDate')}
             />
             <input
               className="input"
@@ -198,11 +194,11 @@ export function AiAuditLog(): React.JSX.Element {
               value={to}
               min={from || undefined}
               onChange={(e) => setTo(e.target.value)}
-              aria-label="To date"
+              aria-label={t('ai.audit.toDate')}
             />
             {filtersActive && (
               <button className="btn sm" onClick={clearFilters}>
-                Clear filters
+                {t('ai.audit.clearFilters')}
               </button>
             )}
             {/* An audit log that cannot leave the app is not an audit log: it
@@ -218,37 +214,37 @@ export function AiAuditLog(): React.JSX.Element {
                   const ok = await window.opsmaxx?.dialog.saveJson(name, auditExport(filtered))
                   // Said either way. A silent no-op after a save is
                   // indistinguishable from a save that worked.
-                  if (ok) toast(`${filtered.length} entries exported`, 'ok')
-                  else if (ok === false) toast('Nothing was written.', 'info')
+                  if (ok) toast(t('ai.audit.exported', { count: filtered.length }), 'ok')
+                  else if (ok === false) toast(t('ai.audit.nothingWritten'), 'info')
                 })()
               }}
             >
-              <Download size={13} /> Export
+              <Download size={13} /> {t('ai.audit.export')}
             </button>
           </div>
 
           <div className="s-desc" style={{ marginBottom: 8 }}>
             {filtered.length === entries.length
-              ? `${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}`
-              : `${filtered.length} of ${entries.length} entries match`}
+              ? t('ai.audit.entryCount', { count: entries.length })
+              : t('ai.audit.matchCount', { shown: filtered.length, total: entries.length })}
           </div>
 
-          {filtered.length === 0 && <div className="s-desc">No entries match these filters.</div>}
+          {filtered.length === 0 && <div className="s-desc">{t('ai.audit.noMatches')}</div>}
 
           {filtered.length > 0 && (
             <table className="table">
               <thead>
                 <tr>
-                  <th>Time</th>
-                  <th>Agent</th>
-                  <th>Session</th>
-                  <th>Workspace / Server</th>
-                  <th>Action</th>
+                  <th>{t('ai.audit.colTime')}</th>
+                  <th>{t('ai.audit.colAgent')}</th>
+                  <th>{t('ai.audit.colSession')}</th>
+                  <th>{t('ai.audit.colWhere')}</th>
+                  <th>{t('ai.audit.colAction')}</th>
                   {/* One column, not two. `Approval` and `Result` both said
                       "denied" for the row an incident reviewer cares about
                       most, and two identical cells were exactly the width the
                       missing session column needed. */}
-                  <th>Outcome</th>
+                  <th>{t('ai.audit.colOutcome')}</th>
                 </tr>
               </thead>
               <tbody>

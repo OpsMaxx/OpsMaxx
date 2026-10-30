@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { bridgeOn } from '../../lib/bridge'
 import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
+import { useT } from '../../lib/i18n'
+import type { Translate } from '../../../../shared/i18n'
 import type { FleetSweepProgress } from '../../../../shared/fleet'
 
 /**
@@ -29,6 +31,7 @@ export function SweepProgress({
   /** What is being collected, for the progress bar's accessible name. */
   label: string
 }): React.JSX.Element | null {
+  const t = useT()
   const [progress, setProgress] = useState<FleetSweepProgress | null>(null)
   const servers = useApp((s) => s.servers)
 
@@ -79,7 +82,7 @@ export function SweepProgress({
           }
         />
       </div>
-      <span className="check-now-said">{describe(progress, servers)}</span>
+      <span className="check-now-said">{describe(t, progress, servers)}</span>
     </div>
   )
 }
@@ -93,15 +96,18 @@ export function SweepProgress({
  * usually the thing the reader wanted to know anyway.
  */
 function describe(
+  t: Translate,
   p: FleetSweepProgress | null,
   servers: readonly { id: string; name: string }[]
 ): string {
   // Its own sentence because it is the part that looks most like nothing
   // happening: a sweep started before this click can run for minutes, and this
   // request waits it out before its own begins.
-  if (p === null || p.phase === 'waiting') return 'Waiting for the running check to finish…'
-  if (p.phase === 'done' || p.total === 0) return 'Finishing up…'
+  if (p === null || p.phase === 'waiting') return t('monitor.sweep.waiting')
+  if (p.phase === 'done' || p.total === 0) return t('monitor.sweep.finishing')
   const name = servers.find((s) => s.id === p.serverId)?.name
-  const counted = `${Math.min(p.done + 1, p.total)} of ${p.total}`
-  return name ? `Asking ${name} — ${counted}` : `Collecting — ${counted}`
+  const counted = { done: Math.min(p.done + 1, p.total), total: p.total }
+  return name
+    ? t('monitor.sweep.asking', { name, ...counted })
+    : t('monitor.sweep.collecting', counted)
 }

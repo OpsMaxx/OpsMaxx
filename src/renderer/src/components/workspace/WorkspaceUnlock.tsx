@@ -3,10 +3,12 @@ import { Eye, EyeOff, Lock, Unlock } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
+import { useT } from '../../lib/i18n'
 
 // Shown whenever something tries to activate a password-protected workspace
 // that has not been unlocked yet this session.
 export function WorkspaceUnlock(): React.JSX.Element | null {
+  const t = useT()
   const pendingId = useApp((s) => s.pendingWorkspaceId)
   const workspaces = useApp((s) => s.workspaces)
   const unlockWorkspace = useApp((s) => s.unlockWorkspace)
@@ -52,21 +54,20 @@ export function WorkspaceUnlock(): React.JSX.Element | null {
     unlockWorkspace(pendingId)
     setPassword('')
     setFailed(false)
-    toast(`${ws.name} unlocked`)
+    toast(t('workspace.unlock.toastUnlocked', { name: ws.name }))
   }
 
   return (
     <Modal
-      title={`${ws.name} is locked`}
-      subtitle="Enter the workspace password to open it"
+      title={t('workspace.unlock.title', { name: ws.name })}
+      subtitle={t('workspace.unlock.subtitle')}
       onClose={close}
     >
       <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
           <Lock size={18} className="faint" style={{ marginTop: 2, flexShrink: 0 }} />
           <span className="muted" style={{ fontSize: 12 }}>
-            Someone set a password on this workspace, so its servers, databases and tunnels stay out
-            of sight until it is entered. Your other workspaces are unaffected.
+            {t('workspace.unlock.explain')}
           </span>
         </div>
         <div className="row" style={{ gap: 6 }}>
@@ -75,7 +76,7 @@ export function WorkspaceUnlock(): React.JSX.Element | null {
             ref={passwordRef}
             type={show ? 'text' : 'password'}
             autoFocus
-            placeholder="Workspace password"
+            placeholder={t('workspace.unlock.placeholder')}
             value={password}
             onChange={(e) => {
               setFailed(false)
@@ -83,34 +84,32 @@ export function WorkspaceUnlock(): React.JSX.Element | null {
             }}
             onKeyDown={(e) => e.key === 'Enter' && void submit()}
           />
-          <button className="icon-btn" title={show ? 'Hide' : 'Show'} onClick={() => setShow((v) => !v)}>
+          <button className="icon-btn" title={show ? t('common.hide') : t('common.show')} onClick={() => setShow((v) => !v)}>
             {show ? <EyeOff size={16} /> : <Eye size={16} />}
           </button>
         </div>
         {failed && (
           <>
-            <div className="vault-error">That is not the password for {ws.name}.</div>
+            <div className="vault-error">{t('workspace.unlock.wrong', { name: ws.name })}</div>
             {/* No reset exists, so say so rather than let someone hunt for one —
                 and name the confusion this trips over most often. */}
             <span className="muted" style={{ fontSize: 12 }}>
-              Workspace passwords are case sensitive, and this is not your vault master password.
-              Nothing here can reset one: to change or remove it, or to delete the workspace
-              entirely, open Manage Workspaces.
+              {t('workspace.unlock.wrongHelp')}
             </span>
           </>
         )}
         <div className="row" style={{ gap: 8 }}>
           {failed && (
             <button className="btn sm" onClick={manage}>
-              Manage workspaces
+              {t('workspace.unlock.manage')}
             </button>
           )}
           <span className="spacer" />
           <button className="btn sm" onClick={close}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button className="btn primary sm" disabled={!password || busy} onClick={() => void submit()}>
-            <Unlock size={14} /> Unlock
+            <Unlock size={14} /> {t('workspace.unlock.unlock')}
           </button>
         </div>
       </div>

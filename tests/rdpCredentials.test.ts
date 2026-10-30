@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { rdpSecretId } from '../src/shared/rdp'
+import EN from '../src/shared/locales/en.json'
 
 /**
  * RDP's login, which used to be SSH's login.
@@ -80,8 +81,8 @@ describe('how a Windows machine is described', () => {
 
   it('asks for one account, not two', () => {
     // The SSH username box is not rendered for a machine that speaks no SSH.
-    const row = MODAL.slice(MODAL.indexOf('Server / IP'))
-    const username = row.indexOf("field-label\">Username")
+    const row = MODAL.slice(MODAL.indexOf("t('connections.addServer.hostLabel')"))
+    const username = row.indexOf("field-label\">{t('connections.addServer.usernameLabel')}")
     expect(username).toBeGreaterThan(-1)
     expect(row.slice(0, username)).toContain("{speaks !== 'rdp' && (")
   })
@@ -227,7 +228,8 @@ describe('running the RDP session', () => {
   it('reports a session that ends instead of leaving the tab looking live', () => {
     // Both halves: a clean end is not an error but must not read as connected,
     // and a failure has to surface rather than being swallowed by the void.
-    expect(VIEW).toContain('The remote desktop session ended.')
+    expect(VIEW).toMatch(/\b(?:t|tr)\('rdp\.view\.sessionEnded'\)/)
+    expect(EN['rdp.view.sessionEnded']).toBe('The remote desktop session ended.')
     const call = VIEW.indexOf('void session')
     expect(call).toBeGreaterThan(-1)
     const after = VIEW.slice(call, call + 900)

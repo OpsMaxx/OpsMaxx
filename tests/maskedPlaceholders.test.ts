@@ -29,6 +29,13 @@ function walk(dir: string): string[] {
 
 const FILES = walk(ROOT).map((f) => ({ file: f, text: readFileSync(f, 'utf8') }))
 
+// Placeholders are catalog keys now: a quoted value that names a key is read as
+// the English it stands for, so the mask is still found wherever it is written.
+const EN: Record<string, string> = JSON.parse(
+  readFileSync(join(__dirname, '..', 'src', 'shared', 'locales', 'en.json'), 'utf8')
+)
+const resolveKey = (v: string): string => EN[v] ?? v
+
 describe('no placeholder impersonates a stored secret', () => {
   it('finds files to check', () => {
     expect(FILES.length).toBeGreaterThan(20)
@@ -47,7 +54,7 @@ describe('no placeholder impersonates a stored secret', () => {
         const start = m.index + 'placeholder='.length
         const chunk = text.slice(start, start + 200).split('\n')[0]
         for (const lit of chunk.matchAll(/'([^']*)'|"([^"]*)"|`([^`]*)`/g)) {
-          const value = lit[1] ?? lit[2] ?? lit[3] ?? ''
+          const value = resolveKey(lit[1] ?? lit[2] ?? lit[3] ?? '')
           if (!value.includes('•')) continue
           // Allowed only when the dots sit beside words saying what they mean.
           // "••••••••  paste to replace" is a true statement about stored
@@ -67,7 +74,8 @@ describe('no placeholder impersonates a stored secret', () => {
     for (const f of ['components/databases/AddDatabaseModal.tsx', 'components/connections/AddServerModal.tsx']) {
       const text = readFileSync(join(ROOT, f), 'utf8')
       expect(text, f).not.toMatch(/placeholder=["']•+["']/)
-      expect(text, f).toMatch(/Unchanged/)
+      const keys = [...text.matchAll(/t\('([\w.]+)'/g)].map((m) => resolveKey(m[1]))
+      expect(keys.some((v) => /Unchanged/.test(v)), f).toBe(true)
     }
   })
 })

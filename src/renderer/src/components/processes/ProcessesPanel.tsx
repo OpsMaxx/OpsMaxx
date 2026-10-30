@@ -2,6 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Play, Plus, RotateCw, Square, Trash2 } from 'lucide-react'
 import { EmptyState } from '../common/EmptyState'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 import {
   PROCESS_LOG_PAGE,
   processDraftProblem
@@ -54,12 +57,12 @@ function processBridge(): ProcessesBridge | null {
     : null
 }
 
-const STATE_LABEL: Record<ProcessState, string> = {
-  stopped: 'Stopped',
-  starting: 'Starting',
-  running: 'Running',
-  'crash-looped': 'Crash-looped',
-  failed: 'Failed'
+const STATE_LABEL: Record<ProcessState, MessageKey> = {
+  stopped: 'processes.state.stopped',
+  starting: 'processes.state.starting',
+  running: 'processes.state.running',
+  'crash-looped': 'processes.state.crashLooped',
+  failed: 'processes.state.failed'
 }
 
 const STATE_CLASS: Record<ProcessState, string> = {
@@ -81,6 +84,7 @@ const emptyDraft = (): ProcessDraft => ({
 })
 
 export function ProcessesPanel(): React.JSX.Element {
+  const t = useT()
   const bridge = useMemo(processBridge, [])
   // `null` until the first read lands. An empty array here renders "No
   // processes yet", which is a claim about what is running under supervision --
@@ -182,9 +186,7 @@ export function ProcessesPanel(): React.JSX.Element {
   if (!bridge) {
     return (
       <div className="panel-body">
-        <div className="s-desc">
-          This build of OpsMaxx cannot supervise local processes.
-        </div>
+        <div className="s-desc">{t('processes.noBridge')}</div>
       </div>
     )
   }
@@ -193,15 +195,12 @@ export function ProcessesPanel(): React.JSX.Element {
     <div className="panel-body">
       <div className="content-header" style={{ paddingLeft: 0, paddingRight: 0 }}>
         <div>
-          <h2 style={{ margin: 0, fontSize: 15 }}>Local processes</h2>
-          <div className="sub">
-            On this machine only. Nothing here starts by itself — a process runs when you
-            press Start and not before.
-          </div>
+          <h2 style={{ margin: 0, fontSize: 15 }}>{t('processes.title')}</h2>
+          <div className="sub">{t('processes.sub')}</div>
         </div>
         <span className="spacer" />
         <button className="btn secondary size-28" onClick={() => setAdding((v) => !v)}>
-          <Plus size={14} /> Add a process
+          <Plus size={14} /> {t('processes.addProcess')}
         </button>
       </div>
 
@@ -217,21 +216,21 @@ export function ProcessesPanel(): React.JSX.Element {
 
       {adding && (
         <div className="card" style={{ marginBottom: 12, padding: 12 }}>
-          <label className="s-label">Name</label>
+          <label className="s-label">{t('processes.form.name')}</label>
           <input
             className="input"
             value={draft.name}
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-            placeholder="API server"
+            placeholder={t('processes.form.namePlaceholder')}
           />
-          <label className="s-label">Command</label>
+          <label className="s-label">{t('processes.form.command')}</label>
           <input
             className="input"
             value={draft.command}
             onChange={(e) => setDraft({ ...draft, command: e.target.value })}
             placeholder="/usr/local/bin/node"
           />
-          <label className="s-label">Arguments</label>
+          <label className="s-label">{t('processes.form.arguments')}</label>
           <input
             className="input"
             value={argsText}
@@ -239,33 +238,30 @@ export function ProcessesPanel(): React.JSX.Element {
             placeholder="server.js --port 3000"
           />
           <div className="s-desc">
-            Separated by spaces, and passed straight to the program. There is no shell here,
-            so nothing is expanded and nothing is quoted — and a secret in this list would be
-            readable by every account on this machine through <code>ps</code>. Use an
-            environment variable from the vault instead.
+            <Trans i18nKey="processes.form.argumentsHelp" components={{ code: <code /> }} />
           </div>
-          <label className="s-label">Working directory</label>
+          <label className="s-label">{t('processes.form.cwd')}</label>
           <input
             className="input"
             value={draft.cwd}
             onChange={(e) => setDraft({ ...draft, cwd: e.target.value })}
             placeholder="/srv/api"
           />
-          <label className="s-label">Environment</label>
+          <label className="s-label">{t('processes.form.env')}</label>
           {draft.env.map((e, i) => (
             <div key={i} style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
               <input
                 className="input"
                 style={{ flex: '0 0 34%' }}
                 value={e.key}
-                aria-label={`Variable ${i + 1} name`}
+                aria-label={t('processes.form.varName', { n: i + 1 })}
                 onChange={(ev) => setEnv(i, { ...e, key: ev.target.value })}
                 placeholder="NODE_ENV"
               />
               <select
                 className="input"
                 style={{ flex: '0 0 26%' }}
-                aria-label={`Variable ${i + 1} source`}
+                aria-label={t('processes.form.varSource', { n: i + 1 })}
                 value={e.kind}
                 onChange={(ev) =>
                   setEnv(
@@ -276,14 +272,14 @@ export function ProcessesPanel(): React.JSX.Element {
                   )
                 }
               >
-                <option value="literal">a value</option>
-                <option value="vault">the vault</option>
+                <option value="literal">{t('processes.form.source.literal')}</option>
+                <option value="vault">{t('processes.form.source.vault')}</option>
               </select>
               {e.kind === 'literal' ? (
                 <input
                   className="input"
                   value={e.value}
-                  aria-label={`Variable ${i + 1} value`}
+                  aria-label={t('processes.form.varValue', { n: i + 1 })}
                   onChange={(ev) => setEnv(i, { ...e, value: ev.target.value })}
                   placeholder="production"
                 />
@@ -291,14 +287,14 @@ export function ProcessesPanel(): React.JSX.Element {
                 <input
                   className="input"
                   value={e.vaultEntryId}
-                  aria-label={`Variable ${i + 1} vault entry`}
+                  aria-label={t('processes.form.varVaultEntry', { n: i + 1 })}
                   onChange={(ev) => setEnv(i, { ...e, vaultEntryId: ev.target.value })}
-                  placeholder="vault entry id"
+                  placeholder={t('processes.form.vaultEntryPlaceholder')}
                 />
               )}
               <button
                 className="btn ghost size-28"
-                aria-label={`Remove variable ${i + 1}`}
+                aria-label={t('processes.form.removeVar', { n: i + 1 })}
                 onClick={() => setDraft({ ...draft, env: draft.env.filter((_x, j) => j !== i) })}
               >
                 <Trash2 size={13} />
@@ -314,13 +310,10 @@ export function ProcessesPanel(): React.JSX.Element {
               })
             }
           >
-            <Plus size={13} /> Add a variable
+            <Plus size={13} /> {t('processes.form.addVar')}
           </button>
           <div className="s-desc">
-            A name that looks like a secret — anything with PASSWORD, TOKEN, SECRET, KEY or
-            CREDENTIAL in it — can only come from the vault. The value is then read when the
-            process starts, is never written to disk here, and is scrubbed out of the output
-            below before it is stored.
+            {t('processes.form.secretHelp')}
             {/* A vault entry is identified rather than PICKED, and that is a
                 boundary rather than an oversight: a module may not reach
                 `window.opsmaxx.vault` (MODULE_FORBIDDEN_BRIDGE), which
@@ -330,7 +323,7 @@ export function ProcessesPanel(): React.JSX.Element {
                 vault rather than about this panel. */}
           </div>
 
-          <label className="s-label">Restart</label>
+          <label className="s-label">{t('processes.form.restartLabel')}</label>
           <select
             className="input"
             value={draft.restart}
@@ -338,11 +331,11 @@ export function ProcessesPanel(): React.JSX.Element {
               setDraft({ ...draft, restart: e.target.value as ProcessDraft['restart'] })
             }
           >
-            <option value="never">Never</option>
-            <option value="on-failure">If it exits with an error</option>
-            <option value="always">Always</option>
+            <option value="never">{t('processes.form.restart.never')}</option>
+            <option value="on-failure">{t('processes.form.restart.onFailure')}</option>
+            <option value="always">{t('processes.form.restart.always')}</option>
           </select>
-          <label className="s-label">Ready when</label>
+          <label className="s-label">{t('processes.form.readyWhen')}</label>
           <select
             className="input"
             value={draft.readiness.kind}
@@ -356,8 +349,8 @@ export function ProcessesPanel(): React.JSX.Element {
               })
             }
           >
-            <option value="spawned">It has started</option>
-            <option value="log">It prints a line containing…</option>
+            <option value="spawned">{t('processes.form.ready.spawned')}</option>
+            <option value="log">{t('processes.form.ready.log')}</option>
           </select>
           {draft.readiness.kind === 'log' && (
             <>
@@ -372,9 +365,7 @@ export function ProcessesPanel(): React.JSX.Element {
                 }
                 placeholder="listening on"
               />
-              <div className="s-desc">
-                Plain text, matched anywhere in a line. Not a pattern language.
-              </div>
+              <div className="s-desc">{t('processes.form.readyHelp')}</div>
             </>
           )}
           {/* The dialog footer contract, in an inline panel: the commit is
@@ -388,17 +379,17 @@ export function ProcessesPanel(): React.JSX.Element {
               </span>
             )}
             <button className="btn secondary size-28" onClick={() => setAdding(false)}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button className="btn primary size-28" onClick={() => void submit()}>
-              Add process
+              {t('processes.form.submit')}
             </button>
           </div>
         </div>
       )}
 
       {rows === null && !adding && (
-        <div className="s-desc state-unknown">Reading what is under supervision…</div>
+        <div className="s-desc state-unknown">{t('processes.reading')}</div>
       )}
 
       {rows?.length === 0 && !adding && (
@@ -406,15 +397,15 @@ export function ProcessesPanel(): React.JSX.Element {
         // its own grammar, in a product that already has one for this.
         <EmptyState
           compact
-          title="No processes yet"
-          message="Add one to run it under supervision — restarts, backoff and crash-loop detection included."
+          title={t('processes.empty.title')}
+          message={t('processes.empty.message')}
           // Not "Add a process" a second time: the header button says exactly
           // that eighty pixels above, and two controls with one name is a
           // thing a screen reader reads out twice and a person reads as a
           // choice between two options that do not differ.
           action={
             <button className="btn secondary size-28" onClick={() => setAdding(true)}>
-              <Plus size={14} /> Add your first process
+              <Plus size={14} /> {t('processes.empty.action')}
             </button>
           }
         />
@@ -428,12 +419,10 @@ export function ProcessesPanel(): React.JSX.Element {
           <div key={p.id} className="card" style={{ marginBottom: 8, padding: 10 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <strong>{p.name}</strong>
-              <span className={clsx('chip', STATE_CLASS[state])}>{STATE_LABEL[state]}</span>
+              <span className={clsx('chip', STATE_CLASS[state])}>{t(STATE_LABEL[state])}</span>
               {st && st.pid > 0 && <span className="s-desc">pid {st.pid}</span>}
               {st && st.restarts > 0 && (
-                <span className="s-desc">
-                  {st.restarts} restart{st.restarts === 1 ? '' : 's'}
-                </span>
+                <span className="s-desc">{t('processes.restarts', { count: st.restarts })}</span>
               )}
               <span className="spacer" />
               <button
@@ -441,38 +430,39 @@ export function ProcessesPanel(): React.JSX.Element {
                 disabled={busy === p.id || live}
                 onClick={() => void act(p.id, () => bridge.start(p.id))}
               >
-                <Play size={13} /> Start
+                <Play size={13} /> {t('processes.start')}
               </button>
               <button
                 className="btn quiet size-24"
                 disabled={busy === p.id || !live}
                 onClick={() => void act(p.id, () => bridge.stop(p.id))}
               >
-                <Square size={13} /> Stop
+                <Square size={13} /> {t('processes.stop')}
               </button>
               <button
                 className="btn quiet size-24"
                 disabled={busy === p.id}
                 onClick={() => void act(p.id, () => bridge.restart(p.id))}
               >
-                <RotateCw size={13} /> Restart
+                <RotateCw size={13} /> {t('processes.restart')}
               </button>
               <button
                 className="btn ghost size-24"
                 disabled={busy === p.id}
                 onClick={() => void act(p.id, () => bridge.remove(p.id))}
-                aria-label="Delete"
-                title="Stops it first, then removes it"
+                aria-label={t('common.delete')}
+                title={t('processes.removeTitle')}
               >
                 <Trash2 size={13} />
               </button>
             </div>
 
             <div className="s-desc" style={{ marginTop: 4 }}>
-              <code>
-                {p.command} {p.args.join(' ')}
-              </code>{' '}
-              in <code>{p.cwd}</code>
+              <Trans
+                i18nKey="processes.commandIn"
+                values={{ command: `${p.command} ${p.args.join(' ')}`, cwd: p.cwd }}
+                components={{ code: <code /> }}
+              />
             </div>
 
             {p.env.length > 0 && (
@@ -483,7 +473,7 @@ export function ProcessesPanel(): React.JSX.Element {
                 {p.env.map((e) => (
                   <span key={e.key} className="chip" style={{ marginRight: 4 }}>
                     {e.key}
-                    {e.source === 'vault' ? ' · from the vault' : ''}
+                    {e.source === 'vault' ? ` ${t('processes.fromVault')}` : ''}
                   </span>
                 ))}
               </div>
@@ -503,7 +493,7 @@ export function ProcessesPanel(): React.JSX.Element {
               style={{ marginTop: 6 }}
               onClick={() => setOpenId(openId === p.id ? null : p.id)}
             >
-              {openId === p.id ? 'Hide output' : 'Show output'}
+              {openId === p.id ? t('processes.hideOutput') : t('processes.showOutput')}
             </button>
 
             {openId === p.id && (
@@ -512,7 +502,7 @@ export function ProcessesPanel(): React.JSX.Element {
                 style={{ maxHeight: 260, overflow: 'auto', marginTop: 6 }}
               >
                 {logs.length === 0
-                  ? 'Nothing yet.'
+                  ? t('processes.nothingYet')
                   : logs.map((l) => `${l.stream === 'stderr' ? '! ' : ''}${l.text}`).join('\n')}
               </pre>
             )}

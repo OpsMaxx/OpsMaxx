@@ -10,6 +10,7 @@ import { Modal } from '../../common/Modal'
 import { SaveRequestDialog } from '../dialogs/SaveRequestDialog'
 import { MethodBadge } from './CollectionTree'
 import { historyMenu, historySourceExists, type HistoryActions } from './treeMenus'
+import { t as tr, useT } from '../../../lib/i18n'
 
 export const HISTORY_PAGE = 50
 
@@ -19,7 +20,7 @@ const DAY = 24 * 60 * 60 * 1000
 export function dayLabel(at: number, now = Date.now()): string {
   const start = (t: number): number => new Date(new Date(t).toDateString()).getTime()
   const days = Math.round((start(now) - start(at)) / DAY)
-  return days === 0 ? 'Today' : days === 1 ? 'Yesterday' : new Date(at).toLocaleDateString()
+  return days === 0 ? tr('http.history.today') : days === 1 ? tr('http.history.yesterday') : new Date(at).toLocaleDateString()
 }
 
 /** Entries grouped by day, newest first, keeping their order within a day. */
@@ -63,6 +64,7 @@ export function HistoryList({ query }: { query: string }): React.JSX.Element {
   const ws = useApp((s) => s.activeWorkspaceId)
   const [sealed, setSealed] = useState(true)
   const seq = useRef(0)
+  const t = useT()
 
   useEffect(() => {
     let live = true
@@ -99,12 +101,12 @@ export function HistoryList({ query }: { query: string }): React.JSX.Element {
   )
 
   useEffect(() => {
-    const t = setTimeout(() => void load(), query ? 200 : 0)
-    return () => clearTimeout(t)
+    const timer = setTimeout(() => void load(), query ? 200 : 0)
+    return () => clearTimeout(timer)
   }, [load, query])
 
   const actions: HistoryActions = {
-    sendAgain: (e) => void sendAgainFromHistory(e).catch(() => toast('Could not send the request again.', 'error')),
+    sendAgain: (e) => void sendAgainFromHistory(e).catch(() => toast(t('http.history.sendAgainFailed'), 'error')),
     openRequest: (e) => e.requestRef && useHttp.getState().openRequest(e.requestRef, { preview: false }),
     openAsNew: openHistoryAsNew,
     saveToCollection: (e) => setSaving(e),
@@ -112,29 +114,30 @@ export function HistoryList({ query }: { query: string }): React.JSX.Element {
       void window.opsmaxx.httpHistory
         .remove(e.id)
         .then(() => setEntries((prev) => prev.filter((x) => x.id !== e.id)))
-        .catch(() => toast('Could not delete that history entry.', 'error'))
+        .catch(() => toast(t('http.history.deleteFailed'), 'error'))
     }
   }
 
-  const groups = useMemo(() => groupByDay(entries), [entries])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `t`: the day labels follow a language change
+  const groups = useMemo(() => groupByDay(entries), [entries, t])
   const open = (e: HistoryEntry): void => (historySourceExists(e) ? actions.openRequest(e) : actions.openAsNew(e))
 
   return (
     <div className="hc-history">
       <div className="hc-history-head">
-        <span className="ui-label">Recent requests</span>
+        <span className="ui-label">{t('http.history.recent')}</span>
         <button
           type="button"
           className="hc-icon-btn"
-          aria-label="History options"
-          title="History options"
+          aria-label={t('http.history.options')}
+          title={t('http.history.options')}
           aria-haspopup="menu"
           onClick={(e) => {
             const b = e.currentTarget.getBoundingClientRect()
             setMenu({
               x: b.left,
               y: b.bottom,
-              entries: [{ label: 'Clear all history…', danger: true, disabled: entries.length === 0, onClick: () => setClearing(true) }]
+              entries: [{ label: t('http.history.clearAllMenu'), danger: true, disabled: entries.length === 0, onClick: () => setClearing(true) }]
             })
           }}
         >
@@ -143,11 +146,11 @@ export function HistoryList({ query }: { query: string }): React.JSX.Element {
       </div>
       {!sealed && (
         <p className="hc-history-note" role="note">
-          History is kept for this session only — this machine has no OS keyring.
+          {t('http.history.sessionOnly')}
         </p>
       )}
       {state === 'loading' && (
-        <div className="hc-history-skeleton" aria-busy="true" aria-label="Loading history">
+        <div className="hc-history-skeleton" aria-busy="true" aria-label={t('http.history.loading')}>
           <div />
           <div />
           <div />
@@ -155,15 +158,15 @@ export function HistoryList({ query }: { query: string }): React.JSX.Element {
       )}
       {state === 'error' && (
         <div className="hc-history-note" role="alert">
-          Could not read history.{' '}
+          {t('http.history.readFailed')}{' '}
           <button type="button" className="btn sm" onClick={() => void load()}>
-            Retry
+            {t('common.retry')}
           </button>
         </div>
       )}
       {state === 'ready' && entries.length === 0 && (
         <p className="hc-history-note">
-          {query ? `No history matches “${query}”.` : 'Requests you send appear here. History stays on this device.'}
+          {query ? t('http.history.noMatch', { query }) : t('http.history.empty')}
         </p>
       )}
       {state === 'ready' &&
@@ -197,7 +200,7 @@ export function HistoryList({ query }: { query: string }): React.JSX.Element {
                     {e.response ? (
                       <span className={`hc-status hc-status--${Math.floor(e.response.status / 100)}xx`}>{e.response.status}</span>
                     ) : e.errorClass ? (
-                      <span className="hc-status hc-status--error">Error</span>
+                      <span className="hc-status hc-status--error">{t('http.history.error')}</span>
                     ) : null}
                     <span className="hc-history-time">{time(e.at)}</span>
                   </button>
@@ -205,8 +208,8 @@ export function HistoryList({ query }: { query: string }): React.JSX.Element {
                     type="button"
                     tabIndex={-1}
                     className="hc-icon-btn hc-tree-more"
-                    aria-label={`Actions for ${e.request.url || e.request.name}`}
-                    title="Actions"
+                    aria-label={t('http.history.actionsFor', { name: e.request.url || e.request.name })}
+                    title={t('http.history.actions')}
                     onClick={(ev) => {
                       const b = ev.currentTarget.getBoundingClientRect()
                       setMenu({ x: b.left, y: b.bottom, entries: historyMenu(e, actions) })
@@ -221,7 +224,7 @@ export function HistoryList({ query }: { query: string }): React.JSX.Element {
         ))}
       {state === 'ready' && more && (
         <button type="button" className="btn ghost sm hc-history-more" onClick={() => void load(entries.at(-1)?.at)}>
-          Show older
+          {t('http.history.showOlder')}
         </button>
       )}
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menu.entries} onClose={() => setMenu(null)} />}
@@ -235,21 +238,21 @@ export function HistoryList({ query }: { query: string }): React.JSX.Element {
       )}
       {clearing && (
         <Modal
-          title="Clear all history?"
+          title={t('http.history.clearTitle')}
           onClose={() => setClearing(false)}
           confirm={{
-            label: 'Clear history',
+            label: t('http.history.clearConfirm'),
             destructive: true,
             onClick: () => {
               setClearing(false)
               void window.opsmaxx.httpHistory
                 .clear()
                 .then(() => setEntries([]))
-                .catch(() => toast('Could not clear history.', 'error'))
+                .catch(() => toast(t('http.history.clearFailed'), 'error'))
             }
           }}
         >
-          <p>Every request in history is removed from this device. This cannot be undone.</p>
+          <p>{t('http.history.clearBody')}</p>
         </Modal>
       )}
     </div>

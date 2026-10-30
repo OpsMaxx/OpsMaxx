@@ -40,6 +40,9 @@ import { formatDbAddress } from '../../../../shared/dbAddress'
 import { EmptyState } from '../common/EmptyState'
 import type { DatabaseConn, DbKind, Server } from '../../types'
 import type { DbConnectConfig, DbInfo, DbQueryResult, DbTestResult } from '../../../../shared/db'
+import type { MessageKey } from '../../../../shared/i18n'
+import { t as translate, useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 /** Where the connection has got to. Named because Results reads it too. */
 type ConnPhase = 'idle' | 'connecting' | 'ok' | 'error'
@@ -74,21 +77,30 @@ function connSummary(db: DatabaseConn, jump: Server | undefined, error: string |
   const host = formatDbAddress(db.host, null)
   switch (classifyConnectionError(error)) {
     case 'refused':
-      return `Nothing is listening on ${where}.`
+      return translate('databases.view.conn.refused', { where })
     case 'unreachable':
-      return `${host} did not answer in time.`
+      return translate('databases.view.conn.unreachable', { host })
     case 'auth':
-      return `${host} rejected the username or password.`
+      return translate('databases.view.conn.auth', { host })
     case 'host-key':
-      return `${jump ? jump.name : 'The SSH server'} presented a different host key, so the tunnel was refused.`
+      return jump
+        ? translate('databases.view.conn.hostKeyJump', { jump: jump.name })
+        : translate('databases.view.conn.hostKey')
     case 'key-missing':
-      return `${jump ? `${jump.name}'s` : 'The'} private key file is not where the connection says it is.`
+      return jump
+        ? translate('databases.view.conn.keyMissingJump', { jump: jump.name })
+        : translate('databases.view.conn.keyMissing')
     case 'passphrase':
-      return `${jump ? `${jump.name}'s` : 'The'} private key needs a passphrase.`
+      return jump
+        ? translate('databases.view.conn.passphraseJump', { jump: jump.name })
+        : translate('databases.view.conn.passphrase')
     case 'permission':
-      return `${db.username || 'This user'} is not allowed to open ${db.database || 'this database'}.`
+      return translate('databases.view.conn.permission', {
+        user: db.username || translate('databases.view.conn.thisUser'),
+        database: db.database || translate('databases.add.thisDatabase')
+      })
     default:
-      return `Could not connect to ${db.name}.`
+      return translate('databases.view.conn.failed', { name: db.name })
   }
 }
 
@@ -99,11 +111,37 @@ function connSummary(db: DatabaseConn, jump: Server | undefined, error: string |
  * a pass, and a badge that only lit for `watch`/`alarm` would render "we were
  * not allowed to check replication" as a clean tab.
  */
-const OPS_BADGE: Record<DbVerdictLevel, { label: string; chip: string; title: string }> = {
-  ok: { label: '', chip: 'ok', title: 'everything readable was healthy' },
-  unknown: { label: '?', chip: '', title: 'something could not be read — not a pass' },
-  watch: { label: '!', chip: 'warn', title: 'something needs watching' },
-  alarm: { label: '!', chip: 'danger', title: 'something is wrong' }
+const OPS_BADGE: Record<DbVerdictLevel, { label: string; chip: string; titleKey: MessageKey }> = {
+  ok: { label: '', chip: 'ok', titleKey: 'databases.view.opsBadge.ok' },
+  unknown: { label: '?', chip: '', titleKey: 'databases.view.opsBadge.unknown' },
+  watch: { label: '!', chip: 'warn', titleKey: 'databases.view.opsBadge.watch' },
+  alarm: { label: '!', chip: 'danger', titleKey: 'databases.view.opsBadge.alarm' }
+}
+
+/** What each engine calls the things in the schema column, keyed so that no
+ *  sentence is built by lowercasing a translated heading. */
+const OBJECT_COPY: Record<
+  'keyspace' | 'databases' | 'tables',
+  { headingKey: MessageKey; noneKey: MessageKey; filterKey: MessageKey; noMatchKey: MessageKey }
+> = {
+  keyspace: {
+    headingKey: 'databases.view.objects.keyspace.heading',
+    noneKey: 'databases.view.objects.keyspace.none',
+    filterKey: 'databases.view.objects.keyspace.filter',
+    noMatchKey: 'databases.view.objects.keyspace.noMatch'
+  },
+  databases: {
+    headingKey: 'databases.view.objects.databases.heading',
+    noneKey: 'databases.view.objects.databases.none',
+    filterKey: 'databases.view.objects.databases.filter',
+    noMatchKey: 'databases.view.objects.databases.noMatch'
+  },
+  tables: {
+    headingKey: 'databases.view.objects.tables.heading',
+    noneKey: 'databases.view.objects.tables.none',
+    filterKey: 'databases.view.objects.tables.filter',
+    noMatchKey: 'databases.view.objects.tables.noMatch'
+  }
 }
 
 /**
@@ -128,6 +166,7 @@ export function DatabaseView({
    */
   visible: boolean
 }): React.JSX.Element {
+  const t = useT()
   const deleteDatabase = useApp((s) => s.deleteDatabase)
   const servers = useWorkspaceServers()
   // The bastion this database is reached through, when it has one. Named in
@@ -184,8 +223,9 @@ export function DatabaseView({
   // locked vault produces an unlock dialog and the call finishing, rather than
   // a rejected promise nobody catches.
   const unlocked = useCallback(
-    <T,>(run: () => Promise<T>): Promise<T> => withVaultUnlock(`Connecting to ${db.name}`, run),
-    [db.name]
+    <T,>(run: () => Promise<T>): Promise<T> =>
+      withVaultUnlock(t('databases.view.connectingReason', { name: db.name }), run),
+    [db.name, t]
   )
 
   /**
@@ -307,7 +347,8 @@ export function DatabaseView({
   // draws a tree rather than a list, so its column is headed by the level the
   // tree starts at.
   const isTree = db.kind === 'mongodb'
-  const objectWord = db.kind === 'redis' ? 'Keyspace' : isTree ? 'Databases' : 'Tables'
+  const objectWord = db.kind === 'redis' ? 'keyspace' : isTree ? 'databases' : 'tables'
+  const objectCopy = OBJECT_COPY[objectWord]
   const objects = isTree ? (info?.databases ?? []) : (info?.tables ?? [])
   const [objectFilter, setObjectFilter] = useState('')
   const needle = objectFilter.trim().toLowerCase()
@@ -345,10 +386,10 @@ export function DatabaseView({
   })
   const emptyHint =
     isTree
-      ? 'None were listed. This user may lack listDatabases — type a name in the picker above to use one anyway.'
+      ? t('databases.view.emptyHint.mongodb')
       : db.kind === 'redis'
-        ? 'This Redis instance has no keys.'
-        : 'This database has no tables yet.'
+        ? t('databases.view.emptyHint.redis')
+        : t('databases.view.emptyHint.sql')
   const shownDbs = typed
     ? allDbs.filter((d) => d.toLowerCase().includes(dbName.trim().toLowerCase()))
     : allDbs
@@ -362,10 +403,10 @@ export function DatabaseView({
     } catch (err) {
       r = { ok: false, error: errorText(err) }
     }
-    setResult(r ?? { ok: false, error: 'The database did not answer.' })
+    setResult(r ?? { ok: false, error: t('databases.view.noAnswer') })
     if (r?.ok && conn.phase !== 'ok') setConn({ phase: 'ok' })
     setRunning(false)
-  }, [query, conn.phase, cfgWith, dbName, unlocked])
+  }, [query, conn.phase, cfgWith, dbName, unlocked, t])
 
   /**
    * What the editor is waiting to be told before it runs.
@@ -440,8 +481,8 @@ export function DatabaseView({
             <input
               className="input"
               style={{ height: 26, width: 170, padding: '0 22px 0 8px' }}
-              placeholder="database"
-              title="Database (type or pick)"
+              placeholder={t('databases.view.pickerPlaceholder')}
+              title={t('databases.view.pickerTitle')}
               value={dbName}
               onFocus={() => setPickerOpen(true)}
               onChange={(e) => {
@@ -465,7 +506,7 @@ export function DatabaseView({
             />
             <button
               className="icon-btn sm"
-              title="Show all databases"
+              title={t('databases.view.showAll')}
               style={{ marginLeft: -22, height: 22, width: 22 }}
               onClick={() => {
                 setTyped(false)
@@ -476,7 +517,7 @@ export function DatabaseView({
             </button>
             {pickerOpen && (
               <div className="menu" style={{ top: 30, left: 0, minWidth: 190, maxHeight: 300, overflowY: 'auto' }}>
-                <div className="menu-label">Databases ({allDbs.length})</div>
+                <div className="menu-label">{t('databases.view.pickerHeading', { count: allDbs.length })}</div>
                 {shownDbs.map((d) => (
                   <button
                     key={d}
@@ -491,7 +532,7 @@ export function DatabaseView({
                 ))}
                 {shownDbs.length === 0 && (
                   <div className="faint" style={{ padding: '4px 10px 8px', fontSize: 11 }}>
-                    {allDbs.length ? 'No match' : 'None listed — the user may lack listDatabases. Type a name.'}
+                    {allDbs.length ? t('databases.view.pickerNoMatch') : t('databases.view.pickerNone')}
                   </div>
                 )}
               </div>
@@ -502,27 +543,29 @@ export function DatabaseView({
         )}
         <div className="row" style={{ gap: 4, marginLeft: 4 }}>
           <button className={`btn sm${mode === 'query' ? ' primary' : ''}`} onClick={() => setMode('query')}>
-            <FileCode2 size={13} /> Query
+            <FileCode2 size={13} /> {t('databases.view.modeQuery')}
           </button>
           <button className={`btn sm${mode === 'shell' ? ' primary' : ''}`} onClick={() => setMode('shell')}>
-            <TerminalSquare size={13} /> Shell
+            <TerminalSquare size={13} /> {t('databases.view.modeShell')}
           </button>
           {isTree && (
             <button
               className={`btn sm${mode === 'monitor' ? ' primary' : ''}`}
               onClick={() => setMode('monitor')}
-              title="Live server activity, sampled while this tab is on screen"
+              title={t('databases.view.modeMonitorTitle')}
             >
-              <Gauge size={13} /> Monitor
+              <Gauge size={13} /> {t('databases.view.modeMonitor')}
             </button>
           )}
           {hasOps && (
             <button
               className={`btn sm${mode === 'ops' ? ' primary' : ''}`}
               onClick={() => setMode('ops')}
-              title={opsLevel ? `Last operational read: ${OPS_BADGE[opsLevel].title}` : undefined}
+              title={
+                opsLevel ? t('databases.view.opsLast', { verdict: t(OPS_BADGE[opsLevel].titleKey) }) : undefined
+              }
             >
-              <Activity size={13} /> Operations
+              <Activity size={13} /> {t('databases.view.modeOps')}
               {opsLevel && opsLevel !== 'ok' && (
                 <span className={`chip ${OPS_BADGE[opsLevel].chip}`} style={{ marginLeft: 4 }}>
                   {OPS_BADGE[opsLevel].label}
@@ -535,23 +578,23 @@ export function DatabaseView({
         {conn.phase === 'connecting' && <Loader2 size={14} className="spin" />}
         {conn.phase === 'ok' && (
           <span className="chip ok" title={conn.message}>
-            <CheckCircle2 size={12} /> connected
+            <CheckCircle2 size={12} /> {t('databases.view.connected')}
           </span>
         )}
         {conn.phase === 'error' && (
           <span className="chip danger" title={conn.message}>
-            <AlertTriangle size={12} /> error
+            <AlertTriangle size={12} /> {t('databases.view.error')}
           </span>
         )}
         <button className="btn sm" onClick={test}>
-          <Plug size={13} /> Test
+          <Plug size={13} /> {t('common.test')}
         </button>
         <button
           className="btn sm danger"
           onClick={() => {
             deleteDatabase(db.id)
             void window.opsmaxx?.secrets.delete(db.id)
-            toast(`${db.name} deleted`)
+            toast(t('databases.deleted', { name: db.name }))
           }}
         >
           <Trash2 size={13} />
@@ -575,15 +618,15 @@ export function DatabaseView({
               first, so that is the button that gets offered instead. */}
           {classifyConnectionError(conn.detail) === 'host-key' ? (
             <button className="btn sm" onClick={() => openSettings('security')}>
-              Review saved keys
+              {t('databases.view.reviewKeys')}
             </button>
           ) : (
             <button className="btn sm" onClick={() => openDatabaseEditor(db.id)}>
-              <Pencil size={13} /> Edit connection
+              <Pencil size={13} /> {t('databases.editConnection')}
             </button>
           )}
           <button className="btn sm" onClick={test}>
-            Retry
+            {t('common.retry')}
           </button>
         </div>
       )}
@@ -591,7 +634,7 @@ export function DatabaseView({
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div className="db-schema" style={{ width: schema.size }}>
           <div className="db-schema-head">
-            <span className="sidebar-title">{objectWord}</span>
+            <span className="sidebar-title">{t(objectCopy.headingKey)}</span>
             {objects.length > 0 && <span className="db-count">{objects.length}</span>}
           </div>
           {/* A filter, once the list is longer than a glance. A schema column
@@ -600,7 +643,7 @@ export function DatabaseView({
           {objects.length > 12 && (
             <input
               className="input db-filter"
-              placeholder={`Filter ${objectWord.toLowerCase()}…`}
+              placeholder={t(objectCopy.filterKey)}
               value={objectFilter}
               spellCheck={false}
               onChange={(e) => setObjectFilter(e.target.value)}
@@ -617,21 +660,21 @@ export function DatabaseView({
             {conn.phase === 'error' ? (
               <EmptyState
                 compact
-                title="Not connected"
-                message="Nothing can be listed until the connection works."
+                title={t('databases.view.notConnected')}
+                message={t('databases.view.notConnectedSchema')}
               />
             ) : conn.phase === 'connecting' || (!info && !objects.length) ? (
               <div className="row faint" style={{ gap: 8, padding: 12 }}>
                 <Loader2 size={13} className="spin" />
-                <span>Loading…</span>
+                <span>{t('common.loading')}</span>
               </div>
             ) : objects.length === 0 ? (
-              <EmptyState compact title={`No ${objectWord.toLowerCase()}`} message={emptyHint} />
+              <EmptyState compact title={t(objectCopy.noneKey)} message={emptyHint} />
             ) : shownObjects.length === 0 ? (
               <EmptyState
                 compact
-                title="Nothing matches"
-                message={`No ${objectWord.toLowerCase()} here match “${objectFilter}”.`}
+                title={t('databases.view.nothingMatches')}
+                message={t(objectCopy.noMatchKey, { filter: objectFilter })}
               />
             ) : isTree ? (
               shownObjects.map((d) => (
@@ -665,7 +708,7 @@ export function DatabaseView({
           className={clsx('resizer static', schema.dragging && 'dragging')}
           onMouseDown={schema.onMouseDown}
           role="separator"
-          aria-label="Resize the schema column"
+          aria-label={t('databases.view.resizeSchema')}
         />
 
         <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
@@ -696,15 +739,16 @@ export function DatabaseView({
               onKeyDown={onKey}
               placeholder={
                 db.kind === 'redis'
-                  ? 'Redis command, e.g. GET mykey'
+                  ? t('databases.view.editorPlaceholder.redis')
                   : db.kind === 'mongodb'
-                    ? 'MongoDB command as JSON, e.g. { "find": "users", "limit": 10 }'
-                    : 'SQL query…'
+                    ? t('databases.view.editorPlaceholder.mongodb')
+                    : t('databases.view.editorPlaceholder.sql')
               }
             />
             <div className="row" style={{ marginTop: 8 }}>
               <button className="btn primary sm" disabled={running} onClick={run}>
-                {running ? <Loader2 size={13} className="spin" /> : <Play size={13} />} Run
+                {running ? <Loader2 size={13} className="spin" /> : <Play size={13} />}{' '}
+                {t('databases.view.run')}
                 <span className="kbd" style={{ marginLeft: 6 }}>
                   Ctrl ⏎
                 </span>
@@ -712,11 +756,12 @@ export function DatabaseView({
               <span className="spacer" />
               {result?.elapsedMs != null && (
                 <span className="faint" style={{ fontSize: 11 }}>
-                  {result.rowCount != null ? `${result.rowCount} rows · ` : ''}
-                  {result.elapsedMs} ms
+                  {result.rowCount != null
+                    ? t('databases.view.rowsAndTime', { count: result.rowCount, ms: result.elapsedMs })
+                    : t('databases.view.elapsed', { ms: result.elapsedMs })}
                 </span>
               )}
-              <button className="icon-btn sm" title="Refresh schema" onClick={() => void test()}>
+              <button className="icon-btn sm" title={t('databases.view.refreshSchema')} onClick={() => void test()}>
                 <RefreshCw size={14} />
               </button>
             </div>
@@ -731,7 +776,7 @@ export function DatabaseView({
               className={clsx('resizer-h', editor.dragging && 'dragging')}
               onMouseDown={editor.onMouseDown}
               role="separator"
-              aria-label="Resize the query editor"
+              aria-label={t('databases.view.resizeEditor')}
             />
           )}
 
@@ -745,11 +790,15 @@ export function DatabaseView({
 
       {pendingRun && (
         <Modal
-          title={pendingRun.kind === 'type-to-confirm' ? 'This cannot be undone' : 'Run this query?'}
+          title={
+            pendingRun.kind === 'type-to-confirm'
+              ? t('databases.view.confirm.undoneTitle')
+              : t('databases.view.confirm.runTitle')
+          }
           subtitle={`${db.name}${dbName ? ` · ${dbName}` : ''}`}
           onClose={() => setPendingRun(null)}
           confirm={{
-            label: 'Run',
+            label: t('databases.view.run'),
             destructive: pendingRun.kind === 'type-to-confirm',
             disabled:
               pendingRun.kind === 'type-to-confirm' && phrase.trim() !== pendingRun.phrase,
@@ -766,11 +815,15 @@ export function DatabaseView({
             <>
               <p className="s-desc">
                 {queryRisk(query) === 'destructive' && pendingRun.phrase !== 'RUN'
-                  ? `This destroys ${pendingRun.phrase} and everything in it. There is no undo and no backup taken.`
-                  : 'This is irreversible. There is no undo and no backup taken.'}
+                  ? t('databases.view.confirm.destroys', { target: pendingRun.phrase })
+                  : t('databases.view.confirm.irreversible')}
               </p>
               <label className="s-desc" htmlFor="db-confirm-phrase">
-                Type <b>{pendingRun.phrase}</b> to confirm.
+                <Trans
+                  i18nKey="databases.view.confirm.typePhrase"
+                  values={{ phrase: pendingRun.phrase }}
+                  components={{ b: <b /> }}
+                />
               </label>
               <input
                 id="db-confirm-phrase"
@@ -786,7 +839,7 @@ export function DatabaseView({
               />
             </>
           ) : (
-            <p className="s-desc">This writes to the database.</p>
+            <p className="s-desc">{t('databases.view.confirm.writes')}</p>
           )}
         </Modal>
       )}
@@ -823,6 +876,7 @@ function DatabaseNode({
   onToggle: () => void
   onPick: (collection: string) => void
 }): React.JSX.Element {
+  const t = useT()
   const loaded = Array.isArray(collections) ? collections : null
   const shown = filter && loaded && !name.toLowerCase().includes(filter)
     ? loaded.filter((c) => c.toLowerCase().includes(filter))
@@ -842,7 +896,7 @@ function DatabaseNode({
         </span>
         <span className="spacer" />
         {loaded && (
-          <span className="db-count" title={`${loaded.length} collection(s)`}>
+          <span className="db-count" title={t('databases.view.collectionCount', { count: loaded.length })}>
             {loaded.length}
           </span>
         )}
@@ -852,15 +906,15 @@ function DatabaseNode({
           {collections === 'loading' ? (
             <div className="row faint db-tree-note" style={{ gap: 8 }}>
               <Loader2 size={12} className="spin" />
-              <span>Loading…</span>
+              <span>{t('common.loading')}</span>
             </div>
           ) : collections === 'denied' ? (
             <div className="faint db-tree-note">
-              This user may not list {name}&rsquo;s collections.
+              {t('databases.view.collectionsDenied', { name })}
             </div>
           ) : shown === null ? null : shown.length === 0 ? (
             <div className="faint db-tree-note">
-              {loaded && loaded.length > 0 ? 'No match here.' : 'No collections.'}
+              {loaded && loaded.length > 0 ? t('databases.view.noMatchHere') : t('databases.view.noCollections')}
             </div>
           ) : (
             shown.map((c) => (
@@ -899,6 +953,7 @@ function Results({
   phase: ConnPhase
   where: string
 }): React.JSX.Element {
+  const t = useT()
   // Connecting is not "no results yet".
   //
   // The empty state below tells the user to write a query and press Run, which
@@ -910,7 +965,7 @@ function Results({
     return (
       <div className="row faint" style={{ gap: 8, padding: 16, alignItems: 'center' }}>
         <Loader2 size={14} className="spin" />
-        <span>Connecting to {where}…</span>
+        <span>{t('databases.view.connectingTo', { where })}</span>
       </div>
     )
   }
@@ -918,8 +973,8 @@ function Results({
     return (
       <EmptyState
         compact
-        title="Not connected"
-        message="Fix the connection above, then run a query. Nothing has been sent to the server."
+        title={t('databases.view.notConnected')}
+        message={t('databases.view.notConnectedResults')}
       />
     )
   }
@@ -932,15 +987,15 @@ function Results({
     return (
       <EmptyState
         compact
-        title="No results yet"
-        message="Write a query above and press Run. Nothing is sent to the server until you do."
+        title={t('databases.view.noResultsTitle')}
+        message={t('databases.view.noResults')}
       />
     )
   }
   if (!result.ok) {
     return (
       <div className="log-line error" style={{ padding: 16, whiteSpace: 'pre-wrap' }}>
-        <span className="lvl">ERROR</span>
+        <span className="lvl">{t('databases.view.errorLevel')}</span>
         <span className="selectable">{result.error}</span>
       </div>
     )
@@ -1013,6 +1068,7 @@ function Results({
 }
 
 export function DatabaseWorkspace(): React.JSX.Element {
+  const t = useT()
   const databases = useApp((s) => s.databases)
   const activeId = useApp((s) => s.activeDatabaseId)
   const openIds = useApp((s) => s.openDatabaseIds)
@@ -1030,10 +1086,10 @@ export function DatabaseWorkspace(): React.JSX.Element {
           <div className="empty-icon">
             <Table2 size={26} />
           </div>
-          <h3>No database selected</h3>
-          <p>Add a database connection, then select it to run queries.</p>
+          <h3>{t('databases.workspace.emptyTitle')}</h3>
+          <p>{t('databases.workspace.emptyBody')}</p>
           <button className="btn primary" onClick={openDatabaseCreator}>
-            <Plug size={15} /> Add Database
+            <Plug size={15} /> {t('databases.workspace.add')}
           </button>
         </div>
       </div>
@@ -1060,7 +1116,7 @@ export function DatabaseWorkspace(): React.JSX.Element {
        * not clickable while it is invisible.
        */}
       <TabStrip
-        label="Database tabs"
+        label={t('databases.workspace.tabs')}
         items={open.map((d) => ({
           id: d.id,
           title: d.name,

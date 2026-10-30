@@ -29,20 +29,23 @@ import { confirmHeldRecord, heldSentence, useAddyUi } from '../../store/addy'
 import { ContextMenu, MenuEntry } from './ContextMenu'
 import { Modal } from '../common/Modal'
 import type { Folder as FolderRecord, Server, ServerStatus } from '../../types'
+import { useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
 /**
  * What each status dot says, for anyone who cannot tell its colour — the dot's
  * shape carries the same distinction (see `.status-dot` in global.css).
  */
-const STATUS_LABEL: Record<ServerStatus, string> = {
-  online: 'Connected',
-  idle: 'Idle',
-  offline: 'Not connected',
-  connecting: 'Connecting'
+const STATUS_LABEL: Record<ServerStatus, MessageKey> = {
+  online: 'connections.tree.status.online',
+  idle: 'connections.tree.status.idle',
+  offline: 'connections.tree.status.offline',
+  connecting: 'connections.tree.status.connecting'
 }
 
 function StatusDot({ status }: { status: ServerStatus }): React.JSX.Element {
-  const label = STATUS_LABEL[status]
+  const t = useT()
+  const label = t(STATUS_LABEL[status])
   return <span className={clsx('status-dot', status)} role="img" aria-label={label} title={label} />
 }
 
@@ -73,6 +76,7 @@ interface Ctx {
  * this is now what populates the list the palette and the hotkey read.
  */
 function LocalMachineSection({ query }: { query: string }): React.JSX.Element | null {
+  const t = useT()
   const shells = useApp((s) => s.localShells)
   const refreshLocalShells = useApp((s) => s.refreshLocalShells)
   // Focus-or-open, not always-open: a server row in this same tree focuses the
@@ -103,7 +107,7 @@ function LocalMachineSection({ query }: { query: string }): React.JSX.Element | 
   return (
     <div className="tree-section">
       <div className="tree-section-label">
-        <Monitor size={11} /> This machine
+        <Monitor size={11} /> {t('connections.tree.thisMachine')}
       </div>
       {ordered.map((sh) => (
         // role/tabIndex/onKeyDown because `.tree-row` is a div with an onClick
@@ -131,6 +135,7 @@ function LocalMachineSection({ query }: { query: string }): React.JSX.Element | 
 }
 
 export function ConnectionTree(): React.JSX.Element {
+  const t = useT()
   const folders = useWorkspaceFolders()
   const servers = useWorkspaceServers()
   // Two servers with the same name render identically here and everywhere the
@@ -256,10 +261,14 @@ export function ConnectionTree(): React.JSX.Element {
   }
 
   const folderMenu = (id: string, name: string): MenuEntry[] => [
-    { label: 'Rename', icon: <Route size={14} />, onClick: () => setRenaming(id) },
-    { label: 'New subfolder', icon: <FolderPlus size={14} />, onClick: () => addFolder('New folder', id) },
+    { label: t('connections.tree.rename'), icon: <Route size={14} />, onClick: () => setRenaming(id) },
+    {
+      label: t('connections.tree.newSubfolder'),
+      icon: <FolderPlus size={14} />,
+      onClick: () => addFolder(t('layout.sidebar.newFolderName'), id)
+    },
     { separator: true, label: '' },
-    { label: `Delete "${name}"`, icon: <Trash2 size={14} />, danger: true, onClick: () => deleteFolder(id) }
+    { label: t('connections.tree.deleteFolder', { name }), icon: <Trash2 size={14} />, danger: true, onClick: () => deleteFolder(id) }
   ]
 
   // Called as a function, not rendered as <FolderLabel />: a component defined
@@ -294,7 +303,7 @@ export function ConnectionTree(): React.JSX.Element {
 
   const q = query.trim().toLowerCase()
   const match = (s: Server): boolean =>
-    !q || s.name.toLowerCase().includes(q) || s.host.includes(q) || s.tags.some((t) => t.includes(q))
+    !q || s.name.toLowerCase().includes(q) || s.host.includes(q) || s.tags.some((tag) => tag.includes(q))
 
   const favorites = servers.filter((s) => s.favorite && match(s))
 
@@ -323,49 +332,50 @@ export function ConnectionTree(): React.JSX.Element {
     .slice(0, 3)
 
   const entries = (s: Server): MenuEntry[] => [
-    { label: 'Connect', icon: <Plug size={14} />, onClick: () => openServer(s.id, 'terminal') },
-    { label: 'New session', icon: <TerminalIcon size={14} />, onClick: () => newSession(s.id) },
-    { label: 'Open monitor', icon: <Activity size={14} />, onClick: () => openServer(s.id, 'monitor') },
+    { label: t('connections.tree.connect'), icon: <Plug size={14} />, onClick: () => openServer(s.id, 'terminal') },
+    { label: t('connections.tree.newSession'), icon: <TerminalIcon size={14} />, onClick: () => newSession(s.id) },
+    { label: t('connections.tree.openMonitor'), icon: <Activity size={14} />, onClick: () => openServer(s.id, 'monitor') },
     // Only for a server that has RDP settings. Listed rather than always shown
     // and disabled: on a fleet of Linux hosts a permanently greyed entry is
     // three quarters of this menu's dead weight.
     ...(s.rdp
       ? [
           {
-            label: 'Open remote desktop',
+            label: t('connections.tree.openRdp'),
             icon: <Monitor size={14} />,
             onClick: () => openRdp(s.id)
           }
         ]
       : []),
     { separator: true, label: '' },
-    { label: 'Edit server', icon: <Pencil size={14} />, onClick: () => openServerEditor(s.id) },
-    { label: 'Edit jump route', icon: <Route size={14} />, onClick: () => openRouteEditor(s.id) },
+    { label: t('connections.tree.editServer'), icon: <Pencil size={14} />, onClick: () => openServerEditor(s.id) },
+    { label: t('connections.tree.editRoute'), icon: <Route size={14} />, onClick: () => openRouteEditor(s.id) },
     {
-      label: s.favorite ? 'Remove favorite' : 'Add favorite',
+      label: s.favorite ? t('connections.tree.removeFavorite') : t('connections.tree.addFavorite'),
       icon: <Star size={14} />,
       onClick: () => toggleFavorite(s.id)
     },
     {
-      label: 'Duplicate',
+      label: t('connections.tree.duplicate'),
       icon: <Copy size={14} />,
       onClick: () => {
-        const id = addServer({ ...s, name: `${s.name} copy` })
+        const copyName = t('connections.tree.copyName', { name: s.name })
+        const id = addServer({ ...s, name: copyName })
         // A credential is held in the OS keychain under the server's own id,
         // so the copy starts without one. Saying so here beats an
         // authentication failure later that reads as the original having
         // broken. SSH-agent servers carry no stored credential either way.
-        if (s.auth === 'agent') toast(`${s.name} copy added`, 'ok')
+        if (s.auth === 'agent') toast(t('connections.tree.copyAdded', { name: copyName }), 'ok')
         else
-          toast(`${s.name} copy was added without a credential.`, 'info', {
-            label: 'Add one',
+          toast(t('connections.tree.copyNoCredential', { name: copyName }), 'info', {
+            label: t('connections.tree.addOne'),
             run: () => openServerEditor(id)
           })
       }
     },
     { separator: true, label: '' },
     {
-      label: 'Delete',
+      label: t('common.delete'),
       icon: <Trash2 size={14} />,
       danger: true,
       onClick: () => setPendingDelete(s)
@@ -378,9 +388,9 @@ export function ConnectionTree(): React.JSX.Element {
     const distro = distroIcon(fleetFacts[s.id]?.facts?.distroId)
     return [
       labels.get(s.id) ?? s.name,
-      STATUS_LABEL[s.status],
+      t(STATUS_LABEL[s.status]),
       distro?.label,
-      s.tags.length > 0 ? `tags: ${s.tags.join(', ')}` : undefined
+      s.tags.length > 0 ? t('connections.tree.tagsAria', { tags: s.tags.join(', ') }) : undefined
     ]
       .filter(Boolean)
       .join(', ')
@@ -428,9 +438,9 @@ export function ConnectionTree(): React.JSX.Element {
         // A cloud server has no address to describe itself with: `host` is empty
         // by construction, so the ordinary user@host:port tooltip would read
         // "@:22". What identifies it is the provider and where the machine sits.
-        title={`${
-          s.cloud ? cloudTargetSubtitle(s.cloud) : `${s.username}@${s.host}:${s.port}`
-        } — double-click for a new session`}
+        title={t('connections.tree.rowTitle', {
+          target: s.cloud ? cloudTargetSubtitle(s.cloud) : `${s.username}@${s.host}:${s.port}`
+        })}
       >
         <StatusDot status={s.status} />
         {distro && (
@@ -449,21 +459,21 @@ export function ConnectionTree(): React.JSX.Element {
           return (
             <button
               className="chip warn"
-              title={`${heldSentence(h)} Click to review.`}
+              title={t('connections.tree.heldTitle', { sentence: heldSentence(h) })}
               onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => {
                 e.stopPropagation()
                 void confirmHeldRecord(h)
               }}
             >
-              confirm
+              {t('connections.tree.heldConfirm')}
             </button>
           )
         })()}
-        {s.tags.slice(0, ROW_TAGS).map((t, i) => (
+        {s.tags.slice(0, ROW_TAGS).map((tag, i) => (
           // By position: a tag list saved before normalisation can repeat one.
-          <span key={i} className="chip" title={t} aria-hidden="true">
-            {t}
+          <span key={i} className="chip" title={tag} aria-hidden="true">
+            {tag}
           </span>
         ))}
         {s.tags.length > ROW_TAGS && (
@@ -483,7 +493,7 @@ export function ConnectionTree(): React.JSX.Element {
         <input
           className="input"
           style={{ height: 30, width: '100%' }}
-          placeholder="Search connections…"
+          placeholder={t('connections.tree.search')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -509,9 +519,9 @@ export function ConnectionTree(): React.JSX.Element {
         {favorites.length > 0 && (
           <div className="tree-section">
             <div className="tree-section-label">
-              <Star size={11} /> Favorites
+              <Star size={11} /> {t('connections.tree.favorites')}
             </div>
-            <div role="tree" aria-label="Favorites">
+            <div role="tree" aria-label={t('connections.tree.favorites')}>
               {favorites.map((s) => serverRow(s, `fav:${s.id}`, 1))}
             </div>
           </div>
@@ -533,13 +543,14 @@ export function ConnectionTree(): React.JSX.Element {
               setDragId(null)
             }}
           >
-            <FolderTree size={11} /> Connections <span className="count">{servers.length}</span>
+            <FolderTree size={11} /> {t('layout.activity.connections')}{' '}
+            <span className="count">{servers.length}</span>
             <button
               className="icon-btn xs"
-              title="New folder"
+              title={t('layout.sidebar.newFolder')}
               onClick={(e) => {
                 e.stopPropagation()
-                setRenaming(addFolder('New folder', null))
+                setRenaming(addFolder(t('layout.sidebar.newFolderName'), null))
               }}
             >
               <FolderPlus size={13} />
@@ -547,7 +558,7 @@ export function ConnectionTree(): React.JSX.Element {
           </div>
 
           {(rootFolders.length > 0 || rootServers.length > 0) && (
-            <div role="tree" aria-label="Connections">
+            <div role="tree" aria-label={t('layout.activity.connections')}>
               {rootFolders.map((f) => {
                 const open = !collapsed[f.id]
                 const childFolders = childFoldersOf(f.id)
@@ -578,7 +589,7 @@ export function ConnectionTree(): React.JSX.Element {
                       onDrop={() => {
                         if (dragId) {
                           moveServerToFolder(dragId, f.id)
-                          toast(`Moved to ${f.name}`)
+                          toast(t('connections.tree.movedTo', { name: f.name }))
                         }
                         setDropFolder(null)
                         setDragId(null)
@@ -626,7 +637,7 @@ export function ConnectionTree(): React.JSX.Element {
                                 onDrop={() => {
                                   if (dragId) {
                                     moveServerToFolder(dragId, cf.id)
-                                    toast(`Moved to ${cf.name}`)
+                                    toast(t('connections.tree.movedTo', { name: cf.name }))
                                   }
                                   setDropFolder(null)
                                   setDragId(null)
@@ -665,9 +676,9 @@ export function ConnectionTree(): React.JSX.Element {
         {recent.length > 0 && (
           <div className="tree-section">
             <div className="tree-section-label">
-              <ServerIcon size={11} /> Recent
+              <ServerIcon size={11} /> {t('connections.tree.recent')}
             </div>
-            <div role="tree" aria-label="Recent">
+            <div role="tree" aria-label={t('connections.tree.recent')}>
               {recent.map((s) => {
                 const key = `recent:${s.id}`
                 return (
@@ -710,10 +721,10 @@ export function ConnectionTree(): React.JSX.Element {
       )}
       {pendingDelete && (
         <Modal
-          title={`Delete ${pendingDelete.name}?`}
+          title={t('connections.tree.deleteTitle', { name: pendingDelete.name })}
           onClose={() => setPendingDelete(null)}
           confirm={{
-            label: 'Delete',
+            label: t('common.delete'),
             destructive: true,
             onClick: () => {
               const s = pendingDelete
@@ -724,21 +735,18 @@ export function ConnectionTree(): React.JSX.Element {
               // server's alone would leave it behind in the OS keychain — a
               // credential for a machine the app no longer knows about.
               void window.opsmaxx?.secrets.delete(rdpSecretId(s.id))
-              toast(`${s.name} deleted`)
+              toast(t('connections.tree.deleted', { name: s.name }))
             }
           }}
         >
           {/* Naming what else goes, because that is the part nobody expects:
               the entry disappearing from a list reads as reversible, and the
               credential it takes with it is not. */}
+          <p className="s-desc">{t('connections.tree.deleteBody')}</p>
           <p className="s-desc">
-            This removes the connection and its saved credential from the OS credential store,
-            including any saved desktop password. Neither can be recovered from OpsMaxx
-            afterwards.
-          </p>
-          <p className="s-desc">
-            Nothing on {pendingDelete.host || 'the server'} itself is touched — no key is revoked
-            and no session is ended.
+            {pendingDelete.host
+              ? t('connections.tree.deleteUntouched', { host: pendingDelete.host })
+              : t('connections.tree.deleteUntouchedServer')}
           </p>
         </Modal>
       )}

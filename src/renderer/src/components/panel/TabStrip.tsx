@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { X, ChevronDown } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 
 /**
  * The tab strip.
@@ -85,6 +86,8 @@ export function TabStrip({
   label,
   children
 }: TabStripProps): React.JSX.Element {
+  // `t` is the tab throughout this component.
+  const tr = useT()
   const listRef = useRef<HTMLDivElement>(null)
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
   const [dragId, setDragId] = useState<string | null>(null)
@@ -315,7 +318,7 @@ export function TabStrip({
                    */
                   <input
                     className="tab-rename"
-                    aria-label={`Rename ${t.title}`}
+                    aria-label={tr('panel.tabs.renameLabel', { title: t.title })}
                     value={editing.text}
                     autoFocus
                     draggable={false}
@@ -381,7 +384,7 @@ export function TabStrip({
             className="tab-new"
             aria-haspopup="menu"
             aria-expanded={menuOpen}
-            title={`All tabs (${items.length})`}
+            title={tr('panel.tabs.allTabs', { count: items.length })}
             onClick={() => setMenuOpen((o) => !o)}
           >
             <ChevronDown size={16} />

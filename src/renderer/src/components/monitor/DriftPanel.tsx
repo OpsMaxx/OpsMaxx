@@ -16,6 +16,9 @@ import { clsx } from '../../lib/format'
 import type { Server } from '../../types'
 import { NoteWhy, PanelShell } from './PanelShell'
 import { SweepEmpty } from './SweepEmpty'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 import {
   DRIFT_NO_PUSH,
   DRIFT_PREVIEW_CHARS,
@@ -45,13 +48,13 @@ import {
 //     with a verdict can read what each rule removes, with a worked example,
 //     and the sentence saying why this file is compared under that set.
 
-const VERDICT_LABEL: Record<DriftVerdict, string> = {
-  baseline: 'baseline',
-  identical: 'identical',
-  'ignored-difference': 'differs in ignored ways',
-  differs: 'differs',
-  absent: 'not on this server',
-  unread: 'could not be read'
+const VERDICT_LABEL: Record<DriftVerdict, MessageKey> = {
+  baseline: 'monitor.drift.verdict.baseline',
+  identical: 'monitor.drift.verdict.identical',
+  'ignored-difference': 'monitor.drift.verdict.ignoredDifference',
+  differs: 'monitor.drift.verdict.differs',
+  absent: 'monitor.drift.verdict.absent',
+  unread: 'monitor.drift.verdict.unread'
 }
 
 /** The class that decides the colour. `ignored-difference` is deliberately NOT
@@ -72,6 +75,7 @@ interface Entry {
 }
 
 function Rules({ watchId }: { watchId: string }): React.JSX.Element | null {
+  const t = useT()
   const watch = DRIFT_WATCHES.find((x) => x.id === watchId)
   if (!watch) return null
   // Rendered in the pipeline order, which is the order they actually run in —
@@ -80,15 +84,13 @@ function Rules({ watchId }: { watchId: string }): React.JSX.Element | null {
   const rules = DRIFT_RULE_ORDER.filter((id) => watch.rules.includes(id)).map(driftRule)
   return (
     <div className="panel-note" data-testid="drift-rules">
-      <b>{watch.path}</b> is compared after these rules are applied, in this order. Two files that
-      differ only in what these remove are reported as differing in ignored ways — never as
-      identical.
+      <Trans i18nKey="monitor.drift.rulesIntro" values={{ path: watch.path }} components={{ b: <b /> }} />
       <ul style={{ margin: '6px 0 0', paddingLeft: 18 }}>
         {rules.map((r) => (
           <li key={r.id}>
             <b>{r.label}</b> — {r.detail}{' '}
             <span className="faint">
-              e.g. <code>{r.example.before}</code> → <code>{r.example.after}</code>
+              {t('monitor.drift.eg')} <code>{r.example.before}</code> → <code>{r.example.after}</code>
             </span>
           </li>
         ))}
@@ -109,34 +111,34 @@ function Row({
   pinned: boolean
   onPin: () => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <tr>
       <td>
         <button
           className={clsx('btn ghost sm', pinned && 'active')}
-          title="Compare every other server against this one"
+          title={t('monitor.drift.pinTitle')}
           onClick={onPin}
         >
           <Pin size={11} />
         </button>{' '}
         {r.serverName}
       </td>
-      <td className={VERDICT_CLASS[r.verdict]}>{VERDICT_LABEL[r.verdict]}</td>
+      <td className={VERDICT_CLASS[r.verdict]}>{t(VERDICT_LABEL[r.verdict])}</td>
       <td className="faint">
         {r.verdict === 'ignored-difference' && r.ignoredBy?.length ? (
           // The sentence this whole item turns on. "Candidates" and not "the
           // cause": proving which single rule is load-bearing would need both
           // files' contents, and not keeping those is the storage decision.
-          <>
-            The bytes differ. After{' '}
-            {r.ignoredBy.map((id) => driftRule(id).label.toLowerCase()).join(', ')} they match.
-          </>
+          t('monitor.drift.ignoredBy', {
+            rules: r.ignoredBy.map((id) => driftRule(id).label.toLowerCase()).join(', ')
+          })
         ) : r.verdict === 'unread' ? (
           <>{DRIFT_STATUS_HELP[r.status]}{r.detail ? ` (${r.detail})` : ''}</>
         ) : r.verdict === 'absent' ? (
           DRIFT_STATUS_HELP.absent
         ) : r.redacted ? (
-          'Secret-shaped text was replaced before comparing, so a difference inside it is invisible here.'
+          t('monitor.drift.redacted')
         ) : (
           ''
         )}
@@ -160,6 +162,7 @@ const LOCAL_ID = 'local'
 const LOCAL_NAME = 'This machine'
 
 export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Element {
+  const t = useT()
   const [entries, setEntries] = useState<Record<string, Entry>>({})
   const [watchId, setWatchId] = useState<string>(DRIFT_WATCHES[0].id)
   // Item 46's operator-chosen watches, beside the catalogue rather than instead
@@ -296,13 +299,10 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   return (
     <PanelShell
       icon={<FileDiff size={14} />}
-      title="Configuration drift"
+      title={t('modules.drift.label')}
       about={
         <>
-          <p>
-            Pick a watched file and see which servers still agree on it. Compared over hashes, and
-            read-only — OpsMaxx never pushes a file back.
-          </p>
+          <p>{t('monitor.drift.about')}</p>
           {/* Behind the disclosure for the reason written out in PatchPanel:
               this states a limit of what the app WRITES, not a limit of what it
               read, so no number on the page becomes misleading without it. It
@@ -315,7 +315,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
         <>
           <select
             className="input sm"
-            aria-label="Watched file"
+            aria-label={t('monitor.drift.watchedFile')}
             value={watchId}
             onChange={(e) => setWatchId(e.target.value)}
           >
@@ -326,37 +326,37 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             ))}
           </select>
           <button className="btn ghost sm" onClick={() => setAdding((a) => !a)}>
-            {adding ? 'Cancel' : 'Watch a file'}
+            {adding ? t('common.cancel') : t('monitor.drift.watchAFile')}
           </button>
           <div className="check-now">
             <button
               className="btn ghost sm"
               disabled={busy}
               onClick={() => void refresh()}
-              title="Re-reads every watched file now, ignoring the hourly clock. Nothing is written to any server by this."
+              title={t('monitor.drift.checkTitle')}
             >
               <RefreshCw size={13} className={clsx(busy && 'spin')} />
-              {busy ? 'Checking…' : 'Check now'}
+              {busy ? t('monitor.common.checking') : t('monitor.common.checkNow')}
             </button>
-            <SweepProgress active={busy} label="Re-reading watched files" />
+            <SweepProgress active={busy} label={t('monitor.drift.progressLabel')} />
           </div>
         </>
       }
     >
       {adding && (
         <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-          <div className="r-title">Watch another file</div>
+          <div className="r-title">{t('monitor.drift.watchAnother')}</div>
           <input
             className="input mono"
-            aria-label="Path"
+            aria-label={t('monitor.drift.path')}
             placeholder="/etc/logrotate.conf"
             value={draft.path}
             onChange={(e) => setDraft({ ...draft, path: e.target.value })}
           />
           <input
             className="input"
-            aria-label="Label"
-            placeholder="What it is, in one line"
+            aria-label={t('monitor.drift.label')}
+            placeholder={t('monitor.drift.labelPlaceholder')}
             value={draft.label}
             onChange={(e) => setDraft({ ...draft, label: e.target.value })}
           />
@@ -365,7 +365,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               of them. */}
           {!check.ok ? (
             draft.path.trim() === '' ? (
-              <div className="s-note faint">A path under /etc.</div>
+              <div className="s-note faint">{t('monitor.drift.pathHint')}</div>
             ) : (
               <div className="s-note is-alarm">{check.detail}</div>
             )
@@ -375,7 +375,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               <div className="s-note warn">{driftWatchApprovalSentence(check.watch.path)}</div>
               <input
                 className="input mono"
-                aria-label={`Type ${driftWatchPhrase(check.watch.path)} to confirm`}
+                aria-label={t('monitor.drift.typeToConfirm', { phrase: driftWatchPhrase(check.watch.path) })}
                 placeholder={driftWatchPhrase(check.watch.path)}
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
@@ -388,7 +388,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               disabled={!check.ok || !verifyDriftWatchApproval(draft.path.trim(), phrase)}
               onClick={addWatch}
             >
-              Add
+              {t('common.add')}
             </button>
           </div>
         </div>
@@ -404,10 +404,10 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 <td>
                   <button
                     className="btn ghost sm"
-                    aria-label={`Stop watching ${w.path}`}
+                    aria-label={t('monitor.drift.stopWatchingPath', { path: w.path })}
                     onClick={() => removeWatch(w.path)}
                   >
-                    Stop watching
+                    {t('monitor.drift.stopWatching')}
                   </button>
                 </td>
               </tr>
@@ -418,10 +418,10 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
 
       {collected === 0 ? (
         <SweepEmpty
-          subject="No configuration files have been read yet."
+          subject={t('monitor.drift.emptySubject')}
           busy={busy}
           onCheckNow={() => void refresh()}
-          note="The watched files are read, never written."
+          note={t('monitor.drift.emptyNote')}
         />
       ) : (
         <>
@@ -431,16 +431,22 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 reads identically and is not the same string — and a headline
                 nobody can find is a headline nobody reads. */}
             <span>
-              <span>{`${comparison.matching} ${comparison.matching === 1 ? 'match' : 'matches'}`}</span>
-              {comparison.diverging > 0 && <span className="state-watch">{` · ${comparison.diverging} differ`}</span>}
+              <span>{t('monitor.drift.matches', { count: comparison.matching })}</span>
+              {comparison.diverging > 0 && (
+                <span className="state-watch">
+                  {` · ${t('monitor.drift.differ', { count: comparison.diverging })}`}
+                </span>
+              )}
               {comparison.coverage.absent.length > 0 && (
                 <span className="state-unknown">
-                  {` · ${comparison.coverage.absent.length} do not have the file`}
+                  {` · ${t('monitor.drift.noFile', { count: comparison.coverage.absent.length })}`}
                 </span>
               )}
             </span>
             <button className="btn ghost sm" onClick={() => setShowRules((v) => !v)}>
-              {showRules ? 'Hide' : 'Show'} the {watch.rules.length} rules this is compared under
+              {t(showRules ? 'monitor.drift.hideRules' : 'monitor.drift.showRules', {
+                count: watch.rules.length
+              })}
             </button>
           </div>
 
@@ -448,17 +454,12 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
 
           {comparison.baselineServerId === null ? (
             <div className="panel-note is-unknown" data-testid="drift-no-baseline">
-              Nothing to compare against. {pinned
-                ? 'The server you pinned could not be read, and another has NOT been substituted for it — a column of verdicts against a reference you did not choose would say less than nothing.'
-                : 'No server answered with a readable copy of this file.'}
+              {pinned ? t('monitor.drift.noBaselinePinned') : t('monitor.drift.noBaselineNone')}
             </div>
           ) : (
             comparison.baselineChosen && (
               <div className="panel-note" data-testid="drift-chosen-baseline">
-                Nobody pinned a baseline, so the largest group of matching servers was used and the
-                others are compared against it. That is a statement about the majority, not about
-                which side is correct: a server that was fixed first looks exactly like a server that
-                drifted. Pin one to compare against it instead.
+                {t('monitor.drift.chosenBaseline')}
               </div>
             )
           )}
@@ -473,9 +474,9 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             <table className="table inv-table">
               <thead>
                 <tr>
-                  <th>Host</th>
-                  <th>Compared with the baseline</th>
-                  <th>Why</th>
+                  <th>{t('monitor.drift.host')}</th>
+                  <th>{t('monitor.drift.comparedWith')}</th>
+                  <th>{t('monitor.drift.why')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -497,13 +498,9 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 file itself is never stored — the two-hashes-and-a-status
                 detail is how that is achieved, which is a different question
                 and one most people never ask. */}
-            Comparison is over hashes — the configuration itself is never copied into OpsMaxx&rsquo;s
-            store.
-            <NoteWhy summary="How the comparison works, and what is held">
-              OpsMaxx keeps two hashes and a status per file per server, so a divergence survives a
-              restart while the file does not. The first {DRIFT_PREVIEW_CHARS} characters of each
-              file are held in memory for this session only, after every redaction rule has run
-              over the whole of it.
+            {t('monitor.drift.overHashes')}
+            <NoteWhy summary={t('monitor.drift.howItWorks')}>
+              {t('monitor.drift.howItWorksBody', { chars: DRIFT_PREVIEW_CHARS })}
             </NoteWhy>
           </div>
         </>

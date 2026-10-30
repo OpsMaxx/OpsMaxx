@@ -37,6 +37,9 @@ import {
   type AddyStep
 } from './addyStatus'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 
 /**
  * Sync & devices — the account, the machines on it, and whether anything moved.
@@ -74,6 +77,7 @@ import { Switch } from '../common/Switch'
  * that is how a user ends up with an account nobody can recover.
  */
 export function AddyPanel(): React.JSX.Element {
+  const t = useT()
   const { status, supported, error, refresh } = useAddyStatus()
   const [syncing, setSyncing] = useState(false)
 
@@ -100,7 +104,7 @@ export function AddyPanel(): React.JSX.Element {
       // wherever its only outcome is an error; it is gated on `enrolled`,
       // which does not cover this.
       if (result === null) {
-        toast('This device is not connected to the relay right now, so nothing was synced.', 'error')
+        toast(t('addy.panel.notConnectedToast'), 'error')
       }
     } catch (err) {
       toast(errorText(err), 'error')
@@ -122,15 +126,8 @@ export function AddyPanel(): React.JSX.Element {
       // every instruction elsewhere told people to "open Account", which is
       // nothing they could find. Saying the same words twice is the cheaper
       // mistake.
-      title="Sync & devices"
-      about={
-        <>
-          Your own machines, and what has reached them. OpsMaxx carries servers, workspaces,
-          tunnels and the vault between your devices through an addy relay you run yourself — every
-          object is sealed before it leaves and the relay holds no key. Nothing here reads or
-          changes a server.
-        </>
-      }
+      title={t('modules.addy.label')}
+      about={t('addy.panel.about')}
       actions={
         supported ? (
           <>
@@ -145,11 +142,12 @@ export function AddyPanel(): React.JSX.Element {
                 ) : (
                   <RefreshCw size={14} />
                 )}
-                {syncing ? ' Syncing…' : ' Sync now'}
+                {' '}
+                {syncing ? t('addy.panel.syncing') : t('addy.panel.syncNow')}
               </button>
             )}
             <button className="btn ghost" onClick={refresh}>
-              <RefreshCw size={14} /> Refresh
+              <RefreshCw size={14} /> {t('common.refresh')}
             </button>
           </>
         ) : undefined
@@ -164,13 +162,8 @@ export function AddyPanel(): React.JSX.Element {
         <div className="addy-note" role="status">
           <AlertTriangle size={15} aria-hidden />
           <div>
-            <strong>Sync is not running on this build.</strong>
-            <NoteWhy summary="What still works, and what does not">
-              Creating an account and pairing a second device work — they talk to the relay
-              directly. What is missing is the engine that carries data afterwards and the state it
-              would report: how many devices are on the account, and when anything last synced.
-              Those tiles say so rather than showing a zero.
-            </NoteWhy>
+            <strong>{t('addy.panel.notSupported')}</strong>
+            <NoteWhy summary={t('addy.panel.notSupportedWhy')}>{t('addy.panel.notSupportedDetail')}</NoteWhy>
           </div>
         </div>
       )}
@@ -178,7 +171,7 @@ export function AddyPanel(): React.JSX.Element {
       {error !== null && (
         <div className="addy-problem" role="alert">
           <AlertTriangle size={15} aria-hidden />
-          <span>Could not read the sync status: {error}</span>
+          <span>{t('addy.panel.statusError', { error })}</span>
         </div>
       )}
 
@@ -197,7 +190,7 @@ export function AddyPanel(): React.JSX.Element {
       <AddyKpis status={status} supported={supported} relay={relay} />
       <HeldRecords lastSyncAt={status?.sync?.lastSyncAt ?? null} />
 
-      <h3 className="ui-section-title addy-h">Where you are</h3>
+      <h3 className="ui-section-title addy-h">{t('addy.panel.whereYouAre')}</h3>
       <ol className="addy-journey">
         {steps.map((s) => (
           <JourneyStep key={s.key} step={s} />
@@ -222,11 +215,11 @@ export function AddyPanel(): React.JSX.Element {
           knows, and applied at the Settings door too, which had no guard at
           all. */}
       <div className="addy-setup-slot">
-        {steps[0].state !== 'done' && <h3 className="ui-section-title addy-h">Start here</h3>}
+        {steps[0].state !== 'done' && <h3 className="ui-section-title addy-h">{t('addy.panel.startHere')}</h3>}
         <AddySetup />
       </div>
 
-      <h3 className="ui-section-title addy-h">Devices</h3>
+      <h3 className="ui-section-title addy-h">{t('addy.panel.devicesHeading')}</h3>
       <AddyDevices devices={status?.devices} supported={supported} onChanged={refresh} />
       {status?.fingerprint && <AccountFingerprint words={status.fingerprint} />}
 
@@ -260,6 +253,7 @@ export function AddyPanel(): React.JSX.Element {
  * week.
  */
 function Transfers({ devices }: { devices?: AddyDevice[] }): React.JSX.Element | null {
+  const t = useT()
   const [arrived, setArrived] = useState<ArrivedTransfer[]>([])
   const [busy, setBusy] = useState(false)
   const others = (devices ?? []).filter((d) => !d.self && d.revoked !== true)
@@ -281,7 +275,7 @@ function Transfers({ devices }: { devices?: AddyDevice[] }): React.JSX.Element |
       // said "sent" would be the worst of both.
       for (const path of picked) {
         const r = await window.opsmaxx!.addy.sendFile(path, to)
-        toast(`Sent ${r.name}`, 'ok')
+        toast(t('addy.transfers.sent', { name: r.name }), 'ok')
       }
     } catch (err) {
       toast(errorText(err), 'error')
@@ -297,24 +291,22 @@ function Transfers({ devices }: { devices?: AddyDevice[] }): React.JSX.Element |
   return (
     <div className="setting-row addy-transfers">
       <div className="s-info">
-        <div className="s-title">Files</div>
-        <div className="s-desc">
-          Send a file to one of your other machines. It is sealed before it leaves and the relay
-          cannot read it; it waits there if that machine is asleep. Anything sent here lands in a
-          folder OpsMaxx keeps and is deleted after a week.
-        </div>
+        <div className="s-title">{t('addy.transfers.title')}</div>
+        <div className="s-desc">{t('addy.transfers.desc')}</div>
         {arrived.length > 0 && (
           <ul className="addy-arrived">
             {arrived.map((f) => (
               <li key={f.id + f.name}>
                 <FileDown size={13} aria-hidden />
                 <span className="strong">{f.name}</span>
-                <span className="fine">{Math.max(1, Math.round(f.size / 1024))} KB</span>
+                <span className="fine">
+                  {t('addy.transfers.size', { size: Math.max(1, Math.round(f.size / 1024)) })}
+                </span>
                 <button
                   className="btn ghost size-24"
                   onClick={() => void window.opsmaxx?.addy.revealTransfer?.(f.path)}
                 >
-                  Show
+                  {t('common.show')}
                 </button>
                 <button
                   className="btn ghost size-24"
@@ -324,7 +316,7 @@ function Transfers({ devices }: { devices?: AddyDevice[] }): React.JSX.Element |
                     })
                   }}
                 >
-                  Delete
+                  {t('common.delete')}
                 </button>
               </li>
             ))}
@@ -342,8 +334,8 @@ function Transfers({ devices }: { devices?: AddyDevice[] }): React.JSX.Element |
             {/* The key as well, for the same reason the device table shows it:
                 two of these buttons can otherwise read identically, and the
                 file goes to whichever machine the user did not mean. */}
-            {busy ? <Loader2 size={13} className="spin" /> : <FileUp size={13} />} Send to{' '}
-            {d.label} ({fingerprint(d.id)})
+            {busy ? <Loader2 size={13} className="spin" /> : <FileUp size={13} />}{' '}
+            {t('addy.transfers.sendTo', { label: d.label, fingerprint: fingerprint(d.id) })}
           </button>
         ))}
       </span>
@@ -366,6 +358,7 @@ function Transfers({ devices }: { devices?: AddyDevice[] }): React.JSX.Element |
  * through. The root key is the only thing it does not have.
  */
 function RekeyRow(): React.JSX.Element {
+  const t = useT()
   const [phrase, setPhrase] = useState('')
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -395,10 +388,7 @@ function RekeyRow(): React.JSX.Element {
           // "epoch" and "collections" are both protocol words. What a person
           // needs to know is that it worked, how much moved, and that their
           // other machines are not broken by it.
-          toast(
-            `The account key was changed. ${r.resealed} ${r.resealed === 1 ? 'item was' : 'items were'} re-sealed under the new one — your other devices pick it up the next time they sync. Then check that Account fingerprint shows the same words on each of them.`,
-            'ok'
-          )
+          toast(t('addy.rekey.done', { count: r.resealed }), 'ok')
           setPhrase('')
           setOpen(false)
         },
@@ -410,25 +400,21 @@ function RekeyRow(): React.JSX.Element {
   return (
     <div className="setting-row">
       <div className="s-info">
-        <div className="s-title">Change the account key</div>
+        <div className="s-title">{t('addy.rekey.title')}</div>
         <div className="s-desc">
-          Removing a device stops it receiving anything new. It does not take back the key that
-          device already has, so a machine that was <strong>stolen</strong> rather than retired can
-          still read everything it had. This replaces that key and re-seals every collection under
-          the new one.
+          <Trans i18nKey="addy.rekey.desc" components={{ strong: <strong /> }} />
           {open && (
             <>
               <br />
-              It needs your recovery phrase. The key being replaced is the one the removed device is
-              holding, so it cannot be the one that signs the replacement.
+              {t('addy.rekey.needsPhrase')}
               {waiting > 0 && (
                 <>
                   <br />
-                  <strong>
-                    {waiting} set-aside {waiting === 1 ? 'copy is' : 'copies are'} still waiting
-                    for a decision, and re-keying deletes {waiting === 1 ? 'it' : 'them'}.
-                  </strong>{' '}
-                  Decide on {waiting === 1 ? 'it' : 'them'} first with <strong>Review now</strong>.
+                  <Trans
+                    i18nKey="addy.rekey.waiting"
+                    values={{ count: waiting }}
+                    components={{ strong: <strong /> }}
+                  />
                 </>
               )}
             </>
@@ -437,31 +423,31 @@ function RekeyRow(): React.JSX.Element {
         {open && (
           <textarea
             className="addy-phrase-input"
-            aria-label="Recovery phrase"
+            aria-label={t('addy.phrase.label')}
             value={phrase}
             onChange={(e) => setPhrase(e.target.value)}
             spellCheck={false}
             rows={2}
-            placeholder="The twelve words, in order"
+            placeholder={t('addy.rekey.placeholder')}
           />
         )}
       </div>
       {open ? (
         <span className="addy-revoke-confirm">
           <button className="btn ghost size-24" disabled={busy} onClick={() => setOpen(false)}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             className="btn size-24"
             disabled={busy || phrase.trim().split(/\s+/).length !== 12}
             onClick={run}
           >
-            {busy ? <Loader2 size={13} className="spin" /> : null} Re-key the account
+            {busy ? <Loader2 size={13} className="spin" /> : null} {t('addy.rekey.run')}
           </button>
         </span>
       ) : (
         <button className="btn ghost size-24" onClick={() => setOpen(true)}>
-          Change it
+          {t('addy.rekey.open')}
         </button>
       )}
     </div>
@@ -508,6 +494,7 @@ function RekeyRow(): React.JSX.Element {
  * forget they flipped, and its symptom is silence.
  */
 function PauseRow({ running }: { running: boolean }): React.JSX.Element {
+  const t = useT()
   const [busy, setBusy] = useState(false)
   const act = (): void => {
     setBusy(true)
@@ -519,9 +506,9 @@ function PauseRow({ running }: { running: boolean }): React.JSX.Element {
         toast(
           okay
             ? running
-              ? 'Sync paused. It starts again next time OpsMaxx opens.'
-              : 'Sync running.'
-            : ((r as { problem?: string }).problem ?? 'Could not start sync.'),
+              ? t('addy.pause.paused')
+              : t('addy.pause.resumed')
+            : ((r as { problem?: string }).problem ?? t('addy.pause.couldNotStart')),
           okay ? 'ok' : 'error'
         )
       })
@@ -531,15 +518,16 @@ function PauseRow({ running }: { running: boolean }): React.JSX.Element {
   return (
     <div className="setting-row">
       <div className="s-info">
-        <div className="s-title">{running ? 'Pause sync' : 'Resume sync'}</div>
+        <div className="s-title">
+          {running ? t('addy.pause.pauseTitle') : t('addy.pause.resumeTitle')}
+        </div>
         <div className="s-desc">
-          {running
-            ? 'Stops carrying data between your devices without leaving the account. Your keys stay, the other devices are not told, and sync starts again the next time OpsMaxx opens.'
-            : 'Nothing is being carried between your devices right now. Your account and keys are untouched.'}
+          {running ? t('addy.pause.pauseDesc') : t('addy.pause.resumeDesc')}
         </div>
       </div>
       <button className="btn ghost size-24" disabled={busy} onClick={act}>
-        {busy ? <Loader2 size={13} className="spin" /> : null} {running ? 'Pause' : 'Resume'}
+        {busy ? <Loader2 size={13} className="spin" /> : null}{' '}
+        {running ? t('addy.pause.pause') : t('addy.pause.resume')}
       </button>
     </div>
   )
@@ -552,6 +540,7 @@ function LeaveRow({
   relay: string | null
   devices: number | null
 }): React.JSX.Element {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
   // THE LAST DEVICE IS THE DANGEROUS CASE. With another device on the account
@@ -570,10 +559,12 @@ function LeaveRow({
         // and should hear that from here rather than discover it there.
         toast(
           !r?.left
-            ? 'This device was not on an account.'
+            ? t('addy.leave.notOnAccount')
             : r.removedFromRoster === true
-              ? 'This device has left the account and removed itself from your device list.'
-              : `This device has left the account, but could not remove itself from your device list${r.rosterProblem ? ` (${r.rosterProblem})` : ''} — remove it from one of your other devices.`,
+              ? t('addy.leave.leftAndRemoved')
+              : r.rosterProblem
+                ? t('addy.leave.leftNotRemovedBecause', { problem: r.rosterProblem })
+                : t('addy.leave.leftNotRemoved'),
           // Not a success colour on a sentence that asks for something to be
           // done on another machine.
           r?.left && r.removedFromRoster !== true ? 'error' : 'ok'
@@ -587,27 +578,17 @@ function LeaveRow({
   return (
     <div className="setting-row">
       <div className="s-info">
-        <div className="s-title">Leave this account</div>
+        <div className="s-title">{t('addy.leave.title')}</div>
         <div className="s-desc">
-          Stops sync on this machine and forgets the keys it holds. Your servers, workspaces,
-          tunnels and vault stay exactly as they are here — what goes is this device&apos;s ability
-          to read anything further from {relay ?? 'the relay'}.
+          {relay !== null ? t('addy.leave.descAt', { relay }) : t('addy.leave.desc')}
           {open && (
             <>
               <br />
-              It also removes this device from your device list, if it can reach the relay. If it
-              cannot, the other machines keep listing it until somebody there removes it.
+              {t('addy.leave.roster')}
               <br />
-              {alone ? (
-                <strong>
-                  This is the only device on the account. After this, the twelve-word recovery
-                  phrase is the only way back into it — the relay holds no key and cannot help.
-                </strong>
-              ) : (
-                <>Nothing changes for the other devices; they keep syncing with each other.</>
-              )}
+              {alone ? <strong>{t('addy.leave.alone')}</strong> : t('addy.leave.notAlone')}
               <br />
-              Joining again — this relay or a different one — starts from the setup screen.
+              {t('addy.leave.rejoin')}
             </>
           )}
         </div>
@@ -615,15 +596,15 @@ function LeaveRow({
       {open ? (
         <span className="addy-revoke-confirm">
           <button className="btn ghost size-24" disabled={busy} onClick={() => setOpen(false)}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button className="btn danger size-24" disabled={busy} onClick={run}>
-            {busy ? <Loader2 size={13} className="spin" /> : null} Leave the account
+            {busy ? <Loader2 size={13} className="spin" /> : null} {t('addy.leave.run')}
           </button>
         </span>
       ) : (
         <button className="btn ghost size-24" onClick={() => setOpen(true)}>
-          Leave
+          {t('addy.leave.open')}
         </button>
       )}
     </div>
@@ -631,6 +612,7 @@ function LeaveRow({
 }
 
 function ClipboardShortcuts(): React.JSX.Element {
+  const t = useT()
   const on = useApp((s) => s.settings.addyClipboardShortcuts === true)
   const setSettings = useApp((s) => s.setSettings)
   const [state, setState] = useState<ClipboardShortcutState | null>(null)
@@ -649,20 +631,17 @@ function ClipboardShortcuts(): React.JSX.Element {
   return (
     <div className="setting-row">
       <div className="s-info">
-        <div className="s-title">Send and receive the clipboard with a keystroke</div>
+        <div className="s-title">{t('addy.clipboard.title')}</div>
         <div className="s-desc">
-          <kbd>Cmd/Ctrl+Shift+C</kbd> sends what is on this clipboard to your other devices;{' '}
-          <kbd>Cmd/Ctrl+Shift+V</kbd> puts the newest thing sent to this one onto the clipboard.
-          Nothing is mirrored in the background — a clipboard that copied everything would send the
-          password you just copied to every machine you own.
-          <br />
-          These are taken from <strong>every application</strong> while OpsMaxx is running, and{' '}
-          <kbd>Cmd/Ctrl+Shift+C</kbd> is the developer tools in most browsers.
+          <Trans
+            i18nKey="addy.clipboard.desc"
+            components={{ kbd: <kbd />, strong: <strong />, br: <br /> }}
+          />
         </div>
       </div>
       <Switch
         checked={on}
-        label="Send and receive the clipboard with a keystroke"
+        label={t('addy.clipboard.title')}
         onChange={(v) => setSettings({ addyClipboardShortcuts: v })}
       />
       {/* `held` is true when EITHER combination registered, because the
@@ -674,20 +653,23 @@ function ClipboardShortcuts(): React.JSX.Element {
           <div>
             {state.blocked.length > 0 ? (
               <>
-                <strong>Another application already holds {state.blocked.join(' and ')}.</strong>
-                <div className="setting-desc">
-                  Close it, or quit whatever has the combination, and switch this off and on again.
-                </div>
+                <strong>
+                  {state.blocked.length === 1
+                    ? t('addy.clipboard.blockedOne', { combo: state.blocked[0] })
+                    : t('addy.clipboard.blockedBoth', {
+                        first: state.blocked[0],
+                        second: state.blocked.slice(1).join(', ')
+                      })}
+                </strong>
+                <div className="setting-desc">{t('addy.clipboard.blockedHelp')}</div>
               </>
             ) : !state.attached ? (
               <>
-                <strong>Not active until this device reaches the relay.</strong>
-                <div className="setting-desc">
-                  There is nowhere to send a clipboard to until then.
-                </div>
+                <strong>{t('addy.clipboard.notAttached')}</strong>
+                <div className="setting-desc">{t('addy.clipboard.notAttachedHelp')}</div>
               </>
             ) : (
-              <strong>The shortcuts could not be registered.</strong>
+              <strong>{t('addy.clipboard.notRegistered')}</strong>
             )}
           </div>
         </div>
@@ -715,6 +697,7 @@ function AddyKpis({
   supported: boolean
   relay: string | null
 }): React.JSX.Element {
+  const t = useT()
   const sync = status?.sync
   const devices = status?.devices
   const enrolled = status?.enrolled === true
@@ -723,23 +706,23 @@ function AddyKpis({
   const attention = conflicts > 0 || held > 0 || sync?.error !== undefined
 
   return (
-    <section className="kpi-band" aria-label="Sync summary">
+    <section className="kpi-band" aria-label={t('addy.kpi.summary')}>
       <div className="kpi">
         <div className="kpi-top">
           <span className="kpi-icon">
             <Satellite size={13} />
           </span>
-          <span className="kpi-label">Account</span>
+          <span className="kpi-label">{t('addy.kpi.account')}</span>
         </div>
-        <div className="kpi-value">{!supported ? '—' : enrolled ? 'On' : 'None'}</div>
+        <div className="kpi-value">{!supported ? '—' : enrolled ? t('common.on') : t('common.none')}</div>
         <div className="kpi-sub" title={relay ?? undefined}>
           {!supported
             ? relay
-              ? `relay ${relay} — enrolment not reported`
-              : 'not reported by this build'
+              ? t('addy.kpi.relayEnrolmentNotReported', { relay })
+              : t('addy.kpi.notReported')
             : enrolled
-              ? (relay ?? 'relay not reported')
-              : 'no account on this device'}
+              ? (relay ?? t('addy.kpi.relayNotReported'))
+              : t('addy.kpi.noAccount')}
         </div>
       </div>
 
@@ -748,15 +731,15 @@ function AddyKpis({
           <span className="kpi-icon">
             <MonitorSmartphone size={13} />
           </span>
-          <span className="kpi-label">Devices</span>
+          <span className="kpi-label">{t('addy.kpi.devices')}</span>
         </div>
         <div className="kpi-value">{devices ? devices.filter((d) => !d.revoked).length : '—'}</div>
         <div className="kpi-sub">
           {devices
             ? devices.some((d) => d.self)
-              ? 'including this one'
-              : 'on this account'
-            : 'not read yet'}
+              ? t('addy.kpi.includingThis')
+              : t('addy.kpi.onThisAccount')
+            : t('addy.kpi.notReadYet')}
         </div>
       </div>
 
@@ -765,10 +748,16 @@ function AddyKpis({
           <span className="kpi-icon">
             {sync?.connected === true ? <Wifi size={13} /> : <WifiOff size={13} />}
           </span>
-          <span className="kpi-label">Sync</span>
+          <span className="kpi-label">{t('addy.kpi.sync')}</span>
         </div>
         <div className="kpi-value">
-          {sync === undefined ? '—' : !sync.running ? 'Off' : sync.connected ? 'Live' : 'Idle'}
+          {sync === undefined
+            ? '—'
+            : !sync.running
+              ? t('common.off')
+              : sync.connected
+                ? t('addy.kpi.live')
+                : t('addy.kpi.idle')}
         </div>
         {/* The trend, only where there is one. A flat line drawn from a missing
             history is a claim that nothing synced, which is a different thing
@@ -779,19 +768,17 @@ function AddyKpis({
             {/* LABELLED. An unlabelled chart with no units is decoration on a
                 panel whose whole argument is that it does not show numbers
                 nobody measured. */}
-            <span className="fine">
-              things carried, last {sync.history.length} passes
-            </span>
+            <span className="fine">{t('addy.kpi.history', { n: sync.history.length })}</span>
           </div>
         )}
         <div className="kpi-sub">
           {sync === undefined
-            ? 'not reported by this build'
+            ? t('addy.kpi.notReported')
             : !sync.running
-              ? 'engine not running'
+              ? t('addy.kpi.engineNotRunning')
               : sync.connected
-                ? 'connected to the relay'
-                : 'not connected right now'}
+                ? t('addy.kpi.connected')
+                : t('addy.kpi.notConnected')}
         </div>
       </div>
 
@@ -800,17 +787,17 @@ function AddyKpis({
           <span className="kpi-icon">
             <Clock size={13} />
           </span>
-          <span className="kpi-label">Last sync</span>
+          <span className="kpi-label">{t('addy.kpi.lastSync')}</span>
         </div>
         <div className="kpi-value">
-          {sync?.lastSyncAt ? ago(sync.lastSyncAt) : sync?.lastSyncAt === null ? 'Never' : '—'}
+          {sync?.lastSyncAt ? ago(sync.lastSyncAt) : sync?.lastSyncAt === null ? t('common.never') : '—'}
         </div>
         <div className="kpi-sub">
           {sync?.lastSyncAt
-            ? 'ago'
+            ? t('addy.kpi.ago')
             : sync?.lastSyncAt === null
-              ? 'nothing has synced yet'
-              : 'not reported by this build'}
+              ? t('addy.kpi.nothingSynced')
+              : t('addy.kpi.notReported')}
         </div>
       </div>
 
@@ -823,11 +810,11 @@ function AddyKpis({
             <span className="kpi-icon">
               <AlertTriangle size={13} />
             </span>
-            <span className="kpi-label">Attention</span>
+            <span className="kpi-label">{t('addy.kpi.attention')}</span>
           </div>
           <div className="kpi-value">{conflicts + held > 0 ? conflicts + held : 1}</div>
           <div className="kpi-sub">
-            {conflicts + held > 0 ? 'waiting for a choice' : 'sync is failing'}
+            {conflicts + held > 0 ? t('addy.kpi.waitingForChoice') : t('addy.kpi.failing')}
           </div>
         </div>
       )}
@@ -844,14 +831,15 @@ const STEP_MARK: Record<AddyStep['state'], React.ReactNode> = {
 
 /** What each state is called, for the people who cannot see the glyph. The
  *  shape carries it for everyone else, which is why the word is not printed. */
-const STEP_WORD: Record<AddyStep['state'], string> = {
-  done: 'Done',
-  now: 'You are here',
-  todo: 'Not yet',
-  unknown: 'Not reported'
+const STEP_WORD: Record<AddyStep['state'], MessageKey> = {
+  done: 'common.done',
+  now: 'addy.journey.state.now',
+  todo: 'addy.journey.state.todo',
+  unknown: 'addy.journey.state.unknown'
 }
 
 function JourneyStep({ step }: { step: AddyStep }): React.JSX.Element {
+  const t = useT()
   return (
     <li className={clsx('addy-step', step.state)}>
       <span className="addy-step-mark" aria-hidden>
@@ -860,7 +848,7 @@ function JourneyStep({ step }: { step: AddyStep }): React.JSX.Element {
       <div className="addy-step-body">
         <div className="addy-step-title">
           {step.title}
-          <span className="chip addy-step-state">{STEP_WORD[step.state]}</span>
+          <span className="chip addy-step-state">{t(STEP_WORD[step.state])}</span>
         </div>
         <div className="addy-step-detail ui-note">{step.detail}</div>
       </div>
@@ -891,9 +879,6 @@ function JourneyStep({ step }: { step: AddyStep }): React.JSX.Element {
 function fingerprint(id: string): string {
   return id.slice(0, 8)
 }
-
-const PHRASE_ADDED_WHY =
-  'This device was added with the recovery phrase, not by pairing. Whoever holds the phrase can add devices. If you do not recognise this one, remove it.'
 
 /** The roster entry that added it was signed with the recovery-phrase key.
  *  Read loosely: main fills the field from the verified chain, and a build
@@ -933,16 +918,13 @@ function AddyDevices({
   /** Re-read the status once the roster has changed under us. */
   onChanged: () => void
 }): React.JSX.Element {
+  const t = useT()
   if (devices === undefined) {
     return (
       <EmptyState
         compact
-        title="Not reported"
-        message={
-          supported
-            ? 'Waiting for the device list from the relay. It arrives the next time this device reaches it — nothing is wrong with the account.'
-            : 'This build cannot read the device list. Pairing still works; what is missing is the readout of what came of it.'
-        }
+        title={t('addy.devices.notReported')}
+        message={supported ? t('addy.devices.waiting') : t('addy.devices.cannotRead')}
       />
     )
   }
@@ -950,16 +932,17 @@ function AddyDevices({
     return (
       <EmptyState
         compact
-        title="No devices"
-        message="No device is on this account yet. Creating an account puts this one on it."
+        title={t('addy.devices.none')}
+        message={t('addy.devices.noneMessage')}
       />
     )
   }
+  const phraseAddedWhy = t('addy.devices.phraseAddedWhy')
   return (
     <table className="mini-table addy-devices">
       <thead>
         <tr>
-          <th>Device</th>
+          <th>{t('addy.devices.device')}</th>
           <th />
         </tr>
       </thead>
@@ -969,23 +952,25 @@ function AddyDevices({
             <td className="strong">
               <Laptop size={13} aria-hidden />{' '}
               <span className="addy-device-name">{d.label}</span>
-              {d.self && <span className="chip info">This device</span>}
-              {d.revoked === true && <span className="chip danger">Revoked</span>}
+              {d.self && <span className="chip info">{t('addy.devices.thisDevice')}</span>}
+              {d.revoked === true && <span className="chip danger">{t('addy.devices.revoked')}</span>}
               {/* NOT EVERY ADD IS A PAIRING. The recovery phrase can add a
                   device with no other machine present and nobody comparing
                   emoji, so a row added that way is the one to look at twice.
                   The chip says it in words; the explanation is the hover text
                   and the screen-reader description. */}
               {addedWithPhrase(d) && (
-                <span className="chip warn" title={PHRASE_ADDED_WHY} aria-description={PHRASE_ADDED_WHY}>
-                  Added with recovery phrase
+                <span className="chip warn" title={phraseAddedWhy} aria-description={phraseAddedWhy}>
+                  {t('addy.devices.addedWithPhrase')}
                 </span>
               )}
               {/* Under the name rather than beside it: it is what you read
                   when the name did not settle it, and a row that leads with
                   a key is a row nobody scans. */}
               <div className="addy-device-fp">{fingerprint(d.id)}</div>
-              {d.addedAt !== null && <div className="fine">Added {addedOn(d.addedAt)}</div>}
+              {d.addedAt !== null && (
+                <div className="fine">{t('addy.devices.addedOn', { date: addedOn(d.addedAt) })}</div>
+              )}
             </td>
             <td className="right">
               {/* Never on this device's own row. A device that revoked itself
@@ -1008,19 +993,13 @@ function AddyDevices({
           That is the column a sysadmin scans to spot a machine that should not
           be there, and it was uniformly false. */}
       <caption className="fine addy-devices-note">
-        <p>
-          In the order they joined the account — the newest is last. The relay does not report
-          when each device was last seen, so that is not shown. What is here comes from the
-          signed device list, which this device verified itself.
-        </p>
+        <p>{t('addy.devices.order')}</p>
         {/* THE ONLY THING ON A ROW THAT IS RELIABLY UNIQUE, and the sentence
             that turns it into a name: you can walk to the other machine and
             read the same characters there. Without this the fingerprint is
             noise, and two devices called the same thing stay that way. */}
         <p>
-          The characters under each name are the start of that device&rsquo;s key. They are how to
-          tell two machines apart when the names read alike — the same characters appear on the
-          machine itself, beside <em>This device</em>.
+          <Trans i18nKey="addy.devices.fingerprintNote" components={{ em: <em /> }} />
         </p>
         {/* ASKED FOR AS "pick a primary device", AND THE ANSWER IS THAT THERE
             IS NOTHING TO PICK. Every device holds the same account key and any
@@ -1028,9 +1007,7 @@ function AddyDevices({
             of failure that the recovery phrase already replaces. Said here
             because this list is where somebody goes looking for the setting. */}
         <p>
-          There is no main device to choose. Every device on this list holds the same account key
-          and any of them can add the next one — including this one, from{' '}
-          <em>Add another device</em> above.
+          <Trans i18nKey="addy.devices.noPrimary" components={{ em: <em /> }} />
         </p>
       </caption>
     </table>
@@ -1060,13 +1037,14 @@ function RevokeButton({
   label: string
   onDone: () => void
 }): React.JSX.Element {
+  const t = useT()
   const [arming, setArming] = useState(false)
   const [busy, setBusy] = useState(false)
 
   if (!arming) {
     return (
       <button className="btn ghost danger size-24" onClick={() => setArming(true)}>
-        Remove
+        {t('common.remove')}
       </button>
     )
   }
@@ -1077,13 +1055,14 @@ function RevokeButton({
             see `fingerprint` — and this sentence is the last thing shown
             before a laptop is wiped. Naming a thing two rows share is not
             naming it. */}
-        Remove <strong>{label}</strong> (<code className="addy-device-fp">{fingerprint(id)}</code>)?
-        Everything OpsMaxx stores on it is deleted the next time it
-        opens <strong>and reaches the relay</strong> — a machine kept offline never hears, which is
-        why a stolen one also needs the account key changed. Adding it back means pairing it again.
+        <Trans
+          i18nKey="addy.revoke.confirm"
+          values={{ label, fingerprint: fingerprint(id) }}
+          components={{ strong: <strong />, code: <code className="addy-device-fp" /> }}
+        />
       </span>
       <button className="btn ghost size-24" disabled={busy} onClick={() => setArming(false)}>
-        Cancel
+        {t('common.cancel')}
       </button>
       <button
         className="btn danger size-24"
@@ -1092,7 +1071,7 @@ function RevokeButton({
           setBusy(true)
           void window.opsmaxx!.addy.revokeDevice(id).then(
             () => {
-              toast(`${label} was removed from the account`, 'ok')
+              toast(t('addy.revoke.removed', { label }), 'ok')
               setArming(false)
               setBusy(false)
               onDone()
@@ -1104,7 +1083,7 @@ function RevokeButton({
           )
         }}
       >
-        {busy ? <Loader2 size={13} className="spin" /> : null} Remove it
+        {busy ? <Loader2 size={13} className="spin" /> : null} {t('addy.revoke.run')}
       </button>
     </span>
   )
@@ -1120,15 +1099,13 @@ function RevokeButton({
  * removed, which is also why it is not something to write down.
  */
 function AccountFingerprint({ words }: { words: string[] }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="setting-row">
       <div className="s-info">
-        <div className="s-title">Account fingerprint</div>
-        <div className="s-desc">
-          A machine recovering this account with the recovery phrase shows five words before it
-          joins. They must be these, in this order. If they differ, tell it to stop.
-        </div>
-        <ol className="addy-phrase" aria-label="Account fingerprint">
+        <div className="s-title">{t('addy.fingerprint.title')}</div>
+        <div className="s-desc">{t('addy.fingerprint.desc')}</div>
+        <ol className="addy-phrase" aria-label={t('addy.fingerprint.title')}>
           {words.map((w, i) => (
             <li key={i}>{w}</li>
           ))}
@@ -1147,6 +1124,7 @@ function AccountFingerprint({ words }: { words: string[] }): React.JSX.Element {
  * on a different network, cost a restart.
  */
 function ReconnectButton(): React.JSX.Element {
+  const t = useT()
   const [busy, setBusy] = useState(false)
   return (
     <button
@@ -1156,17 +1134,23 @@ function ReconnectButton(): React.JSX.Element {
         setBusy(true)
         void window.opsmaxx?.addy
           ?.reconnect()
-          .then((r) => toast(r.ok ? 'Connected.' : (r.problem ?? 'Still not connected.'), r.ok ? 'ok' : 'error'))
+          .then((r) =>
+            toast(
+              r.ok ? t('addy.panel.reconnected') : (r.problem ?? t('addy.panel.stillNotConnected')),
+              r.ok ? 'ok' : 'error'
+            )
+          )
           .catch((err: unknown) => toast(errorText(err), 'error'))
           .finally(() => setBusy(false))
       }}
     >
-      {busy ? <Loader2 size={13} className="spin" /> : null} Try again
+      {busy ? <Loader2 size={13} className="spin" /> : null} {t('addy.panel.tryAgain')}
     </button>
   )
 }
 
 function AddyProblems({ status }: { status: AddyStatus | null }): React.JSX.Element | null {
+  const t = useT()
   const sync = status?.sync
   if (sync === undefined) return null
   const conflicts = sync.conflicts
@@ -1179,7 +1163,10 @@ function AddyProblems({ status }: { status: AddyStatus | null }): React.JSX.Elem
           {/* The code is for a bug report, not for reading: on hover, not in
               the sentence. */}
           <span title={sync.error.code}>
-            Sync last failed {ago(sync.error.at)} ago: {syncErrorText(sync.error.message)}
+            {t('addy.panel.syncFailed', {
+              ago: ago(sync.error.at),
+              reason: syncErrorText(sync.error.message)
+            })}
           </span>
         </div>
       )}
@@ -1199,6 +1186,7 @@ function AddyProblems({ status }: { status: AddyStatus | null }): React.JSX.Elem
  * has quietly stopped: CI polling, monitoring, a VPN that starts at login.
  */
 function HeldRecords({ lastSyncAt }: { lastSyncAt: number | null }): React.JSX.Element | null {
+  const t = useT()
   const held = useAddyUi((s) => s.held)
   // Asked again whenever a sync lands; the badges elsewhere read the same list.
   useEffect(() => refreshHeld(), [lastSyncAt])
@@ -1207,19 +1195,19 @@ function HeldRecords({ lastSyncAt }: { lastSyncAt: number | null }): React.JSX.E
     <div className="addy-note addy-held" role="status">
       <AlertTriangle size={15} aria-hidden />
       <div>
-        <p>
-          {held.length === 1 ? 'One synced change is' : `${held.length} synced changes are`} waiting for you to confirm
-          them on this device. Until you do, OpsMaxx does not send their saved credentials anywhere new, and
-          background checks skip them.
-        </p>
+        <p>{held.length === 1 ? t('addy.held.one') : t('addy.held.many', { n: held.length })}</p>
         <ul>
           {held.map((r) => (
             <li key={`${r.kind}:${r.id}`}>
               <span>
-                <strong>{r.name}</strong> — {heldSentence(r)} Now: <code>{r.destination}</code>
+                <Trans
+                  i18nKey="addy.held.item"
+                  values={{ name: r.name, why: heldSentence(r), destination: r.destination }}
+                  components={{ strong: <strong />, code: <code /> }}
+                />
               </span>
               <button className="btn ghost size-24" onClick={() => void confirmHeldRecord(r)}>
-                Review
+                {t('addy.held.review')}
               </button>
             </li>
           ))}
@@ -1237,18 +1225,18 @@ function HeldRecords({ lastSyncAt }: { lastSyncAt: number | null }): React.JSX.E
  * and asks" — which it had just been told not to do.
  */
 function ConflictsNote({ conflicts }: { conflicts: number }): React.JSX.Element {
+  const t = useT()
   const deferred = useAddyUi((s) => s.deferredConflicts.length)
   return (
     <div className="addy-note" role="status">
       <AlertTriangle size={15} aria-hidden />
       <span>
-        {conflicts} {conflicts === 1 ? 'change was' : 'changes were'} made on two devices at once.
-        Only you know which version is right, so OpsMaxx shows both and asks which to keep.
-        {deferred > 0 && ' You left some of them for later.'}
+        {t('addy.conflictsNote.text', { count: conflicts })}
+        {deferred > 0 && ` ${t('addy.conflictsNote.deferred')}`}
       </span>
       {deferred > 0 && (
         <button className="btn ghost size-24" onClick={undeferConflicts}>
-          Review now
+          {t('addy.conflictsNote.reviewNow')}
         </button>
       )}
     </div>

@@ -2,6 +2,7 @@ import { Cpu, MemoryStick, HardDrive, ArrowDown, ArrowUp } from 'lucide-react'
 import { useServerMetrics } from '../../hooks/useServerMetrics'
 import { Sparkline } from '../common/Sparkline'
 import { bytes, rate, clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import type { Server } from '../../types'
 // Shared with the fleet health panel above, so a host listed there as low on
 // disk is exactly a host whose bar here is red.
@@ -14,6 +15,7 @@ export function ServerMonitorCard({
   server: Server
   onOpen: () => void
 }): React.JSX.Element {
+  const t = useT()
   // No third argument on purpose. This card is rendered once per server in
   // the fleet grid, so lifting the prompt here would let one sweep raise a
   // dialog per host. Unreadable gauges plus the refusal text is the right
@@ -35,7 +37,7 @@ export function ServerMonitorCard({
 
       {off ? (
         <div className="faint" style={{ padding: '18px 0', textAlign: 'center' }}>
-          Offline
+          {t('monitor.card.offline')}
         </div>
       ) : (
         <>
@@ -74,7 +76,7 @@ export function ServerMonitorCard({
           {m.host && (
             <div className="row muted" style={{ justifyContent: 'space-between' }}>
               <span>
-                <HardDrive size={11} /> Disk
+                <HardDrive size={11} /> {t('monitor.common.disk')}
               </span>
               <b style={{ color: 'var(--text)' }}>
                 {bytes(m.host.diskUsed)} / {bytes(m.host.diskTotal)}

@@ -7,6 +7,8 @@ import type { AccessGroup, McpGlobalConfig } from '../../../../shared/mcp'
 import { PICKERLESS_MODE } from '../../../../shared/mcp'
 import { Switch } from '../common/Switch'
 import { ModePicker } from './ModePicker'
+import { t as tr, useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 
 /**
@@ -29,14 +31,14 @@ async function buildsClause(): Promise<string> {
         // "not reported" rather than "running": a provider that returned no run
         // id has told us nothing since, and guessing would be the one claim
         // nobody checked.
-        const how = r.state === 'unknown' ? 'state not reported' : r.state
-        return `  • ${what} on ${r.connectionName} (${how})`
+        const how = r.state === 'unknown' ? tr('ai.security.buildStateUnknown') : r.state
+        return `  • ${tr('ai.security.buildLine', { run: what, connection: r.connectionName, state: how })}`
       })
       .join('\n')
-    const more = runs.length > 5 ? `\n  • …and ${runs.length - 5} more` : ''
+    const more = runs.length > 5 ? `\n  • ${tr('ai.security.buildsMore', { count: runs.length - 5 })}` : ''
     return (
-      `\n\nThis does NOT stop ${runs.length} build(s) an agent started:\n${lines}${more}` +
-      '\nStop those on the run in CI/CD, or in the provider.'
+      `\n\n${tr('ai.security.buildsNotStopped', { count: runs.length })}\n${lines}${more}` +
+      `\n${tr('ai.security.buildsStopThose')}`
     )
   } catch {
     // The dialog must open even if this cannot be answered.
@@ -49,7 +51,7 @@ const BIND_FAILED = 'mcp-bind-failed'
 
 function copy(text: string): void {
   navigator.clipboard.writeText(text)
-  toast('Copied')
+  toast(tr('common.copied'))
 }
 
 export function AiSecurity(): React.JSX.Element {
@@ -67,6 +69,7 @@ export function AiSecurity(): React.JSX.Element {
   // "Pick a different port" is the fix for almost every start failure, so the
   // message hands the user the field instead of naming it.
   const portRef = useRef<HTMLInputElement>(null)
+  const t = useT()
 
   const load = (): void => {
     void window.opsmaxx?.aiMcp.getConfig().then((c) => c && setConfig(c))
@@ -103,7 +106,7 @@ export function AiSecurity(): React.JSX.Element {
     const result = await window.opsmaxx?.aiMcp.setConfig(patch).catch(() => null)
     if (!result) {
       // The control already shows the new value; say that nothing changed.
-      toast('That setting was not saved — OpsMaxx did not accept the change.', 'error')
+      toast(t('ai.security.notSaved'), 'error')
       load()
       return
     }
@@ -113,10 +116,10 @@ export function AiSecurity(): React.JSX.Element {
       // retries while the bridge is meant to be on) replaces this rather than
       // stacking a copy per port number.
       toast(
-        `OpsMaxx could not listen on port ${result.config.port}: ${result.error}. Another program is probably using it.`,
+        t('ai.security.bindFailed', { port: result.config.port, error: result.error }),
         'error',
         {
-          label: 'Pick another port',
+          label: t('ai.security.pickAnotherPort'),
           run: () => {
             portRef.current?.focus()
             portRef.current?.select()
@@ -149,22 +152,22 @@ export function AiSecurity(): React.JSX.Element {
     const builds = await buildsClause()
     const ok = window.confirm(
       (live === null
-        ? 'Stop all AI access?\n\nOpsMaxx could not read how many sessions are active, so it cannot say what this will revoke. It will revoke every one of them.'
-        : `Stop all AI access?\n\nThis revokes ${live.sessions} active session(s) and denies ${live.pending} waiting request(s). Agents will have to be reconnected by hand.`) +
+        ? t('ai.security.confirmUnknown')
+        : t('ai.security.confirmCounts', { sessions: live.sessions, pending: live.pending })) +
         builds
     )
     if (!ok) return
     const result = await window.opsmaxx?.aiMcp.killAllSessions()
     load()
     if (!result) {
-      toast('AI access was not stopped — every session is still live.', 'error', {
-        label: 'Try again',
+      toast(t('ai.security.stopFailed'), 'error', {
+        label: t('ai.security.tryAgain'),
         run: () => void killAll()
       })
       return
     }
     toast(
-      `Stopped every agent: ${result.revoked} session(s) revoked, ${result.denied} waiting request(s) denied. A build an agent already started is not stopped by this — stop those on the run in CI/CD.`,
+      t('ai.security.stopped', { revoked: result.revoked, denied: result.denied }),
       'ok'
     )
   }
@@ -189,8 +192,8 @@ export function AiSecurity(): React.JSX.Element {
 
   return (
     <div className="settings-section">
-      <h2>Security</h2>
-      <div className="sub">Global configuration for the OpsMaxx MCP bridge itself.</div>
+      <h2>{t('nav.ai.security')}</h2>
+      <div className="sub">{t('ai.security.intro')}</div>
 
       {/* The switch shows whether the bridge is LISTENING, not whether it is
           meant to be. With the port taken it was drawn on beside text saying
@@ -198,26 +201,26 @@ export function AiSecurity(): React.JSX.Element {
           again. Now a press from off always asks main to start it. */}
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Enable AI & MCP access</div>
+          <div className="s-title">{t('ai.security.enable')}</div>
           <div className={clsx('s-desc', config.enabled && !status.running && 'state-alarm')}>
             {status.running
-              ? `Listening on 127.0.0.1:${port} — never reachable from outside this machine.`
+              ? t('ai.security.listening', { address: `127.0.0.1:${port}` })
               : config.enabled
-                ? `Not listening: OpsMaxx could not open 127.0.0.1:${config.port}. No AI agent can reach it until it does — pick another port, or turn this on again once the port is free.`
-                : 'Off. No AI agent can reach OpsMaxx while disabled.'}
+                ? t('ai.security.notListening', { address: `127.0.0.1:${config.port}` })
+                : t('ai.security.off')}
           </div>
         </div>
         <Switch
           checked={status.running}
-          label="Enable AI & MCP access"
+          label={t('ai.security.enable')}
           onChange={(v) => update({ enabled: v })}
         />
       </div>
 
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Local port</div>
-          <div className="s-desc">Restart the bridge (toggle it off and on) after changing this.</div>
+          <div className="s-title">{t('ai.security.localPort')}</div>
+          <div className="s-desc">{t('ai.security.localPortDesc')}</div>
         </div>
         <input
           className="input"
@@ -231,29 +234,26 @@ export function AiSecurity(): React.JSX.Element {
 
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Approval timeout</div>
-          <div className="s-desc">How long an ASK action waits for you before it is treated as denied.</div>
+          <div className="s-title">{t('ai.security.approvalTimeout')}</div>
+          <div className="s-desc">{t('ai.security.approvalTimeoutDesc')}</div>
         </div>
         <select
           className="input"
           value={config.approvalTimeoutSeconds}
           onChange={(e) => update({ approvalTimeoutSeconds: Number(e.target.value) })}
         >
-          <option value={60}>1 minute</option>
-          <option value={120}>2 minutes</option>
-          <option value={300}>5 minutes</option>
-          <option value={600}>10 minutes</option>
+          {[1, 2, 5, 10].map((m) => (
+            <option key={m} value={m * 60}>
+              {t('ai.security.minutes', { count: m })}
+            </option>
+          ))}
         </select>
       </div>
 
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Default profile for new agent sessions</div>
-          <div className="s-desc">
-            The profile a session starts in when nobody picks one — CLI-paired and OAuth sessions always start
-            in it. Until you set one they start on Custom with the default access group, which is no access at all
-            if there is none. Each session’s profile can be changed under Active Sessions.
-          </div>
+          <div className="s-title">{t('ai.security.defaultProfile')}</div>
+          <div className="s-desc">{t('ai.security.defaultProfileDesc')}</div>
         </div>
         <ModePicker
           value={config.defaultSessionMode ?? PICKERLESS_MODE}
@@ -267,37 +267,37 @@ export function AiSecurity(): React.JSX.Element {
 
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">🚨 Stop all AI access</div>
+          <div className="s-title">🚨 {t('ai.security.stopAll')}</div>
           <div className="s-desc">
-            Immediately revokes every active session and denies every pending approval request.
+            {t('ai.security.stopAllDesc')}
             {/* Says what it would actually do, before it is pressed. An
                 emergency stop that cannot tell you whether anything is running
                 is one you press to find out. */}
             {liveCount !== null && (
               <>
                 {' '}
-                Right now that is {liveCount.sessions} session(s) and {liveCount.pending} waiting
-                request(s).
+                {t('ai.security.rightNow', { sessions: liveCount.sessions, pending: liveCount.pending })}
               </>
             )}
           </div>
         </div>
         <button className="btn danger outline" onClick={killAll}>
-          <Octagon size={14} /> Stop all AI access
+          <Octagon size={14} /> {t('ai.security.stopAll')}
         </button>
       </div>
 
-      <h3 style={{ marginTop: 24 }}>Connecting Claude Code</h3>
+      <h3 style={{ marginTop: 24 }}>{t('ai.security.claudeTitle')}</h3>
       <div className="setting-row" style={{ alignItems: 'flex-start' }}>
         <div className="s-info">
           <div className="s-desc">
-            This command needs a token, and a token comes from an agent session. Create one, then
-            paste the command into a terminal with that token in place of{' '}
-            <code className="mono">&lt;token&gt;</code>.
+            <Trans
+              i18nKey="ai.security.claudeDesc"
+              components={{ token: <code className="mono">&lt;token&gt;</code> }}
+            />
           </div>
         </div>
         <button className="btn sm" onClick={() => openAi('agents')}>
-          <Plus size={13} /> Create a session
+          <Plus size={13} /> {t('ai.security.createSession')}
         </button>
       </div>
       <div className="setting-row">
@@ -309,29 +309,28 @@ export function AiSecurity(): React.JSX.Element {
         </button>
       </div>
 
-      <h3 style={{ marginTop: 18 }}>Connecting Codex, Gemini CLI or another MCP client</h3>
-      <div className="s-desc">
-        Most MCP-compatible clients accept a Streamable HTTP server via JSON configuration, for example:
-      </div>
+      <h3 style={{ marginTop: 18 }}>{t('ai.security.otherTitle')}</h3>
+      <div className="s-desc">{t('ai.security.otherDesc')}</div>
       <div className="setting-row">
         <pre className="mono" style={{ flex: 1, whiteSpace: 'pre-wrap' }}>{jsonConfig}</pre>
         <button className="btn sm" onClick={() => copy(jsonConfig)}>
           <Copy size={13} />
         </button>
       </div>
-      <div className="s-desc">
-        Works the same way whether OpsMaxx is installed normally or running in portable mode — the
-        port and token are all any client needs.
-      </div>
+      <div className="s-desc">{t('ai.security.portable')}</div>
 
-      <h3 style={{ marginTop: 18 }}>Or skip typing tokens: the OpsMaxx CLI launcher</h3>
+      <h3 style={{ marginTop: 18 }}>{t('ai.security.cliTitle')}</h3>
       <div className="s-desc">
-        Install the CLI once (<code className="mono">npm install -g opsmaxx</code>, or{' '}
-        <code className="mono">npm install -g .</code> from this repo), then run{' '}
-        <code className="mono">opsmaxx claude</code> or <code className="mono">opsmaxx codex</code>. The
-        first run pops a one-time pairing code right here in OpsMaxx — type it into the terminal and the
-        session, token and MCP config are wired up for you. <code className="mono">opsmaxx run -- &lt;command&gt;</code>{' '}
-        works the same way for any other MCP-aware CLI.
+        <Trans
+          i18nKey="ai.security.cliDesc"
+          components={{
+            install: <code className="mono">npm install -g opsmaxx</code>,
+            installLocal: <code className="mono">npm install -g .</code>,
+            claude: <code className="mono">opsmaxx claude</code>,
+            codex: <code className="mono">opsmaxx codex</code>,
+            run: <code className="mono">opsmaxx run -- &lt;command&gt;</code>
+          }}
+        />
       </div>
     </div>
   )

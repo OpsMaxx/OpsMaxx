@@ -1,5 +1,7 @@
 import type { CicdOutcome, CicdStatus } from '../../../../shared/cicd'
 import { clsx } from '../../lib/format'
+import { t as tNow, useT } from '../../lib/i18n'
+import type { MessageKey, Translate } from '../../../../shared/i18n'
 
 /**
  * A run's status as a shape AND a word, never as a colour alone.
@@ -38,19 +40,19 @@ export function roleOf(outcome: CicdOutcome): StateRole {
 
 /** Uppercase where the state needs acting on, lowercase where it does not —
  *  the same reason PosturePanel shouts EXPIRED and not "reachable". */
-export function wordOf(outcome: CicdOutcome): string {
-  if (outcome.status === 'success') return outcome.warning === true ? 'UNSTABLE' : 'ok'
-  const words: Record<CicdStatus, string> = {
-    queued: 'queued',
-    running: 'running',
-    success: 'ok',
-    failed: 'FAILED',
-    canceled: 'canceled',
-    skipped: 'skipped',
-    manual: 'NEEDS APPROVAL',
-    unknown: 'UNKNOWN'
+export function wordOf(outcome: CicdOutcome, t: Translate = tNow): string {
+  if (outcome.status === 'success') return outcome.warning === true ? t('cicd.status.unstable') : t('cicd.status.ok')
+  const words: Record<CicdStatus, MessageKey> = {
+    queued: 'cicd.status.queued',
+    running: 'cicd.status.running',
+    success: 'cicd.status.ok',
+    failed: 'cicd.status.failed',
+    canceled: 'cicd.status.canceled',
+    skipped: 'cicd.status.skipped',
+    manual: 'cicd.status.needsApproval',
+    unknown: 'cicd.status.unknown'
   }
-  return words[outcome.status]
+  return t(words[outcome.status])
 }
 
 export function StatusWord({
@@ -60,8 +62,9 @@ export function StatusWord({
   outcome: CicdOutcome
   className?: string
 }): React.JSX.Element {
+  const t = useT()
   const role = roleOf(outcome)
-  const word = wordOf(outcome)
+  const word = wordOf(outcome, t)
   return (
     <span className={clsx('cicd-status', `state-${role}`, className)}>
       {/* aria-hidden: the shape is the non-colour signal for a sighted reader,
@@ -80,10 +83,11 @@ export function StatusWord({
  * nothing to number. It renders as the unknown ring, which is the true answer.
  */
 export function RequestedWord({ note }: { note?: string }): React.JSX.Element {
+  const t = useT()
   return (
     <span className="cicd-status state-unknown" title={note}>
       <span className="state-dot is-unknown" aria-hidden />
-      REQUESTED · no run id yet
+      {t('cicd.status.requested')}
     </span>
   )
 }

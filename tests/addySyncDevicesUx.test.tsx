@@ -364,6 +364,15 @@ describe('the panel', () => {
     expect(settings).toContain("<h3>{t('settingsPage.sync.heading')}</h3>")
     const en = JSON.parse(readFileSync(join(ROOT, 'src/shared/locales/en.json'), 'utf8'))
     expect(en['settingsPage.sync.heading']).toBe('Sync & devices')
+    // The words themselves live in the catalog now, so the same rule is held
+    // there: the panel's title is the feature's name, and nothing these
+    // screens say sends anybody to "Account" or asks for a pairing id.
+    expect(files[0]).toContain("title={t('modules.addy.label')}")
+    expect(en['modules.addy.label']).toBe('Sync & devices')
+    for (const [key, text] of Object.entries(en as Record<string, string>)) {
+      if (!key.startsWith('addy.')) continue
+      expect(text, key).not.toMatch(/Open <strong>Account<\/strong>|open Account there|pairing id/)
+    }
   })
 
   it('labels the re-key box', async () => {

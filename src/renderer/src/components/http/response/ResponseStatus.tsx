@@ -6,6 +6,8 @@ import { useHttp } from '../../../store/http'
 import { cancel } from '../../../lib/httpSend'
 import { bytes, clsx } from '../../../lib/format'
 import { statusShape } from './bodyWindow'
+import { useT } from '../../../lib/i18n'
+import type { MessageKey } from '../../../../../shared/i18n'
 
 const IDLE: ResponseState = { status: 'idle' }
 
@@ -16,19 +18,20 @@ export function useResponse(tabId: Id): ResponseState {
 /** Seconds since `startedAt`, ticking while mounted. */
 export function useElapsed(startedAt: number | null): string {
   const [now, setNow] = useState(() => Date.now())
+  const t = useT()
   useEffect(() => {
     if (startedAt === null) return
-    const t = setInterval(() => setNow(Date.now()), 100)
-    return () => clearInterval(t)
+    const timer = setInterval(() => setNow(Date.now()), 100)
+    return () => clearInterval(timer)
   }, [startedAt])
-  return startedAt === null ? '' : `${(Math.max(0, now - startedAt) / 1000).toFixed(1)} s`
+  return startedAt === null ? '' : t('http.response.seconds', { value: (Math.max(0, now - startedAt) / 1000).toFixed(1) })
 }
 
-const TLS_TEXT = {
-  verified: 'Certificate verified',
-  'custom-ca': 'Certificate verified with a custom CA',
-  unverified: 'Certificate NOT verified'
-} as const
+const TLS_TEXT: Record<'verified' | 'custom-ca' | 'unverified', MessageKey> = {
+  verified: 'http.response.tlsVerified',
+  'custom-ca': 'http.response.tlsCustomCa',
+  unverified: 'http.response.tlsUnverified'
+}
 
 /**
  * The response in one line: status, time, size, lock, route. It is the status
@@ -38,23 +41,24 @@ const TLS_TEXT = {
 export function ResponseStatus({ tabId }: { tabId: Id }): React.JSX.Element {
   const r = useResponse(tabId)
   const elapsed = useElapsed(r.status === 'sending' ? r.startedAt : null)
+  const t = useT()
 
-  if (r.status === 'idle') return <span className="hc-rs hc-rs-idle">No response yet</span>
+  if (r.status === 'idle') return <span className="hc-rs hc-rs-idle">{t('http.response.noResponse')}</span>
 
   if (r.status === 'sending') {
     return (
       <span className="hc-rs">
         <Loader2 size={13} className="spin" aria-hidden />
-        <span>Waiting… {elapsed}</span>
-        <button className="btn sm danger" onClick={() => cancel(tabId)} title="Cancel (Esc)">
-          Cancel
+        <span>{t('http.response.waiting', { elapsed })}</span>
+        <button className="btn sm danger" onClick={() => cancel(tabId)} title={t('http.urlBar.cancelEsc')}>
+          {t('common.cancel')}
         </button>
       </span>
     )
   }
 
   if (r.status === 'error') {
-    if (r.errorClass === 'prod-declined') return <span className="hc-rs hc-rs-idle">Not sent</span>
+    if (r.errorClass === 'prod-declined') return <span className="hc-rs hc-rs-idle">{t('http.response.notSent')}</span>
     return (
       <span className="hc-rs hc-rs-error">
         <AlertTriangle size={13} aria-hidden />
@@ -66,9 +70,9 @@ export function ResponseStatus({ tabId }: { tabId: Id }): React.JSX.Element {
   const { response: res, sentAs } = r
   const secure = /^https:/i.test(sentAs.url)
   const size = [
-    `Body ${bytes(res.body.byteLength)} (${res.body.byteLength} bytes)`,
-    res.decodedFrom && `${res.decodedFrom}, decoded`,
-    res.truncated && 'truncated at the 32 MiB limit'
+    t('http.response.bodySize', { size: bytes(res.body.byteLength), bytes: res.body.byteLength }),
+    res.decodedFrom && t('http.response.decoded', { encoding: res.decodedFrom }),
+    res.truncated && t('http.response.truncated')
   ]
     .filter(Boolean)
     .join(' · ')
@@ -78,22 +82,22 @@ export function ResponseStatus({ tabId }: { tabId: Id }): React.JSX.Element {
         <span className={clsx('state-dot', statusShape(res.status))} aria-hidden />
         {res.status} {res.statusText}
       </span>
-      <span className="hc-rs-metric">{Math.round(res.durationMs)} ms</span>
+      <span className="hc-rs-metric">{t('http.response.ms', { value: Math.round(res.durationMs) })}</span>
       <span className="hc-rs-metric" title={size}>
         {bytes(res.body.byteLength)}
-        {res.truncated ? ' (cut)' : ''}
+        {res.truncated ? ` ${t('http.response.cut')}` : ''}
       </span>
       {secure && (
         <span
           className={clsx('hc-rs-lock', sentAs.tls === 'unverified' && 'hc-danger')}
-          title={TLS_TEXT[sentAs.tls]}
-          aria-label={TLS_TEXT[sentAs.tls]}
+          title={t(TLS_TEXT[sentAs.tls])}
+          aria-label={t(TLS_TEXT[sentAs.tls])}
           role="img"
         >
           {sentAs.tls === 'unverified' ? <LockOpen size={13} /> : <Lock size={13} />}
         </span>
       )}
-      {sentAs.route.key !== 'direct' && <span className="hc-rs-metric">via {sentAs.route.label}</span>}
+      {sentAs.route.key !== 'direct' && <span className="hc-rs-metric">{t('http.response.via', { route: sentAs.route.label })}</span>}
     </span>
   )
 }

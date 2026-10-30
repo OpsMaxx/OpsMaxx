@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { useApp } from './app'
 import { useVaultPrompt } from './vaultPrompt'
 import { bridgeOn } from '../lib/bridge'
+import { t } from '../lib/i18n'
 import type { BackupSkipCode } from '../../../shared/backup'
 
 /**
@@ -120,6 +121,6 @@ export function startBackupRunWatch(): () => void {
  * by hand would be a second code path for the same thing.
  */
 export async function offerUnlockForBackups(): Promise<void> {
-  await useVaultPrompt.getState().request('Scheduled backups are waiting on the vault.')
+  await useVaultPrompt.getState().request(t('store.backupRuns.waitingOnVault'))
   await refresh()
 }

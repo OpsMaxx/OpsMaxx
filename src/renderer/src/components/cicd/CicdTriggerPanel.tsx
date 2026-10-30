@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Field, Modal } from '../common/Modal'
 import { EmptyState } from '../common/EmptyState'
 import { clsx, duration } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import { StatusWord, RequestedWord } from './Status'
 import { Reading } from './Reading'
 import { cicdBridge, cicdBridgeHas, pathLabel, triggerablePipelines, useCicdConnectionList, useCicdState } from './state'
@@ -37,6 +38,7 @@ export function CicdTriggerPanel({
   connections?: CicdConnection[]
   bridge?: CicdBridge
 }): React.JSX.Element {
+  const t = useT()
   const stored = useCicdConnectionList()
   const connections = seed ?? stored
   const canRefresh = cicdBridgeHas(bridge, 'refresh')
@@ -66,31 +68,30 @@ export function CicdTriggerPanel({
         <input
           className="input"
           value={filter}
-          placeholder="Filter pipelines…"
-          aria-label="Filter pipelines"
+          placeholder={t('cicd.trigger.filterPlaceholder')}
+          aria-label={t('cicd.trigger.filterLabel')}
           onChange={(e) => setFilter(e.target.value)}
         />
         <span className="spacer" />
         <button
           className="btn secondary size-28"
           disabled={!canRefresh}
-          title={canRefresh ? undefined : 'This build cannot read on demand.'}
+          title={canRefresh ? undefined : t('cicd.common.cannotReadOnDemand')}
           onClick={() => void bridge?.refresh().catch(() => undefined)}
         >
-          Refresh
+          {t('common.refresh')}
         </button>
       </div>
 
       <div className="panel-stats" data-testid="cicd-trigger-counts">
-        <span>
-          {shown.length} of {all.length} {all.length === 1 ? 'pipeline' : 'pipelines'} can be
-          started
-        </span>
+        <span>{t('cicd.trigger.counts', { shown: shown.length, count: all.length })}</span>
       </div>
 
       {requested.length > 0 && (
         <div className="cicd-rows">
-          <div className="ui-label cicd-bucket">Asked for this session · {requested.length}</div>
+          <div className="ui-label cicd-bucket">
+            {t('cicd.trigger.askedThisSession', { count: requested.length })}
+          </div>
           {requested.map((r) => (
             <div key={r.key} className="cicd-row">
               {/* Never green, and never a fabricated run number. Jenkins hands
@@ -102,10 +103,10 @@ export function CicdTriggerPanel({
               )}
               <span className="grow ellipsis">{r.label}</span>
               {r.result.run && <span className="mono">#{r.result.run.id}</span>}
-              <span className="faint">{duration(r.at)} ago</span>
+              <span className="faint">{t('cicd.common.ago', { duration: duration(r.at) })}</span>
               {r.result.webUrl !== undefined && (
                 <a href={r.result.webUrl} target="_blank" rel="noreferrer">
-                  Open in the provider
+                  {t('cicd.common.openInProvider')}
                 </a>
               )}
             </div>
@@ -121,17 +122,15 @@ export function CicdTriggerPanel({
       {connections.length === 0 ? (
         <EmptyState
           compact
-          title="No CI account is connected"
-          message="Connect one on the CI/CD panel first. Nothing here can reach a CI server until then."
+          title={t('cicd.common.noAccount')}
+          message={t('cicd.trigger.noAccountMessage')}
         />
       ) : shown.length === 0 ? (
         <EmptyState
           compact
-          title={all.length === 0 ? 'No pipeline can be started' : 'Nothing matched'}
+          title={all.length === 0 ? t('cicd.trigger.noneStartableTitle') : t('cicd.trigger.noMatchTitle')}
           message={
-            all.length === 0
-              ? 'None of the pipelines read so far declares a way to be started by hand. A GitHub workflow needs workflow_dispatch in its YAML.'
-              : 'No startable pipeline matches that filter.'
+            all.length === 0 ? t('cicd.trigger.noneStartableMessage') : t('cicd.trigger.noMatchMessage')
           }
         />
       ) : (
@@ -152,7 +151,7 @@ export function CicdTriggerPanel({
                 {pipeline.name}
               </span>
               <span className="faint ellipsis">{connection.name}</span>
-              <span className="ui-label">Start…</span>
+              <span className="ui-label">{t('cicd.trigger.startEllipsis')}</span>
             </button>
           ))}
         </div>
@@ -201,6 +200,7 @@ export function TriggerModal({
   onClose: () => void
   onStarted: (result: CicdTriggerResult) => void
 }): React.JSX.Element {
+  const t = useT()
   const [params, setParams] = useState<CicdParam[] | null>(null)
   const [values, setValues] = useState<Record<string, string>>({})
   const [ref, setRef] = useState(pipeline.last?.branch ?? '')
@@ -247,11 +247,11 @@ export function TriggerModal({
   const needsRef = connection.provider !== 'jenkins'
   const blocked =
     needsRef && ref.trim() === ''
-      ? 'Name the branch, tag or commit to run against.'
+      ? t('cicd.trigger.needsRef')
       : missingRequired
-        ? `${missingRequired.label} is required by this pipeline.`
+        ? t('cicd.trigger.paramRequired', { label: missingRequired.label })
         : !bridge
-          ? 'This build cannot reach a CI server. Restart the app to rebuild the bridge.'
+          ? t('cicd.trigger.noBridge')
           : null
 
   const start = async (): Promise<void> => {
@@ -271,8 +271,12 @@ export function TriggerModal({
 
   return (
     <Modal
-      title={`Start ${pipeline.name}`}
-      subtitle={`On ${connection.name}${where ? ` · ${where}` : ''}`}
+      title={t('cicd.trigger.modalTitle', { name: pipeline.name })}
+      subtitle={
+        where
+          ? t('cicd.trigger.modalSubtitleAt', { name: connection.name, where })
+          : t('cicd.trigger.modalSubtitle', { name: connection.name })
+      }
       onClose={onClose}
       footerNote={
         error !== null ? (
@@ -282,34 +286,31 @@ export function TriggerModal({
         ) : null
       }
       confirm={{
-        label: starting ? 'Starting…' : 'Start the run',
+        label: starting ? t('cicd.trigger.starting') : t('cicd.trigger.startRun'),
         disabled: blocked !== null || starting,
         onClick: () => void start()
       }}
     >
       {/* The blast radius, in the user's terms rather than the API's. */}
-      <div className="panel-note is-watch">
-        This starts a real run on {connection.name}. OpsMaxx does not administer that server and
-        cannot stop the run once it has been accepted — whatever the pipeline deploys, deploys.
-      </div>
+      <div className="panel-note is-watch">{t('cicd.trigger.blastRadius', { name: connection.name })}</div>
 
       {/* Absent for Jenkins rather than disabled: there is no Jenkins field this
           would set, so a greyed box would be claiming one exists. */}
       {needsRef && (
         <Field
-          label="Run against"
+          label={t('cicd.trigger.refLabel')}
           required
-          hint="The branch, tag or commit the pipeline runs on."
+          hint={t('cicd.trigger.refHint')}
         >
           <input className="input" value={ref} autoFocus onChange={(e) => setRef(e.target.value)} />
         </Field>
       )}
 
       {params === null ? (
-        <Reading label="Reading what this pipeline accepts…" />
+        <Reading label={t('cicd.trigger.readingParams')} />
       ) : params.length === 0 ? (
         /* No manufactured empty form. */
-        <div className="ui-note">This pipeline takes no parameters.</div>
+        <div className="ui-note">{t('cicd.trigger.noParams')}</div>
       ) : (
         params.map((p) => (
           <Field
@@ -344,7 +345,7 @@ export function TriggerModal({
                 value={values[p.key] ?? ''}
                 onChange={(e) => setValues((v) => ({ ...v, [p.key]: e.target.value }))}
               >
-                <option value="">Choose…</option>
+                <option value="">{t('cicd.trigger.choose')}</option>
                 {(p.choices ?? []).map((c) => (
                   <option key={c} value={c}>
                     {c}

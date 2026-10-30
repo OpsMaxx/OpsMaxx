@@ -4,6 +4,8 @@ import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { toast } from '../../store/toast'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 import type { AgentIdentity, AgentStatus, ApprovalScope } from '../../../../shared/sshAgentHost'
 
 /**
@@ -15,6 +17,7 @@ import type { AgentIdentity, AgentStatus, ApprovalScope } from '../../../../shar
  * is shown, with the exact line to put in a shell, and it is copyable.
  */
 export function AgentPanel(): React.JSX.Element {
+  const t = useT()
   const settings = useApp((s) => s.settings.sshAgent)
   const setSettings = useApp((s) => s.setSettings)
   const [status, setStatus] = useState<AgentStatus>({ running: false, identities: 0 })
@@ -52,11 +55,8 @@ export function AgentPanel(): React.JSX.Element {
     <div className="agent-panel">
       <label className="setting-row">
         <div>
-          <div className="setting-label">Let other tools use the SSH keys in your vault</div>
-          <div className="setting-desc">
-            Starts an SSH agent that offers the keys stored here to git, ansible, rsync and anything
-            else that looks for one. Nothing is signed without asking you first.
-          </div>
+          <div className="setting-label">{t('sshAgent.panel.enableLabel')}</div>
+          <div className="setting-desc">{t('sshAgent.panel.enableDesc')}</div>
         </div>
         <input
           type="checkbox"
@@ -73,39 +73,39 @@ export function AgentPanel(): React.JSX.Element {
 
       {status.running && status.path && (
         <div className="agent-panel-sock">
-          <div className="setting-label">Point your shell at it</div>
+          <div className="setting-label">{t('sshAgent.panel.pointShell')}</div>
           {/* The step that is easy to skip and silently fatal: an agent
               nothing points at does nothing, `git push` goes on using ~/.ssh,
               and the user concludes the feature is broken. */}
-          <div className="setting-desc">
-            Add this to your shell profile, or run it in a terminal to try it now. The path changes
-            each time OpsMaxx starts.
-          </div>
+          <div className="setting-desc">{t('sshAgent.panel.pointShellDesc')}</div>
           <div className="agent-panel-code">
             <code>{envLine}</code>
             <button
               className="btn"
-              aria-label="Copy"
+              aria-label={t('common.copy')}
               onClick={() => {
                 void navigator.clipboard.writeText(envLine)
                 setCopied(true)
                 setTimeout(() => setCopied(false), 1500)
-                toast('Copied')
+                toast(t('common.copied'))
               }}
             >
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
           </div>
           <div className="setting-desc">
-            Then <code>ssh-add -l</code> should list {usable.length}{' '}
-            {usable.length === 1 ? 'key' : 'keys'}.
+            <Trans
+              i18nKey="sshAgent.panel.sshAddList"
+              values={{ count: usable.length }}
+              components={{ code: <code /> }}
+            />
           </div>
         </div>
       )}
 
       <div className="agent-panel-keys">
         <div className="setting-label">
-          <KeyRound size={14} aria-hidden /> Keys it can offer
+          <KeyRound size={14} aria-hidden /> {t('sshAgent.panel.keysLabel')}
         </div>
         {/* A LOCKED VAULT IS NOT AN EMPTY ONE.
             `identities()` reads through `vaultEntriesForResolve`, which
@@ -118,16 +118,11 @@ export function AgentPanel(): React.JSX.Element {
         {keys.length === 0 &&
           (vaultLocked ? (
             <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
-              <div className="setting-desc grow">
-                The vault is locked, so the agent has no keys to offer and is refusing to sign.
-                Your keys are still there.
-              </div>
-              <UnlockVaultButton reason="Unlocking lets the SSH agent offer your keys again." />
+              <div className="setting-desc grow">{t('sshAgent.panel.locked')}</div>
+              <UnlockVaultButton reason={t('sshAgent.panel.unlockReason')} />
             </div>
           ) : (
-            <div className="setting-desc">
-              No SSH keys in the vault yet. Add one with its private key and it appears here.
-            </div>
+            <div className="setting-desc">{t('sshAgent.panel.noKeys')}</div>
           ))}
         {usable.map((k) => (
           <div key={k.entryId} className="agent-panel-key">
@@ -151,50 +146,43 @@ export function AgentPanel(): React.JSX.Element {
         <>
           <label className="setting-row">
             <div>
-              <div className="setting-label">When you approve, remember it for</div>
-              <div className="setting-desc">
-                What the prompt offers by default. You can always pick something else in the prompt
-                itself.
-              </div>
+              <div className="setting-label">{t('sshAgent.panel.rememberLabel')}</div>
+              <div className="setting-desc">{t('sshAgent.panel.rememberDesc')}</div>
             </div>
             <select
               value={settings.defaultScope}
               onChange={(e) => void apply({ defaultScope: e.target.value as ApprovalScope })}
             >
-              <option value="once">this signature only</option>
-              <option value="window">{settings.windowMinutes} minutes</option>
-              <option value="session">until the vault locks</option>
+              <option value="once">{t('sshAgent.panel.scope.once')}</option>
+              <option value="window">
+                {t('sshAgent.panel.scope.window', { count: settings.windowMinutes })}
+              </option>
+              <option value="session">{t('sshAgent.panel.scope.session')}</option>
             </select>
           </label>
 
           <label className="setting-row">
             <div>
-              <div className="setting-label">When that time runs out</div>
+              <div className="setting-label">{t('sshAgent.panel.expiryLabel')}</div>
               {/* Two settings rather than one, because "how long" and "what
                   then" have different right answers: refusing outright is for
                   somebody who wants a key usable for one task and then inert
                   without having to remember to revoke it. */}
-              <div className="setting-desc">
-                Ask again, or stop using that key entirely until OpsMaxx restarts.
-              </div>
+              <div className="setting-desc">{t('sshAgent.panel.expiryDesc')}</div>
             </div>
             <select
               value={settings.onExpiry}
               onChange={(e) => void apply({ onExpiry: e.target.value as 'ask-again' | 'refuse' })}
             >
-              <option value="ask-again">ask again</option>
-              <option value="refuse">refuse until restart</option>
+              <option value="ask-again">{t('sshAgent.panel.expiry.askAgain')}</option>
+              <option value="refuse">{t('sshAgent.panel.expiry.refuse')}</option>
             </select>
           </label>
 
           <label className="setting-row">
             <div>
-              <div className="setting-label">Stop signing when the vault auto-locks the screen</div>
-              <div className="setting-desc">
-                The vault keeps resolving credentials for background work after it hides your
-                entries. This makes signatures stop at that point too — for when you want the agent
-                inert the moment you walk away, rather than only when the vault fully locks.
-              </div>
+              <div className="setting-label">{t('sshAgent.panel.requireOpenLabel')}</div>
+              <div className="setting-desc">{t('sshAgent.panel.requireOpenDesc')}</div>
             </div>
             <input
               type="checkbox"

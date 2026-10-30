@@ -9,6 +9,7 @@ import { rdpSecretId } from '../../../../shared/rdp'
 import type { DbKind } from '../../../../shared/db'
 import { saveDatabaseEdit } from '../../store/dbEditor'
 import type { Hop, TunnelKind } from '../../types'
+import { t } from '../../lib/i18n'
 
 /**
  * A jump hop as main resolved it.
@@ -238,10 +239,7 @@ export function AgentConfigWatcher(): null {
               // agent claim it added a server that is not there. Nothing in the
               // app can grant it access to the OS keychain, so this one has no
               // button — the sentence is the whole of what can be done.
-              toast(
-                `${req.name} was not added — this computer's secure storage refused the credential, and OpsMaxx will not keep one anywhere else.`,
-                'error'
-              )
+              toast(t('ai.agentConfig.serverNotAdded', { name: req.name }), 'error')
               api?.replyCreateServer?.(id, {
                 ok: false,
                 error: 'OS secure storage is unavailable, so the credential could not be saved.'
@@ -255,18 +253,19 @@ export function AgentConfigWatcher(): null {
           // backup, a keychain copy is neither — so leaving it unsaid is
           // leaving the reader to find out later and wonder.
           toast(
-            `An AI agent added the server ${req.name}.` +
-              (intoVault ? ' Its credential was saved in the vault.' : ''),
+            intoVault
+              ? t('ai.agentConfig.serverAddedVault', { name: req.name })
+              : t('ai.agentConfig.serverAdded', { name: req.name }),
             'ok',
             {
-              label: 'Show it',
+              label: t('ai.agentConfig.showIt'),
               run: () => useApp.getState().setActivity('connections')
             }
           )
           api?.replyCreateServer?.(id, { ok: true, serverId })
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err)
-          toast(`An AI agent tried to add ${req.name} and it did not work: ${reason}`, 'error')
+          toast(t('ai.agentConfig.addFailed', { name: req.name, reason }), 'error')
           api?.replyCreateServer?.(id, { ok: false, error: reason })
         }
       })()
@@ -302,10 +301,7 @@ export function AgentConfigWatcher(): null {
                   // the old credential is already gone from our hands. Say so
                   // rather than reporting a success that left the connection
                   // unable to authenticate.
-                  toast(
-                    `${before.name} was changed, but this computer's secure storage refused the new credential.`,
-                    'error'
-                  )
+                  toast(t('ai.agentConfig.changedNoCredential', { name: before.name }), 'error')
                   api?.replyConfigWrite?.(id, {
                     ok: false,
                     error: 'OS secure storage is unavailable, so the credential could not be saved.'
@@ -313,8 +309,8 @@ export function AgentConfigWatcher(): null {
                   return
                 }
               }
-              toast(`An AI agent changed the server ${rest.name ?? before.name}.`, 'ok', {
-                label: 'Show it',
+              toast(t('ai.agentConfig.serverChanged', { name: rest.name ?? before.name }), 'ok', {
+                label: t('ai.agentConfig.showIt'),
                 run: () => useApp.getState().setActivity('connections')
               })
               api?.replyConfigWrite?.(id, { ok: true, id: req.serverId })
@@ -330,7 +326,7 @@ export function AgentConfigWatcher(): null {
               // half-completion for a tool whose whole purpose is cleanup.
               void window.opsmaxx?.secrets.delete(req.serverId)
               void window.opsmaxx?.secrets.delete(rdpSecretId(req.serverId))
-              toast(`An AI agent removed the server ${gone.name}.`, 'ok')
+              toast(t('ai.agentConfig.serverRemoved', { name: gone.name }), 'ok')
               api?.replyConfigWrite?.(id, { ok: true, id: req.serverId })
               return
             }
@@ -348,21 +344,21 @@ export function AgentConfigWatcher(): null {
               // Says that it is defined and NOT running. The two are separate
               // approvals on the bridge and conflating them here would make the
               // toast promise something that has not happened.
-              toast(`An AI agent defined the tunnel ${req.name}. It is not running.`, 'ok', {
-                label: 'Show it',
+              toast(t('ai.agentConfig.tunnelDefined', { name: req.name }), 'ok', {
+                label: t('ai.agentConfig.showIt'),
                 run: () => useApp.getState().setActivity('tunnels')
               })
               api?.replyConfigWrite?.(id, { ok: true, id: tunnelId })
               return
             }
             case 'tunnel.remove': {
-              const gone = useApp.getState().tunnels.find((t) => t.id === req.tunnelId)
+              const gone = useApp.getState().tunnels.find((x) => x.id === req.tunnelId)
               if (!gone) throw new Error('That tunnel no longer exists.')
               // Stop before forgetting: a running forward whose record is gone
               // is a listener nothing in the UI can close.
               await window.opsmaxx?.tunnel?.stop(req.tunnelId)
               useApp.getState().deleteTunnel(req.tunnelId)
-              toast(`An AI agent removed the tunnel ${gone.name}.`, 'ok')
+              toast(t('ai.agentConfig.tunnelRemoved', { name: gone.name }), 'ok')
               api?.replyConfigWrite?.(id, { ok: true, id: req.tunnelId })
               return
             }
@@ -383,10 +379,7 @@ export function AgentConfigWatcher(): null {
                   // credential the agent supplied cannot authenticate, so it is
                   // taken back out rather than reported as added.
                   useApp.getState().deleteDatabase(databaseId)
-                  toast(
-                    `${req.fields.name} was not added — this computer's secure storage refused the credential.`,
-                    'error'
-                  )
+                  toast(t('ai.agentConfig.databaseNotAdded', { name: req.fields.name }), 'error')
                   api?.replyConfigWrite?.(id, {
                     ok: false,
                     error: 'OS secure storage is unavailable, so the credential could not be saved.'
@@ -395,10 +388,11 @@ export function AgentConfigWatcher(): null {
                 }
               }
               toast(
-                `An AI agent added the database ${req.fields.name}.` +
-                  (intoVault ? ' Its credential was saved in the vault.' : ''),
+                intoVault
+                  ? t('ai.agentConfig.databaseAddedVault', { name: req.fields.name })
+                  : t('ai.agentConfig.databaseAdded', { name: req.fields.name }),
                 'ok',
-                { label: 'Show it', run: () => useApp.getState().setActivity('databases') }
+                { label: t('ai.agentConfig.showIt'), run: () => useApp.getState().setActivity('databases') }
               )
               api?.replyConfigWrite?.(id, { ok: true, id: databaseId })
               return
@@ -415,10 +409,7 @@ export function AgentConfigWatcher(): null {
                 const put = await databaseSecretFor(name, req.patch.username ?? before.username, req.secret)
                 const ok = await window.opsmaxx?.secrets.set(req.databaseId, JSON.stringify(put.stored))
                 if (ok === false) {
-                  toast(
-                    `${name} was changed, but this computer's secure storage refused the new credential.`,
-                    'error'
-                  )
+                  toast(t('ai.agentConfig.changedNoCredential', { name }), 'error')
                   api?.replyConfigWrite?.(id, {
                     ok: false,
                     error: 'OS secure storage is unavailable, so the credential could not be saved.'
@@ -426,8 +417,8 @@ export function AgentConfigWatcher(): null {
                   return
                 }
               }
-              toast(`An AI agent changed the database ${req.patch.name ?? before.name}.`, 'ok', {
-                label: 'Show it',
+              toast(t('ai.agentConfig.databaseChanged', { name: req.patch.name ?? before.name }), 'ok', {
+                label: t('ai.agentConfig.showIt'),
                 run: () => useApp.getState().setActivity('databases')
               })
               api?.replyConfigWrite?.(id, { ok: true, id: req.databaseId })
@@ -441,14 +432,14 @@ export function AgentConfigWatcher(): null {
               await window.opsmaxx?.db?.close?.(req.databaseId)
               useApp.getState().deleteDatabase(req.databaseId)
               void window.opsmaxx?.secrets.delete(req.databaseId)
-              toast(`An AI agent removed the database ${gone.name}.`, 'ok')
+              toast(t('ai.agentConfig.databaseRemoved', { name: gone.name }), 'ok')
               api?.replyConfigWrite?.(id, { ok: true, id: req.databaseId })
               return
             }
           }
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err)
-          toast(`An AI agent tried to change the OpsMaxx configuration and it did not work: ${reason}`, 'error')
+          toast(t('ai.agentConfig.writeFailed', { reason }), 'error')
           api?.replyConfigWrite?.(id, { ok: false, error: reason })
         }
       })()

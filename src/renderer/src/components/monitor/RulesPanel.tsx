@@ -22,6 +22,9 @@ import { jobApprovalFor } from '../../../../shared/jobs'
 import type { JobSpec, JobTargetRef } from '../../../../shared/jobs'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
+import { t as tr, useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 
 // Rules — roadmap item 27.
 //
@@ -50,53 +53,68 @@ function bridge(): Partial<RulesBridge> | undefined {
   return (window.opsmaxx as unknown as { rules?: Partial<RulesBridge> } | undefined)?.rules
 }
 
-const KIND_LABEL: Record<RuleAlertKind, string> = {
-  'vpn-down': 'VPN down',
-  'service-down': 'Service down',
-  'pod-crashloop': 'Pods restarting',
-  'vpn-degraded': 'VPN up but silent',
-  cpu: 'CPU',
-  disk: 'Disk',
-  inode: 'Inodes',
-  load: 'Load',
-  'host-unreachable': 'Host unreachable',
-  'job-failed': 'Job failed',
-  'tunnel-down': 'Tunnel down',
-  'backup-failed': 'Backup failed',
-  'db-alarm': 'Database alarm',
-  'db-watch': 'Database watch',
-  'oom-kill': 'OOM kill',
-  'cert-expiry': 'Certificate expiry',
-  'vpn-cert-expiry': 'VPN certificate expiry',
-  'error-rate': 'Journal error rate'
+const KIND_LABEL: Record<RuleAlertKind, MessageKey> = {
+  'vpn-down': 'monitor.rules.kind.vpnDown',
+  'service-down': 'monitor.rules.kind.serviceDown',
+  'pod-crashloop': 'monitor.rules.kind.podCrashloop',
+  'vpn-degraded': 'monitor.rules.kind.vpnDegraded',
+  cpu: 'monitor.rules.kind.cpu',
+  disk: 'monitor.rules.kind.disk',
+  inode: 'monitor.rules.kind.inode',
+  load: 'monitor.rules.kind.load',
+  'host-unreachable': 'monitor.rules.kind.hostUnreachable',
+  'job-failed': 'monitor.rules.kind.jobFailed',
+  'tunnel-down': 'monitor.rules.kind.tunnelDown',
+  'backup-failed': 'monitor.rules.kind.backupFailed',
+  'db-alarm': 'monitor.rules.kind.dbAlarm',
+  'db-watch': 'monitor.rules.kind.dbWatch',
+  'oom-kill': 'monitor.rules.kind.oomKill',
+  'cert-expiry': 'monitor.rules.kind.certExpiry',
+  'vpn-cert-expiry': 'monitor.rules.kind.vpnCertExpiry',
+  'error-rate': 'monitor.rules.kind.errorRate'
 }
 
-const WINDOWS: { ms: number; label: string }[] = [
-  { ms: 60_000, label: 'a minute' },
-  { ms: 600_000, label: '10 minutes' },
-  { ms: 3_600_000, label: 'an hour' },
-  { ms: 6 * 3_600_000, label: '6 hours' },
-  { ms: 86_400_000, label: 'a day' }
+const EVENT_LABEL: Record<RuleTriggerEvent, MessageKey> = {
+  raised: 'monitor.rules.when.raised',
+  resolved: 'monitor.rules.when.resolved'
+}
+
+const WINDOWS: { ms: number; labelKey: MessageKey }[] = [
+  { ms: 60_000, labelKey: 'monitor.rules.window.minute' },
+  { ms: 600_000, labelKey: 'monitor.rules.window.tenMinutes' },
+  { ms: 3_600_000, labelKey: 'monitor.rules.window.hour' },
+  { ms: 6 * 3_600_000, labelKey: 'monitor.rules.window.sixHours' },
+  { ms: 86_400_000, labelKey: 'monitor.rules.window.day' }
 ]
 
 function windowLabel(ms: number): string {
-  return WINDOWS.find((w) => w.ms === ms)?.label ?? `${Math.round(ms / 60_000)} minutes`
+  const known = WINDOWS.find((w) => w.ms === ms)
+  return known
+    ? tr(known.labelKey)
+    : tr('monitor.rules.window.minutes', { count: Math.round(ms / 60_000) })
 }
 
 /** The rate limit as a sentence. A pair of numbers in a table is not something
  *  anyone reads as "this may restart your database once an hour". */
 function limitText(maxFirings: number, windowMs: number): string {
-  const times = maxFirings === 1 ? 'once' : `${maxFirings} times`
-  return `At most ${times} in ${windowLabel(windowMs)}`
+  const window = windowLabel(windowMs)
+  return maxFirings === 1
+    ? tr('monitor.rules.limit.once', { window })
+    : tr('monitor.rules.limit.times', { count: maxFirings, window })
 }
 
 function when(rule: RuleView): string {
-  const kind = KIND_LABEL[rule.trigger.kind as RuleAlertKind] ?? rule.trigger.kind
-  const parts = [`${kind} ${rule.trigger.event}`]
-  if (rule.filter.serverId !== undefined) parts.push('on one server')
-  if (rule.filter.minValue !== undefined) parts.push(`at or above ${rule.filter.minValue}`)
-  return parts.join(', ')
+  const known = KIND_LABEL[rule.trigger.kind as RuleAlertKind]
+  const kind = known ? tr(known) : rule.trigger.kind
+  const event = EVENT_LABEL[rule.trigger.event as RuleTriggerEvent]
+  let text = event ? tr(event, { kind }) : `${kind} ${rule.trigger.event}`
+  if (rule.filter.serverId !== undefined) text += tr('monitor.rules.when.onOneServer')
+  if (rule.filter.minValue !== undefined)
+    text += tr('monitor.rules.when.atOrAbove', { value: rule.filter.minValue })
+  return text
 }
+
+const FAINT = { faint: <span className="faint" /> }
 
 function RuleCard({
   rule,
@@ -109,46 +127,49 @@ function RuleCard({
   onToggle: (enabled: boolean) => void
   onRemove: () => void
 }): React.JSX.Element {
+  const t = useT()
   const hostName = (id: string): string => servers.find((s) => s.id === id)?.name ?? id
   const job = rule.action.type === 'job' ? rule.action : null
 
   return (
     <div className={clsx('card', 'col')} style={{ gap: 8, padding: 12 }}>
       <div className="row" style={{ justifyContent: 'space-between', alignItems: 'baseline', gap: 8 }}>
-        <b>{rule.name || 'Untitled rule'}</b>
+        <b>{rule.name || t('monitor.rules.card.untitled')}</b>
         <div className="row" style={{ gap: 8 }}>
           <label className="row" style={{ gap: 4 }}>
             <input
               type="checkbox"
               checked={rule.enabled}
-              aria-label={`Enable ${rule.name}`}
+              aria-label={t('monitor.rules.card.enableLabel', { name: rule.name })}
               onChange={(e) => onToggle(e.target.checked)}
             />
-            {rule.enabled ? 'Enabled' : 'Disabled'}
+            {rule.enabled ? t('common.enabled') : t('common.disabled')}
           </label>
-          <button className="btn ghost" aria-label={`Delete ${rule.name}`} onClick={onRemove}>
+          <button className="btn ghost" aria-label={t('monitor.rules.card.deleteLabel', { name: rule.name })} onClick={onRemove}>
             <Trash2 size={14} />
           </button>
         </div>
       </div>
 
       <div>
-        <span className="faint">When </span>
-        {when(rule)}
+        <Trans i18nKey="monitor.rules.card.when" values={{ when: when(rule) }} components={FAINT} />
       </div>
 
       {job === null ? (
         <div>
-          <span className="faint">Then </span>
-          post to the configured webhook
+          <Trans i18nKey="monitor.rules.card.thenWebhook" components={FAINT} />
         </div>
       ) : (
         <div className="col" style={{ gap: 4 }}>
           <div>
-            <span className="faint">Then run </span>
-            {job.spec.title}
-            <span className="faint"> on </span>
-            {job.targets.map((t) => hostName(t.serverId)).join(', ')}
+            <Trans
+              i18nKey="monitor.rules.card.thenRun"
+              values={{
+                title: job.spec.title,
+                hosts: job.targets.map((x) => hostName(x.serverId)).join(', ')
+              }}
+              components={FAINT}
+            />
           </div>
           {/* The step text itself, never a job id. What a rule runs is the
               thing a person has to be able to check a year later. */}
@@ -163,10 +184,12 @@ function RuleCard({
       <div className="faint">
         {limitText(rule.limit.maxFirings, rule.limit.windowMs)}
         {rule.status.lastFiredAt !== undefined
-          ? ` · last acted ${new Date(rule.status.lastFiredAt).toLocaleString()}`
-          : ' · has not acted yet'}
+          ? t('monitor.rules.card.lastActed', {
+              when: new Date(rule.status.lastFiredAt).toLocaleString()
+            })
+          : t('monitor.rules.card.notActed')}
         {rule.status.suppressed > 0
-          ? ` · ${rule.status.suppressed} matching event(s) declined by the rate limit`
+          ? t('monitor.rules.card.suppressed', { count: rule.status.suppressed })
           : ''}
       </div>
 
@@ -177,7 +200,7 @@ function RuleCard({
           style={{ gap: 6, alignItems: 'flex-start' }}
         >
           <AlertTriangle size={14} />
-          <span>This rule will not run: {rule.verdict.reason}</span>
+          <span>{t('monitor.rules.card.willNotRun', { reason: rule.verdict.reason ?? '' })}</span>
         </div>
       )}
       {rule.verdict.ok && rule.status.refusal !== undefined && (
@@ -186,7 +209,7 @@ function RuleCard({
           style={{ gap: 6, alignItems: 'flex-start' }}
         >
           <AlertTriangle size={14} />
-          <span>Last time it fired it was refused: {rule.status.refusal}</span>
+          <span>{t('monitor.rules.card.lastRefused', { reason: rule.status.refusal })}</span>
         </div>
       )}
     </div>
@@ -201,6 +224,7 @@ export function RulesPanel({
   /** True when this panel is only on screen because a rule is still armed. */
   moduleOff?: boolean
 }): React.JSX.Element {
+  const t = useT()
   // `null` until the read comes back, NOT `[]`.
   //
   // An empty array means "there are no rules", and this screen says that out
@@ -356,7 +380,7 @@ export function RulesPanel({
     if (!canCreate) return
     const fn = bridge()?.create
     if (typeof fn !== 'function') {
-      setError('This build of the app cannot create rules — restart it.')
+      setError(t('monitor.rules.error.noCreate'))
       return
     }
     const confirmedAt = Date.now()
@@ -402,7 +426,7 @@ export function RulesPanel({
     try {
       const created = await fn(draft)
       if (!created) {
-        setError('That rule was refused. Check the trigger and the command.')
+        setError(t('monitor.rules.error.refused'))
         return
       }
       setError(null)
@@ -435,16 +459,11 @@ export function RulesPanel({
     // anything, which is exactly what the accent is reserved for.
     <PanelShell
       icon={<Zap size={14} />}
-      title="Rules"
-      about={
-        <p>
-          When an alert fires, run a job or post to the webhook. A rule runs the job it was
-          confirmed with, on the servers it was confirmed for, and refuses if either has changed.
-        </p>
-      }
+      title={t('modules.rules.label')}
+      about={<p>{t('monitor.rules.about')}</p>}
       actions={
         <button className="btn primary sm" onClick={() => setOpen((v) => !v)}>
-          <Plus size={14} /> New rule
+          <Plus size={14} /> {t('monitor.rules.newRule')}
         </button>
       }
     >
@@ -457,11 +476,7 @@ export function RulesPanel({
       {moduleOff && (
         <div className="row state-warn" style={{ gap: 6 }}>
           <AlertTriangle size={14} />
-          <span>
-            Rules is switched off in Settings, but the rules below are still armed and still
-            run. Switching the module off hides this panel; it does not disarm anything.
-            Disarm each rule here, or leave them running deliberately.
-          </span>
+          <span>{t('monitor.rules.moduleOff')}</span>
         </div>
       )}
 
@@ -475,32 +490,36 @@ export function RulesPanel({
       {open && (
         <div className="card col" style={{ gap: 10, padding: 12 }}>
           <label className="col" style={{ gap: 4 }}>
-            Name
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Vacuum the journal" />
+            {t('monitor.rules.form.name')}
+            <input
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              placeholder={t('monitor.rules.form.namePlaceholder')}
+            />
           </label>
 
           <div className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
             <label className="col" style={{ gap: 4 }}>
-              When
+              {t('monitor.rules.form.when')}
               <select value={kind} onChange={(e) => setKind(e.target.value as RuleAlertKind)}>
                 {RULE_ALERT_KINDS.map((k) => (
                   <option key={k} value={k}>
-                    {KIND_LABEL[k]}
+                    {t(KIND_LABEL[k])}
                   </option>
                 ))}
               </select>
             </label>
             <label className="col" style={{ gap: 4 }}>
-              is
+              {t('monitor.rules.form.is')}
               <select value={event} onChange={(e) => setEvent(e.target.value as RuleTriggerEvent)}>
-                <option value="raised">raised</option>
-                <option value="resolved">resolved</option>
+                <option value="raised">{t('monitor.rules.form.eventRaised')}</option>
+                <option value="resolved">{t('monitor.rules.form.eventResolved')}</option>
               </select>
             </label>
             <label className="col" style={{ gap: 4 }}>
-              on
+              {t('monitor.rules.form.on')}
               <select value={hostFilter} onChange={(e) => setHostFilter(e.target.value)}>
-                <option value="">any server</option>
+                <option value="">{t('monitor.rules.form.anyServer')}</option>
                 {servers.map((s) => (
                   <option key={s.id} value={s.id}>
                     {s.name}
@@ -509,11 +528,11 @@ export function RulesPanel({
               </select>
             </label>
             <label className="col" style={{ gap: 4 }}>
-              at or above
+              {t('monitor.rules.form.atOrAbove')}
               <input
                 value={minValue}
                 onChange={(e) => setMinValue(e.target.value)}
-                placeholder="any reading"
+                placeholder={t('monitor.rules.form.anyReading')}
                 inputMode="decimal"
                 style={{ width: 100 }}
               />
@@ -531,29 +550,29 @@ export function RulesPanel({
 
           <div className="row" style={{ gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
             <label className="col" style={{ gap: 4 }}>
-              At most
+              {t('monitor.rules.form.atMost')}
               <input
                 type="number"
                 min={1}
                 max={RULE_LIMIT_MAX_FIRINGS}
                 value={maxFirings}
-                aria-label="Firings allowed in the window"
+                aria-label={t('monitor.rules.form.firingsLabel')}
                 onChange={(e) => setMaxFirings(Math.max(1, Number(e.target.value) || 1))}
                 style={{ width: 70 }}
               />
             </label>
             <label className="col" style={{ gap: 4 }}>
-              time(s) in
+              {t('monitor.rules.form.timesIn')}
               <select value={windowMs} onChange={(e) => setWindowMs(Number(e.target.value))}>
                 {WINDOWS.map((w) => (
                   <option key={w.ms} value={w.ms}>
-                    {w.label}
+                    {t(w.labelKey)}
                   </option>
                 ))}
               </select>
             </label>
             <span className="faint" style={{ paddingBottom: 6 }}>
-              A rule with no ceiling turns a flapping condition into an outage.
+              {t('monitor.rules.form.ceilingNote')}
             </span>
           </div>
 
@@ -565,7 +584,7 @@ export function RulesPanel({
                 checked={actionType === 'notify'}
                 onChange={() => setActionType('notify')}
               />
-              Post to the webhook
+              {t('monitor.rules.form.actionWebhook')}
             </label>
             <label className="row" style={{ gap: 4 }}>
               <input
@@ -574,7 +593,7 @@ export function RulesPanel({
                 checked={actionType === 'job'}
                 onChange={() => setActionType('job')}
               />
-              Run a job
+              {t('monitor.rules.form.actionJob')}
             </label>
           </div>
 
@@ -585,11 +604,15 @@ export function RulesPanel({
           {actionType === 'job' && (
             <div className="col" style={{ gap: 8 }}>
               <label className="col" style={{ gap: 4 }}>
-                Job title
-                <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Clear the journal" />
+                {t('monitor.rules.form.jobTitle')}
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder={t('monitor.rules.form.jobTitlePlaceholder')}
+                />
               </label>
               <label className="col" style={{ gap: 4 }}>
-                Commands, one per line
+                {t('monitor.rules.form.commands')}
                 <textarea
                   rows={3}
                   value={commands}
@@ -598,7 +621,7 @@ export function RulesPanel({
                 />
               </label>
               <div className="col" style={{ gap: 4 }}>
-                Servers
+                {t('monitor.rules.form.servers')}
                 <div className="col" style={{ gap: 2, maxHeight: 160, overflowY: 'auto' }}>
                   {servers.map((s) => (
                     <label key={s.id} className="row" style={{ gap: 6 }}>
@@ -620,11 +643,11 @@ export function RulesPanel({
               {plan !== null && (
                 <div className="col" style={{ gap: 2 }}>
                   <div>
-                    <span className="faint">This runs on </span>
-                    {plan.blastRadius} server(s) at once
-                    <span className="faint"> and reads as </span>
-                    {plan.risk}
-                    <span className="faint">, every time it fires.</span>
+                    <Trans
+                      i18nKey="monitor.rules.form.blastRadius"
+                      values={{ count: plan.blastRadius, risk: plan.risk }}
+                      components={FAINT}
+                    />
                   </div>
                   {plan.reasons.map((r) => (
                     <div key={r} className="faint">
@@ -642,11 +665,14 @@ export function RulesPanel({
                   `planPhrase`. */}
               {planPhrase !== null && (
                 <label className="col" style={{ gap: 4 }}>
-                  Run as a one-off, this job would need confirming by typing{' '}
-                  <b>{planPhrase}</b>. It needs that here too.
+                  <Trans
+                    i18nKey="monitor.rules.form.jobPhrase"
+                    values={{ phrase: planPhrase }}
+                    components={{ b: <b /> }}
+                  />
                   <input
                     value={jobPhrase}
-                    aria-label={`Type ${planPhrase} to confirm the job`}
+                    aria-label={t('monitor.rules.form.jobPhraseLabel', { phrase: planPhrase })}
                     onChange={(e) => setJobPhrase(e.target.value)}
                   />
                 </label>
@@ -656,11 +682,16 @@ export function RulesPanel({
                 {/* Always typed, for a job rule. `planJob` would ask for a click
                     here; a standing authorisation is a different thing being
                     agreed to, and the word says which one. */}
-                This rule runs commands on those servers unattended, whenever it fires. Type{' '}
-                <b>{RULE_UNATTENDED_PHRASE}</b> to confirm.
+                <Trans
+                  i18nKey="monitor.rules.form.unattended"
+                  values={{ phrase: RULE_UNATTENDED_PHRASE }}
+                  components={{ b: <b /> }}
+                />
                 <input
                   value={phrase}
-                  aria-label="Type UNATTENDED to confirm"
+                  aria-label={t('monitor.rules.form.unattendedLabel', {
+                    phrase: RULE_UNATTENDED_PHRASE
+                  })}
                   onChange={(e) => setPhrase(e.target.value)}
                 />
               </label>
@@ -669,10 +700,10 @@ export function RulesPanel({
 
           <div className="row" style={{ gap: 8 }}>
             <button className="btn primary" disabled={!canCreate} onClick={() => void create()}>
-              <Zap size={14} /> Create rule
+              <Zap size={14} /> {t('monitor.rules.form.create')}
             </button>
             <button className="btn ghost" onClick={reset}>
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div>
@@ -680,22 +711,20 @@ export function RulesPanel({
 
       {noBridge ? (
         <div className="panel-note is-alarm">
-          This build’s preload does not expose the rule engine yet. Restart the app to rebuild it.
+          {t('monitor.rules.noBridge')}
         </div>
       ) : rules === null ? (
         <div className="panel-empty">
-          <p className="panel-empty-title">Reading the rules…</p>
+          <p className="panel-empty-title">{t('monitor.rules.reading')}</p>
         </div>
       ) : rules.length === 0 ? (
         // Was one grey sentence with no next step. The sentence is kept —
         // "nothing runs on its own" is the reassurance a rules screen owes the
         // reader — and now it says what to do about it.
         <div className="panel-empty">
-          <p className="panel-empty-title">No rules. Nothing runs on its own.</p>
+          <p className="panel-empty-title">{t('monitor.rules.empty.title')}</p>
           <p className="panel-empty-body">
-            Press <b>New rule</b> to connect an alert to a job or to the webhook. Every rule is
-            confirmed once, against a specific job and specific servers, and refuses to run if either
-            of those changes afterwards.
+            <Trans i18nKey="monitor.rules.empty.body" components={{ b: <b /> }} />
           </p>
         </div>
       ) : (

@@ -65,7 +65,9 @@ describe('the schema column', () => {
   })
 
   it('says so when a filter matches nothing, rather than looking empty', () => {
-    expect(VIEW).toMatch(/title="Nothing matches"/)
+    expect(VIEW).toMatch(/title=\{t\('databases\.view\.nothingMatches'\)\}/)
+    const en = JSON.parse(read('../src/shared/locales/en.json')) as Record<string, string>
+    expect(en['databases.view.nothingMatches']).toBe('Nothing matches')
   })
 
   it('clips a long name to one line and keeps the whole of it in the title', () => {

@@ -16,6 +16,7 @@ import { isVpnRunning } from '../../../../shared/vpn'
 import type { FrpSpec } from '../../../../shared/vpn'
 import { headline } from './useVpnProfiles'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
 
 /**
  * The last thing between a typed port number and a port on the internet.
@@ -49,6 +50,7 @@ export function FrpPublishDialog({
   localPort,
   onClose
 }: FrpPublishDialogProps): React.JSX.Element {
+  const t = useT()
   const upsertVpnProfile = useApp((s) => s.upsertVpnProfile)
   const status = useApp((s) => s.vpnStatuses[target.profile.id])
 
@@ -84,12 +86,12 @@ export function FrpPublishDialog({
       if (!bridgeHas(vpn, method)) {
         // Saved, not started. Saying so beats a success toast for something
         // that did not happen.
-        toast(`Added to ${target.profile.name}. Press Start on it to publish.`, 'info')
+        toast(t('vpn.frp.publish.addedNotStarted', { name: target.profile.name }), 'info')
         onClose()
         return
       }
 
-      const result = await withVaultUnlock(`Publishing ${exposure.local}`, () =>
+      const result = await withVaultUnlock(t('vpn.frp.publish.unlockReason', { local: exposure.local }), () =>
         running
           ? window.opsmaxx!.vpn.reload(target.profile.id)
           : window.opsmaxx!.vpn.start(target.profile.id)
@@ -98,9 +100,9 @@ export function FrpPublishDialog({
         // The proxy stays on the profile. It is valid and confirmed; what
         // failed is the engine, and the row's own Start button is now the
         // shortest way to try again.
-        toast(headline(result.error ?? 'The frp client failed to start.'), 'error')
+        toast(headline(result.error ?? t('vpn.frp.publish.startFailed')), 'error')
       } else {
-        toast(`Published at ${url}`, 'ok')
+        toast(t('vpn.frp.publish.published', { url }), 'ok')
       }
       onClose()
     } finally {
@@ -110,24 +112,24 @@ export function FrpPublishDialog({
 
   return (
     <Modal
-      title="Publish a local port"
+      title={t('vpn.frp.publish.title')}
       subtitle={target.profile.name}
       onClose={onClose}
       confirm={{
-        label: 'Publish',
+        label: t('vpn.frp.publish.confirm'),
         disabled: !acknowledged || !nameOk || busy,
         onClick: () => void publish()
       }}
     >
       <div className="col" style={{ gap: 14 }}>
         <Field
-          label="Name"
+          label={t('vpn.frp.publish.name')}
           required
           error={
             collides
-              ? `“${clean}” is already published from this profile.`
+              ? t('vpn.frp.publish.nameTaken', { name: clean })
               : clean === ''
-                ? 'Give it a name — it becomes the first label of the address.'
+                ? t('vpn.frp.publish.nameEmpty')
                 : null
           }
         >
@@ -135,7 +137,7 @@ export function FrpPublishDialog({
             className="input"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            aria-label="Name"
+            aria-label={t('vpn.frp.publish.name')}
           />
         </Field>
 
@@ -160,7 +162,7 @@ export function FrpPublishDialog({
             onChange={setAcknowledged}
           />
           <span style={{ fontSize: 12, color: acknowledged ? 'var(--text-muted)' : 'var(--warn)' }}>
-            I want {exposure.local} reachable at {exposure.url}.
+            {t('vpn.frp.publish.ack', { local: exposure.local, url: exposure.url })}
           </span>
         </label>
       </div>

@@ -8,6 +8,8 @@ import { PanelShell } from './PanelShell'
 import { PanelError } from '../common/PanelError'
 import { withVaultUnlock, isVaultLocked } from '../../lib/withVaultUnlock'
 import { sshTargetFor } from '../../lib/ssh'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 // What each server supervises for this account, read from its own systemd.
 //
@@ -34,6 +36,7 @@ interface Row {
 export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Element {
   // `null` until read, never `[]`. Rendering an empty list as "nothing is
   // supervised" before asking is the claim this app has been fixing all week.
+  const t = useT()
   const [rows, setRows] = useState<Row[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -45,7 +48,7 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
   const read = useCallback(async (): Promise<void> => {
     const collect = bridge()?.collect
     if (typeof collect !== 'function') {
-      setError('This build’s preload does not expose server services yet. Restart the app to rebuild it.')
+      setError(t('monitor.services.noBridge'))
       setRows([])
       return
     }
@@ -73,7 +76,7 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
       // message and go elsewhere", so it gets the prompt and one retry rather
       // than a red note carrying an internal token.
       setRows(
-        await withVaultUnlock('Reading what each server supervises needs its stored credential.', () =>
+        await withVaultUnlock(t('monitor.services.unlockReason'), () =>
           collect(targets)
         )
       )
@@ -82,7 +85,7 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     } finally {
       setLoading(false)
     }
-  }, [servers])
+  }, [servers, t])
 
   // WHY A DISABLED BUTTON NEEDS A SENTENCE.
   //
@@ -94,9 +97,9 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
   // state is most of what anyone sees. A cursor is not an explanation, so the
   // button now carries the reason and the label says the read is in progress.
   const disabledReason = (): string | null => {
-    if (servers.length === 0) return 'This workspace has no servers to ask.'
+    if (servers.length === 0) return t('monitor.services.noServersTitle')
     if (loading) {
-      return `Reading ${servers.length} server${servers.length === 1 ? '' : 's'}. Each is asked over its own connection, so this takes longer on a large estate.`
+      return t('monitor.services.readingTitle', { count: servers.length })
     }
     return null
   }
@@ -119,16 +122,16 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
         // the shape of this whole report.
         title={
           why ??
-          'Asks each server in this workspace what its own systemd is supervising for your account. Read-only.'
+          t('monitor.services.readTitle')
         }
         onClick={() => void read()}
       >
         <RefreshCw size={13} className={clsx(loading && 'spin')} />{' '}
         {loading
-          ? `Reading ${servers.length}…`
+          ? t('monitor.services.readingCount', { count: servers.length })
           : rows
-            ? 'Refresh'
-            : 'Read services'}
+            ? t('common.refresh')
+            : t('monitor.services.readServices')}
       </button>
     )
   }
@@ -142,14 +145,9 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     // drew heavier than the heading. Hierarchy exactly inverted, by absence.
     <PanelShell
       icon={<ServerCog size={14} />}
-      title="Server services"
+      title={t('modules.services.label')}
       about={
-        <p>
-          What each server&rsquo;s own systemd supervises for your account. Read-only — nothing is
-          started, stopped or written here, because the server&rsquo;s supervisor is the one that
-          is still there when OpsMaxx is not. Installing a unit writes a file onto a host, so
-          it lives on the Operations rail.
-        </p>
+        <p>{t('monitor.services.about')}</p>
       }
       actions={readNow(rows === null)}
     >
@@ -161,7 +159,7 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           which only handled the rejection, did nothing at all in practice. */}
       <PanelError
         error={error ?? lockedDetail}
-        reason="Reading what each server supervises needs its stored credential."
+        reason={t('monitor.services.unlockReason')}
         onRetry={() => void read()}
       />
 
@@ -191,11 +189,9 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
         // manager names the Vault in the left sidebar. Wayfinding to something
         // on screen beats a button that lands somewhere with no answer on it.
         <div className="panel-empty">
-          <p className="panel-empty-title">No servers to ask.</p>
+          <p className="panel-empty-title">{t('monitor.services.noServers')}</p>
           <p className="panel-empty-body">
-            A server belongs to one workspace, and this panel only asks the active one&rsquo;s. Add a
-            server to this workspace, or switch to the workspace yours are in from the picker beside
-            the app name in the title bar.
+            {t('monitor.services.noServersBody')}
           </p>
         </div>
       ) : loading && rows === null ? (
@@ -205,18 +201,17 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
         // instruction to press the thing you just pressed.
         <div className="panel-empty">
           <p className="panel-empty-title">
-            Reading {servers.length} server{servers.length === 1 ? '' : 's'}…
+            {t('monitor.services.readingServers', { count: servers.length })}
           </p>
           <p className="panel-empty-body">
-            Each is asked over its own connection, so a large estate takes a moment. Servers that
-            are unreachable or have no systemd are reported rather than skipped.
+            {t('monitor.services.readingBody')}
           </p>
         </div>
       ) : rows === null ? (
         <div className="panel-empty">
-          <p className="panel-empty-title">Nothing read yet.</p>
+          <p className="panel-empty-title">{t('monitor.services.nothingRead')}</p>
           <p className="panel-empty-body">
-            Press <b>Read services</b> to ask each server what it is supervising for you.
+            <Trans i18nKey="monitor.services.pressRead" components={{ b: <b /> }} />
           </p>
         </div>
       ) : (
@@ -239,7 +234,7 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
               {/* The headline first and the list second, deliberately: the list
                   is what people look at and the sentence is what they need. */}
               <div className={clsx('r-sub', s.level === 'alarm' && 'danger')}>
-                {locked ? 'Not read — this server’s credential is in the locked vault.' : s.headline}
+                {locked ? t('monitor.services.locked') : s.headline}
               </div>
               {!locked && r.reading.detail && (
                 <div className="r-sub faint mono">{r.reading.detail}</div>
@@ -253,10 +248,10 @@ export function ServicesPanel({ servers }: { servers: Server[] }): React.JSX.Ele
                 <button
                   className="btn sm"
                   data-testid={`install-on-${r.serverId}`}
-                  title="Opens Operations › Jobs › Install a service, with this server chosen. Writing a unit file changes a server, so it lives on the rail where everything does."
+                  title={t('monitor.services.installTitle')}
                   onClick={() => openUnitInstall(r.serverId)}
                 >
-                  <Plus size={12} /> New service…
+                  <Plus size={12} /> {t('monitor.services.newService')}
                 </button>
               </div>
               {shown.length > 0 && (

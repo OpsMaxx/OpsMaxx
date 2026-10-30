@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Loader2, RefreshCw } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
+import type { Translate } from '../../../../shared/i18n'
 import { remoteText } from '../../../../shared/remoteText'
 import { EmptyState } from '../common/EmptyState'
 import { cicdBridgeHas } from './state'
@@ -34,6 +36,7 @@ export function QueuePanel({
   /** `cicdTrigger`. Decided at the mount point; this only renders it. */
   canTrigger?: boolean
 }): React.JSX.Element {
+  const t = useT()
   const [connectionId, setConnectionId] = useState(connections[0]?.id ?? '')
   const [state, setState] = useState<
     | { kind: 'idle' }
@@ -65,7 +68,7 @@ export function QueuePanel({
           <select
             className="input"
             value={connectionId}
-            aria-label="Account"
+            aria-label={t('cicd.queue.account')}
             onChange={(e) => setConnectionId(e.target.value)}
           >
             {connections.map((c) => (
@@ -82,8 +85,8 @@ export function QueuePanel({
           disabled={!can || state.kind === 'reading'}
           title={
             can
-              ? 'Read the queue and the executors now.'
-              : 'This build cannot read a queue. Restart the app to rebuild the bridge.'
+              ? t('cicd.queue.readTitle')
+              : t('cicd.queue.unavailableTitle')
           }
           onClick={read}
         >
@@ -92,7 +95,7 @@ export function QueuePanel({
           ) : (
             <RefreshCw size={13} />
           )}
-          {state.kind === 'reading' ? 'Reading…' : 'Read now'}
+          {state.kind === 'reading' ? t('cicd.common.reading') : t('cicd.common.readNow')}
         </button>
       </div>
 
@@ -100,18 +103,18 @@ export function QueuePanel({
       {/* A queue read is one HTTP call, but a Jenkins controller under load is
           exactly when somebody opens this tab — so "is it working or is it
           hung" is a real question here too, and a full stop cannot answer it. */}
-      {state.kind === 'reading' && <Reading label="Reading the queue and the executors…" />}
+      {state.kind === 'reading' && <Reading label={t('cicd.queue.reading')} />}
 
       {state.kind === 'ok' && (
         <>
           <Capacity capacity={state.capacity} queued={state.items.length} />
 
-          <h4 className="ui-label">Queue</h4>
+          <h4 className="ui-label">{t('cicd.queue.queueHeading')}</h4>
           {state.items.length === 0 ? (
             <EmptyState
               compact
-              title="Nothing is queued"
-              message="Every build this account can see has either started or finished."
+              title={t('cicd.queue.emptyTitle')}
+              message={t('cicd.queue.emptyMessage')}
             />
           ) : (
             <div className="cicd-rows">
@@ -132,19 +135,23 @@ export function QueuePanel({
                       )}
                       aria-hidden="true"
                     />
-                    {i.stuck ? 'STUCK' : i.blocked ? 'BLOCKED' : 'WAITING'}
+                    {i.stuck
+                      ? t('cicd.queue.stuck')
+                      : i.blocked
+                        ? t('cicd.queue.blocked')
+                        : t('cicd.queue.waiting')}
                   </span>
                   <span className="ellipsis">{remoteText(i.name)}</span>
                   <span className="spacer" />
                   {i.since !== undefined && (
-                    <span className="cicd-row-age">{waitingFor(i.since)}</span>
+                    <span className="cicd-row-age">{waitingFor(i.since, t)}</span>
                   )}
                   {canDrop && (
                     <button
                       type="button"
                       className="btn secondary size-24"
                       disabled={dropping === i.id}
-                      title="Drop this item out of the queue. If it has already started, it is a running build and this will not stop it."
+                      title={t('cicd.queue.dropTitle')}
                       onClick={() => {
                         setDropping(i.id)
                         void bridge!
@@ -156,7 +163,7 @@ export function QueuePanel({
                           })
                       }}
                     >
-                      {dropping === i.id ? 'Dropping...' : 'Drop'}
+                      {dropping === i.id ? t('cicd.queue.dropping') : t('cicd.queue.drop')}
                     </button>
                   )}
                 </div>
@@ -185,22 +192,25 @@ function Capacity({
   capacity: CicdCapacity
   queued: number
 }): React.JSX.Element {
+  const t = useT()
   const idle = Math.max(0, capacity.totalExecutors - capacity.busyExecutors)
   return (
     <>
       <div className="panel-stats">
         <span>
-          {capacity.busyExecutors} of {capacity.totalExecutors} executor
-          {capacity.totalExecutors === 1 ? '' : 's'} busy
+          {t('cicd.queue.executorsBusy', {
+            busy: capacity.busyExecutors,
+            count: capacity.totalExecutors
+          })}
         </span>
         <span className="faint">
           {idle === 0 && queued > 0
-            ? 'Nothing is free, so the queue is waiting on capacity rather than on a fault.'
-            : `${idle} free`}
+            ? t('cicd.queue.noCapacity')
+            : t('cicd.queue.idleFree', { idle })}
         </span>
       </div>
 
-      <h4 className="ui-label">Agents</h4>
+      <h4 className="ui-label">{t('cicd.queue.agentsHeading')}</h4>
       <div className="cicd-rows">
         {capacity.agents.map((a) => (
           <div key={a.name} className="cicd-queue-row">
@@ -209,16 +219,23 @@ function Capacity({
                 className={clsx('state-dot', a.offline ? 'is-alarm' : 'is-ok')}
                 aria-hidden="true"
               />
-              {a.offline ? (a.temporarilyOffline ? 'TAKEN OFFLINE' : 'OFFLINE') : 'ONLINE'}
+              {a.offline
+                ? a.temporarilyOffline
+                  ? t('cicd.queue.takenOffline')
+                  : t('cicd.queue.offline')
+                : t('cicd.queue.online')}
             </span>
             <span className="ellipsis">{remoteText(a.name)}</span>
             <span className="ui-note">
-              {a.executors} executor{a.executors === 1 ? '' : 's'}
-              {!a.offline && a.idle ? ', idle' : ''}
+              {!a.offline && a.idle
+                ? t('cicd.queue.agentExecutorsIdle', { count: a.executors })
+                : t('cicd.queue.agentExecutors', { count: a.executors })}
             </span>
             <span className="spacer" />
             {a.diskFreeBytes !== undefined && (
-              <span className="cicd-row-age">{gib(a.diskFreeBytes)} free</span>
+              <span className="cicd-row-age">
+                {t('cicd.queue.diskFree', { size: gib(a.diskFreeBytes) })}
+              </span>
             )}
           </div>
         ))}
@@ -238,9 +255,11 @@ function gib(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GiB`
 }
 
-function waitingFor(since: number): string {
+function waitingFor(since: number, t: Translate): string {
   const mins = Math.max(0, Math.round((Date.now() - since) / 60_000))
-  if (mins < 60) return `waiting ${mins}m`
+  if (mins < 60) return t('cicd.queue.waitingMinutes', { mins })
   const hours = Math.round(mins / 60)
-  return hours < 48 ? `waiting ${hours}h` : `waiting ${Math.round(hours / 24)}d`
+  return hours < 48
+    ? t('cicd.queue.waitingHours', { hours })
+    : t('cicd.queue.waitingDays', { days: Math.round(hours / 24) })
 }

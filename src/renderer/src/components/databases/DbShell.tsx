@@ -5,6 +5,9 @@ import { ContextMenu, type MenuEntry } from '../connections/ContextMenu'
 import { shellPrompt } from '../../../../shared/dbshell'
 import type { DbShellResult } from '../../../../shared/dbshell'
 import type { DbConnectConfig, DbKind } from '../../../../shared/db'
+import type { MessageKey } from '../../../../shared/i18n'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 interface Entry {
   id: number
@@ -24,15 +27,16 @@ interface Props {
   onSchemaChanged: () => void
 }
 
-const BANNER: Record<DbKind, string> = {
-  mongodb: 'MongoDB shell — type "help" for commands.',
-  postgres: 'PostgreSQL shell — SQL plus \\l, \\dt, \\d <table>. Type "help".',
-  mysql: 'MySQL shell — SQL plus \\l, \\dt, \\d <table>. Type "help".',
-  mssql: 'SQL Server shell — T-SQL plus \\l, \\dt, \\d <table>. Type "help".',
-  redis: 'Redis shell — type "help" for commands.'
+const BANNER: Record<DbKind, MessageKey> = {
+  mongodb: 'databases.shell.banner.mongodb',
+  postgres: 'databases.shell.banner.postgres',
+  mysql: 'databases.shell.banner.mysql',
+  mssql: 'databases.shell.banner.mssql',
+  redis: 'databases.shell.banner.redis'
 }
 
 export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: Props): React.JSX.Element {
+  const t = useT()
   const [entries, setEntries] = useState<Entry[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -68,7 +72,7 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
     setInput('')
     setBusy(true)
 
-    const r = (await window.opsmaxx?.db.shell(cfg, line)) ?? { ok: false, error: 'No response' }
+    const r = (await window.opsmaxx?.db.shell(cfg, line)) ?? { ok: false, error: t('databases.shell.noResponse') }
 
     if (r.clear) setEntries([])
     else setEntries((e) => e.map((x) => (x.id === id ? { ...x, result: r } : x)))
@@ -76,7 +80,7 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
     if (r.refreshSchema) onSchemaChanged()
     setBusy(false)
     inputRef.current?.focus()
-  }, [input, busy, prompt, cfg, onUseDatabase, onSchemaChanged])
+  }, [input, busy, prompt, cfg, onUseDatabase, onSchemaChanged, t])
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>): void => {
     const el = e.currentTarget
@@ -166,11 +170,15 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
   const menuEntries = (): MenuEntry[] => {
     const hasSelection = !!window.getSelection()?.toString()
     return [
-      { label: 'Copy', icon: <Copy size={14} />, onClick: () => copySelection() },
-      { label: 'Paste', icon: <ClipboardPaste size={14} />, onClick: () => void pasteIntoInput() },
+      { label: t('common.copy'), icon: <Copy size={14} />, onClick: () => copySelection() },
+      { label: t('databases.shell.paste'), icon: <ClipboardPaste size={14} />, onClick: () => void pasteIntoInput() },
       { separator: true, label: '' },
-      { label: hasSelection ? 'Select all output' : 'Select all', icon: <TextSelect size={14} />, onClick: selectAllOutput },
-      { label: 'Clear', icon: <Eraser size={14} />, onClick: () => setEntries([]) }
+      {
+        label: hasSelection ? t('databases.shell.selectAllOutput') : t('databases.shell.selectAll'),
+        icon: <TextSelect size={14} />,
+        onClick: selectAllOutput
+      },
+      { label: t('databases.shell.clear'), icon: <Eraser size={14} />, onClick: () => setEntries([]) }
     ]
   }
 
@@ -189,7 +197,7 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
       }}
     >
       <div className="dbshell-scroll" ref={scrollRef}>
-        <div className="dbshell-banner">{BANNER[kind]}</div>
+        <div className="dbshell-banner">{t(BANNER[kind])}</div>
         {entries.map((e) => (
           <div key={e.id} className="dbshell-entry">
             <div className="dbshell-line">
@@ -217,8 +225,7 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
       </div>
       <div className="dbshell-hint">
         <span>
-          <b>Enter</b> run · <b>Shift+Enter</b> newline · <b>↑</b> history · <b>Ctrl+C/V</b> copy &amp; paste ·{' '}
-          <b>Ctrl+L</b> clear · <b>help</b> for commands
+          <Trans i18nKey="databases.shell.hint" components={{ b: <b /> }} />
         </span>
       </div>
       {menu && <ContextMenu x={menu.x} y={menu.y} entries={menuEntries()} onClose={() => setMenu(null)} />}
@@ -227,6 +234,7 @@ export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: P
 }
 
 function Output({ result }: { result: DbShellResult }): React.JSX.Element | null {
+  const t = useT()
   if (!result.ok) {
     return <div className="dbshell-error">{result.error}</div>
   }
@@ -255,7 +263,7 @@ function Output({ result }: { result: DbShellResult }): React.JSX.Element | null
       </div>
     )
   }
-  if (!parts.length) return <div className="dbshell-note">ok</div>
+  if (!parts.length) return <div className="dbshell-note">{t('databases.shell.ok')}</div>
   return <>{parts}</>
 }
 

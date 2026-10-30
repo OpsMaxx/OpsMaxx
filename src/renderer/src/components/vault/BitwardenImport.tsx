@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { AlertTriangle, Download, Loader2 } from 'lucide-react'
 import { useVault } from '../../store/vault'
 import { toast } from '../../store/toast'
+import { useT } from '../../lib/i18n'
 import type { VaultEntry } from '../../../../shared/vault'
 
 /**
@@ -18,6 +19,7 @@ import type { VaultEntry } from '../../../../shared/vault'
  * named.
  */
 export function BitwardenImport(): React.JSX.Element {
+  const t = useT()
   const entries = useVault((s) => s.entries)
   const [serverURL, setServerURL] = useState('https://vault.bitwarden.com')
   const [email, setEmail] = useState('')
@@ -59,7 +61,7 @@ export function BitwardenImport(): React.JSX.Element {
     // judgement this cannot make for somebody -- deleting the duplicate is
     // reversible, and silently overwriting a password is not.
     void window.opsmaxx?.vault.save([...entries, ...preview.entries]).then(() => {
-      toast(`Imported ${preview.entries.length} entries`)
+      toast(t('vault.bitwarden.imported', { count: preview.entries.length }))
       setPreview(null)
       setPassword('')
     })
@@ -68,21 +70,19 @@ export function BitwardenImport(): React.JSX.Element {
   return (
     <div className="bw-import">
       <div className="setting-desc">
-        Reads a Bitwarden or Vaultwarden vault into this one, once. It does not keep the two in
-        step afterwards, and nothing is sent anywhere else: this machine talks to that server
-        directly.
+        {t('vault.bitwarden.intro')}
       </div>
 
       <label className="bw-field">
-        <span>Server</span>
+        <span>{t('vault.bitwarden.server')}</span>
         <input value={serverURL} onChange={(e) => setServerURL(e.target.value)} spellCheck={false} />
       </label>
       <label className="bw-field">
-        <span>Email</span>
+        <span>{t('vault.bitwarden.email')}</span>
         <input value={email} onChange={(e) => setEmail(e.target.value)} spellCheck={false} />
       </label>
       <label className="bw-field">
-        <span>Master password</span>
+        <span>{t('vault.bitwarden.masterPassword')}</span>
         <input
           type="password"
           value={password}
@@ -91,11 +91,11 @@ export function BitwardenImport(): React.JSX.Element {
         />
       </label>
       <label className="bw-field">
-        <span>Two-factor code</span>
+        <span>{t('vault.bitwarden.twoFactor')}</span>
         <input
           value={twoFactorCode}
           onChange={(e) => setTwoFactorCode(e.target.value)}
-          placeholder="only if the account has it"
+          placeholder={t('vault.bitwarden.twoFactorPlaceholder')}
           autoComplete="off"
           spellCheck={false}
         />
@@ -103,7 +103,8 @@ export function BitwardenImport(): React.JSX.Element {
 
       <button className="btn" disabled={busy || !email || !password} onClick={() => void fetchPreview()}>
         {busy ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
-        {busy ? ' Reading…' : ' Show me what would be imported'}
+        {' '}
+        {busy ? t('vault.bitwarden.reading') : t('vault.bitwarden.preview')}
       </button>
 
       {error && (
@@ -116,8 +117,7 @@ export function BitwardenImport(): React.JSX.Element {
       {preview && (
         <div className="bw-preview">
           <div className="setting-label">
-            {preview.entries.length} {preview.entries.length === 1 ? 'entry' : 'entries'} would be
-            added
+            {t('vault.bitwarden.wouldBeAdded', { count: preview.entries.length })}
           </div>
           <ul>
             {preview.entries.slice(0, 50).map((e) => (
@@ -125,7 +125,7 @@ export function BitwardenImport(): React.JSX.Element {
                 {e.name} <span className="bw-kind">{e.kind}</span>
               </li>
             ))}
-            {preview.entries.length > 50 && <li>… and {preview.entries.length - 50} more</li>}
+            {preview.entries.length > 50 && <li>{t('vault.bitwarden.andMore', { count: preview.entries.length - 50 })}</li>}
           </ul>
 
           {preview.skipped.length > 0 && (
@@ -133,11 +133,13 @@ export function BitwardenImport(): React.JSX.Element {
               {/* Listed, never dropped. An import that quietly left half a
                   vault behind is one somebody discovers when they need one of
                   the missing passwords. */}
-              <div className="setting-label">{preview.skipped.length} could not be imported</div>
+              <div className="setting-label">
+                {t('vault.bitwarden.couldNotImport', { count: preview.skipped.length })}
+              </div>
               <ul className="bw-skipped">
                 {preview.skipped.map((s, i) => (
                   <li key={i}>
-                    {s.name} — {s.reason}
+                    {t('vault.bitwarden.skippedRow', { name: s.name, reason: s.reason })}
                   </li>
                 ))}
               </ul>
@@ -145,11 +147,10 @@ export function BitwardenImport(): React.JSX.Element {
           )}
 
           <button className="btn" onClick={apply} disabled={preview.entries.length === 0}>
-            Add these to my vault
+            {t('vault.bitwarden.apply')}
           </button>
           <div className="setting-desc">
-            Existing entries are left alone. Anything with the same name arrives as a second entry
-            rather than replacing yours.
+            {t('vault.bitwarden.applyNote')}
           </div>
         </div>
       )}

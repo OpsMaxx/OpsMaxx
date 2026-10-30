@@ -12,6 +12,7 @@ import { overrides } from '../env/EnvironmentsTab'
 import { countRequests } from '../sidebar/treeMenus'
 import { requestImport } from '../HttpSidebar'
 import { RouteSelect, collectionRoute, routeFields } from './RouteSelect'
+import { useT } from '../../../lib/i18n'
 import '../nav.css'
 
 type Section = CollectionSection
@@ -47,7 +48,8 @@ export function CollectionTab({ tabId }: CollectionTabProps): React.JSX.Element 
   const [pasted, setPasted] = useState('')
   const [caError, setCaError] = useState<string | null>(null)
   const [confirm, setConfirm] = useState<Confirm | null>(null)
-  if (!c) return <p className="hc-note-line">This collection no longer exists.</p>
+  const t = useT()
+  if (!c) return <p className="hc-note-line">{t('http.collection.gone')}</p>
   const update = useApi.getState().updateCollection
   const set = (patch: Parameters<typeof update>[1]): void => update(c.id, patch)
 
@@ -63,24 +65,24 @@ export function CollectionTab({ tabId }: CollectionTabProps): React.JSX.Element 
       {c.tlsReview && (
         <div className="hc-banner" role="status">
           <TriangleAlert size={13} aria-hidden="true" />
-          <span>Certificate settings for {c.name} were changed on another device.</span>
+          <span>{t('http.collection.tlsReviewBanner', { name: c.name })}</span>
           <button
             type="button"
             className="btn sm"
             onClick={() => setSection('connection')}
           >
-            Review
+            {t('http.collection.review')}
           </button>
         </div>
       )}
       <Tabs
-        ariaLabel="Collection settings"
+        ariaLabel={t('http.collection.settingsLabel')}
         idPrefix={`hc-col-${c.id}`}
         tabs={[
-          { id: 'overview', label: 'Overview' },
-          { id: 'variables', label: 'Variables', count: c.variables.filter((v) => v.enabled).length },
-          { id: 'auth', label: 'Auth', dot: c.auth.type !== 'none' ? 'set' : undefined },
-          { id: 'connection', label: 'Connection', dot: c.insecureTls ? 'problem' : undefined }
+          { id: 'overview', label: t('http.collection.overview') },
+          { id: 'variables', label: t('http.collection.variables'), count: c.variables.filter((v) => v.enabled).length },
+          { id: 'auth', label: t('http.collection.auth'), dot: c.auth.type !== 'none' ? 'set' : undefined },
+          { id: 'connection', label: t('http.collection.connection'), dot: c.insecureTls ? 'problem' : undefined }
         ]}
         active={section}
         onChange={(id) => setSection(id as Section)}
@@ -89,27 +91,27 @@ export function CollectionTab({ tabId }: CollectionTabProps): React.JSX.Element 
         {section === 'overview' && (
           <>
             <label className="hc-form-row">
-              <span className="ui-label">Name</span>
+              <span className="ui-label">{t('http.collection.name')}</span>
               <input className="hc-input" value={c.name} onChange={(e) => set({ name: e.target.value })} />
             </label>
             <label className="hc-form-col">
-              <span className="ui-label">Description</span>
+              <span className="ui-label">{t('http.collection.description')}</span>
               <textarea className="hc-input hc-textarea" value={c.description ?? ''} onChange={(e) => set({ description: e.target.value })} />
             </label>
             <p className="hc-note-line">
-              {countRequests(c.items)} {countRequests(c.items) === 1 ? 'request' : 'requests'}
+              {t('http.collection.requestCount', { count: countRequests(c.items) })}
             </p>
             {c.importedFrom && (
               <p className="hc-note-line">
-                Imported from {c.importedFrom.url ?? c.importedFrom.fileName}{' '}
+                {t('http.collection.importedFrom', { source: c.importedFrom.url ?? c.importedFrom.fileName ?? '' })}{' '}
                 <button type="button" className="btn sm" onClick={() => requestImport(c.id)}>
-                  Re-import
+                  {t('http.collection.reimport')}
                 </button>
               </p>
             )}
             {c.needsReimport && (
               <p className="hc-warn-line">
-                <TriangleAlert size={13} aria-hidden="true" /> This collection’s requests have to be re-imported from its spec.
+                <TriangleAlert size={13} aria-hidden="true" /> {t('http.collection.needsReimport')}
               </p>
             )}
           </>
@@ -125,7 +127,7 @@ export function CollectionTab({ tabId }: CollectionTabProps): React.JSX.Element 
         )}
         {section === 'auth' && (
           <>
-            <p className="hc-note-line">Requests set to Inherit use this.</p>
+            <p className="hc-note-line">{t('http.collection.inheritNote')}</p>
             <AuthEditor
               value={c.auth}
               collectionName={c.name}
@@ -140,16 +142,14 @@ export function CollectionTab({ tabId }: CollectionTabProps): React.JSX.Element 
             {c.tlsReview && (
               <div className="hc-banner" role="note">
                 <TriangleAlert size={13} aria-hidden="true" />
-                <span>
-                  These connection settings came from another device. Requests in {c.name} are held until you accept them.
-                </span>
+                <span>{t('http.collection.tlsReviewHeld', { name: c.name })}</span>
                 <button type="button" className="btn primary sm" onClick={() => useApi.getState().acceptTlsReview(c.id)}>
-                  Accept these settings
+                  {t('http.collection.acceptSettings')}
                 </button>
               </div>
             )}
             <label className="hc-form-row">
-              <span className="ui-label">Send from</span>
+              <span className="ui-label">{t('http.collection.sendFrom')}</span>
               <RouteSelect value={collectionRoute(c)} onChange={(r) => set(routeFields(r))} />
             </label>
             <label className="hc-form-row">
@@ -158,44 +158,44 @@ export function CollectionTab({ tabId }: CollectionTabProps): React.JSX.Element 
                 checked={!c.insecureTls}
                 onChange={(e) => (e.target.checked ? set({ insecureTls: false }) : setConfirm({ kind: 'tls-off' }))}
               />
-              Verify certificates
+              {t('http.collection.verifyCertificates')}
             </label>
             {c.insecureTls && (
               <p className="hc-warn-line">
-                <TriangleAlert size={13} aria-hidden="true" /> Certificates are NOT verified for requests in {c.name}.
+                <TriangleAlert size={13} aria-hidden="true" /> {t('http.collection.notVerified', { name: c.name })}
               </p>
             )}
             <div className="hc-form-col">
-              <span className="ui-label">Custom CA</span>
+              <span className="ui-label">{t('http.collection.customCa')}</span>
               {c.caPem ? (
                 <p className="hc-note-line">
-                  Custom CA set ({certCount(c.caPem)} {certCount(c.caPem) === 1 ? 'certificate' : 'certificates'}).{' '}
+                  {t('http.collection.customCaSet', { count: certCount(c.caPem) })}{' '}
                   <button type="button" className="btn ghost sm" onClick={() => set({ caPem: undefined })}>
-                    Remove
+                    {t('common.remove')}
                   </button>
                 </p>
               ) : (
-                <p className="hc-note-line">None: certificates are checked against the system’s trusted roots.</p>
+                <p className="hc-note-line">{t('http.collection.noCustomCa')}</p>
               )}
               <div className="hc-form-row">
                 <button
                   type="button"
                   className="btn sm"
-                  onClick={() => void window.opsmaxx.http.chooseCaFile().then(offerCa, () => setCaError('Could not read that file.'))}
+                  onClick={() => void window.opsmaxx.http.chooseCaFile().then(offerCa, () => setCaError(t('http.collection.readFileFailed')))}
                 >
-                  Choose file…
+                  {t('http.collection.chooseFile')}
                 </button>
               </div>
               <textarea
                 className="hc-input hc-textarea hc-mono"
-                aria-label="Paste a CA certificate (PEM)"
+                aria-label={t('http.collection.pasteCa')}
                 placeholder="-----BEGIN CERTIFICATE-----"
                 value={pasted}
                 onChange={(e) => setPasted(e.target.value)}
               />
               <div className="hc-form-row">
                 <button type="button" className="btn sm" disabled={!pasted.trim()} onClick={() => offerCa(certificateBlocks(pasted))}>
-                  Use pasted certificate
+                  {t('http.collection.usePasted')}
                 </button>
               </div>
               {caError && (
@@ -205,7 +205,7 @@ export function CollectionTab({ tabId }: CollectionTabProps): React.JSX.Element 
               )}
             </div>
             <label className="hc-form-row">
-              <span className="ui-label">Default timeout (seconds)</span>
+              <span className="ui-label">{t('http.collection.defaultTimeout')}</span>
               <input
                 className="hc-input hc-num"
                 type="number"
@@ -224,10 +224,10 @@ export function CollectionTab({ tabId }: CollectionTabProps): React.JSX.Element 
       </div>
       {confirm?.kind === 'tls-off' && (
         <Modal
-          title={`Stop verifying certificates for ${c.name}?`}
+          title={t('http.collection.stopVerifyingTitle', { name: c.name })}
           onClose={() => setConfirm(null)}
           confirm={{
-            label: 'Stop verifying',
+            label: t('http.collection.stopVerifying'),
             destructive: true,
             onClick: () => {
               set({ insecureTls: true })
@@ -235,18 +235,15 @@ export function CollectionTab({ tabId }: CollectionTabProps): React.JSX.Element 
             }
           }}
         >
-          <p>
-            Every request in {c.name} will accept any certificate, including one presented by somebody intercepting the
-            connection. Adding the server’s CA instead keeps the check.
-          </p>
+          <p>{t('http.collection.stopVerifyingBody', { name: c.name })}</p>
         </Modal>
       )}
       {confirm?.kind === 'ca' && (
         <Modal
-          title={`Trust this CA for ${c.name}?`}
+          title={t('http.collection.trustCaTitle', { name: c.name })}
           onClose={() => setConfirm(null)}
           confirm={{
-            label: 'Trust this CA',
+            label: t('http.collection.trustCa'),
             destructive: true,
             onClick: () => {
               set({ caPem: confirm.pem })
@@ -256,7 +253,9 @@ export function CollectionTab({ tabId }: CollectionTabProps): React.JSX.Element 
           }}
         >
           <p>
-            Requests in {c.name} will accept certificates signed by {certCount(confirm.pem) === 1 ? 'this certificate' : `these ${certCount(confirm.pem)} certificates`}, in addition to the system’s roots.
+            {certCount(confirm.pem) === 1
+              ? t('http.collection.trustCaBodyOne', { name: c.name })
+              : t('http.collection.trustCaBodyMany', { name: c.name, count: certCount(confirm.pem) })}
           </p>
         </Modal>
       )}

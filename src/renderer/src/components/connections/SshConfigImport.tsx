@@ -7,6 +7,8 @@ import { clsx } from '../../lib/format'
 import type { SshConfigHost } from '../../../../shared/sshconfig'
 import type { Hop } from '../../types'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 let hopSeq = 0
 
@@ -45,6 +47,7 @@ function hopsFor(entry: SshConfigHost, all: SshConfigHost[]): Hop[] {
 }
 
 export function SshConfigImport(): React.JSX.Element {
+  const t = useT()
   const setModal = useApp((s) => s.setModal)
   const addServer = useApp((s) => s.addServer)
   const addFolder = useApp((s) => s.addFolder)
@@ -68,8 +71,8 @@ export function SshConfigImport(): React.JSX.Element {
         const missing = /no such file|ENOENT/i.test(r.error ?? '')
         setError(
           missing
-            ? `There is no ${r.path} on this machine, so there is nothing to import.`
-            : (r.error ?? `Could not read ${r.path}.`)
+            ? t('connections.sshImport.missing', { path: r.path })
+            : (r.error ?? t('connections.sshImport.readFailed', { path: r.path }))
         )
         return
       }
@@ -89,7 +92,7 @@ export function SshConfigImport(): React.JSX.Element {
 
   const runImport = async (): Promise<void> => {
     if (chosen.length === 0) return
-    const folderId = intoFolder ? addFolder('Imported from ~/.ssh/config', null, 'server') : null
+    const folderId = intoFolder ? addFolder(t('connections.sshImport.folderName'), null, 'server') : null
     const unsaved: string[] = []
 
     for (const h of chosen) {
@@ -120,13 +123,13 @@ export function SshConfigImport(): React.JSX.Element {
         if (ok === false) unsaved.push(h.alias)
       }
     }
-    toast(`Imported ${chosen.length} server${chosen.length === 1 ? '' : 's'}`, 'ok')
+    toast(t('connections.sshImport.imported', { count: chosen.length }), 'ok')
     // Actionless deliberately: the fix is a keychain this app cannot unlock,
     // and each of these servers needs its key re-attached individually — which
     // is what naming them here lets the user go and do.
     if (unsaved.length)
       toast(
-        `This device would not store the authentication details for ${unsaved.join(', ')} — open each one and set them again.`,
+        t('connections.sshImport.unsaved', { names: unsaved.join(', ') }),
         'error'
       )
     setModal(null)
@@ -134,7 +137,7 @@ export function SshConfigImport(): React.JSX.Element {
 
   return (
     <Modal
-      title="Import from SSH config"
+      title={t('connections.sshImport.title')}
       subtitle={path || '~/.ssh/config'}
       size="lg"
       onClose={() => setModal(null)}
@@ -142,17 +145,19 @@ export function SshConfigImport(): React.JSX.Element {
         <>
           <span className="spacer" />
           <button className="btn" onClick={() => setModal(null)}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button className="btn primary" disabled={chosen.length === 0} onClick={() => void runImport()}>
-            <Download size={14} /> Import {chosen.length || ''}
+            <Download size={14} />{' '}
+            {chosen.length ? t('connections.sshImport.importCount', { count: chosen.length }) : t('connections.sshImport.import')}
           </button>
         </>
       }
     >
       {loading && (
         <div className="row" style={{ gap: 8, padding: 12 }}>
-          <Loader2 size={15} className="spin" /> Reading {path || 'SSH config'}…
+          <Loader2 size={15} className="spin" />{' '}
+          {path ? t('connections.sshImport.reading', { path }) : t('connections.sshImport.readingConfig')}
         </div>
       )}
 
@@ -161,7 +166,7 @@ export function SshConfigImport(): React.JSX.Element {
           <div className="vault-error">{error}</div>
           <div className="row" style={{ gap: 8, marginTop: 10 }}>
             <button className="btn primary" onClick={() => setModal('add-server')}>
-              Add a server manually
+              {t('connections.sshImport.addManually')}
             </button>
           </div>
         </>
@@ -169,8 +174,7 @@ export function SshConfigImport(): React.JSX.Element {
 
       {!loading && !error && hosts.length === 0 && (
         <div className="faint" style={{ padding: 12 }}>
-          No concrete servers found. Entries using only wildcards (<span className="mono">Host *</span>) are
-          treated as defaults and are not imported on their own.
+          <Trans i18nKey="connections.sshImport.noHosts" components={{ mono: <span className="mono" /> }} />
         </div>
       )}
 
@@ -181,16 +185,16 @@ export function SshConfigImport(): React.JSX.Element {
               className="btn sm"
               onClick={() => setPicked(Object.fromEntries(hosts.map((h) => [h.alias, true])))}
             >
-              Select all
+              {t('connections.sshImport.selectAll')}
             </button>
             <button className="btn sm" onClick={() => setPicked({})}>
-              Select none
+              {t('connections.sshImport.selectNone')}
             </button>
             <span className="spacer" />
             <label className="row" style={{ gap: 8 }}>
               <Switch checked={intoFolder} onChange={setIntoFolder} />
               <span className="muted">
-                <FolderPlus size={13} /> Group into a folder
+                <FolderPlus size={13} /> {t('connections.sshImport.groupIntoFolder')}
               </span>
             </label>
           </div>
@@ -215,13 +219,13 @@ export function SshConfigImport(): React.JSX.Element {
                   <div>
                     <div className="r-title">
                       {h.alias}
-                      {existing && <span className="chip" style={{ marginLeft: 8 }}>already added</span>}
+                      {existing && <span className="chip" style={{ marginLeft: 8 }}>{t('connections.sshImport.alreadyAdded')}</span>}
                     </div>
                     <div className="r-sub mono">
                       {h.user ? `${h.user}@` : ''}
                       {h.hostName}
                       {h.port !== 22 ? `:${h.port}` : ''}
-                      {h.proxyJump ? ` · jump ${h.proxyJump}` : ''}
+                      {h.proxyJump ? ` · ${t('connections.sshImport.jump', { host: h.proxyJump })}` : ''}
                       {h.identityFile ? ` · ${h.identityFile}` : ''}
                     </div>
                   </div>

@@ -5,6 +5,9 @@ import { ENV_WRITE_DISCLOSURE } from '../../../../shared/envWrite'
 import type { ComposeEnvWriteResult } from '../../../../shared/compose'
 import type { VaultEntryDescriptor, VaultIndexResult } from '../../../../shared/vaultIndex'
 import { bridgeHas } from '../../lib/bridge'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 
 // Setting one `.env` variable from the vault.
@@ -31,11 +34,11 @@ import { UnlockVaultButton } from '../common/UnlockVaultButton'
 // screen, because an operator who expects a no-op and gets a write should have
 // been told, and because a limitation nobody states reads as a bug.
 
-const SLOTS: { slot: 'password' | 'privateKey' | 'username' | 'field'; label: string }[] = [
-  { slot: 'password', label: 'The entry’s password / API key' },
-  { slot: 'privateKey', label: 'The entry’s key material' },
-  { slot: 'username', label: 'The entry’s username' },
-  { slot: 'field', label: 'A named custom field' }
+const SLOTS: { slot: 'password' | 'privateKey' | 'username' | 'field'; labelKey: MessageKey }[] = [
+  { slot: 'password', labelKey: 'docker.envWrite.slotPassword' },
+  { slot: 'privateKey', labelKey: 'docker.envWrite.slotPrivateKey' },
+  { slot: 'username', labelKey: 'docker.envWrite.slotUsername' },
+  { slot: 'field', labelKey: 'docker.envWrite.slotField' }
 ]
 
 export interface EnvValueWriteProps {
@@ -56,6 +59,7 @@ export function EnvValueWrite({
   sudo,
   onWritten
 }: EnvValueWriteProps): React.JSX.Element | null {
+  const t = useT()
   const [entries, setEntries] = useState<VaultEntryDescriptor[] | null>(null)
   const [locked, setLocked] = useState(false)
   const [open, setOpen] = useState(false)
@@ -92,9 +96,9 @@ export function EnvValueWrite({
         className="btn quiet"
         style={{ fontSize: 11 }}
         onClick={() => void openForm()}
-        aria-label={`Set ${name} from the vault`}
+        aria-label={t('docker.envWrite.openLabel', { name })}
       >
-        <KeyRound size={11} /> Set from vault
+        <KeyRound size={11} /> {t('docker.envWrite.open')}
       </button>
     )
   }
@@ -105,12 +109,13 @@ export function EnvValueWrite({
     return (
       <div className="faint" style={{ fontSize: 11, display: 'flex', alignItems: 'center', gap: 6 }}>
         <span>
-          Set <span className="mono">{name}</span> from the vault.
+          <Trans
+            i18nKey="docker.envWrite.lockedPrompt"
+            values={{ name }}
+            components={{ mono: <span className="mono" /> }}
+          />
         </span>
-        <UnlockVaultButton
-          className="btn sm"
-          reason={`Unlocking lets you set ${name} from a vault entry.`}
-        />
+        <UnlockVaultButton className="btn sm" reason={t('docker.envWrite.unlockReason', { name })} />
       </div>
     )
   }
@@ -140,7 +145,7 @@ export function EnvValueWrite({
       setResult(r)
       if (r.ok) onWritten()
     } catch {
-      setResult({ ok: false, reason: 'The write could not be run.' })
+      setResult({ ok: false, reason: t('docker.envWrite.couldNotRun') })
     } finally {
       setBusy(false)
     }
@@ -155,12 +160,12 @@ export function EnvValueWrite({
         <select
           className="input"
           style={{ fontSize: 11 }}
-          aria-label="Vault entry"
+          aria-label={t('docker.envWrite.entryLabel')}
           value={entryId}
           onChange={(e) => setEntryId(e.target.value)}
           disabled={busy}
         >
-          <option value="">Choose a vault entry…</option>
+          <option value="">{t('docker.envWrite.chooseEntry')}</option>
           {entries.map((e) => (
             <option key={e.id} value={e.id}>
               {e.name}
@@ -170,14 +175,14 @@ export function EnvValueWrite({
         <select
           className="input"
           style={{ fontSize: 11 }}
-          aria-label="Which field"
+          aria-label={t('docker.envWrite.slotLabel')}
           value={slot}
           onChange={(e) => setSlot(e.target.value as typeof slot)}
           disabled={busy}
         >
           {SLOTS.map((s) => (
             <option key={s.slot} value={s.slot}>
-              {s.label}
+              {t(s.labelKey)}
             </option>
           ))}
         </select>
@@ -185,12 +190,12 @@ export function EnvValueWrite({
           <select
             className="input"
             style={{ fontSize: 11 }}
-            aria-label="Field name"
+            aria-label={t('docker.envWrite.fieldLabel')}
             value={fieldKey}
             onChange={(e) => setFieldKey(e.target.value)}
             disabled={busy}
           >
-            <option value="">Choose a field…</option>
+            <option value="">{t('docker.envWrite.chooseField')}</option>
             {/* The KEYS of the entry's custom fields. A key is a label the
                 operator typed; the value beside it never reaches here. */}
             {(chosen?.fieldKeys ?? []).map((k) => (
@@ -202,10 +207,10 @@ export function EnvValueWrite({
         )}
         <button className="btn" style={{ fontSize: 11 }} onClick={() => void run()} disabled={busy || !ready}>
           {busy ? <Loader2 size={11} className="spin" /> : null}
-          {busy ? 'Writing' : 'Write'}
+          {busy ? t('docker.envWrite.writing') : t('docker.envWrite.write')}
         </button>
         <button className="btn quiet" style={{ fontSize: 11 }} onClick={() => setOpen(false)} disabled={busy}>
-          Cancel
+          {t('common.cancel')}
         </button>
       </div>
 
@@ -219,10 +224,13 @@ export function EnvValueWrite({
           {/* Which line, never what is on it. */}
           <span>
             {result.action === 'append'
-              ? `${result.name} was added to ${path}.`
-              : `${result.name} was replaced on line ${result.line} of ${path}.`}{' '}
-            The previous file is at <span className="mono">{result.backup}</span>. Nothing is
-            running the new value yet — the stack has to be brought up again.
+              ? t('docker.envWrite.appended', { name: result.name, path })
+              : t('docker.envWrite.replaced', { name: result.name, line: String(result.line), path })}{' '}
+            <Trans
+              i18nKey="docker.envWrite.backup"
+              values={{ backup: result.backup }}
+              components={{ mono: <span className="mono" /> }}
+            />
           </span>
         </div>
       )}

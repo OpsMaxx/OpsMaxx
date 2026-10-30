@@ -4,6 +4,7 @@ import { Modal } from '../common/Modal'
 import { EmptyState } from '../common/EmptyState'
 import { duration } from '../../lib/format'
 import { useApp } from '../../store/app'
+import { useT } from '../../lib/i18n'
 import { PROVIDER_LABEL, hostOf, useCicdConnectionList } from './state'
 import type { CicdConnection, CicdPanelState } from '../../../../shared/cicd'
 
@@ -48,6 +49,7 @@ export function CicdAccountsModal({
   onEdit: (connection: CicdConnection) => void
   onClose: () => void
 }): React.JSX.Element {
+  const t = useT()
   const connections = useCicdConnectionList()
   const remove = useApp((s) => s.deleteCicdConnection)
   const [pendingDelete, setPendingDelete] = useState<CicdConnection | null>(confirmRemove ?? null)
@@ -58,14 +60,14 @@ export function CicdAccountsModal({
   if (pendingDelete) {
     return (
       <Modal
-        title={`Remove ${pendingDelete.name}?`}
+        title={t('cicd.accounts.removeTitle', { name: pendingDelete.name })}
         // Backing out of a confirm the tab opened directly closes the whole
         // thing: the reader never asked for the list, so dropping them into it
         // would answer a question they did not put.
         onClose={() => (confirmRemove ? onClose() : setPendingDelete(null))}
-        cancelLabel="Keep it"
+        cancelLabel={t('cicd.accounts.keepIt')}
         confirm={{
-          label: 'Remove',
+          label: t('common.remove'),
           destructive: true,
           onClick: () => {
             const doomed = pendingDelete
@@ -79,37 +81,34 @@ export function CicdAccountsModal({
             disappearing from a list reads as reversible, and the credential it
             takes with it is not. */}
         <p className="s-desc">
-          OpsMaxx stops polling {hostOf(pendingDelete.baseUrl)} and deletes the stored token from
-          the vault. Nothing on {PROVIDER_LABEL[pendingDelete.provider]} itself changes — no
-          pipeline, no run and no build is touched, and the token stays valid until you revoke it
-          there.
+          {t('cicd.accounts.removeBody', {
+            host: hostOf(pendingDelete.baseUrl),
+            provider: PROVIDER_LABEL[pendingDelete.provider]
+          })}
         </p>
-        <p className="s-desc">
-          The token cannot be recovered from OpsMaxx afterwards. Connecting the account again means
-          pasting it again.
-        </p>
+        <p className="s-desc">{t('cicd.accounts.removeUnrecoverable')}</p>
       </Modal>
     )
   }
 
   return (
     <Modal
-      title="CI/CD accounts"
-      subtitle="Every account this workspace polls. Connect as many as you like, including several of the same provider — each is polled and addressed on its own."
+      title={t('cicd.accounts.title')}
+      subtitle={t('cicd.accounts.subtitle')}
       size="lg"
       onClose={onClose}
-      cancelLabel="Done"
+      cancelLabel={t('common.done')}
       footer={
         <button className="btn secondary size-28" onClick={onAdd}>
-          <Plus size={14} /> Connect an account
+          <Plus size={14} /> {t('cicd.accounts.connect')}
         </button>
       }
     >
       {connections.length === 0 ? (
         <EmptyState
           compact
-          title="No CI account is connected"
-          message="Nothing is polled until one exists."
+          title={t('cicd.common.noAccount')}
+          message={t('cicd.accounts.emptyMessage')}
         />
       ) : (
         <div className="cicd-account-list">
@@ -125,28 +124,30 @@ export function CicdAccountsModal({
                       /* Never implicit. The connect modal says so when it is set
                          and this list has to as well, or the only place the
                          weaker setting is visible is the form that set it. */
-                      <span className="state-alarm"> · certificate checking off</span>
+                      <span className="state-alarm"> · {t('cicd.accounts.tlsOff')}</span>
                     )}
                   </div>
                 </div>
                 <span className="ui-note cicd-account-read">
-                  {s?.readAt === undefined ? 'never read' : `read ${duration(s.readAt)} ago`}
+                  {s?.readAt === undefined
+                    ? t('cicd.common.neverRead')
+                    : t('cicd.accounts.readAgo', { duration: duration(s.readAt) })}
                 </span>
                 <button
                   type="button"
                   className="btn secondary size-24"
-                  title={`Change ${c.name}'s URL, route or token.`}
+                  title={t('cicd.accounts.editTitle', { name: c.name })}
                   onClick={() => onEdit(c)}
                 >
-                  <Pencil size={13} /> Edit
+                  <Pencil size={13} /> {t('common.edit')}
                 </button>
                 <button
                   type="button"
                   className="btn secondary size-24"
-                  title={`Stop polling ${c.name} and delete its stored token.`}
+                  title={t('cicd.accounts.removeButtonTitle', { name: c.name })}
                   onClick={() => setPendingDelete(c)}
                 >
-                  <Trash2 size={13} /> Remove
+                  <Trash2 size={13} /> {t('common.remove')}
                 </button>
               </div>
             )

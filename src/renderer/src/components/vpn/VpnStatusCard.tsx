@@ -13,6 +13,8 @@ import type {
 } from '../../types'
 import { bytes, clsx } from '../../lib/format'
 import { VpnDiagnose } from './VpnDiagnose'
+import { t as tr, useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
 // How healthy a profile is, as the UI cares about it. Deliberately coarser than
 // VpnState in one place and finer in another: `reconnecting` and `degraded`
@@ -37,17 +39,20 @@ export function isHandshakeFresh(lastHandshakeSec: number | undefined): boolean 
  *  makes the reader do the subtraction, and the subtraction is the whole
  *  question being asked. */
 export function handshakeLabel(lastHandshakeSec: number | undefined): string {
-  if (lastHandshakeSec === undefined) return 'no handshake yet'
+  if (lastHandshakeSec === undefined) return tr('vpn.status.noHandshake')
   const age = clampAge(lastHandshakeSec)
-  if (age < 60) return `handshake ${age}s ago`
-  if (age < 3600) return `handshake ${Math.floor(age / 60)}m ${age % 60}s ago`
-  return `handshake ${Math.floor(age / 3600)}h ${Math.floor((age % 3600) / 60)}m ago`
+  if (age < 60) return tr('vpn.status.handshakeSeconds', { s: age })
+  if (age < 3600) return tr('vpn.status.handshakeMinutes', { m: Math.floor(age / 60), s: age % 60 })
+  return tr('vpn.status.handshakeHours', {
+    h: Math.floor(age / 3600),
+    m: Math.floor((age % 3600) / 60)
+  })
 }
 
 /** "1 proxy", "3 proxies". Lives here because the pane and the sidebar both
  *  say it, and the sidebar used to say "1 proxies". */
 export function proxyCount(n: number): string {
-  return `${n} ${n === 1 ? 'proxy' : 'proxies'}`
+  return tr('vpn.status.proxyCount', { count: n })
 }
 
 /** The one-line description of an frp client: where it dials and how much it
@@ -55,22 +60,22 @@ export function proxyCount(n: number): string {
  *  reads as a field the app failed to load rather than one nobody has filled
  *  in. */
 export function frpSummary(spec: FrpSpec): string {
-  const server = spec.serverAddr ? `${spec.serverAddr}:${spec.serverPort}` : 'no server yet'
+  const server = spec.serverAddr ? `${spec.serverAddr}:${spec.serverPort}` : tr('vpn.status.noServer')
   return `${server} · ${proxyCount(spec.proxies.length)}`
 }
 
 /** Why a profile is amber, in a sentence. Every degraded state had one except
  *  the two frp ones, which showed a chip and left the user to guess. */
 export function degradedReason(kind: VpnKind, status: VpnStatus | undefined): string {
-  if (status?.state === 'reconnecting') return 'Lost the connection to the server; retrying.'
+  if (status?.state === 'reconnecting') return tr('vpn.status.reconnecting')
   if (status?.state === 'degraded') {
     if (kind === 'frp') {
-      return 'Connected to the server, but at least one proxy failed to start — see the table below.'
+      return tr('vpn.status.frpDegraded')
     }
-    return 'The connection is up but is not carrying traffic.'
+    return tr('vpn.status.noTraffic')
   }
   // Connected, with a WireGuard handshake old enough that nothing is crossing.
-  return `The tunnel is up but nothing is crossing it — the last handshake is older than ${WG_HANDSHAKE_STALE_SEC}s. Check that UDP to the peer endpoint is not being blocked.`
+  return tr('vpn.status.staleHandshake', { seconds: WG_HANDSHAKE_STALE_SEC })
 }
 
 export function vpnHealth(status: VpnStatus | undefined): VpnHealth {
@@ -88,12 +93,12 @@ export function vpnHealth(status: VpnStatus | undefined): VpnHealth {
   return 'ok'
 }
 
-const HEALTH_LABEL: Record<VpnHealth, string> = {
-  off: 'Stopped',
-  connecting: 'Connecting',
-  ok: 'Connected',
-  degraded: 'Degraded',
-  error: 'Error'
+const HEALTH_LABEL: Record<VpnHealth, MessageKey> = {
+  off: 'vpn.status.healthOff',
+  connecting: 'vpn.status.healthConnecting',
+  ok: 'vpn.status.healthOk',
+  degraded: 'vpn.status.healthDegraded',
+  error: 'vpn.status.healthError'
 }
 
 const HEALTH_CHIP: Record<VpnHealth, string> = {
@@ -122,7 +127,8 @@ export function HealthDot({ health }: { health: VpnHealth }): React.JSX.Element 
 }
 
 export function HealthChip({ health }: { health: VpnHealth }): React.JSX.Element {
-  return <span className={clsx('chip', HEALTH_CHIP[health])}>{HEALTH_LABEL[health]}</span>
+  const t = useT()
+  return <span className={clsx('chip', HEALTH_CHIP[health])}>{t(HEALTH_LABEL[health])}</span>
 }
 
 /** E25. A listener on anything but the loopback is reachable by every other
@@ -133,15 +139,27 @@ export function isLoopbackBind(host: string): boolean {
   return h === '' || h === '127.0.0.1' || h === '::1' || h === '[::1]' || h === 'localhost'
 }
 
-export function BindWarning({ host, what }: { host: string; what: string }): React.JSX.Element | null {
+const BIND_WARNING: Record<'listener' | 'visitor' | 'proxy', MessageKey> = {
+  listener: 'vpn.status.bindWarningListener',
+  visitor: 'vpn.status.bindWarningVisitor',
+  proxy: 'vpn.status.bindWarningProxy'
+}
+
+/** `what` names the thing bound, and picks the whole sentence rather than a
+ *  phrase dropped into one, so a translation can put it where it belongs. */
+export function BindWarning({
+  host,
+  what
+}: {
+  host: string
+  what: keyof typeof BIND_WARNING
+}): React.JSX.Element | null {
+  const t = useT()
   if (isLoopbackBind(host)) return null
   return (
     <div className="row" style={{ gap: 6, color: 'var(--warn)', fontSize: 11 }}>
       <AlertTriangle size={12} />
-      <span>
-        Bound to {host} — {what} is reachable from every machine on your network, not just this
-        one. Use 127.0.0.1 unless you meant to share it.
-      </span>
+      <span>{t(BIND_WARNING[what], { host })}</span>
     </div>
   )
 }
@@ -168,6 +186,7 @@ interface VpnStatusCardProps {
 }
 
 export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JSX.Element {
+  const t = useT()
   const health = vpnHealth(status)
   const stats = status?.stats
   const listeners = status?.listeners ?? []
@@ -197,7 +216,7 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
         <div
           className="conn-error"
           style={{ borderRadius: 'var(--r-sm)', border: 'none' }}
-          title={status.errorCode ? `Error code: ${status.errorCode}` : undefined}
+          title={status.errorCode ? t('vpn.status.errorCode', { code: status.errorCode }) : undefined}
         >
           <AlertTriangle size={13} />
           <span>{status.error}</span>
@@ -205,22 +224,25 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
       )}
 
       <div className="info-grid">
-        <Item k="State" v={HEALTH_LABEL[health]} />
+        <Item k={t('vpn.status.state')} v={t(HEALTH_LABEL[health])} />
         {profile.spec.kind === 'wireguard' && (
-          <Item k="Handshake" v={handshakeLabel(stats?.lastHandshakeSec)} />
+          <Item k={t('vpn.status.handshake')} v={handshakeLabel(stats?.lastHandshakeSec)} />
         )}
         {/* Not for ngrok: it reports per-endpoint counters that cannot honestly
             be collapsed into one pair, so the driver sends zeroes and two rows
             reading "0 B" would be a claim about traffic rather than an absence
             of one. */}
-        {stats && profile.spec.kind !== 'ngrok' && <Item k="Received" v={bytes(stats.rxBytes)} />}
-        {stats && profile.spec.kind !== 'ngrok' && <Item k="Sent" v={bytes(stats.txBytes)} />}
-        {stats?.assignedIp && <Item k="Assigned IP" v={stats.assignedIp} />}
-        {stats?.remoteEndpoint && <Item k="Endpoint" v={stats.remoteEndpoint} />}
+        {stats && profile.spec.kind !== 'ngrok' && <Item k={t('vpn.status.received')} v={bytes(stats.rxBytes)} />}
+        {stats && profile.spec.kind !== 'ngrok' && <Item k={t('vpn.status.sent')} v={bytes(stats.txBytes)} />}
+        {stats?.assignedIp && <Item k={t('vpn.status.assignedIp')} v={stats.assignedIp} />}
+        {stats?.remoteEndpoint && <Item k={t('vpn.status.endpoint')} v={stats.remoteEndpoint} />}
         {stats?.latencyMs !== undefined && (
-          <Item k="Latency" v={`${Math.round(stats.latencyMs)} ms`} />
+          <Item
+            k={t('vpn.status.latency')}
+            v={t('vpn.status.latencyValue', { ms: Math.round(stats.latencyMs) })}
+          />
         )}
-        {status && status.restarts > 0 && <Item k="Restarts" v={String(status.restarts)} />}
+        {status && status.restarts > 0 && <Item k={t('vpn.status.restarts')} v={String(status.restarts)} />}
       </div>
 
       {/* The public URLs. This is the entire point of an ngrok tunnel: the
@@ -264,7 +286,7 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
                   background: p.online ? 'var(--ok)' : 'var(--muted)'
                 }}
               />
-              <span style={{ minWidth: 90 }} title={p.online ? 'Online' : 'Offline'}>
+              <span style={{ minWidth: 90 }} title={p.online ? t('vpn.status.online') : t('vpn.status.offline')}>
                 {p.name}
               </span>
               <span className="mono selectable faint" style={{ fontSize: 11 }}>
@@ -296,14 +318,14 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
           say this tunnel has no peers. */}
       {profile.spec.kind === 'wireguard' && (stats?.peers?.length ?? 0) > 0 && (
         <div className="col" style={{ gap: 6 }}>
-          <span className="field-label">Peers</span>
+          <span className="field-label">{t('vpn.status.peers')}</span>
           <table className="mini-table">
             <thead>
               <tr>
-                <th>Peer</th>
-                <th>Handshake</th>
-                <th>Received</th>
-                <th>Sent</th>
+                <th>{t('vpn.status.peer')}</th>
+                <th>{t('vpn.status.handshake')}</th>
+                <th>{t('vpn.status.received')}</th>
+                <th>{t('vpn.status.sent')}</th>
               </tr>
             </thead>
             <tbody>
@@ -345,7 +367,7 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
 
       {listeners.length > 0 && (
         <div className="col" style={{ gap: 6 }}>
-          <span className="field-label">Local listeners</span>
+          <span className="field-label">{t('vpn.status.localListeners')}</span>
           {listeners.map((l, i) => (
             <div key={`${l.bindHost}:${l.bindPort}-${i}`} className="col" style={{ gap: 4 }}>
               <div className="row" style={{ gap: 8 }}>
@@ -354,7 +376,7 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
                   {listenerLabel(l)}
                 </span>
               </div>
-              <BindWarning host={l.bindHost} what="this listener" />
+              <BindWarning host={l.bindHost} what="listener" />
             </div>
           ))}
         </div>
@@ -362,22 +384,22 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
 
       {profile.spec.kind === 'frp' && (
         <div className="col" style={{ gap: 6 }}>
-          <span className="field-label">Proxies</span>
+          <span className="field-label">{t('vpn.status.proxies')}</span>
           {proxies.length === 0 ? (
             // frp publishes no client-side byte counters, so this table is the
             // telemetry. Saying so beats showing invented rx/tx numbers.
             <span className="faint" style={{ fontSize: 11 }}>
-              No proxy status yet. frp reports per-proxy state rather than traffic counters.
+              {t('vpn.status.noProxyStatus')}
             </span>
           ) : (
             <table className="mini-table">
               <thead>
                 <tr>
-                  <th>Proxy</th>
-                  <th>Type</th>
-                  <th>Status</th>
-                  <th>Local</th>
-                  <th>Remote</th>
+                  <th>{t('vpn.status.proxy')}</th>
+                  <th>{t('vpn.status.type')}</th>
+                  <th>{t('vpn.status.status')}</th>
+                  <th>{t('vpn.status.local')}</th>
+                  <th>{t('vpn.status.remote')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -411,6 +433,7 @@ export function VpnStatusCard({ profile, status }: VpnStatusCardProps): React.JS
  * to be movable. It was previously neither clickable nor selectable.
  */
 function AuthoriseNode({ url }: { url: string }): React.JSX.Element {
+  const t = useT()
   const [copied, setCopied] = useState(false)
 
   const copy = (): void => {
@@ -426,8 +449,7 @@ function AuthoriseNode({ url }: { url: string }): React.JSX.Element {
       <div className="vpn-authorise-say">
         <AlertTriangle size={13} />
         <span>
-          This node has not been authorised yet. It is a device of its own on your tailnet — separate
-          from any Tailscale client already running on this machine — so it needs approving once.
+          {t('vpn.status.authoriseNote')}
         </span>
       </div>
       {/* Selectable, and on one line that scrolls rather than wrapping: a URL
@@ -438,11 +460,11 @@ function AuthoriseNode({ url }: { url: string }): React.JSX.Element {
           className="btn primary sm"
           onClick={() => window.open(url, '_blank', 'noopener,noreferrer')}
         >
-          <ExternalLink size={13} /> Authorise this node
+          <ExternalLink size={13} /> {t('vpn.status.authorise')}
         </button>
         <button className="btn ghost sm" onClick={copy}>
           {copied ? <Check size={13} /> : <Copy size={13} />}
-          {copied ? 'Copied' : 'Copy link'}
+          {copied ? t('common.copied') : t('vpn.status.copyLink')}
         </button>
       </div>
     </div>

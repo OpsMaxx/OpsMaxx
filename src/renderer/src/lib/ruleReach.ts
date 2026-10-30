@@ -1,5 +1,7 @@
 import { DISK_DANGER } from '../../../shared/hostHealth'
 import type { RuleAlertKind } from '../../../shared/rules'
+import type { MessageKey } from '../../../shared/i18n'
+import { t } from './i18n'
 
 // Whether a rule as written can ever act.
 //
@@ -146,12 +148,19 @@ export function ruleWarnings(input: {
     // of exactly 80 is reachable because that alert raises at 80.
     const unreachable = floor.strict ? typed <= floor.value : typed < floor.value
     if (unreachable) {
-      const at = `${floor.value}${floor.unit}`
+      const kindKey = LABEL[input.kind]
+      const vars = {
+        kind: kindKey ? t(kindKey) : input.kind,
+        at: withUnit(floor.value, floor.unit),
+        typed: withUnit(typed, floor.unit)
+      }
       out.push({
         field: 'minValue',
         text: floor.fixed
-          ? `A ${LABEL[input.kind] ?? input.kind} alert is only raised ${floor.strict ? 'above' : 'at or above'} ${at}, and that number is fixed. This rule will not act until then — ${typed}${floor.unit} makes no difference to when it fires.`
-          : `A ${LABEL[input.kind] ?? input.kind} alert is only raised at or above ${at} for this server, so this rule will not act below that. Change the alert threshold in Settings if ${typed}${floor.unit} is the line you want.`
+          ? floor.strict
+            ? t('lib.ruleReach.fixedAbove', vars)
+            : t('lib.ruleReach.fixedAtOrAbove', vars)
+          : t('lib.ruleReach.movable', vars)
       })
     }
   }
@@ -162,16 +171,21 @@ export function ruleWarnings(input: {
       // Said as a fact about delivery, not as a validation failure: the rule is
       // legitimate and saving it before configuring the endpoint is a
       // reasonable order to work in.
-      text: 'Webhook delivery is switched off, so this rule will match and send nothing. Turn it on in Settings → Alerts.'
+      text: t('lib.ruleReach.webhookOff')
     })
   }
 
   return out
 }
 
-const LABEL: Partial<Record<RuleAlertKind, string>> = {
-  cpu: 'CPU',
-  disk: 'disk',
-  inode: 'inode',
-  load: 'load'
+const LABEL: Partial<Record<RuleAlertKind, MessageKey>> = {
+  cpu: 'lib.ruleReach.kind.cpu',
+  disk: 'lib.ruleReach.kind.disk',
+  inode: 'lib.ruleReach.kind.inode',
+  load: 'lib.ruleReach.kind.load'
+}
+
+/** `unit` stays the data `alertFloor` returns; only the sentence is translated. */
+function withUnit(n: number, unit: string): string {
+  return unit === ' per core' ? t('lib.ruleReach.perCore', { n }) : `${n}${unit}`
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ShieldOff, AlertTriangle, Loader2 } from 'lucide-react'
 import type { AddyRevocation } from '../../../../preload'
+import { useT } from '../../lib/i18n'
 
 /**
  * What this device shows after the account it belonged to revoked it.
@@ -30,8 +31,9 @@ export function RevokedScreen({
 }): React.JSX.Element {
   const [clearing, setClearing] = useState(false)
   const [retrying, setRetrying] = useState(false)
+  const t = useT()
 
-  const when = state.at ? new Date(state.at).toLocaleString() : 'an unknown time'
+  const when = state.at ? new Date(state.at).toLocaleString() : t('addy.revoked.unknownTime')
   const failed = state.stage === 'failed'
   const running = state.stage === 'wiping'
 
@@ -39,17 +41,12 @@ export function RevokedScreen({
     <div className="revoked-screen">
       <div className="revoked-card">
         <ShieldOff size={40} className="revoked-icon" aria-hidden />
-        <h1>This device was removed from its account</h1>
-        <p>
-          On {when}, the account owner removed this device. OpsMaxx deleted the data it was holding
-          for that account from this computer: servers, credentials, the vault, the host-key pins and
-          the local history.
-        </p>
+        <h1>{t('addy.revoked.title')}</h1>
+        <p>{t('addy.revoked.body', { when })}</p>
 
         {running && (
           <p className="revoked-progress">
-            <Loader2 size={16} className="spin" aria-hidden /> Still deleting. Leave the app open
-            until this finishes.
+            <Loader2 size={16} className="spin" aria-hidden /> {t('addy.revoked.deleting')}
           </p>
         )}
 
@@ -57,15 +54,12 @@ export function RevokedScreen({
           <div className="revoked-problem" role="alert">
             <AlertTriangle size={16} aria-hidden />
             <div>
-              <strong>Some of it could not be deleted.</strong>
+              <strong>{t('addy.revoked.failed')}</strong>
               {/* Shown rather than swallowed: the person at this machine is the
                   only one who can act on it, and "something went wrong" would
                   leave them unable to. */}
-              <p>{state.error ?? 'No reason was recorded.'}</p>
-              <p>
-                Close anything still using those files — an editor, a terminal, a backup tool —
-                and try again. OpsMaxx cannot be used on this computer until this finishes.
-              </p>
+              <p>{state.error ?? t('addy.revoked.noReason')}</p>
+              <p>{t('addy.revoked.failedHelp')}</p>
               {/* THE DEAD END THIS FIXES. `failed` offered no action at all:
                   the only button on the screen renders on `wiped`, so a retry
                   that kept failing left the app bricked with nothing to press
@@ -80,20 +74,17 @@ export function RevokedScreen({
               >
                 {retrying ? (
                   <>
-                    <Loader2 size={14} className="spin" aria-hidden /> Trying again…
+                    <Loader2 size={14} className="spin" aria-hidden /> {t('addy.revoked.retrying')}
                   </>
                 ) : (
-                  'Try deleting again'
+                  t('addy.revoked.retry')
                 )}
               </button>
             </div>
           </div>
         )}
 
-        <p className="revoked-note">
-          Nothing here can be recovered from this computer. If this was a mistake, the account owner
-          can add this device again — it will pair as a new device and sync everything back.
-        </p>
+        <p className="revoked-note">{t('addy.revoked.note')}</p>
 
         {/* Only once the deletion has actually finished. Offering it during
             `wiping` or after `failed` would let someone dismiss the screen while
@@ -107,7 +98,7 @@ export function RevokedScreen({
               void onClear()
             }}
           >
-            {clearing ? 'Setting up…' : 'Use this computer for something else'}
+            {clearing ? t('addy.revoked.settingUp') : t('addy.revoked.clear')}
           </button>
         )}
       </div>

@@ -207,8 +207,15 @@ describe('the words it uses', () => {
       require('node:path').join(__dirname, '..', 'src/renderer/src/components/addy/collectionNames.ts'),
       'utf8'
     )
+    const EN = JSON.parse(
+      require('node:fs').readFileSync(
+        require('node:path').join(__dirname, '..', 'src/shared/locales/en.json'),
+        'utf8'
+      )
+    )
     for (const name of SYNCED_COLLECTIONS) {
       expect(PANEL, `${name} has no display name`).toMatch(new RegExp(`\\b${name}:`))
+      expect(EN[`addy.collections.${name}`], `${name} has no display name`).toBeTruthy()
     }
   })
 

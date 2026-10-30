@@ -330,7 +330,11 @@ describe('a promoted module gets its own page, not Monitoring\'s', () => {
     const idx = FM.indexOf('promoted ? (')
     expect(idx, 'the promoted header branch is gone').toBeGreaterThan(-1)
     const after = FM.slice(idx)
-    for (const chrome of ['ui-page-title">Monitoring', 'New group', 'monitor-tabs monitor-strip']) {
+    for (const chrome of [
+      "ui-page-title\">{t('layout.activity.monitor')}",
+      "t('monitor.fleet.newGroup')",
+      'monitor-tabs monitor-strip'
+    ]) {
       expect(after, `${chrome} escaped the promoted branch`).toContain(chrome)
       expect(
         after.indexOf(chrome),

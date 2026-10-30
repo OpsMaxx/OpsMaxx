@@ -6,7 +6,9 @@ import {
   type HostFacts
 } from '../../../shared/hostFacts'
 import type { HostMetrics } from '../../../shared/ssh'
+import type { MessageKey } from '../../../shared/i18n'
 import { bytes } from './format'
+import { t } from './i18n'
 
 // The estate inventory: every host, what it is, and what it needs.
 //
@@ -67,15 +69,33 @@ export type CellGap =
  * mistaken for zero.
  */
 export const GAP_LABEL: Record<CellGap, string> = {
-  absent: 'not on this server',
-  denied: 'not permitted',
-  'no-tool': 'no tool for it',
-  'stale-metadata': 'from a stale cache',
-  unsupported: 'cannot be answered',
-  unknown: 'unknown',
-  'not-collected': 'not collected yet',
-  'probe-failed': 'collection failed',
-  'not-sampled': 'not sampled yet'
+  get absent() {
+    return t('lib.inventory.gap.absent')
+  },
+  get denied() {
+    return t('lib.inventory.gap.denied')
+  },
+  get 'no-tool'() {
+    return t('lib.inventory.gap.noTool')
+  },
+  get 'stale-metadata'() {
+    return t('lib.inventory.gap.staleMetadata')
+  },
+  get unsupported() {
+    return t('lib.inventory.gap.unsupported')
+  },
+  get unknown() {
+    return t('lib.inventory.gap.unknown')
+  },
+  get 'not-collected'() {
+    return t('lib.inventory.gap.notCollected')
+  },
+  get 'probe-failed'() {
+    return t('lib.inventory.gap.probeFailed')
+  },
+  get 'not-sampled'() {
+    return t('lib.inventory.gap.notSampled')
+  }
 }
 
 /** The sentence behind the phrase, shown on hover. The six that come off the
@@ -87,12 +107,15 @@ export const GAP_HELP: Record<CellGap, string> = {
   'stale-metadata': FACT_STATUS_HELP['stale-metadata'],
   unsupported: FACT_STATUS_HELP.unsupported,
   unknown: FACT_STATUS_HELP.unknown,
-  'not-collected':
-    'Host facts have not been collected for this server yet. They are collected about once an hour, on the same background sweep as metrics, so a server added recently will not have any until that sweep reaches it.',
-  'probe-failed':
-    'The facts probe ran on this server and did not complete. A server can answer a metrics sample perfectly and still refuse this one, so this is reported separately from the server being reachable.',
-  'not-sampled':
-    'This value comes from the metrics sweep rather than the hourly facts probe, and this server has not been sampled yet.'
+  get 'not-collected'() {
+    return t('lib.inventory.gapHelp.notCollected')
+  },
+  get 'probe-failed'() {
+    return t('lib.inventory.gapHelp.probeFailed')
+  },
+  get 'not-sampled'() {
+    return t('lib.inventory.gapHelp.notSampled')
+  }
 }
 
 /**
@@ -171,12 +194,12 @@ const missing = (gap: CellGap, detail?: string): InventoryCell => ({
  */
 export function compactAge(fromMs: number, now = Date.now()): string {
   const s = Math.max(0, Math.floor((now - fromMs) / 1000))
-  if (s < 60) return `${s}s`
+  if (s < 60) return t('lib.inventory.age.seconds', { n: s })
   const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m`
+  if (m < 60) return t('lib.inventory.age.minutes', { n: m })
   const h = Math.floor(m / 60)
-  if (h < 48) return `${h}h`
-  return `${Math.floor(h / 24)}d`
+  if (h < 48) return t('lib.inventory.age.hours', { n: h })
+  return t('lib.inventory.age.days', { n: Math.floor(h / 24) })
 }
 
 /**
@@ -192,13 +215,16 @@ export function agesSentence(
   metadataAt: number | null,
   now = Date.now()
 ): string {
-  const collected =
-    collectedAt === null ? 'never collected' : `collected ${compactAge(collectedAt, now)} ago`
-  const metadata =
-    metadataAt === null
-      ? 'and the age of the package metadata behind the counts is not known'
-      : `from package metadata ${compactAge(metadataAt, now)} old`
-  return `${collected}, ${metadata}`
+  const vars = {
+    collected: collectedAt === null ? '' : compactAge(collectedAt, now),
+    metadata: metadataAt === null ? '' : compactAge(metadataAt, now)
+  }
+  if (collectedAt === null) {
+    return metadataAt === null
+      ? t('lib.inventory.ages.neverUnknown')
+      : t('lib.inventory.ages.neverKnown', vars)
+  }
+  return metadataAt === null ? t('lib.inventory.ages.agoUnknown', vars) : t('lib.inventory.ages.agoKnown', vars)
 }
 
 // ---------------------------------------------------------------------------
@@ -240,44 +266,56 @@ export interface InventoryColumn {
   help?: string
 }
 
+// Label and help are looked up when read, so the table follows a language change.
+function column({
+  labelKey,
+  helpKey,
+  ...rest
+}: Omit<InventoryColumn, 'label' | 'help'> & { labelKey: MessageKey; helpKey?: MessageKey }): InventoryColumn {
+  return Object.defineProperties(rest as InventoryColumn, {
+    label: { get: () => t(labelKey), enumerable: true },
+    ...(helpKey ? { help: { get: () => t(helpKey), enumerable: true } } : {})
+  })
+}
+
 export const INVENTORY_COLUMNS: InventoryColumn[] = [
-  { id: 'host', label: 'Host', primary: true },
-  { id: 'distro', label: 'Distribution', primary: true },
-  { id: 'pkg', label: 'Packages', primary: true, help: 'The package manager this server uses.' },
-  {
+  column({ id: 'host', labelKey: 'lib.inventory.column.host.label', primary: true }),
+  column({ id: 'distro', labelKey: 'lib.inventory.column.distro.label', primary: true }),
+  column({ id: 'pkg', labelKey: 'lib.inventory.column.pkg.label', primary: true, helpKey: 'lib.inventory.column.pkg.help' }),
+  column({
     id: 'pending',
-    label: 'Updates',
+    labelKey: 'lib.inventory.column.pending.label',
     primary: true,
     numeric: true,
-    help: 'Updates the local package cache knows about. OpsMaxx never refreshes that cache — refreshing is a network operation and on some package managers it can break the server — so read this next to the metadata age.'
-  },
-  {
+    helpKey: 'lib.inventory.column.pending.help'
+  }),
+  column({
     id: 'security',
-    label: 'Security',
+    labelKey: 'lib.inventory.column.security.label',
     primary: true,
     numeric: true,
-    help: 'Security updates specifically, where the distribution publishes them. Arch and Alpine have no security channel at all, and dnf cannot answer where the repositories omit updateinfo — those servers say so rather than reporting zero.'
-  },
-  { id: 'reboot', label: 'Reboot', primary: true },
-  {
+    helpKey: 'lib.inventory.column.security.help'
+  }),
+  column({ id: 'reboot', labelKey: 'lib.inventory.column.reboot.label', primary: true }),
+  column({
     id: 'factsAge',
-    label: 'Collected',
+    labelKey: 'lib.inventory.column.factsAge.label',
     primary: true,
     numeric: true,
-    help: 'How long ago these facts were collected. Facts are collected about once an hour, not on the two-minute metrics cadence.'
-  },
-  {
+    helpKey: 'lib.inventory.column.factsAge.help'
+  }),
+  column({
     id: 'metadataAge',
-    label: 'Metadata',
+    labelKey: 'lib.inventory.column.metadataAge.label',
     primary: true,
     numeric: true,
-    help: 'How old the package cache behind the update counts is. This is a SECOND age and not the one above it: freshly collected counts read out of a forty-day-old cache are forty days out of date.'
-  },
-  { id: 'kernel', label: 'Kernel', primary: false },
-  { id: 'arch', label: 'Arch', primary: false },
-  { id: 'cpu', label: 'CPU', primary: false },
-  { id: 'ram', label: 'RAM', primary: false, numeric: true },
-  { id: 'virt', label: 'Virtualisation', primary: false }
+    helpKey: 'lib.inventory.column.metadataAge.help'
+  }),
+  column({ id: 'kernel', labelKey: 'lib.inventory.column.kernel.label', primary: false }),
+  column({ id: 'arch', labelKey: 'lib.inventory.column.arch.label', primary: false }),
+  column({ id: 'cpu', labelKey: 'lib.inventory.column.cpu.label', primary: false }),
+  column({ id: 'ram', labelKey: 'lib.inventory.column.ram.label', primary: false, numeric: true }),
+  column({ id: 'virt', labelKey: 'lib.inventory.column.virt.label', primary: false })
 ]
 
 // ---------------------------------------------------------------------------
@@ -308,7 +346,7 @@ export interface InventoryRow {
 
 /** Bare metal is a real answer and `none` is a confusing way to print it. */
 function virtText(v: string): string {
-  return v === 'none' ? 'bare metal' : v
+  return v === 'none' ? t('lib.inventory.bareMetal') : v
 }
 
 export function buildRow(input: InventoryInput, now = Date.now()): InventoryRow {
@@ -405,8 +443,12 @@ export function buildRow(input: InventoryInput, now = Date.now()): InventoryRow 
       return facts.rebootRequired
         ? // Sorted so "yes" comes first ascending: the hosts owed a reboot are
           // the reason anyone sorts this column.
-          value('yes', 0, facts.rebootReason ? `Waiting on: ${facts.rebootReason}` : '')
-        : value('no', 1)
+          value(
+            t('lib.inventory.reboot.yes'),
+            0,
+            facts.rebootReason ? t('lib.inventory.reboot.waitingOn', { reason: facts.rebootReason }) : ''
+          )
+        : value(t('lib.inventory.reboot.no'), 1)
     })(),
     factsAge:
       input.factsAt === null
@@ -537,7 +579,8 @@ export function summarise(rows: InventoryRow[]): InventorySummary {
     if (sec.gap === null) s.securityTotal += Number(sec.sort)
     else if (sec.gap === 'unsupported') s.securityUnanswerable++
     else s.securityUnknown++
-    if (r.cells.reboot.gap === null && r.cells.reboot.text === 'yes') s.rebootsOwed++
+    // The sort key, not the text, which is in the reader's language.
+    if (r.cells.reboot.gap === null && r.cells.reboot.sort === 0) s.rebootsOwed++
     if (p.staleMetadata || sec.staleMetadata) s.staleMetadata++
   }
   return s

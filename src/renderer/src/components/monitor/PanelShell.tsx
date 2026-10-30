@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Info } from 'lucide-react'
 import { approvalShowing, inLayerAbove } from '../../hooks/useClickOutside'
+import { useT } from '../../lib/i18n'
 
 // The page template every monitoring and operations tab wears.
 //
@@ -91,6 +92,7 @@ export function PanelAbout({
   label?: string
   children: React.ReactNode
 }): React.JSX.Element {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const host = useRef<HTMLSpanElement>(null)
   const id = useId()
@@ -127,13 +129,13 @@ export function PanelAbout({
         aria-controls={id}
         // Named, not just an icon. A screen reader reading "button" beside
         // fifteen identical headings tells nobody which panel it belongs to.
-        aria-label={label ?? `About ${title}`}
+        aria-label={label ?? t('monitor.common.aboutPanel', { title })}
         onClick={() => setOpen((v) => !v)}
       >
         <Info size={14} />
       </button>
       {open && (
-        <div className="panel-info-pop" id={id} role="group" aria-label={label ?? `About ${title}`}>
+        <div className="panel-info-pop" id={id} role="group" aria-label={label ?? t('monitor.common.aboutPanel', { title })}>
           {children}
         </div>
       )}

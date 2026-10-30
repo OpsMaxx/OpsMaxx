@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ShieldAlert, TriangleAlert } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import {
   SCANNER_UNMEASURED,
   summariseScan,
@@ -28,6 +29,7 @@ export function ImageScanPanel({
   image: string
   scan: (ref: string) => Promise<ImageScanProbe>
 }): React.JSX.Element {
+  const t = useT()
   const [probe, setProbe] = useState<ImageScanProbe | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -48,13 +50,13 @@ export function ImageScanPanel({
   return (
     <div style={{ marginTop: 6 }}>
       <button className="btn ghost sm" disabled={loading} onClick={() => void run()}>
-        <ShieldAlert size={12} /> {probe === null ? 'Scan this image' : 'Scan again'}
-        {loading && <span className="faint"> reading…</span>}
+        <ShieldAlert size={12} /> {probe === null ? t('docker.scan.scan') : t('docker.scan.scanAgain')}
+        {loading && <span className="faint"> {t('docker.scan.reading')}</span>}
       </button>
 
       {probe !== null && !probe.ok && (
         <div className="s-note is-alarm">
-          <TriangleAlert size={12} /> The scan did not run: <span className="mono">{probe.detail}</span>
+          <TriangleAlert size={12} /> {t('docker.scan.failed')} <span className="mono">{probe.detail}</span>
         </div>
       )}
 
@@ -78,10 +80,10 @@ export function ImageScanPanel({
                   // total: on the measured Debian image every critical and high
                   // had NO fix, so a total alone invites an upgrade that clears
                   // nothing.
-                  title={`${c.fixable} of ${c.total} have a fixed version`}
+                  title={t('docker.scan.fixableTitle', { fixable: c.fixable, total: c.total })}
                 >
                   {c.severity.toLowerCase()} {c.total}
-                  {c.total > 0 && ` (${c.fixable} fixable)`}
+                  {c.total > 0 && ` ${t('docker.scan.fixable', { fixable: c.fixable })}`}
                 </span>
               ))}
             </div>

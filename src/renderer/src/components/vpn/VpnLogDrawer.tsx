@@ -4,6 +4,7 @@ import { Modal } from '../common/Modal'
 import type { VpnLogLine } from '../../types'
 import { clsx } from '../../lib/format'
 import { bridgeHas } from '../../lib/bridge'
+import { useT } from '../../lib/i18n'
 
 // The renderer's own cap. Main already rings its buffer, but a drawer left open
 // through a reconnect loop would otherwise grow an unbounded React list in a
@@ -60,6 +61,7 @@ export function VpnLogDrawer({
   profileName,
   onClose
 }: VpnLogDrawerProps): React.JSX.Element {
+  const t = useT()
   const [lines, setLines] = useState<VpnLogLine[]>([])
   const [copied, setCopied] = useState(false)
 
@@ -120,8 +122,8 @@ export function VpnLogDrawer({
 
   return (
     <Modal
-      title={`${profileName} — log`}
-      subtitle="Live output from the tunnel engine, with known secrets redacted"
+      title={t('vpn.logs.title', { name: profileName })}
+      subtitle={t('vpn.logs.subtitle')}
       size="lg"
       onClose={onClose}
       // In the sticky footer, like every other modal in the app. Inside
@@ -130,7 +132,7 @@ export function VpnLogDrawer({
       footer={
         <>
           <span className="faint" style={{ fontSize: 11 }}>
-            Showing the last {MAX_LINES} lines.
+            {t('vpn.logs.showingLast', { count: MAX_LINES })}
           </span>
           <span className="spacer" />
           {/* Because the thing people come here for is usually one line — an
@@ -140,13 +142,13 @@ export function VpnLogDrawer({
               which selection by hand does badly across 500 wrapped rows. */}
           <button className="btn" disabled={lines.length === 0} onClick={copyAll}>
             {copied ? <Check size={13} /> : <Copy size={13} />}
-            {copied ? 'Copied' : 'Copy all'}
+            {copied ? t('common.copied') : t('vpn.logs.copyAll')}
           </button>
           <button className="btn" onClick={() => setLines([])}>
-            Clear view
+            {t('vpn.logs.clearView')}
           </button>
           <button className="btn primary" onClick={onClose}>
-            Close
+            {t('common.close')}
           </button>
         </>
       }
@@ -161,7 +163,7 @@ export function VpnLogDrawer({
         }}
       >
         {lines.length === 0 ? (
-          <div className="log-line faint">No output yet.</div>
+          <div className="log-line faint">{t('vpn.logs.empty')}</div>
         ) : (
           collapse(lines).map((l, i) => (
             <div key={`${l.at}-${i}`} className={clsx('log-line', STREAM_CLASS[l.stream])}>

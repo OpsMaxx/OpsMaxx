@@ -11,6 +11,7 @@ import {
 } from '../../../../shared/frpTunnel'
 import type { FrpPublicHost, FrpSpec, FrpTokenResult, VpnProfile } from '../../../../shared/vpn'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
 
 /**
  * `vpn.frpToken`, read off the bridge rather than called through it.
@@ -79,10 +80,11 @@ export function FrpTunnelSetup({
   onClose,
   onDone
 }: FrpTunnelSetupProps): React.JSX.Element {
+  const t = useT()
   const upsertVpnProfile = useApp((s) => s.upsertVpnProfile)
   const base = existing?.spec.kind === 'frp' ? existing.spec : null
 
-  const [name, setName] = useState(existing?.name ?? 'Tunnel server')
+  const [name, setName] = useState(existing?.name ?? t('vpn.frp.setup.defaultName'))
   const [serverAddr, setServerAddr] = useState(base?.serverAddr ?? '')
   const [serverPort, setServerPort] = useState(base?.serverPort ?? 7000)
   const [token, setToken] = useState('')
@@ -120,9 +122,9 @@ export function FrpTunnelSetup({
     try {
       let tokenRef = base?.auth.tokenRef
       if (token.trim() && storeToken) {
-        const stored = await withVaultUnlock(`Saving the frp token for ${name.trim()}`, () =>
+        const stored = await withVaultUnlock(t('vpn.frp.setup.unlockReason', { name: name.trim() }), () =>
           storeToken({
-            profileName: name.trim() || 'Tunnel server',
+            profileName: name.trim() || t('vpn.frp.setup.defaultName'),
             workspaceId,
             token: token.trim(),
             ...(tokenRef?.vaultEntryId ? { replaces: tokenRef.vaultEntryId } : {})
@@ -132,7 +134,7 @@ export function FrpTunnelSetup({
           // The dialog stays open with everything still typed in, so the user
           // can unlock the vault and press Finish again rather than starting
           // the setup over.
-          toast(stored?.error ?? 'The token could not be saved to the vault.', 'error')
+          toast(stored?.error ?? t('vpn.frp.setup.tokenNotSaved'), 'error')
           return
         }
         tokenRef = stored.tokenRef
@@ -166,12 +168,12 @@ export function FrpTunnelSetup({
       const profile: VpnProfile = {
         id: existing?.id ?? `vpn-${crypto.randomUUID()}`,
         workspaceId,
-        name: name.trim() || 'Tunnel server',
+        name: name.trim() || t('vpn.frp.setup.defaultName'),
         autoStart: existing?.autoStart ?? false,
         spec
       }
       upsertVpnProfile(profile)
-      toast(`${profile.name} saved`, 'ok')
+      toast(t('vpn.frp.setup.saved', { name: profile.name }), 'ok')
       onDone(profile)
     } finally {
       setSaving(false)
@@ -180,30 +182,28 @@ export function FrpTunnelSetup({
 
   return (
     <Modal
-      title="Set up a tunnel server"
-      subtitle="Once. After this, publishing a port is one step."
+      title={t('vpn.frp.setup.title')}
+      subtitle={t('vpn.frp.setup.subtitle')}
       size="lg"
       onClose={onClose}
-      confirm={{ label: 'Finish setup', disabled: !ready, onClick: () => void finish() }}
+      confirm={{ label: t('vpn.frp.setup.finish'), disabled: !ready, onClick: () => void finish() }}
     >
       <div className="col" style={{ gap: 14 }}>
         {/* Said once, here, and nowhere else in this pane. */}
         <p className="muted" style={{ fontSize: 12, margin: 0, lineHeight: 1.5 }}>
-          OpsMaxx does not serve public addresses. frp publishes through an frp server you run,
-          under a domain you own — so those are the two things this asks for. It is the only time
-          it will.
+          {t('vpn.frp.setup.intro')}
         </p>
 
-        <Field label="Name">
+        <Field label={t('vpn.frp.setup.name')}>
           <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
         </Field>
 
         <div className="field-row">
           <Field
-            label="frp server address"
+            label={t('vpn.frp.setup.serverAddr')}
             required
             error={
-              serverAddr.trim() === '' ? 'Name the frp server this client dials.' : null
+              serverAddr.trim() === '' ? t('vpn.frp.setup.serverAddrMissing') : null
             }
           >
             <input
@@ -214,9 +214,9 @@ export function FrpTunnelSetup({
             />
           </Field>
           <Field
-            label="Control port"
+            label={t('vpn.frp.setup.controlPort')}
             required
-            error={serverPort > 0 && serverPort < 65536 ? null : 'A port between 1 and 65535.'}
+            error={serverPort > 0 && serverPort < 65536 ? null : t('vpn.frp.setup.portRange')}
           >
             <input
               className="input"
@@ -229,17 +229,21 @@ export function FrpTunnelSetup({
         </div>
 
         <Field
-          label="Server token"
+          label={t('vpn.frp.setup.token')}
           hint={
             storeToken
-              ? 'Stored in the vault. Leave it empty if your frp server has no token.'
-              : 'This build of the preload bridge cannot store a token yet — add one to this profile’s vault entry instead.'
+              ? t('vpn.frp.setup.tokenHint')
+              : t('vpn.frp.setup.tokenUnsupported')
           }
         >
           <input
             className="input"
             type="password"
-            placeholder={base?.auth.tokenRef ? 'Stored in the vault — type to replace' : 'auth.token from frps.toml'}
+            placeholder={
+              base?.auth.tokenRef
+                ? t('vpn.frp.setup.tokenStoredPlaceholder')
+                : t('vpn.frp.setup.tokenPlaceholder')
+            }
             value={token}
             onChange={(e) => setToken(e.target.value)}
             disabled={!storeToken}
@@ -250,14 +254,14 @@ export function FrpTunnelSetup({
 
         <div className="field-row">
           <Field
-            label="Your domain"
+            label={t('vpn.frp.setup.domain')}
             required
             error={
               baseDomain.trim() === ''
-                ? 'A domain you own, delegated to your frp server.'
+                ? t('vpn.frp.setup.domainMissing')
                 : domainOk
                   ? null
-                  : 'This is not a domain name.'
+                  : t('vpn.frp.setup.domainInvalid')
             }
           >
             <input
@@ -267,7 +271,7 @@ export function FrpTunnelSetup({
               onChange={(e) => setBaseDomain(e.target.value)}
             />
           </Field>
-          <Field label="Served over">
+          <Field label={t('vpn.frp.setup.servedOver')}>
             <select
               className="input"
               value={scheme}
@@ -280,7 +284,7 @@ export function FrpTunnelSetup({
               ))}
             </select>
           </Field>
-          <Field label="Port in the URL">
+          <Field label={t('vpn.frp.setup.urlPort')}>
             <input
               className="input"
               type="number"
@@ -296,13 +300,12 @@ export function FrpTunnelSetup({
           // wish fails in the browser rather than here, where it could be
           // explained.
           <span className="field-hint">
-            Choose https only if something in front of your frp server terminates TLS for these
-            names. frp does not do it for you.
+            {t('vpn.frp.setup.httpsNote')}
           </span>
         )}
 
         <div className="field">
-          <span className="field-label">The DNS record</span>
+          <span className="field-label">{t('vpn.frp.setup.dnsRecord')}</span>
           <code
             className="input"
             style={{ display: 'block', fontSize: 12, padding: '6px 8px', userSelect: 'text' }}
@@ -310,8 +313,9 @@ export function FrpTunnelSetup({
             {record}
           </code>
           <span className="field-hint">
-            A wildcard, so every service you publish later gets a name without another DNS change.
-            {example ? ` A service named "staging" would appear at ${example}.` : ''}
+            {example
+              ? t('vpn.frp.setup.wildcardExample', { url: example })
+              : t('vpn.frp.setup.wildcardNote')}
           </span>
         </div>
 
@@ -321,13 +325,12 @@ export function FrpTunnelSetup({
         <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
           <Switch
             checked={confirmed}
-            label="I have created this record, and my frp server serves HTTP for these names."
+            label={t('vpn.frp.setup.confirmLabel')}
             style={{ marginTop: 1 }}
             onChange={setConfirmed}
           />
           <span style={{ fontSize: 12, color: confirmed ? 'var(--text-muted)' : 'var(--warn)' }}>
-            I have created this record, and my frp server serves HTTP for these names. OpsMaxx
-            does not check — it cannot see your DNS.
+            {t('vpn.frp.setup.confirmText')}
           </span>
         </label>
       </div>

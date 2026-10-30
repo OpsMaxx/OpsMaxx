@@ -42,11 +42,13 @@ import { MonitorStrip } from './MonitorStrip'
 import { SftpView } from './SftpView'
 import { RdpView } from '../rdp/RdpView'
 import type { PanelView, Server, Tab, TabView } from '../../types'
+import { useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
-const VIEWS: { id: PanelView; label: string; icon: React.ReactNode }[] = [
-  { id: 'terminal', label: 'Terminal', icon: <TerminalIcon size={14} /> },
-  { id: 'monitor', label: 'Monitor', icon: <Activity size={14} /> },
-  { id: 'files', label: 'Files', icon: <FolderOpen size={14} /> }
+const VIEWS: { id: PanelView; labelKey: MessageKey; icon: React.ReactNode }[] = [
+  { id: 'terminal', labelKey: 'panel.view.terminal', icon: <TerminalIcon size={14} /> },
+  { id: 'monitor', labelKey: 'panel.view.monitor', icon: <Activity size={14} /> },
+  { id: 'files', labelKey: 'panel.view.files', icon: <FolderOpen size={14} /> }
 ]
 
 // A single tab pane. Every view the user has opened (Terminal / Monitor /
@@ -69,6 +71,7 @@ function TabPane({
   // gated on visibility rather than on being rendered.
   active: boolean
 }): React.JSX.Element {
+  const t = useT()
   // `TabView`, not `PanelView`: this runs for every kind of tab, including the
   // RDP one whose only view is 'desktop'. The pane styles below stay on
   // `PanelView`, because by the time they are called the tab is an SSH one.
@@ -117,7 +120,13 @@ function TabPane({
   }
 
   if (!server) {
-    return <EmptyState icon={<TerminalIcon size={26} />} title="Session unavailable" message="This server no longer exists." />
+    return (
+      <EmptyState
+        icon={<TerminalIcon size={26} />}
+        title={t('panel.pane.unavailableTitle')}
+        message={t('panel.pane.serverGone')}
+      />
+    )
   }
 
   // Before the view-by-view rendering below, because an RDP tab has none of
@@ -213,6 +222,7 @@ const localHost = {
 // terminal instead of a blank rectangle; it just cannot be split, and its
 // session is keyed by the tab id rather than a pane id.
 function Terminals({ tab, tp }: { tab: Tab; tp: TabPanes | undefined }): React.JSX.Element {
+  const t = useT()
   const servers = useApp((s) => s.servers)
   const localShells = useApp((s) => s.localShells)
   const setServerStatus = useApp((s) => s.setServerStatus)
@@ -225,8 +235,8 @@ function Terminals({ tab, tp }: { tab: Tab; tp: TabPanes | undefined }): React.J
       return (
         <EmptyState
           icon={<TerminalIcon size={26} />}
-          title="Session unavailable"
-          message="This shell is no longer available on this machine."
+          title={t('panel.pane.unavailableTitle')}
+          message={t('panel.pane.shellGone')}
         />
       )
     }
@@ -239,14 +249,20 @@ function Terminals({ tab, tp }: { tab: Tab; tp: TabPanes | undefined }): React.J
     return (
       <EmptyState
         icon={<TerminalIcon size={26} />}
-        title="Session unavailable"
-        message="A remote desktop has no terminal."
+        title={t('panel.pane.unavailableTitle')}
+        message={t('panel.pane.rdpNoTerminal')}
       />
     )
   }
   const server = servers.find((sv) => sv.id === tab.serverId)
   if (!server) {
-    return <EmptyState icon={<TerminalIcon size={26} />} title="Session unavailable" message="This server no longer exists." />
+    return (
+      <EmptyState
+        icon={<TerminalIcon size={26} />}
+        title={t('panel.pane.unavailableTitle')}
+        message={t('panel.pane.serverGone')}
+      />
+    )
   }
   // A demo server has no transport: TerminalView falls through to the
   // simulated shell, which is what `server` is still passed for.
@@ -279,6 +295,7 @@ function Terminals({ tab, tp }: { tab: Tab; tp: TabPanes | undefined }): React.J
 // with no config would send a first-run user to a dialog that can only tell
 // them there is nothing there.
 function NoTabs(): React.JSX.Element {
+  const t = useT()
   const setModal = useApp((s) => s.setModal)
   const servers = useWorkspaceServers()
   // null while the probe is outstanding: not "no config", which would make the
@@ -301,8 +318,8 @@ function NoTabs(): React.JSX.Element {
     return (
       <EmptyState
         icon={<ServerIcon size={26} />}
-        title="No open sessions"
-        message="Select a server from the sidebar to open a terminal."
+        title={t('panel.noTabs.noSessionsTitle')}
+        message={t('panel.noTabs.noSessionsMessage')}
       />
     )
   }
@@ -311,11 +328,11 @@ function NoTabs(): React.JSX.Element {
   return (
     <EmptyState
       icon={<ServerIcon size={26} />}
-      title="No servers yet"
+      title={t('panel.noTabs.noServersTitle')}
       message={
         importFirst
-          ? `OpsMaxx found ${config.count} host${config.count === 1 ? '' : 's'} in your ~/.ssh/config. Import them, or add one by hand.`
-          : 'Add a connection to get started, or import the ones you already have from ~/.ssh/config.'
+          ? t('panel.noTabs.foundHosts', { count: config.count })
+          : t('panel.noTabs.noServersMessage')
       }
       action={
         <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
@@ -323,13 +340,13 @@ function NoTabs(): React.JSX.Element {
             className={clsx('btn', importFirst && 'primary')}
             onClick={() => setModal('import-ssh')}
           >
-            <Download size={15} /> Import from ~/.ssh/config
+            <Download size={15} /> {t('panel.noTabs.import')}
           </button>
           <button
             className={clsx('btn', !importFirst && 'primary')}
             onClick={() => setModal('add-server')}
           >
-            <Plus size={15} /> Add Server
+            <Plus size={15} /> {t('panel.noTabs.addServer')}
           </button>
         </div>
       }
@@ -356,6 +373,7 @@ function TabKindIcon({ tab }: { tab: Tab }): React.JSX.Element {
 }
 
 export function WorkspacePanel(): React.JSX.Element {
+  const tr = useT()
   // Tabs shown in the bar: this workspace only.
   const tabs = useWorkspaceTabs()
   // Every tab in every workspace stays mounted, so switching workspace does
@@ -414,42 +432,42 @@ export function WorkspacePanel(): React.JSX.Element {
     const idx = tabs.findIndex((t) => t.id === tabId)
     return [
       {
-        label: 'Rename…',
+        label: tr('panel.tabMenu.rename'),
         icon: <Pencil size={14} />,
         // The strip owns the editor; this only asks for it. A nonce, because
         // asking twice for the same tab must be two events.
         onClick: () => setRenaming({ id: tabId, nonce: Date.now() })
       },
-      { label: 'Duplicate Tab', icon: <Copy size={14} />, onClick: () => duplicateTab(tabId) },
+      { label: tr('panel.tabMenu.duplicate'), icon: <Copy size={14} />, onClick: () => duplicateTab(tabId) },
       { separator: true, label: '' },
-      { label: 'Close', icon: <X size={14} />, onClick: () => closeTab(tabId) },
+      { label: tr('common.close'), icon: <X size={14} />, onClick: () => closeTab(tabId) },
       {
-        label: 'Close Others',
+        label: tr('panel.tabMenu.closeOthers'),
         icon: <X size={14} />,
         disabled: tabs.length < 2,
         onClick: () => closeOtherTabs(tabId)
       },
       {
-        label: 'Close All to the Left',
+        label: tr('panel.tabMenu.closeLeft'),
         icon: <ArrowLeftToLine size={14} />,
         disabled: idx <= 0,
         onClick: () => closeTabsToLeft(tabId)
       },
       {
-        label: 'Close All to the Right',
+        label: tr('panel.tabMenu.closeRight'),
         icon: <ArrowRightToLine size={14} />,
         disabled: idx === tabs.length - 1,
         onClick: () => closeTabsToRight(tabId)
       },
       { separator: true, label: '' },
-      { label: 'Close All Tabs', icon: <X size={14} />, danger: true, onClick: () => closeAllTabs() }
+      { label: tr('panel.tabMenu.closeAll'), icon: <X size={14} />, danger: true, onClick: () => closeAllTabs() }
     ]
   }
 
   return (
     <div className="main">
       <TabStrip
-        label="Session tabs"
+        label={tr('panel.tabs.sessionTabs')}
         items={tabs.map((t) => {
           const srv = t.kind === 'ssh' || t.kind === 'rdp' ? servers.find((s) => s.id === t.serverId) : undefined
           return {
@@ -464,7 +482,7 @@ export function WorkspacePanel(): React.JSX.Element {
             // The full name plus what it is connected to, because the title
             // itself is ellipsised at 220px and a truncated hostname is the
             // one thing a user hovers a tab to find out.
-            tooltip: srv ? `${t.title} — ${srv.name}` : t.title
+            tooltip: srv ? tr('panel.tabs.tooltip', { title: t.title, server: srv.name }) : t.title
           }
         })}
         activeId={activeTabId}
@@ -477,7 +495,7 @@ export function WorkspacePanel(): React.JSX.Element {
       >
         {/* A split button: the plus repeats whatever the current tab is, the
             caret opens the list of shells on this machine. */}
-        <button className="tab-new" title="New session" onClick={addTab}>
+        <button className="tab-new" title={tr('panel.tabs.newSession')} onClick={addTab}>
           <Plus size={16} />
         </button>
         <LocalShellMenu />
@@ -512,7 +530,7 @@ export function WorkspacePanel(): React.JSX.Element {
                 className={clsx('seg-btn', active.view === v.id && 'active')}
                 onClick={() => setTabView(active.id, v.id)}
               >
-                {v.icon} {v.label}
+                {v.icon} {tr(v.labelKey)}
               </button>
             ))}
           </div>
@@ -532,7 +550,7 @@ export function WorkspacePanel(): React.JSX.Element {
                   and the toolbar sits above all of them. */}
               <button
                 className="icon-btn"
-                title="Find in terminal"
+                title={tr('panel.toolbar.find')}
                 onClick={() =>
                   requestTerminalFind(panes[active.id]?.activePaneId ?? active.id)
                 }
@@ -541,14 +559,14 @@ export function WorkspacePanel(): React.JSX.Element {
               </button>
               <button
                 className={clsx('icon-btn', activeSplit === 'v' && 'active')}
-                title="Split vertical"
+                title={tr('panel.toolbar.splitVertical')}
                 onClick={() => toggleSplit(active.id, 'v')}
               >
                 <SplitSquareHorizontal size={15} />
               </button>
               <button
                 className={clsx('icon-btn', activeSplit === 'h' && 'active')}
-                title="Split horizontal"
+                title={tr('panel.toolbar.splitHorizontal')}
                 onClick={() => toggleSplit(active.id, 'h')}
               >
                 <SplitSquareVertical size={15} />
@@ -563,8 +581,8 @@ export function WorkspacePanel(): React.JSX.Element {
                 disabled={atPaneCap}
                 title={
                   atPaneCap
-                    ? `Maximum of ${MAX_PANES} panes per tab`
-                    : 'Add a pane on the same target'
+                    ? tr('panel.toolbar.paneCap', { max: MAX_PANES })
+                    : tr('panel.toolbar.addPane')
                 }
                 onClick={() => splitPane(active.id, activeSplit ?? 'v')}
               >

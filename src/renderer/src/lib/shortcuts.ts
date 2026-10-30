@@ -5,6 +5,9 @@
 // call it, so what the user presses while recording is exactly what matches
 // later. Nothing else parses key events.
 
+import type { MessageKey, Vars } from '../../../shared/i18n'
+import { t } from './i18n'
+
 export type Scope = 'global' | 'app' | 'terminal' | 'http'
 
 export interface Command {
@@ -45,45 +48,62 @@ export interface Command {
   hint?: string
 }
 
+interface CommandSpec extends Omit<Command, 'name' | 'group' | 'hint'> {
+  nameKey: MessageKey
+  nameVars?: Vars
+  groupKey: MessageKey
+  hintKey?: MessageKey
+}
+
+// The words are looked up each time they are read rather than once at import,
+// so Settings and the palette follow a language change.
+function cmd({ nameKey, nameVars, groupKey, hintKey, ...rest }: CommandSpec): Command {
+  return Object.defineProperties(rest as Command, {
+    name: { get: () => t(nameKey, nameVars), enumerable: true },
+    group: { get: () => t(groupKey), enumerable: true },
+    ...(hintKey ? { hint: { get: () => t(hintKey), enumerable: true } } : {})
+  })
+}
+
 // Order here is the order shown in Settings.
 export const COMMANDS: Command[] = [
-  { id: 'palette', name: 'Command Palette', group: 'General', scope: 'app', keys: 'Ctrl+K' },
-  {
+  cmd({ id: 'palette', nameKey: 'lib.shortcuts.palette.name', groupKey: 'lib.shortcuts.group.general', scope: 'app', keys: 'Ctrl+K' }),
+  cmd({
     id: 'palette-global',
-    name: 'Command Palette (in terminal)',
-    group: 'General',
+    nameKey: 'lib.shortcuts.paletteGlobal.name',
+    groupKey: 'lib.shortcuts.group.general',
     scope: 'global',
     keys: 'Ctrl+Shift+P',
-    hint: 'Ctrl+K is kill-line in a shell, so terminals need a second binding.'
-  },
-  { id: 'settings', name: 'Open Settings', group: 'General', scope: 'app', keys: 'Ctrl+,', winKeys: 'Ctrl+Shift+,' },
-  { id: 'toggle-sidebar', name: 'Toggle Sidebar', group: 'General', scope: 'app', keys: 'Ctrl+B' },
-  {
+    hintKey: 'lib.shortcuts.paletteGlobal.hint'
+  }),
+  cmd({ id: 'settings', nameKey: 'lib.shortcuts.settings.name', groupKey: 'lib.shortcuts.group.general', scope: 'app', keys: 'Ctrl+,', winKeys: 'Ctrl+Shift+,' }),
+  cmd({ id: 'toggle-sidebar', nameKey: 'lib.shortcuts.toggleSidebar.name', groupKey: 'lib.shortcuts.group.general', scope: 'app', keys: 'Ctrl+B' }),
+  cmd({
     id: 'toggle-sidebar-global',
-    name: 'Toggle Sidebar (in terminal)',
-    group: 'General',
+    nameKey: 'lib.shortcuts.toggleSidebarGlobal.name',
+    groupKey: 'lib.shortcuts.group.general',
     scope: 'global',
     keys: 'Ctrl+Shift+B',
-    hint: 'Ctrl+B is backward-char and the tmux prefix, so terminals need a second binding.'
-  },
+    hintKey: 'lib.shortcuts.toggleSidebarGlobal.hint'
+  }),
 
-  { id: 'new-server', name: 'New Server', group: 'Tabs', scope: 'app', keys: 'Ctrl+N', winKeys: 'Alt+N' },
-  { id: 'new-terminal', name: 'New Terminal', group: 'Tabs', scope: 'app', keys: 'Ctrl+T', winKeys: 'Ctrl+Shift+T' },
-  {
+  cmd({ id: 'new-server', nameKey: 'lib.shortcuts.newServer.name', groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+N', winKeys: 'Alt+N' }),
+  cmd({ id: 'new-terminal', nameKey: 'lib.shortcuts.newTerminal.name', groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+T', winKeys: 'Ctrl+Shift+T' }),
+  cmd({
     id: 'new-local-terminal',
-    name: 'New Local Terminal',
-    group: 'Tabs',
+    nameKey: 'lib.shortcuts.newLocalTerminal.name',
+    groupKey: 'lib.shortcuts.group.tabs',
     scope: 'app',
     keys: 'Ctrl+Shift+T',
     // Ctrl+Shift+T is New Tab on Windows and Linux -- what both their terminals
     // bind -- so the local shell moves aside there rather than taking it.
     winKeys: 'Alt+Shift+T',
-    hint: 'Opens a shell on this machine, not on a server.'
-  },
-  { id: 'duplicate-tab', name: 'Duplicate Tab', group: 'Tabs', scope: 'app', keys: 'Ctrl+Shift+D' },
-  { id: 'close-tab', name: 'Close Tab', group: 'Tabs', scope: 'app', keys: 'Ctrl+W', winKeys: 'Ctrl+Shift+W' },
-  { id: 'next-tab', name: 'Next Tab', group: 'Tabs', scope: 'global', keys: 'Ctrl+Tab' },
-  { id: 'prev-tab', name: 'Previous Tab', group: 'Tabs', scope: 'global', keys: 'Ctrl+Shift+Tab' },
+    hintKey: 'lib.shortcuts.newLocalTerminal.hint'
+  }),
+  cmd({ id: 'duplicate-tab', nameKey: 'lib.shortcuts.duplicateTab.name', groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+Shift+D' }),
+  cmd({ id: 'close-tab', nameKey: 'lib.shortcuts.closeTab.name', groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+W', winKeys: 'Ctrl+Shift+W' }),
+  cmd({ id: 'next-tab', nameKey: 'lib.shortcuts.nextTab.name', groupKey: 'lib.shortcuts.group.tabs', scope: 'global', keys: 'Ctrl+Tab' }),
+  cmd({ id: 'prev-tab', nameKey: 'lib.shortcuts.prevTab.name', groupKey: 'lib.shortcuts.group.tabs', scope: 'global', keys: 'Ctrl+Shift+Tab' }),
   /**
    * NOT Ctrl+Shift+T, which every browser uses for this and which this app
    * already spends on New Local Terminal. In a terminal client that meaning is
@@ -91,16 +111,16 @@ export const COMMANDS: Command[] = [
    * it — and moving a binding people already have in their fingers to gain the
    * browser's is a bad trade. Ctrl+Shift+Z reads as the undo it is.
    */
-  {
+  cmd({
     id: 'reopen-tab',
-    name: 'Reopen Closed Tab',
-    group: 'Tabs',
+    nameKey: 'lib.shortcuts.reopenTab.name',
+    groupKey: 'lib.shortcuts.group.tabs',
     scope: 'app',
     keys: 'Ctrl+Shift+Z',
-    hint: 'Reconnects a fresh session on the same target; scrollback is not restored.'
-  },
-  { id: 'split-v', name: 'Split Right', group: 'Tabs', scope: 'app', keys: 'Ctrl+\\', winKeys: 'Alt+\\' },
-  { id: 'split-h', name: 'Split Down', group: 'Tabs', scope: 'app', keys: 'Ctrl+Shift+\\' },
+    hintKey: 'lib.shortcuts.reopenTab.hint'
+  }),
+  cmd({ id: 'split-v', nameKey: 'lib.shortcuts.splitV.name', groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+\\', winKeys: 'Alt+\\' }),
+  cmd({ id: 'split-h', nameKey: 'lib.shortcuts.splitH.name', groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+Shift+\\' }),
 
   /**
    * Jump to a tab by position, 9 meaning the last one however many there are.
@@ -109,63 +129,63 @@ export const COMMANDS: Command[] = [
    * settings pane's source of truth and a generated block cannot be read by
    * someone scanning for a key they think is taken.
    */
-  { id: 'select-tab-1', name: 'Go to Tab 1', group: 'Tabs', scope: 'app', keys: 'Ctrl+1', winKeys: 'Alt+1' },
-  { id: 'select-tab-2', name: 'Go to Tab 2', group: 'Tabs', scope: 'app', keys: 'Ctrl+2', winKeys: 'Alt+2' },
-  { id: 'select-tab-3', name: 'Go to Tab 3', group: 'Tabs', scope: 'app', keys: 'Ctrl+3', winKeys: 'Alt+3' },
-  { id: 'select-tab-4', name: 'Go to Tab 4', group: 'Tabs', scope: 'app', keys: 'Ctrl+4', winKeys: 'Alt+4' },
-  { id: 'select-tab-5', name: 'Go to Tab 5', group: 'Tabs', scope: 'app', keys: 'Ctrl+5', winKeys: 'Alt+5' },
-  { id: 'select-tab-6', name: 'Go to Tab 6', group: 'Tabs', scope: 'app', keys: 'Ctrl+6', winKeys: 'Alt+6' },
-  { id: 'select-tab-7', name: 'Go to Tab 7', group: 'Tabs', scope: 'app', keys: 'Ctrl+7', winKeys: 'Alt+7' },
-  { id: 'select-tab-8', name: 'Go to Tab 8', group: 'Tabs', scope: 'app', keys: 'Ctrl+8', winKeys: 'Alt+8' },
-  {
+  cmd({ id: 'select-tab-1', nameKey: 'lib.shortcuts.selectTab.name', nameVars: { n: 1 }, groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+1', winKeys: 'Alt+1' }),
+  cmd({ id: 'select-tab-2', nameKey: 'lib.shortcuts.selectTab.name', nameVars: { n: 2 }, groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+2', winKeys: 'Alt+2' }),
+  cmd({ id: 'select-tab-3', nameKey: 'lib.shortcuts.selectTab.name', nameVars: { n: 3 }, groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+3', winKeys: 'Alt+3' }),
+  cmd({ id: 'select-tab-4', nameKey: 'lib.shortcuts.selectTab.name', nameVars: { n: 4 }, groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+4', winKeys: 'Alt+4' }),
+  cmd({ id: 'select-tab-5', nameKey: 'lib.shortcuts.selectTab.name', nameVars: { n: 5 }, groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+5', winKeys: 'Alt+5' }),
+  cmd({ id: 'select-tab-6', nameKey: 'lib.shortcuts.selectTab.name', nameVars: { n: 6 }, groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+6', winKeys: 'Alt+6' }),
+  cmd({ id: 'select-tab-7', nameKey: 'lib.shortcuts.selectTab.name', nameVars: { n: 7 }, groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+7', winKeys: 'Alt+7' }),
+  cmd({ id: 'select-tab-8', nameKey: 'lib.shortcuts.selectTab.name', nameVars: { n: 8 }, groupKey: 'lib.shortcuts.group.tabs', scope: 'app', keys: 'Ctrl+8', winKeys: 'Alt+8' }),
+  cmd({
     id: 'select-tab-last',
-    name: 'Go to Last Tab',
-    group: 'Tabs',
+    nameKey: 'lib.shortcuts.selectTabLast.name',
+    groupKey: 'lib.shortcuts.group.tabs',
     scope: 'app',
     keys: 'Ctrl+9',
     winKeys: 'Alt+9',
-    hint: 'The last tab, whatever the count — the same as every browser.'
-  },
+    hintKey: 'lib.shortcuts.selectTabLast.hint'
+  }),
 
-  {
+  cmd({
     id: 'new-workspace',
-    name: 'New Workspace',
-    group: 'Workspaces',
+    nameKey: 'lib.shortcuts.newWorkspace.name',
+    groupKey: 'lib.shortcuts.group.workspaces',
     scope: 'global',
     keys: 'Ctrl+Shift+N'
-  },
-  {
+  }),
+  cmd({
     id: 'switch-workspace',
-    name: 'Switch to Workspace 1–9',
-    group: 'Workspaces',
+    nameKey: 'lib.shortcuts.switchWorkspace.name',
+    groupKey: 'lib.shortcuts.group.workspaces',
     scope: 'global',
     keys: 'Ctrl+1…9',
     fixed: true,
-    hint: 'Numbering follows the sidebar order. In the HTTP client these keys go to request tabs.'
-  },
-  {
+    hintKey: 'lib.shortcuts.switchWorkspace.hint'
+  }),
+  cmd({
     id: 'lock-workspace',
-    name: 'Lock Workspace',
-    group: 'Workspaces',
+    nameKey: 'lib.shortcuts.lockWorkspace.name',
+    groupKey: 'lib.shortcuts.group.workspaces',
     scope: 'app',
     keys: 'Ctrl+L',
     winKeys: 'Ctrl+Shift+L',
-    hint: 'Only for workspaces that have a password set.'
-  },
+    hintKey: 'lib.shortcuts.lockWorkspace.hint'
+  }),
 
-  { id: 'open-files', name: 'Open Files', group: 'Views', scope: 'global', keys: 'Ctrl+Shift+E' },
-  { id: 'open-monitor', name: 'Open Fleet Monitor', group: 'Views', scope: 'app', keys: 'Ctrl+M', winKeys: 'Ctrl+Shift+M' },
-  { id: 'zoom-in', name: 'Zoom In', group: 'Views', scope: 'global', keys: 'Ctrl+=' },
-  {
+  cmd({ id: 'open-files', nameKey: 'lib.shortcuts.openFiles.name', groupKey: 'lib.shortcuts.group.views', scope: 'global', keys: 'Ctrl+Shift+E' }),
+  cmd({ id: 'open-monitor', nameKey: 'lib.shortcuts.openMonitor.name', groupKey: 'lib.shortcuts.group.views', scope: 'app', keys: 'Ctrl+M', winKeys: 'Ctrl+Shift+M' }),
+  cmd({ id: 'zoom-in', nameKey: 'lib.shortcuts.zoomIn.name', groupKey: 'lib.shortcuts.group.views', scope: 'global', keys: 'Ctrl+=' }),
+  cmd({
     id: 'zoom-in-alt',
-    name: 'Zoom In (alternate)',
-    group: 'Views',
+    nameKey: 'lib.shortcuts.zoomInAlt.name',
+    groupKey: 'lib.shortcuts.group.views',
     scope: 'global',
     keys: 'Ctrl+Shift+=',
-    hint: 'The shifted form of the same key, which is how "Ctrl +" is usually typed.'
-  },
-  { id: 'zoom-out', name: 'Zoom Out', group: 'Views', scope: 'global', keys: 'Ctrl+-' },
-  { id: 'zoom-reset', name: 'Reset Zoom', group: 'Views', scope: 'global', keys: 'Ctrl+0' },
+    hintKey: 'lib.shortcuts.zoomInAlt.hint'
+  }),
+  cmd({ id: 'zoom-out', nameKey: 'lib.shortcuts.zoomOut.name', groupKey: 'lib.shortcuts.group.views', scope: 'global', keys: 'Ctrl+-' }),
+  cmd({ id: 'zoom-reset', nameKey: 'lib.shortcuts.zoomReset.name', groupKey: 'lib.shortcuts.group.views', scope: 'global', keys: 'Ctrl+0' }),
 
   /**
    * The HTTP client (§2.7). Tabs there are request tabs: the Tabs commands
@@ -174,125 +194,126 @@ export const COMMANDS: Command[] = [
    * protect. `keys: ''` leaves an alias unbound on macOS, where Cmd already
    * does the job.
    */
-  { id: 'http-new-tab', name: 'New Request Tab', group: 'HTTP client', scope: 'http', keys: '', winKeys: 'Ctrl+T' },
-  { id: 'http-close-tab', name: 'Close Request Tab', group: 'HTTP client', scope: 'http', keys: '', winKeys: 'Ctrl+W' },
-  ...[1, 2, 3, 4, 5, 6, 7, 8].map(
-    (n): Command => ({
+  cmd({ id: 'http-new-tab', nameKey: 'lib.shortcuts.httpNewTab.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: '', winKeys: 'Ctrl+T' }),
+  cmd({ id: 'http-close-tab', nameKey: 'lib.shortcuts.httpCloseTab.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: '', winKeys: 'Ctrl+W' }),
+  ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) =>
+    cmd({
       id: `http-select-tab-${n}`,
-      name: `Go to Request Tab ${n}`,
-      group: 'HTTP client',
+      nameKey: 'lib.shortcuts.httpSelectTab.name',
+      nameVars: { n },
+      groupKey: 'lib.shortcuts.group.httpClient',
       scope: 'http',
       keys: '',
       winKeys: `Ctrl+${n}`
     })
   ),
-  {
+  cmd({
     id: 'http-select-tab-last',
-    name: 'Go to Last Request Tab',
-    group: 'HTTP client',
+    nameKey: 'lib.shortcuts.httpSelectTabLast.name',
+    groupKey: 'lib.shortcuts.group.httpClient',
     scope: 'http',
     keys: '',
     winKeys: 'Ctrl+9',
-    hint: 'In the HTTP client Ctrl+1…9 are request tabs, not workspaces.'
-  },
-  {
+    hintKey: 'lib.shortcuts.httpSelectTabLast.hint'
+  }),
+  cmd({
     id: 'http-send',
-    name: 'Send / Connect / Run',
-    group: 'HTTP client',
+    nameKey: 'lib.shortcuts.httpSend.name',
+    groupKey: 'lib.shortcuts.group.httpClient',
     scope: 'http',
     keys: 'Ctrl+Enter',
-    hint: 'On a connected WebSocket it sends the message; it never disconnects.'
-  },
-  { id: 'http-save', name: 'Save Request', group: 'HTTP client', scope: 'http', keys: 'Ctrl+S' },
-  { id: 'http-save-as', name: 'Save Request As…', group: 'HTTP client', scope: 'http', keys: 'Ctrl+Shift+S' },
-  {
+    hintKey: 'lib.shortcuts.httpSend.hint'
+  }),
+  cmd({ id: 'http-save', nameKey: 'lib.shortcuts.httpSave.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Ctrl+S' }),
+  cmd({ id: 'http-save-as', nameKey: 'lib.shortcuts.httpSaveAs.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Ctrl+Shift+S' }),
+  cmd({
     id: 'http-focus-region',
-    name: 'Next Region',
-    group: 'HTTP client',
+    nameKey: 'lib.shortcuts.httpFocusRegion.name',
+    groupKey: 'lib.shortcuts.group.httpClient',
     scope: 'http',
     keys: 'F6',
-    hint: 'Tree, URL, request tabs, response. Needs fn on a Mac laptop.'
-  },
-  { id: 'http-focus-region-back', name: 'Previous Region', group: 'HTTP client', scope: 'http', keys: 'Shift+F6' },
-  {
+    hintKey: 'lib.shortcuts.httpFocusRegion.hint'
+  }),
+  cmd({ id: 'http-focus-region-back', nameKey: 'lib.shortcuts.httpFocusRegionBack.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Shift+F6' }),
+  cmd({
     id: 'http-focus-url',
-    name: 'Focus URL',
-    group: 'HTTP client',
+    nameKey: 'lib.shortcuts.httpFocusUrl.name',
+    groupKey: 'lib.shortcuts.group.httpClient',
     scope: 'http',
     // ⌘L is Lock Workspace on macOS and stays so; F6 reaches the URL there.
     keys: '',
     winKeys: 'Ctrl+L'
-  },
-  { id: 'http-env', name: 'Environment Picker', group: 'HTTP client', scope: 'http', keys: 'Ctrl+E' },
-  { id: 'http-toggle-response', name: 'Toggle Response', group: 'HTTP client', scope: 'http', keys: 'Ctrl+J' },
-  { id: 'http-toggle-request', name: 'Toggle Request', group: 'HTTP client', scope: 'http', keys: 'Ctrl+Shift+J' },
-  {
+  }),
+  cmd({ id: 'http-env', nameKey: 'lib.shortcuts.httpEnv.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Ctrl+E' }),
+  cmd({ id: 'http-toggle-response', nameKey: 'lib.shortcuts.httpToggleResponse.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Ctrl+J' }),
+  cmd({ id: 'http-toggle-request', nameKey: 'lib.shortcuts.httpToggleRequest.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Ctrl+Shift+J' }),
+  cmd({
     id: 'http-toggle-layout',
-    name: 'Side by Side / Stacked',
-    group: 'HTTP client',
+    nameKey: 'lib.shortcuts.httpToggleLayout.name',
+    groupKey: 'lib.shortcuts.group.httpClient',
     scope: 'http',
     keys: 'Ctrl+Alt+J'
-  },
-  { id: 'http-beautify', name: 'Beautify', group: 'HTTP client', scope: 'http', keys: 'Ctrl+Alt+B' },
-  {
+  }),
+  cmd({ id: 'http-beautify', nameKey: 'lib.shortcuts.httpBeautify.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Ctrl+Alt+B' }),
+  cmd({
     id: 'http-copy-curl',
-    name: 'Copy as cURL',
-    group: 'HTTP client',
+    nameKey: 'lib.shortcuts.httpCopyCurl.name',
+    groupKey: 'lib.shortcuts.group.httpClient',
     scope: 'http',
     keys: 'Ctrl+Shift+C',
-    hint: 'Secrets are masked.'
-  },
+    hintKey: 'lib.shortcuts.httpCopyCurl.hint'
+  }),
   /*
    * Fixed, not rebindable: the editors (CodeMirror's Mod-F) and the collection
    * tree (Mod-D) own these keys where they apply, so a rebinding here would
    * change what Settings shows and nothing else.
    */
-  { id: 'http-find', name: 'Find', group: 'HTTP client', scope: 'http', keys: 'Ctrl+F', fixed: true },
-  { id: 'http-duplicate', name: 'Duplicate', group: 'HTTP client', scope: 'http', keys: 'Ctrl+D', fixed: true },
-  { id: 'http-import', name: 'Import…', group: 'HTTP client', scope: 'http', keys: 'Ctrl+O' },
-  {
+  cmd({ id: 'http-find', nameKey: 'lib.shortcuts.httpFind.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Ctrl+F', fixed: true }),
+  cmd({ id: 'http-duplicate', nameKey: 'lib.shortcuts.httpDuplicate.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Ctrl+D', fixed: true }),
+  cmd({ id: 'http-import', nameKey: 'lib.shortcuts.httpImport.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Ctrl+O' }),
+  cmd({
     id: 'http-variable-card',
-    name: 'Show Variable',
-    group: 'HTTP client',
+    nameKey: 'lib.shortcuts.httpVariableCard.name',
+    groupKey: 'lib.shortcuts.group.httpClient',
     scope: 'http',
     keys: 'Ctrl+I',
     fixed: true,
-    hint: 'In a URL or value field, at the caret.'
-  },
-  { id: 'http-cancel', name: 'Cancel Request', group: 'HTTP client', scope: 'http', keys: 'Escape', fixed: true },
-  { id: 'http-rename', name: 'Rename', group: 'HTTP client', scope: 'http', keys: 'F2', fixed: true },
-  {
+    hintKey: 'lib.shortcuts.httpVariableCard.hint'
+  }),
+  cmd({ id: 'http-cancel', nameKey: 'lib.shortcuts.httpCancel.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Escape', fixed: true }),
+  cmd({ id: 'http-rename', nameKey: 'lib.shortcuts.httpRename.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'F2', fixed: true }),
+  cmd({
     id: 'http-delete',
-    name: 'Delete Tree Row',
-    group: 'HTTP client',
+    nameKey: 'lib.shortcuts.httpDelete.name',
+    groupKey: 'lib.shortcuts.group.httpClient',
     scope: 'http',
     keys: isMac() ? 'Ctrl+Backspace' : 'Delete',
     fixed: true,
-    hint: 'Plain Backspace never deletes.'
-  },
-  { id: 'http-tree-undo', name: 'Undo Tree Delete', group: 'HTTP client', scope: 'http', keys: 'Ctrl+Z', fixed: true },
+    hintKey: 'lib.shortcuts.httpDelete.hint'
+  }),
+  cmd({ id: 'http-tree-undo', nameKey: 'lib.shortcuts.httpTreeUndo.name', groupKey: 'lib.shortcuts.group.httpClient', scope: 'http', keys: 'Ctrl+Z', fixed: true }),
 
-  { id: 'term-copy', name: 'Copy', group: 'Terminal', scope: 'terminal', keys: 'Ctrl+Shift+C' },
-  {
+  cmd({ id: 'term-copy', nameKey: 'lib.shortcuts.termCopy.name', groupKey: 'lib.shortcuts.group.terminal', scope: 'terminal', keys: 'Ctrl+Shift+C' }),
+  cmd({
     id: 'term-copy-alt',
-    name: 'Copy (alternate)',
-    group: 'Terminal',
+    nameKey: 'lib.shortcuts.termCopyAlt.name',
+    groupKey: 'lib.shortcuts.group.terminal',
     scope: 'terminal',
     keys: 'Ctrl+Insert'
-  },
-  { id: 'term-paste', name: 'Paste', group: 'Terminal', scope: 'terminal', keys: 'Ctrl+Shift+V' },
-  {
+  }),
+  cmd({ id: 'term-paste', nameKey: 'lib.shortcuts.termPaste.name', groupKey: 'lib.shortcuts.group.terminal', scope: 'terminal', keys: 'Ctrl+Shift+V' }),
+  cmd({
     id: 'term-paste-alt',
-    name: 'Paste (alternate)',
-    group: 'Terminal',
+    nameKey: 'lib.shortcuts.termPasteAlt.name',
+    groupKey: 'lib.shortcuts.group.terminal',
     scope: 'terminal',
     keys: 'Shift+Insert'
-  },
-  { id: 'term-find', name: 'Find in Terminal', group: 'Terminal', scope: 'terminal', keys: 'Ctrl+Shift+F' },
-  {
+  }),
+  cmd({ id: 'term-find', nameKey: 'lib.shortcuts.termFind.name', groupKey: 'lib.shortcuts.group.terminal', scope: 'terminal', keys: 'Ctrl+Shift+F' }),
+  cmd({
     id: 'term-find-alt',
-    name: 'Find in Terminal (alternate)',
-    group: 'Terminal',
+    nameKey: 'lib.shortcuts.termFindAlt.name',
+    groupKey: 'lib.shortcuts.group.terminal',
     scope: 'terminal',
     /**
      * macOS only, because Cmd folds into Ctrl here.
@@ -309,7 +330,7 @@ export const COMMANDS: Command[] = [
      * alias can set one in Settings > Keyboard Shortcuts.
      */
     keys: isMac() ? 'Ctrl+F' : ''
-  }
+  })
 ]
 
 export const COMMANDS_BY_ID = new Map(COMMANDS.map((c) => [c.id, c]))

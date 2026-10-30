@@ -21,57 +21,47 @@ import type {
   FilePathRule,
   PermissionValue
 } from '../../../../shared/mcp'
+import type { MessageKey } from '../../../../shared/i18n'
+import { t } from '../../lib/i18n'
 
 interface Phrasing {
   /** Bare infinitive — "Can run commands", "Cannot run commands". */
-  verb: string
+  verbKey: MessageKey
   /** Gerund — "Asks before running commands". */
-  gerund: string
+  gerundKey: MessageKey
 }
 
 // Short verb phrases, not the grid's noun labels: "Execute terminal commands,
 // Read files" is a column header, "run commands and read files" is a sentence.
 const PHRASING: Record<AiCapability, Phrasing> = {
-  viewServer: { verb: 'see server details', gerund: 'showing server details' },
-  terminal: { verb: 'run commands', gerund: 'running commands' },
-  readFiles: { verb: 'read files', gerund: 'reading files' },
-  writeFiles: { verb: 'write files', gerund: 'writing files' },
-  sftpDownload: { verb: 'download files', gerund: 'downloading files' },
-  sftpUpload: { verb: 'upload files', gerund: 'uploading files' },
-  sshTunnel: { verb: 'define and open SSH tunnels', gerund: 'defining and opening SSH tunnels' },
-  databaseAccess: { verb: 'query databases', gerund: 'querying databases' },
-  sudo: { verb: 'use sudo', gerund: 'using sudo' },
-  containers: { verb: 'list containers and read their logs', gerund: 'reading containers' },
-  containerControl: { verb: 'start and stop containers', gerund: 'controlling containers' },
-  ciRead: { verb: 'read CI pipelines and build output', gerund: 'reading CI pipelines and build output' },
+  viewServer: { verbKey: 'ai.summary.verb.viewServer', gerundKey: 'ai.summary.gerund.viewServer' },
+  terminal: { verbKey: 'ai.summary.verb.terminal', gerundKey: 'ai.summary.gerund.terminal' },
+  readFiles: { verbKey: 'ai.summary.verb.readFiles', gerundKey: 'ai.summary.gerund.readFiles' },
+  writeFiles: { verbKey: 'ai.summary.verb.writeFiles', gerundKey: 'ai.summary.gerund.writeFiles' },
+  sftpDownload: { verbKey: 'ai.summary.verb.sftpDownload', gerundKey: 'ai.summary.gerund.sftpDownload' },
+  sftpUpload: { verbKey: 'ai.summary.verb.sftpUpload', gerundKey: 'ai.summary.gerund.sftpUpload' },
+  sshTunnel: { verbKey: 'ai.summary.verb.sshTunnel', gerundKey: 'ai.summary.gerund.sshTunnel' },
+  databaseAccess: { verbKey: 'ai.summary.verb.databaseAccess', gerundKey: 'ai.summary.gerund.databaseAccess' },
+  sudo: { verbKey: 'ai.summary.verb.sudo', gerundKey: 'ai.summary.gerund.sudo' },
+  containers: { verbKey: 'ai.summary.verb.containers', gerundKey: 'ai.summary.gerund.containers' },
+  containerControl: { verbKey: 'ai.summary.verb.containerControl', gerundKey: 'ai.summary.gerund.containerControl' },
+  ciRead: { verbKey: 'ai.summary.verb.ciRead', gerundKey: 'ai.summary.gerund.ciRead' },
   // No internal comma: these phrases are joined into a comma list, and one
   // that contains its own commas cannot be told apart from its neighbours.
-  ciTrigger: { verb: 'start and cancel CI pipelines', gerund: 'starting and cancelling CI pipelines' },
-  fleetRead: { verb: 'read across the fleet', gerund: 'reading across the fleet' },
-  backupRead: { verb: 'see backup health', gerund: 'reading backup health' },
-  serverMetrics: { verb: 'read server metrics', gerund: 'reading server metrics' },
-  hostFacts: {
-    verb: 'read the server inventory and its pending security updates',
-    gerund: 'reading the server inventory and its pending security updates'
-  },
+  ciTrigger: { verbKey: 'ai.summary.verb.ciTrigger', gerundKey: 'ai.summary.gerund.ciTrigger' },
+  fleetRead: { verbKey: 'ai.summary.verb.fleetRead', gerundKey: 'ai.summary.gerund.fleetRead' },
+  backupRead: { verbKey: 'ai.summary.verb.backupRead', gerundKey: 'ai.summary.gerund.backupRead' },
+  serverMetrics: { verbKey: 'ai.summary.verb.serverMetrics', gerundKey: 'ai.summary.gerund.serverMetrics' },
+  hostFacts: { verbKey: 'ai.summary.verb.hostFacts', gerundKey: 'ai.summary.gerund.hostFacts' },
   // "collect", not "read": no agent can read these at all, and the verb has to
   // survive being read quickly. What the grant does is let OpsMaxx's own
   // hourly posture probe ASK the host for its rule lines.
-  sudoersRead: {
-    verb: 'collect this server’s sudoers rules',
-    gerund: 'collecting this server’s sudoers rules'
-  },
-  firewallRules: {
-    verb: 'collect this server’s firewall rule list',
-    gerund: 'collecting this server’s firewall rule list'
-  },
+  sudoersRead: { verbKey: 'ai.summary.verb.sudoersRead', gerundKey: 'ai.summary.gerund.sudoersRead' },
+  firewallRules: { verbKey: 'ai.summary.verb.firewallRules', gerundKey: 'ai.summary.gerund.firewallRules' },
   // All three verbs, matching the capability's own detail. The card is what
   // most people read instead of the grid, so a summary that still said only
   // "add servers" would be the last place the old, narrower promise survived.
-  manageServers: {
-    verb: 'add, change and remove servers in the workspace',
-    gerund: 'adding, changing and removing servers in the workspace'
-  },
+  manageServers: { verbKey: 'ai.summary.verb.manageServers', gerundKey: 'ai.summary.gerund.manageServers' },
   // Says what it grants and what it does not, matching the capability's own
   // detail. "Control VPNs and reverse proxies" reads as a power over both, and
   // no value of this setting grants the second: an frp proxy makes a port on
@@ -79,10 +69,7 @@ const PHRASING: Record<AiCapability, Phrasing> = {
   // refuses one at any setting and no access group can permit it. A summary
   // that names a power the code refuses is how somebody ends up believing they
   // granted less than they did — or more.
-  vpnControl: {
-    verb: 'start and stop VPNs, and list reverse proxies',
-    gerund: 'starting and stopping VPNs, and listing reverse proxies'
-  }
+  vpnControl: { verbKey: 'ai.summary.verb.vpnControl', gerundKey: 'ai.summary.gerund.vpnControl' }
 }
 
 // The three that do not merely act on a server the user already trusts: sudo is
@@ -221,29 +208,36 @@ function sortForSentence(ids: AiCapability[]): AiCapability[] {
   return [...ids].sort((a, b) => rank(a) - rank(b))
 }
 
+const verb = (id: AiCapability): string => t(PHRASING[id].verbKey)
+const gerund = (id: AiCapability): string => t(PHRASING[id].gerundKey)
+
 /** "a", "a and b", "a, b, and c" — Oxford comma, matching the app's copy. */
 function join(items: string[], conjunction: 'and' | 'or'): string {
   if (items.length === 0) return ''
   if (items.length === 1) return items[0]
-  if (items.length === 2) return `${items[0]} ${conjunction} ${items[1]}`
-  return `${items.slice(0, -1).join(', ')}, ${conjunction} ${items[items.length - 1]}`
+  const last = items[items.length - 1]
+  if (items.length === 2) {
+    return conjunction === 'and'
+      ? t('ai.summary.list.andTwo', { first: items[0], last })
+      : t('ai.summary.list.orTwo', { first: items[0], last })
+  }
+  const rest = items.slice(0, -1).join(t('ai.summary.list.separator'))
+  return conjunction === 'and'
+    ? t('ai.summary.list.andMany', { rest, last })
+    : t('ai.summary.list.orMany', { rest, last })
 }
 
 // "1 path rule that allows it and 3 that block it" — the noun is carried by the
 // first part only, and the verb agrees with its own count.
-const EXCEPTION_VERB: Record<PermissionValue, { one: string; many: string }> = {
-  allow: { one: 'allows it', many: 'allow it' },
-  ask: { one: 'asks you first', many: 'ask you first' },
-  deny: { one: 'blocks it', many: 'block it' }
+const EXCEPTION_KEYS: Record<PermissionValue, { first: MessageKey; more: MessageKey }> = {
+  allow: { first: 'ai.summary.exception.firstAllow', more: 'ai.summary.exception.moreAllow' },
+  ask: { first: 'ai.summary.exception.firstAsk', more: 'ai.summary.exception.moreAsk' },
+  deny: { first: 'ai.summary.exception.firstDeny', more: 'ai.summary.exception.moreDeny' }
 }
 
 function exceptionTail(exceptions: FileRuleException[]): string {
   return join(
-    exceptions.map(({ value, count }, i) => {
-      const verb = count === 1 ? EXCEPTION_VERB[value].one : EXCEPTION_VERB[value].many
-      const noun = i === 0 ? `path ${count === 1 ? 'rule' : 'rules'} ` : ''
-      return `${count} ${noun}that ${verb}`
-    }),
+    exceptions.map(({ value, count }, i) => t(EXCEPTION_KEYS[value][i === 0 ? 'first' : 'more'], { count })),
     'and'
   )
 }
@@ -253,26 +247,23 @@ function fileCapabilityClause(
   value: PermissionValue,
   exceptions: FileRuleException[]
 ): string {
-  const { verb, gerund } = PHRASING[id]
-  const base =
-    value === 'allow'
-      ? `Can ${verb} without asking`
-      : value === 'ask'
-        ? `Asks you first before ${gerund}`
-        : `Cannot ${verb}`
-  return `${base} — except ${exceptionTail(exceptions)}.`
+  const except = exceptionTail(exceptions)
+  return value === 'allow'
+    ? t('ai.summary.fileClause.allow', { verb: verb(id), except })
+    : value === 'ask'
+      ? t('ai.summary.fileClause.ask', { gerund: gerund(id), except })
+      : t('ai.summary.fileClause.deny', { verb: verb(id), except })
 }
 
 function unrecognisedClause(items: CapabilityDecision[]): string {
-  const named = items.map((d) => `${d.label} ("${d.unrecognised}")`)
+  const named = items.map((d) => t('ai.summary.unrecognisedItem', { label: d.label, value: d.unrecognised ?? '' }))
   return items.length === 1
-    ? `${named[0]} is set to a value OpsMaxx does not recognise, so the policy engine allows it. Set it again below.`
-    : `${join(named, 'and')} are set to values OpsMaxx does not recognise, so the policy engine allows them. Set them again below.`
+    ? t('ai.summary.unrecognisedOne', { name: named[0] })
+    : t('ai.summary.unrecognisedMany', { names: join(named, 'and') })
 }
 
 /** The card's word for RISKY_ACTIONS, qualifying every "without asking" above it. */
-export const RISKY_CLAUSE =
-  'Still confirms risky actions it allows — destructive commands, database writes, tunnels, server changes, VPNs and CI runs.'
+export const RISKY_CLAUSE_KEY: MessageKey = 'ai.summary.riskyClause'
 
 export interface AccessGroupSummary {
   /** The whole thing, ready to render or assert on. */
@@ -349,31 +340,26 @@ export function summariseAccessGroup(group: AccessGroup): AccessGroupSummary {
     // The state a brand-new install is in until a group is assigned, and the
     // one that makes an agent look broken rather than restricted.
     clauses.push(
-      overridden.length > 0
-        ? 'Allows nothing except the file paths below — every other AI request against the server is refused.'
-        : 'Allows nothing — every AI request against the server is refused.'
+      overridden.length > 0 ? t('ai.summary.allowsNothingExceptPaths') : t('ai.summary.allowsNothing')
     )
   } else if (counts.allow === decisions.length) {
     // Listing all twelve here reads as a wall of text at the exact moment the
     // reader most needs to notice one fact, so name the dangerous three.
-    const including = join(
-      ELEVATED_CAPABILITIES.map((id) => PHRASING[id].gerund),
-      'and'
-    )
+    const including = join(ELEVATED_CAPABILITIES.map(gerund), 'and')
     clauses.push(
       overridden.length > 0
-        ? `Can do everything without asking except the file paths below — including ${including}.`
-        : `Can do everything without asking — including ${including}.`
+        ? t('ai.summary.everythingExceptPaths', { including })
+        : t('ai.summary.everything', { including })
     )
   } else {
     if (allowed.length > 0) {
-      clauses.push(`Can ${join(allowed.map((id) => PHRASING[id].verb), 'and')} without asking.`)
+      clauses.push(t('ai.summary.allowed', { verbs: join(allowed.map(verb), 'and') }))
     }
     if (asked.length > 0) {
-      clauses.push(`Asks you first before ${join(asked.map((id) => PHRASING[id].gerund), 'and')}.`)
+      clauses.push(t('ai.summary.asked', { gerunds: join(asked.map(gerund), 'and') }))
     }
     if (denied.length > 0) {
-      clauses.push(`Cannot ${join(denied.map((id) => PHRASING[id].verb), 'or')}.`)
+      clauses.push(t('ai.summary.denied', { verbs: join(denied.map(verb), 'or') }))
     }
   }
 
@@ -381,7 +367,7 @@ export function summariseAccessGroup(group: AccessGroup): AccessGroupSummary {
 
   // Absent reads as ON, as it does to the policy engine (confirmsRisky). Only
   // said when something is allowed: it qualifies an Allow and nothing else.
-  if (group.confirmRisky !== false && counts.allow > 0) clauses.push(RISKY_CLAUSE)
+  if (group.confirmRisky !== false && counts.allow > 0) clauses.push(t(RISKY_CLAUSE_KEY))
 
   return {
     sentence: clauses.join(' '),
@@ -439,7 +425,7 @@ export function summariseFilePolicies(
 
   if (rules.length === 0) {
     return {
-      sentence: 'No path rules — every file follows the read and write settings above.',
+      sentence: t('ai.summary.files.none'),
       total: 0,
       denying: 0,
       asking: 0,
@@ -448,15 +434,15 @@ export function summariseFilePolicies(
   }
 
   const parts: string[] = []
-  if (denying > 0) parts.push(`${denying} blocking access`)
-  if (asking > 0) parts.push(`${asking} asking first`)
-  const detail = parts.length > 0 ? ` — ${join(parts, 'and')}` : ''
-  const widened =
-    widening > 0
-      ? ` ${widening} ${widening === 1 ? 'grants' : 'grant'} more than the capabilities above, and the path rule wins.`
-      : ''
+  if (denying > 0) parts.push(t('ai.summary.files.blocking', { count: denying }))
+  if (asking > 0) parts.push(t('ai.summary.files.asking', { count: asking }))
+  const head =
+    parts.length > 0
+      ? t('ai.summary.files.rulesWithDetail', { count: rules.length, detail: join(parts, 'and') })
+      : t('ai.summary.files.rules', { count: rules.length })
+  const widened = widening > 0 ? ` ${t('ai.summary.files.widening', { count: widening })}` : ''
   return {
-    sentence: `${rules.length} path ${rules.length === 1 ? 'rule' : 'rules'}${detail}.${widened}`,
+    sentence: `${head}${widened}`,
     total: rules.length,
     denying,
     asking,

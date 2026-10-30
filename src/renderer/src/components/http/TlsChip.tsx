@@ -4,6 +4,7 @@ import { useHttp } from '../../store/http'
 import { useApi } from '../../store/api'
 import { clsx } from '../../lib/format'
 import { useTabOrGhost } from './RouteChip'
+import { useT } from '../../lib/i18n'
 
 export interface TlsChipProps {
   tabId: Id
@@ -19,6 +20,7 @@ export interface TlsChipProps {
  */
 export function TlsChip({ tabId, compact }: TlsChipProps): React.JSX.Element | null {
   const tab = useTabOrGhost(tabId)
+  const t = useT()
   const collection = useApi((s) => (tab?.ref ? s.collections.find((c) => c.id === tab.ref!.collectionId) : undefined))
   if (!collection) return null
   const open = (): void => {
@@ -29,32 +31,32 @@ export function TlsChip({ tabId, compact }: TlsChipProps): React.JSX.Element | n
   // accepts it (§2.16, SEC-M4), and every request tab says so, not only the
   // collection: it is the request that would be sent under it.
   if (collection.tlsReview) {
-    const label = `Connection settings for ${collection.name} changed on another device — Review`
+    const label = t('http.tls.reviewLabel', { name: collection.name })
     return (
       <button
         className={clsx('hc-chip hc-chip-danger', compact && 'hc-chip-icon')}
         aria-label={label}
-        title={`${label}. The change is not used until it is accepted in the collection's Connection settings.`}
+        title={t('http.tls.reviewTitle', { label })}
         onClick={open}
       >
         <ShieldAlert size={14} aria-hidden />
-        {!compact && <span className="hc-chip-text">Review TLS change</span>}
+        {!compact && <span className="hc-chip-text">{t('http.tls.reviewChip')}</span>}
       </button>
     )
   }
   if (!collection.insecureTls && !collection.caPem) return null
 
   const off = collection.insecureTls
-  const text = off ? 'TLS unverified' : 'Custom CA'
+  const text = off ? t('http.tls.unverified') : t('http.tls.customCa')
   const label = off
-    ? `Certificate verification is off for this collection (${collection.name})`
-    : `Certificates are checked against a custom CA from ${collection.name}`
+    ? t('http.tls.unverifiedLabel', { name: collection.name })
+    : t('http.tls.customCaLabel', { name: collection.name })
   const Icon = off ? AlertTriangle : BadgeCheck
   return (
     <button
       className={clsx('hc-chip', off ? 'hc-chip-danger' : 'hc-chip-info', compact && 'hc-chip-icon')}
       aria-label={label}
-      title={`${label}. Change it in the collection's Connection settings.`}
+      title={t('http.tls.changeTitle', { label })}
       onClick={open}
     >
       <Icon size={14} aria-hidden />

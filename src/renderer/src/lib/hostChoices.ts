@@ -1,4 +1,5 @@
 import type { Server } from '../types'
+import { t } from './i18n'
 
 /**
  * Which servers a host dropdown offers, and which one it starts on.
@@ -56,7 +57,7 @@ export function hostChoices(servers: Server[]): HostChoice[] {
       // "offline" would be a statement about the host; this is a statement
       // about this app's session with it, which is the only thing `status`
       // actually records.
-      note: connected ? null : 'not connected'
+      note: connected ? null : t('lib.hostChoices.notConnected')
     }
   })
 }

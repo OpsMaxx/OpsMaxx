@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Eye, EyeOff, X } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import { formatBytes, maskHeaderValue } from './InspectView'
 import type { InspectFlow, InspectHeader } from '../../../../shared/inspect'
 
@@ -20,6 +21,7 @@ export function InspectFlowDetail({
   flow: InspectFlow
   onClose: () => void
 }): React.JSX.Element {
+  const t = useT()
   const [tab, setTab] = useState<'request' | 'response'>('response')
   const [revealed, setRevealed] = useState(false)
 
@@ -45,7 +47,7 @@ export function InspectFlowDetail({
           </div>
         </div>
         <div className="spacer" />
-        <button className="btn ghost size-24" onClick={onClose} aria-label="Close details">
+        <button className="btn ghost size-24" onClick={onClose} aria-label={t('inspect.detail.close')}>
           <X size={14} />
         </button>
       </div>
@@ -61,42 +63,39 @@ export function InspectFlowDetail({
           className={clsx('seg-btn', tab === 'request' && 'active')}
           onClick={() => setTab('request')}
         >
-          Request <span className="count">{formatBytes(flow.requestBytes ?? 0)}</span>
+          {t('inspect.detail.request')} <span className="count">{formatBytes(flow.requestBytes ?? 0)}</span>
         </button>
         <button
           className={clsx('seg-btn', tab === 'response' && 'active')}
           onClick={() => setTab('response')}
         >
-          Response <span className="count">{formatBytes(flow.responseBytes ?? 0)}</span>
+          {t('inspect.detail.response')} <span className="count">{formatBytes(flow.responseBytes ?? 0)}</span>
         </button>
       </div>
 
       <section style={{ padding: '0 var(--sp-2)' }}>
         <div className="row" style={{ alignItems: 'center' }}>
-          <h3 style={{ margin: '8px 0' }}>Headers</h3>
+          <h3 style={{ margin: '8px 0' }}>{t('inspect.detail.headers')}</h3>
           <div className="spacer" />
           {hasSensitive && (
             <button className="btn ghost size-24" onClick={() => setRevealed((v) => !v)}>
               {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
-              {revealed ? 'Hide credentials' : 'Reveal credentials'}
+              {revealed ? t('inspect.detail.hideCredentials') : t('inspect.detail.revealCredentials')}
             </button>
           )}
         </div>
         {headers.length === 0 ? (
-          <div className="sub">None recorded.</div>
+          <div className="sub">{t('inspect.detail.noneRecorded')}</div>
         ) : (
           <HeaderList headers={headers} revealed={revealed} />
         )}
         {tab === 'request' && flow.request.headersTruncated && (
-          <div className="sub">
-            The header list was longer than OpsMaxx records. The request itself was forwarded
-            whole.
-          </div>
+          <div className="sub">{t('inspect.detail.headersTruncated')}</div>
         )}
       </section>
 
       <section style={{ padding: 'var(--sp-2)' }}>
-        <h3 style={{ margin: '8px 0' }}>Body</h3>
+        <h3 style={{ margin: '8px 0' }}>{t('inspect.detail.body')}</h3>
         <BodyView flow={flow} side={tab} />
       </section>
     </aside>
@@ -135,6 +134,7 @@ function BodyView({
   flow: InspectFlow
   side: 'request' | 'response'
 }): React.JSX.Element {
+  const t = useT()
   const preview = side === 'request' ? flow.requestPreview : flow.responsePreview
   const spilled = side === 'request' ? flow.requestSpilled : flow.responseSpilled
   const size = (side === 'request' ? flow.requestBytes : flow.responseBytes) ?? 0
@@ -165,25 +165,24 @@ function BodyView({
 
   if (flow.upgraded) {
     return (
-      <div className="sub">
-        This connection was upgraded to another protocol after the handshake — a WebSocket, almost
-        always. The handshake above is recorded; the frames that follow are not.
-      </div>
+      <div className="sub">{t('inspect.detail.upgraded')}</div>
     )
   }
   if (!preview && size === 0) {
-    return <div className="sub">No body.</div>
+    return <div className="sub">{t('inspect.detail.noBody')}</div>
   }
   if (!preview) {
-    return <div className="sub">{formatBytes(size)} not recorded.</div>
+    return <div className="sub">{t('inspect.detail.notRecorded', { size: formatBytes(size) })}</div>
   }
 
   return (
     <div className="col" style={{ gap: 6 }}>
       {binary ? (
         <div className="sub">
-          {formatBytes(size)} of binary data ({flow.contentType ?? 'unknown type'}). Not shown as
-          text.
+          {t('inspect.detail.binary', {
+            size: formatBytes(size),
+            type: flow.contentType ?? t('inspect.detail.unknownType')
+          })}
         </div>
       ) : (
         <pre
@@ -226,24 +225,24 @@ function BodyView({
           }}
         >
           {loading
-            ? 'Loading…'
+            ? t('common.loading')
             : full
-              ? `Load more (${formatBytes(offset)} of ${formatBytes(total ?? size)})`
-              : `Load recorded body (${formatBytes(size)})`}
+              ? t('inspect.detail.loadMore', {
+                  loaded: formatBytes(offset),
+                  total: formatBytes(total ?? size)
+                })
+              : t('inspect.detail.loadRecorded', { size: formatBytes(size) })}
         </button>
       )}
 
       {eof && full && (
         <div className="sub">
-          Showing the whole recorded body, {formatBytes(total ?? offset)}.
+          {t('inspect.detail.wholeBody', { size: formatBytes(total ?? offset) })}
         </div>
       )}
 
       {truncated && (
-        <div className="sub">
-          This body was larger than the capture limit. It reached its destination in full; only the
-          recording stops here.
-        </div>
+        <div className="sub">{t('inspect.detail.truncated')}</div>
       )}
     </div>
   )

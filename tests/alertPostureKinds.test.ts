@@ -144,7 +144,7 @@ describe('a certificate running out', () => {
 
     cert(-1)
     expect(raises()).toHaveLength(2)
-    expect(shown[1].title).toBe('web-1: Certificate 1 days PAST expiry')
+    expect(shown[1].title).toBe('web-1: Certificate 1 day PAST expiry')
   })
 
   it('does not treat every step below the line as a crossing', () => {

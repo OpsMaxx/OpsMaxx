@@ -7,6 +7,7 @@ import { isVaultLocked, withVaultUnlock } from '../../lib/withVaultUnlock'
 import { clsx, duration } from '../../lib/format'
 import { remoteText } from '../../../../shared/remoteText'
 import { useApp } from '../../store/app'
+import { useT } from '../../lib/i18n'
 import { confirmHeldRecord, heldSentence, useAddyUi } from '../../store/addy'
 import { TabStrip } from '../panel/TabStrip'
 import { ContextMenu, type MenuEntry } from '../connections/ContextMenu'
@@ -121,6 +122,7 @@ export function CicdPanel({
   active?: boolean
   onSaveConnection?: (connection: CicdConnection, token: string) => void | Promise<void>
 }): React.JSX.Element {
+  const t = useT()
   const stored = useCicdConnectionList()
   const upsert = useApp((s) => s.upsertCicdConnection)
   const connections = seed ?? stored
@@ -306,7 +308,7 @@ export function CicdPanel({
       // vault the user was never asked to open. Declining still throws, and the
       // modal now says so on the button rather than swallowing it.
       const vaultEntryId = await withVaultUnlock(
-        `Unlocking lets OpsMaxx store the token for ${connection.name}.`,
+        t('cicd.panel.unlockToStore', { name: connection.name }),
         () => bridge!.createSecret(`CI/CD — ${connection.name}`, token)
       )
       record = { ...connection, vaultEntryId }
@@ -347,18 +349,18 @@ export function CicdPanel({
    */
   const accountMenu = (c: CicdConnection): MenuEntry[] => [
     {
-      label: 'Edit…',
+      label: t('cicd.panel.menuEdit'),
       icon: <Pencil size={14} />,
       onClick: () => setConnecting({ mode: 'edit', connection: c })
     },
     {
-      label: 'Update token…',
+      label: t('cicd.panel.menuUpdateToken'),
       icon: <KeyRound size={14} />,
       onClick: () => setConnecting({ mode: 'edit', connection: c })
     },
     { label: '', separator: true },
     {
-      label: 'Remove…',
+      label: t('cicd.panel.menuRemove'),
       icon: <Trash2 size={14} />,
       danger: true,
       onClick: () => setAccountsOpen({ on: 'remove', connection: c })
@@ -368,20 +370,11 @@ export function CicdPanel({
   return (
     <PanelShell
       icon={<Activity size={16} />}
-      title="CI/CD"
+      title={t('modules.cicd.label')}
       about={
         <>
-          <p className="ui-note">
-            Pipelines, runs and logs from Jenkins, GitLab CI and GitHub Actions accounts you
-            connect. OpsMaxx polls them on a timer and never receives a webhook, so everything
-            here is as fresh as the last successful read — which the header states.
-          </p>
-          <p className="ui-note">
-            Reading is what this module does on its own. Starting, cancelling and disabling live
-            on the same screen but behind a second module — "Start a build" — because the
-            consequence is that a deploy goes out, and that is a separate decision from being
-            allowed to look.
-          </p>
+          <p className="ui-note">{t('cicd.panel.about1')}</p>
+          <p className="ui-note">{t('cicd.panel.about2')}</p>
         </>
       }
       actions={
@@ -391,12 +384,12 @@ export function CicdPanel({
             disabled={!canRefresh}
             title={
               canRefresh
-                ? 'Read every connected account now, ignoring the timer.'
-                : 'This build cannot read on demand. Restart the app to rebuild the bridge.'
+                ? t('cicd.panel.refreshTitle')
+                : t('cicd.panel.refreshUnavailable')
             }
             onClick={() => readNow(bridge, states, connections.map((c) => c.id))}
           >
-            Refresh
+            {t('common.refresh')}
           </button>
         )
       }
@@ -405,14 +398,14 @@ export function CicdPanel({
       {connections.length === 0 ? (
         <EmptyState
           icon={<Activity size={22} />}
-          title="No CI account is connected"
-          message="Connect a Jenkins, GitLab or GitHub account and OpsMaxx will watch its pipelines. Nothing is polled until one exists."
+          title={t('cicd.common.noAccount')}
+          message={t('cicd.panel.emptyMessage')}
           action={
             <button
               className="btn primary size-28"
               onClick={() => setConnecting({ mode: 'new' })}
             >
-              Connect an account
+              {t('cicd.accounts.connect')}
             </button>
           }
         />
@@ -438,22 +431,26 @@ export function CicdPanel({
           <div className="cicd-nav">
           <div className="cicd-accounts-strip">
             <TabStrip
-              label="CI/CD account tabs"
+              label={t('cicd.panel.tabsLabel')}
               items={[
                 {
                   id: ALL,
-                  title: 'All accounts',
+                  title: t('cicd.panel.allAccounts'),
                   status: <AccountDot connections={connections} states={states} now={now} />,
                   tooltip:
                     connections.length === 1
-                      ? 'The one connected account.'
-                      : `Every connected account (${connections.length}), ranked together.`
+                      ? t('cicd.panel.oneAccountTooltip')
+                      : t('cicd.panel.allAccountsTooltip', { count: connections.length })
                 },
                 ...connections.map((c) => ({
                   id: c.id,
                   title: c.name,
                   status: <AccountDot connections={[c]} states={states} now={now} />,
-                  tooltip: `${c.name} — ${PROVIDER_LABEL[c.provider]} at ${hostOf(c.baseUrl)}`
+                  tooltip: t('cicd.panel.accountTooltip', {
+                    name: c.name,
+                    provider: PROVIDER_LABEL[c.provider],
+                    host: hostOf(c.baseUrl)
+                  })
                 }))
               ]}
               activeId={inView}
@@ -470,8 +467,8 @@ export function CicdPanel({
               <button
                 type="button"
                 className="tab-new"
-                title="Connect a CI account."
-                aria-label="Connect a CI account"
+                title={t('cicd.panel.connectTitle')}
+                aria-label={t('cicd.connect.title')}
                 onClick={() => setConnecting({ mode: 'new' })}
               >
                 <Plus size={16} />
@@ -479,8 +476,8 @@ export function CicdPanel({
               <button
                 type="button"
                 className="tab-new"
-                title="Edit or remove connected accounts."
-                aria-label="Manage CI accounts"
+                title={t('cicd.panel.manageTitle')}
+                aria-label={t('cicd.panel.manageLabel')}
                 onClick={() => setAccountsOpen({ on: 'list' })}
               >
                 <Settings2 size={15} />
@@ -495,7 +492,7 @@ export function CicdPanel({
               aria-pressed={subTab === 'activity'}
               onClick={() => setTab('activity')}
             >
-              Activity
+              {t('cicd.panel.tabActivity')}
             </button>
             <button
               type="button"
@@ -503,7 +500,7 @@ export function CicdPanel({
               aria-pressed={subTab === 'pipelines'}
               onClick={() => setTab('pipelines')}
             >
-              Pipelines
+              {t('cicd.panel.tabPipelines')}
               {allPipelines.length > 0 && <span className="count">{allPipelines.length}</span>}
             </button>
             {/* Absent, not disabled. A greyed tab is still a claim that the
@@ -516,7 +513,7 @@ export function CicdPanel({
                 aria-pressed={subTab === 'queue'}
                 onClick={() => setTab('queue')}
               >
-                Queue &amp; capacity
+                {t('cicd.panel.tabQueue')}
               </button>
             )}
           </div>
@@ -564,20 +561,20 @@ export function CicdPanel({
             <input
               className="input"
               value={filter}
-              placeholder="Filter by pipeline, branch or account…"
-              aria-label="Filter runs"
+              placeholder={t('cicd.activity.filterPlaceholder')}
+              aria-label={t('cicd.activity.filterLabel')}
               onChange={(e) => setFilter(e.target.value)}
             />
             <select
               className="input"
               value={bucket}
-              aria-label="Show"
+              aria-label={t('cicd.activity.showLabel')}
               onChange={(e) => setBucket(e.target.value as CicdBucket | 'all')}
             >
-              <option value="all">Everything</option>
+              <option value="all">{t('cicd.activity.everything')}</option>
               {BUCKET_ORDER.map((b) => (
                 <option key={b} value={b}>
-                  {BUCKET_LABEL[b]}
+                  {t(BUCKET_LABEL[b])}
                 </option>
               ))}
             </select>
@@ -593,17 +590,13 @@ export function CicdPanel({
               it is the last true answer rather than a made-up one. */}
           {!firstRead && (
           <div className="panel-stats" data-testid="cicd-counts">
-            <span>
-              {shown.length} of {rows.length} {rows.length === 1 ? 'run' : 'runs'} in the last 24
-              hours
-            </span>
+            <span>{t('cicd.activity.counts', { shown: shown.length, count: rows.length })}</span>
             {olderThanWindow > 0 && (
-              <span className="faint">
-                {olderThanWindow} last ran longer ago than that and {olderThanWindow === 1 ? 'is' : 'are'} not
-                shown
-              </span>
+              <span className="faint">{t('cicd.activity.olderThanWindow', { count: olderThanWindow })}</span>
             )}
-            {neverRun > 0 && <span className="faint">{neverRun} have never run</span>}
+            {neverRun > 0 && (
+              <span className="faint">{t('cicd.activity.neverRun', { neverRun })}</span>
+            )}
           </div>
           )}
 
@@ -617,12 +610,8 @@ export function CicdPanel({
                The paragraph is kept verbatim because it is the thing that
                stops somebody concluding their token is broken. It is now under
                the indicator rather than standing in for one. */
-            <Reading
-              label={`Reading ${reading.join(', ')}…`}
-            >
-              GitHub in particular takes a while the first time — it lists the repositories, then
-              each one&apos;s workflows, then reads each workflow to find out whether it can be
-              started by hand. Nothing is wrong with the token while this is moving.
+            <Reading label={t('cicd.activity.readingNames', { names: reading.join(', ') })}>
+              {t('cicd.activity.readingDetail')}
             </Reading>
           ) : shown.length === 0 ? (
             // "Every connected account answered" was printed whenever there were
@@ -635,21 +624,21 @@ export function CicdPanel({
               compact
               title={
                 rows.length > 0
-                  ? 'Nothing matched'
+                  ? t('cicd.trigger.noMatchTitle')
                   : unread.length > 0
-                    ? 'Not read yet'
+                    ? t('cicd.activity.unreadTitle')
                     : barren.length > 0
-                      ? 'No pipelines to show'
-                      : 'Nothing has run in the last 24 hours'
+                      ? t('cicd.activity.barrenTitle')
+                      : t('cicd.activity.quietTitle')
               }
               message={
                 rows.length > 0
-                  ? 'No run in the window matches that filter. Clear it to see the rest.'
+                  ? t('cicd.activity.noMatchMessage')
                   : unread.length > 0
-                    ? `${unread.join(', ')} ${unread.length === 1 ? 'has' : 'have'} not answered yet, so nothing below reflects ${unread.length === 1 ? 'it' : 'them'}. Press Refresh; if it stays unread, the account is not being polled.`
+                    ? t('cicd.activity.unreadMessage', { names: unread.join(', '), count: unread.length })
                     : barren.length > 0
-                      ? `${barren.join(', ')} answered and listed no pipelines at all. That is what a credential with no access to the jobs looks like — the provider returns an empty list rather than refusing — so check what the token's account can see.`
-                      : 'Every connected account answered, and none of its pipelines has produced a run inside the window.'
+                      ? t('cicd.activity.barrenMessage', { names: barren.join(', ') })
+                      : t('cicd.activity.quietMessage')
               }
             />
           ) : (
@@ -657,7 +646,7 @@ export function CicdPanel({
               {BUCKET_ORDER.filter((b) => shown.some((r) => r.bucket === b)).map((b) => (
                 <div key={b}>
                   <div className="ui-label cicd-bucket">
-                    {BUCKET_LABEL[b]} · {shown.filter((r) => r.bucket === b).length}
+                    {t(BUCKET_LABEL[b])} · {shown.filter((r) => r.bucket === b).length}
                   </div>
                   {shown
                     .filter((r) => r.bucket === b)
@@ -742,6 +731,7 @@ export function CicdPanel({
  * nor green.
  */
 function RunRow({ row, onOpen }: { row: CicdRow; onOpen: () => void }): React.JSX.Element {
+  const t = useT()
   const path = pathLabel(row.pipeline)
   return (
     <button className={clsx('cicd-row', row.stale && 'is-stale')} onClick={onOpen}>
@@ -759,9 +749,11 @@ function RunRow({ row, onOpen }: { row: CicdRow; onOpen: () => void }): React.JS
         <span className="ellipsis faint">{remoteText(row.run.actor)}</span>
       )}
       <span className="faint cicd-row-age">
-        {row.run.startedAt === undefined ? '—' : `${duration(row.run.startedAt)} ago`}
+        {row.run.startedAt === undefined
+          ? '—'
+          : t('cicd.common.ago', { duration: duration(row.run.startedAt) })}
       </span>
-      {row.stale && <span className="state-unknown">not re-read</span>}
+      {row.stale && <span className="state-unknown">{t('cicd.activity.notReread')}</span>}
     </button>
   )
 }
@@ -846,6 +838,7 @@ function Freshness({
   troubleOnly?: boolean
   onUpdateToken: (connection: CicdConnection) => void
 }): React.JSX.Element {
+  const t = useT()
   const held = useAddyUi((s) => s.held)
   const rows = connections.map((c) => ({
     c,
@@ -858,13 +851,8 @@ function Freshness({
     <div className="cicd-freshness">
       {quiet > 0 && (
         <div className="panel-stats" data-testid="cicd-accounts-ok">
-          <span>
-            {quiet} of {rows.length} {rows.length === 1 ? 'account is' : 'accounts are'} answering
-            on time
-          </span>
-          <span className="faint">
-            Open an account&apos;s own tab for its last read and its request budget.
-          </span>
+          <span>{t('cicd.freshness.quiet', { quiet, count: rows.length })}</span>
+          <span className="faint">{t('cicd.freshness.quietHint')}</span>
         </div>
       )}
       {shown.map(({ c }) => {
@@ -898,17 +886,21 @@ function Freshness({
                 {/* "reading now" outranks both. It is the newest fact and the
                     only one of the three that is not a complaint. */}
                 {s?.reading === true
-                  ? 'reading now…'
+                  ? t('cicd.freshness.readingNow')
                   : s?.readAt === undefined
-                    ? 'never read'
-                    : `Read ${duration(s.readAt)} ago`}{' '}
-                · every {every}s
+                    ? t('cicd.common.neverRead')
+                    : t('cicd.freshness.readAgo', { duration: duration(s.readAt) })}{' '}
+                {t('cicd.freshness.every', { secs: every })}
               </span>
               {s?.budget !== undefined && (
                 <span className="ui-note">
-                  {s.budget.remaining} of {s.budget.limit} requests left
-                  {s.budget.resetAt !== undefined &&
-                    `, resets in ${Math.max(0, Math.round((s.budget.resetAt - now) / 1000))}s`}
+                  {s.budget.resetAt !== undefined
+                    ? t('cicd.freshness.budgetResets', {
+                        remaining: s.budget.remaining,
+                        limit: s.budget.limit,
+                        secs: Math.max(0, Math.round((s.budget.resetAt - now) / 1000))
+                      })
+                    : t('cicd.freshness.budget', { remaining: s.budget.remaining, limit: s.budget.limit })}
                 </span>
               )}
             </div>
@@ -916,11 +908,13 @@ function Freshness({
             {heldRec ? (
               <div className="panel-note is-watch" data-testid={`cicd-held-${c.id}`}>
                 <span className="grow">
-                  {heldSentence(heldRec)} Its token is not sent until you confirm the change on this
-                  device. Now: {heldRec.destination}
+                  {t('cicd.freshness.held', {
+                    held: heldSentence(heldRec),
+                    destination: heldRec.destination
+                  })}
                 </span>
                 <button className="btn secondary size-24" onClick={() => void confirmHeldRecord(heldRec)}>
-                  Review
+                  {t('cicd.freshness.review')}
                 </button>
               </div>
             ) : vaultShut ? (
@@ -941,15 +935,12 @@ function Freshness({
                * again the error comes back with it and so does the banner.
                */
               s?.reading === true ? (
-                <Reading label={`Reading ${c.name} now.`} />
+                <Reading label={t('cicd.freshness.readingName', { name: c.name })} />
               ) : (
               <div className="panel-note is-alarm">
-                <span className="grow">
-                  {c.name} authenticates with a credential in the vault, and the vault is locked.
-                  The runs below are the last ones read and are not being refreshed.
-                </span>
+                <span className="grow">{t('cicd.freshness.vaultLocked', { name: c.name })}</span>
                 <UnlockVaultButton
-                  reason={`Unlocking resumes reading pipelines from ${c.name}.`}
+                  reason={t('cicd.freshness.unlockReason', { name: c.name })}
                   // The press was made to fix THIS screen. Waiting out the rest
                   // of a 60-second poll with the red bar still up is the same
                   // bug with a timer on it. `onUnlocked` runs only on a
@@ -961,34 +952,32 @@ function Freshness({
               )
             ) : expired ? (
               <div className="panel-note is-alarm">
-                <span className="grow">
-                  {c.name} refused the token. It has expired or been revoked — the runs below are
-                  the last ones read and are not being refreshed.
-                </span>
+                <span className="grow">{t('cicd.freshness.expired', { name: c.name })}</span>
                 <button className="btn secondary size-24" onClick={() => onUpdateToken(c)}>
-                  Update token
+                  {t('cicd.freshness.updateToken')}
                 </button>
               </div>
             ) : limited ? (
               <div className="panel-note is-watch">
-                {c.name} has run out of request budget. Nothing is wrong with the runs below —
-                they simply cannot be refreshed until the provider&apos;s window resets.
+                {t('cicd.freshness.rateLimited', { name: c.name })}
               </div>
             ) : (
               s?.error !== undefined && (
                 <div className="panel-note is-alarm">
                   <span className="grow">
-                    {hostOf(c.baseUrl)} could not be read ({s.failures}{' '}
-                    {s.failures === 1 ? 'attempt' : 'attempts'}): {s.error}. The runs below are
-                    ageing, not gone.
+                    {t('cicd.freshness.failed', {
+                      host: hostOf(c.baseUrl),
+                      count: s.failures,
+                      error: s.error
+                    })}
                   </span>
                   <button
                     className="btn secondary size-24"
                     disabled={!canRefresh}
-                    title={canRefresh ? undefined : 'This build cannot read on demand.'}
+                    title={canRefresh ? undefined : t('cicd.common.cannotReadOnDemand')}
                     onClick={() => readNow(bridge, states, [c.id])}
                   >
-                    Retry
+                    {t('common.retry')}
                   </button>
                 </div>
               )

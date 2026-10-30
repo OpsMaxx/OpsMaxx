@@ -13,6 +13,8 @@ import type {
 import { bridgeHas } from '../../lib/bridge'
 import type { DiscoveredVpnProfile } from '../../../../shared/vpn'
 import { isVaultLocked, withVaultUnlock } from '../../lib/withVaultUnlock'
+import { useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
 const ACCEPT: Record<ImportableVpnKind, string> = {
   wireguard: '.conf',
@@ -20,16 +22,16 @@ const ACCEPT: Record<ImportableVpnKind, string> = {
   frp: '.toml,.ini'
 }
 
-const HINT: Record<ImportableVpnKind, string> = {
-  wireguard: 'Paste a WireGuard .conf, or drop the file here.',
-  openvpn: 'Paste an .ovpn profile, or drop the file here.',
-  frp: 'Paste an frpc .toml (or .ini), or drop the file here.'
+const HINT: Record<ImportableVpnKind, MessageKey> = {
+  wireguard: 'vpn.import.hintWireguard',
+  openvpn: 'vpn.import.hintOpenvpn',
+  frp: 'vpn.import.hintFrp'
 }
 
-const TITLE: Record<ImportableVpnKind, string> = {
-  wireguard: 'Import WireGuard config',
-  openvpn: 'Import OpenVPN profile',
-  frp: 'Import frp client config'
+const TITLE: Record<ImportableVpnKind, MessageKey> = {
+  wireguard: 'vpn.import.titleWireguard',
+  openvpn: 'vpn.import.titleOpenvpn',
+  frp: 'vpn.import.titleFrp'
 }
 
 interface VpnImportModalProps {
@@ -42,6 +44,7 @@ interface VpnImportModalProps {
 // report is shown before anything is written: a profile that silently dropped
 // the half of the config that made it work is worse than a failed import.
 export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JSX.Element {
+  const t = useT()
   const workspaceId = useApp((s) => s.activeId())
   const upsertVpnProfile = useApp((s) => s.upsertVpnProfile)
 
@@ -106,7 +109,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
     if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'import')) return
     let live = true
     setParsing(true)
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       void window.opsmaxx?.vpn.import(kind, body, baseDir).then((r) => {
         if (!live) return
         setParsing(false)
@@ -121,7 +124,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
     }, 250)
     return () => {
       live = false
-      clearTimeout(t)
+      clearTimeout(timer)
     }
   }, [text, kind, baseDir, pending])
 
@@ -155,21 +158,20 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
   // what is true right now — "paste a config to begin" after a config had been
   // pasted and rejected was both stale and no help at all.
   const status = (): string => {
-    if (parsing) return 'Checking this config…'
-    if (saving) return 'Importing…'
-    if (!pending && !text.trim()) return 'Paste or drop a config to begin.'
-    if (rejected.length > 0)
-      return 'This config was rejected. Remove the directive above, then paste it again.'
-    if (blocked || !report?.spec) return report?.error ?? 'This config could not be read.'
+    if (parsing) return t('vpn.import.statusChecking')
+    if (saving) return t('vpn.import.statusImporting')
+    if (!pending && !text.trim()) return t('vpn.import.statusEmpty')
+    if (rejected.length > 0) return t('vpn.import.statusRejected')
+    if (blocked || !report?.spec) return report?.error ?? t('vpn.import.statusUnreadable')
     if (needsAck)
       return removed.length === 1
-        ? 'Read the removed directive above to continue.'
-        : 'Read the removed directives above to continue.'
-    if (!name.trim()) return 'Name this profile to import it.'
+        ? t('vpn.import.statusReadOne')
+        : t('vpn.import.statusReadMany')
+    if (!name.trim()) return t('vpn.import.statusNameMissing')
     // "Ready to import." sitting under a red box that says it was not imported
     // is the kind of contradiction that makes people distrust the whole screen.
-    if (commitError) return 'Not imported — see the message above.'
-    return 'Ready to import.'
+    if (commitError) return t('vpn.import.statusNotImported')
+    return t('vpn.import.statusReady')
   }
 
   const save = async (): Promise<void> => {
@@ -187,7 +189,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
     // find. `commitImport`'s preload signature predates `errorCode`, but its
     // handler has returned one from the start (services/vpn/import.ts), and
     // withVaultUnlock reads the value rather than the declared type.
-    const committed = await withVaultUnlock(`Importing ${name.trim()}`, () =>
+    const committed = await withVaultUnlock(t('vpn.import.unlockReason', { name: name.trim() }), () =>
       Promise.resolve(
         // A discovered profile is committed BY PATH: main reads the file, so an
         // inline private key never crosses IPC and a path-form `ca ca.crt`
@@ -209,8 +211,8 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
       const vaultLocked = isVaultLocked(committed)
       setCommitError({
         message: vaultLocked
-          ? 'Nothing was imported: this profile’s keys and certificates are stored in the vault, and the vault is shut.'
-          : (committed?.error ?? 'This profile could not be imported.'),
+          ? t('vpn.import.vaultShut')
+          : (committed?.error ?? t('vpn.import.commitFailed')),
         vaultLocked
       })
       return
@@ -238,15 +240,16 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
     // and open the form that holds the ticks.
     const proxies = spec.kind === 'frp' ? spec.proxies : []
     if (proxies.length > 0) {
-      const what =
+      toast(
         proxies.length === 1
-          ? 'what its proxy exposes'
-          : `what each of its ${proxies.length} proxies exposes`
-      toast(`${profile.name} imported — confirm ${what} before starting`, 'ok')
+          ? t('vpn.import.importedConfirmOne', { name: profile.name })
+          : t('vpn.import.importedConfirmMany', { name: profile.name, count: proxies.length }),
+        'ok'
+      )
       setCreated(profile)
       return
     }
-    toast(`${profile.name} imported — press Start to connect`, 'ok')
+    toast(t('vpn.import.importedStart', { name: profile.name }), 'ok')
     onClose()
   }
 
@@ -332,8 +335,8 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
 
   return (
     <Modal
-      title={TITLE[kind]}
-      subtitle="Nothing is saved until you have seen what was stripped out"
+      title={t(TITLE[kind])}
+      subtitle={t('vpn.import.subtitle')}
       size="lg"
       onClose={onClose}
       // In the sticky footer, like every other modal in the app. Inside
@@ -341,7 +344,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
       // long stripped-directive report both Import and the line explaining why
       // it is disabled start out below the fold.
       footerNote={status()}
-      confirm={{ label: 'Import profile', disabled: !canSave, onClick: () => void save() }}
+      confirm={{ label: t('vpn.import.confirm'), disabled: !canSave, onClick: () => void save() }}
     >
       <div className="col" style={{ gap: 10 }}>
         {/* Already on this machine. Above the drop zone on purpose: if OpenVPN
@@ -361,7 +364,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
             <div className="row" style={{ gap: 8 }}>
               <FileUp size={14} className="faint" />
               <span className="ui-note">
-                {scanning ? 'Looking for profiles already on this machine…' : 'Found on this machine'}
+                {scanning ? t('vpn.import.scanning') : t('vpn.import.found')}
               </span>
             </div>
             {found.map((profile) => {
@@ -383,7 +386,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
                       }}
                       title={profile.sourcePath}
                     >
-                      {usable ? profile.sourcePath : (profile.report.error ?? 'Cannot be imported.')}
+                      {usable ? profile.sourcePath : (profile.report.error ?? t('vpn.import.cannotImport'))}
                     </span>
                   </div>
                   <span className="grow" />
@@ -395,7 +398,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
                     // the report below has been seen.
                     onClick={() => chooseFound(profile)}
                   >
-                    {pending?.sourcePath === profile.sourcePath ? 'Reviewing' : 'Review'}
+                    {pending?.sourcePath === profile.sourcePath ? t('vpn.import.reviewing') : t('vpn.import.review')}
                   </button>
                 </div>
               )
@@ -426,11 +429,11 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
           <div className="row" style={{ gap: 8 }}>
             <FileUp size={14} className="faint" />
             <span className="muted" style={{ fontSize: 12 }}>
-              {HINT[kind]}
+              {t(HINT[kind])}
             </span>
             <span className="grow" />
             <button className="btn secondary size-28" onClick={() => fileInput.current?.click()}>
-              <Upload size={13} /> Choose file
+              <Upload size={13} /> {t('vpn.import.chooseFile')}
             </button>
             <input
               ref={fileInput}
@@ -450,7 +453,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
             // what the keyboard should already be in.
             autoFocus
             spellCheck={false}
-            placeholder={HINT[kind]}
+            placeholder={t(HINT[kind])}
             value={text}
             onChange={(e) => {
               // Typing replaces whatever was picked from the list. `baseDir`
@@ -476,7 +479,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
           >
             <div className="row" style={{ gap: 8, fontWeight: 600, fontSize: 12 }}>
               <ShieldAlert size={14} />
-              <span>This config cannot be imported</span>
+              <span>{t('vpn.import.rejectedTitle')}</span>
             </div>
             {/* Quoting the line matters. "Rejected for security reasons" sends
                 the user to a forum; the directive itself sends them to the one
@@ -490,9 +493,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
               </div>
             ))}
             <span style={{ fontSize: 11, opacity: 0.9 }}>
-              These directives run commands on your machine. OpsMaxx re-emits a config it
-              generated itself, so it cannot honour them — and importing while pretending it had
-              would be a lie about what this profile does.
+              {t('vpn.import.rejectedNote')}
             </span>
           </div>
         )}
@@ -507,7 +508,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
                 style={{ flexShrink: 0 }}
                 onClick={() => void save()}
               >
-                Unlock vault and import
+                {t('vpn.import.unlockAndImport')}
               </button>
             )}
           </div>
@@ -523,7 +524,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
         {removed.length > 0 && (
           <div className="col" style={{ gap: 6 }}>
             <span className="field-label" style={{ color: 'var(--warn)' }}>
-              {removed.length} {removed.length === 1 ? 'directive was' : 'directives were'} removed
+              {t('vpn.import.removed', { count: removed.length })}
             </span>
             <div
               className="paste-preview"
@@ -547,7 +548,7 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
             </div>
             {needsAck && (
               <span className="faint" style={{ fontSize: 11 }}>
-                Scroll to the end of the list to continue.
+                {t('vpn.import.scrollToContinue')}
               </span>
             )}
           </div>
@@ -565,14 +566,14 @@ export function VpnImportModal({ kind, onClose }: VpnImportModalProps): React.JS
         )}
 
         <Field
-          label="Profile name"
+          label={t('vpn.import.profileName')}
           required
-          error={nameTouched && name.trim() === '' ? 'Give the profile a name.' : null}
+          error={nameTouched && name.trim() === '' ? t('vpn.import.nameRequired') : null}
         >
           <input
             className="input"
             value={name}
-            placeholder="Office VPN"
+            placeholder={t('vpn.import.namePlaceholder')}
             onChange={(e) => {
               setNameTouched(true)
               setName(e.target.value)

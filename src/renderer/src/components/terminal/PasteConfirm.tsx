@@ -3,6 +3,7 @@ import { Modal } from '../common/Modal'
 import { ClipboardPaste, AlertTriangle } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { bytes } from '../../lib/format'
+import { t as tr, useT } from '../../lib/i18n'
 import type { ClipboardImage } from '../../../../shared/ssh'
 
 /**
@@ -62,11 +63,9 @@ export function useTerminalPasteRequest(
  * this said, which was wrong for most modern bash and zsh prompts.
  */
 export function pasteEffect(text: string, bracketed: boolean): string {
-  if (bracketed) return 'Nothing runs until you press Enter'
-  if (/[\r\n]$/.test(text)) return 'Every line runs as soon as it is pasted'
-  return /[\r\n]/.test(text)
-    ? 'All but the last line run now; the last waits for Enter'
-    : 'It waits for you to press Enter'
+  if (bracketed) return tr('terminal.paste.effectBracketed')
+  if (/[\r\n]$/.test(text)) return tr('terminal.paste.effectEveryLine')
+  return /[\r\n]/.test(text) ? tr('terminal.paste.effectAllButLast') : tr('terminal.paste.effectWaits')
 }
 
 // Confirming shows exactly what is about to be pasted, and what that will do.
@@ -94,6 +93,7 @@ export function PasteConfirm({
   onConfirm: () => void
   onCancel: () => void
 }): React.JSX.Element {
+  const t = useT()
   // Split on every break xterm will send as Enter, a lone \r included, so the
   // preview shows one row per command that will run.
   const rows = text.split(/\r\n|\r|\n/)
@@ -102,7 +102,7 @@ export function PasteConfirm({
 
   return (
     <Modal
-      title={`Paste ${lines} line${lines === 1 ? '' : 's'} into ${server}?`}
+      title={t('terminal.paste.title', { count: lines, server })}
       subtitle={pasteEffect(text, bracketed)}
       onClose={onCancel}
     >
@@ -110,13 +110,12 @@ export function PasteConfirm({
         <div className="row" style={{ gap: 8, color: 'var(--warn)' }}>
           <AlertTriangle size={16} />
           <span style={{ fontSize: 12 }}>
-            {local ? 'This is a shell on this computer.' : 'This is a remote shell.'} Check the
-            commands before continuing.
+            {local ? t('terminal.paste.warnLocal') : t('terminal.paste.warnRemote')}
           </span>
         </div>
         <pre className="paste-preview selectable">
           {preview.join('\n')}
-          {hidden > 0 ? `\n… ${hidden} more line${hidden === 1 ? '' : 's'}` : ''}
+          {hidden > 0 ? `\n${t('terminal.paste.moreLines', { count: hidden })}` : ''}
         </pre>
         <div className="row" style={{ gap: 8 }}>
           <span className="spacer" />
@@ -125,10 +124,11 @@ export function PasteConfirm({
               the next Enter -- a key repeat or a second tap -- as consent to a
               text nobody has read yet. So there, Cancel holds the focus. */}
           <button className="btn sm" onClick={onCancel} autoFocus={full}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button className="btn primary sm" onClick={onConfirm} autoFocus={!full}>
-            <ClipboardPaste size={14} /> {full || bracketed ? 'Paste' : 'Paste and run'}
+            <ClipboardPaste size={14} />{' '}
+            {full || bracketed ? t('terminal.paste.paste') : t('terminal.paste.pasteAndRun')}
           </button>
         </div>
       </div>
@@ -155,32 +155,36 @@ export function ImagePasteConfirm({
   onConfirm: () => void
   onCancel: () => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <Modal
-      title={`Copy this image to ${server}?`}
-      subtitle="Its path is pasted, which Claude Code takes as the image"
+      title={t('terminal.imagePaste.title', { server })}
+      subtitle={t('terminal.imagePaste.subtitle')}
       onClose={onCancel}
     >
       <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <img
           src={image.preview}
-          alt="The image on the clipboard"
+          alt={t('terminal.imagePaste.alt')}
           style={{ maxWidth: '100%', maxHeight: 240, objectFit: 'contain', alignSelf: 'center' }}
         />
         <span style={{ fontSize: 'var(--fs-xs)', color: 'var(--text-muted)' }}>
-          {image.width} × {image.height} PNG, {bytes(image.png.byteLength)}. Written to /tmp on{' '}
-          {server}, readable only by the account you are logged in as, and deleted when this
-          terminal closes.
+          {t('terminal.imagePaste.detail', {
+            width: image.width,
+            height: image.height,
+            size: bytes(image.png.byteLength),
+            server
+          })}
         </span>
         <div className="row" style={{ gap: 8 }}>
           <span className="spacer" />
           {/* Cancel holds the focus. Ctrl+V then a reflexive Enter would
               otherwise send a screenshot nobody looked at to the server. */}
           <button className="btn sm" onClick={onCancel} autoFocus>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button className="btn primary sm" onClick={onConfirm}>
-            <ClipboardPaste size={14} /> Copy and paste path
+            <ClipboardPaste size={14} /> {t('terminal.imagePaste.confirm')}
           </button>
         </div>
       </div>

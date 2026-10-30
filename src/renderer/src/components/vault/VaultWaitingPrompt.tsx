@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
 import { useVaultPrompt } from '../../store/vaultPrompt'
+import { t } from '../../lib/i18n'
 
 /**
  * One sentence from the surfaces that are waiting.
@@ -21,14 +22,14 @@ export function waitingSentence(parts: string[]): string {
   const subject =
     parts.length === 1
       ? parts[0]
-      : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
+      : t('vault.waiting.list', { head: parts.slice(0, -1).join(', '), last: parts[parts.length - 1] })
   // "VPN “office” is waiting" and "1 CI account is waiting", but "2 CI accounts
   // are waiting". One phrase naming one thing is the only singular case, and
   // whether a phrase names one thing is in its leading count when it has one —
   // so the verb comes from the text, not from how many phrases there are.
   const lead = /^(\d+) /.exec(parts[0])
   const singular = parts.length === 1 && (!lead || lead[1] === '1')
-  return `${subject} ${singular ? 'is' : 'are'} waiting on the vault.`
+  return singular ? t('vault.waiting.sentenceOne', { subject }) : t('vault.waiting.sentenceMany', { subject })
 }
 
 /**
@@ -129,7 +130,7 @@ export function VaultWaitingPrompt(): null {
       // targets actually being watched. Zero — sampling switched off, nothing
       // configured — leaves the surface out instead of guessing at it.
       const blocked = (await window.opsmaxx?.fleet?.status())?.vaultBlockedCount ?? 0
-      if (blocked > 0) parts.push(`${blocked} monitored server${blocked === 1 ? '' : 's'}`)
+      if (blocked > 0) parts.push(t('vault.waiting.monitoredServers', { count: blocked }))
 
       const sentence = waitingSentence(parts)
       if (!sentence) return

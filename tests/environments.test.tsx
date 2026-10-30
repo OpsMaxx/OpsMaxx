@@ -8,7 +8,10 @@ import { useApp } from '../src/renderer/src/store/app'
 import { useHttp } from '../src/renderer/src/store/http'
 import { EnvironmentsTab, openEnvironmentsTab } from '../src/renderer/src/components/http/env/EnvironmentsTab'
 import { EnvironmentPicker } from '../src/renderer/src/components/http/env/EnvironmentPicker'
-import { CREDENTIAL_WARNING, credentialVariables } from '../src/renderer/src/components/http/env/VariablesTable'
+import { credentialVariables } from '../src/renderer/src/components/http/env/VariablesTable'
+import en from '../src/shared/locales/en.json'
+
+const CREDENTIAL_WARNING = en['http.variables.credentialWarning']
 
 const ws = (): string => useApp.getState().activeWorkspaceId
 const env = (id: string, name: string, extra: Partial<Environment> = {}): Environment => ({

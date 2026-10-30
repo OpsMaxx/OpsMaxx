@@ -9,8 +9,10 @@ import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { classifyConnectionError, errorText } from '../../lib/connectionError'
 import { openSettings } from '../../store/nav'
 import type { Hop } from '../../types'
+import { useT } from '../../lib/i18n'
 
 export function RouteEditor(): React.JSX.Element {
+  const t = useT()
   const setModal = useApp((s) => s.setModal)
   const serverId = useApp((s) => s.routeEditorServerId)
   const server = useApp((s) => s.servers.find((sv) => sv.id === serverId))
@@ -35,7 +37,7 @@ export function RouteEditor(): React.JSX.Element {
     const probeKey = `route-test-${server.id}`
     let failure: string | undefined
     try {
-      const r = await withVaultUnlock(`Testing the route to ${server.name}`, async () =>
+      const r = await withVaultUnlock(t('connections.route.vaultReason', { name: server.name }), async () =>
         window.opsmaxx?.sftp.connect(probeKey, {
           sessionId: probeKey,
           serverId: server.id,
@@ -48,7 +50,7 @@ export function RouteEditor(): React.JSX.Element {
           hops: sshHopsFor({ ...server, route: hops })
         })
       )
-      if (!r?.ok) failure = r?.error ?? 'The connection did not open.'
+      if (!r?.ok) failure = r?.error ?? t('connections.route.didNotOpen')
     } catch (err) {
       failure = errorText(err)
     }
@@ -58,32 +60,32 @@ export function RouteEditor(): React.JSX.Element {
       setResult({
         ok: true,
         message: hops.length
-          ? `Reached ${server.name} through ${hops.length} hop${hops.length === 1 ? '' : 's'}.`
-          : `Reached ${server.name} directly.`
+          ? t('connections.route.reachedThrough', { name: server.name, count: hops.length })
+          : t('connections.route.reachedDirect', { name: server.name })
       })
       return
     }
     setResult({
       ok: false,
-      message: `The route did not come up. ${hops.length ? 'A hop below, or the target itself, refused the connection.' : 'The target refused the connection.'}`,
+      message: hops.length ? t('connections.route.failedHops') : t('connections.route.failedDirect'),
       detail: failure
     })
   }
 
   return (
     <Modal
-      title="Connection Route"
-      subtitle={server ? `Jump path to ${server.name}` : 'Jump path'}
+      title={t('connections.route.title')}
+      subtitle={server ? t('connections.route.subtitleFor', { name: server.name }) : t('connections.route.subtitle')}
       onClose={() => setModal(null)}
       size="lg"
       footer={
         <>
           <button className="btn" disabled={testing || !serverId} onClick={() => void testAll()}>
-            <PlayCircle size={14} /> {testing ? 'Testing…' : 'Test route'}
+            <PlayCircle size={14} /> {testing ? t('connections.route.testing') : t('connections.route.test')}
           </button>
           <span className="spacer" />
           <button className="btn" onClick={() => setModal(null)}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             className="btn primary"
@@ -91,11 +93,11 @@ export function RouteEditor(): React.JSX.Element {
             onClick={() => {
               if (!serverId) return
               updateServer(serverId, { route: hops })
-              toast('Route saved', 'ok')
+              toast(t('connections.route.saved'), 'ok')
               setModal(null)
             }}
           >
-            Save route
+            {t('connections.route.save')}
           </button>
         </>
       }
@@ -123,7 +125,7 @@ export function RouteEditor(): React.JSX.Element {
               this path will connect again. */}
           {classifyConnectionError(result.detail) === 'host-key' && (
             <button className="btn sm" onClick={() => openSettings('security')}>
-              Review saved keys
+              {t('connections.route.reviewKeys')}
             </button>
           )}
         </div>
@@ -135,8 +137,8 @@ export function RouteEditor(): React.JSX.Element {
             <Monitor size={16} />
           </span>
           <div className="r-body">
-            <div className="r-name">Local machine</div>
-            <div className="r-host">this device</div>
+            <div className="r-name">{t('connections.route.localMachine')}</div>
+            <div className="r-host">{t('connections.route.thisDevice')}</div>
           </div>
           <CheckCircle2 size={16} style={{ color: 'var(--ok)' }} />
         </div>
@@ -156,7 +158,7 @@ export function RouteEditor(): React.JSX.Element {
             <ServerIcon size={16} />
           </span>
           <div className="r-body">
-            <div className="r-name">{server?.name ?? 'Target server'}</div>
+            <div className="r-name">{server?.name ?? t('connections.route.targetServer')}</div>
             <div className="r-host">
               {server?.host}:{server?.port}
             </div>

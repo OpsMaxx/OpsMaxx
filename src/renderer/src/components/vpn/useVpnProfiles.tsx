@@ -33,6 +33,8 @@ import { VpnImportModal } from './VpnImportModal'
 import { VpnProfileForm, type VpnFormFocus } from './VpnProfileForm'
 import { NgrokSetup } from './NgrokSetup'
 import { VpnLogDrawer } from './VpnLogDrawer'
+import { t as tr, useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
 const KIND_LABEL: Record<VpnKind, string> = {
   wireguard: 'WireGuard',
@@ -67,22 +69,25 @@ function subtitle(profile: VpnProfile): string {
   const spec = profile.spec
   if (spec.kind === 'wireguard') {
     const peer = spec.peers[0]
-    const mode = spec.mode === 'userspace' ? 'userspace' : 'system'
-    return `WireGuard · ${mode}${peer?.endpoint ? ` · ${peer.endpoint}` : ''}`
+    const mode = tr(
+      spec.mode === 'userspace'
+        ? 'vpn.profiles.subtitleWireguardUserspace'
+        : 'vpn.profiles.subtitleWireguardSystem'
+    )
+    return `${mode}${peer?.endpoint ? ` · ${peer.endpoint}` : ''}`
   }
   if (spec.kind === 'openvpn') {
     const r = spec.remotes?.[0]
     return `OpenVPN${r ? ` · ${r.host}:${r.port}` : ''}`
   }
   if (spec.kind === 'ngrok') {
-    const n = spec.tunnels.length
-    return `ngrok · ${n} ${n === 1 ? 'endpoint' : 'endpoints'}`
+    return tr('vpn.profiles.subtitleNgrok', { count: spec.tunnels.length })
   }
   if (spec.kind === 'tailscale') {
     // No endpoint to name: the tailnet is a mesh and the daemon owns the
     // connection. What is worth saying is that this app is attached to
     // something it does not run.
-    return 'Tailscale · a node of its own on your tailnet'
+    return tr('vpn.profiles.subtitleTailscale')
   }
   return `frp · ${frpSummary(spec)}`
 }
@@ -90,13 +95,19 @@ function subtitle(profile: VpnProfile): string {
 /** What the vault loses along with the profile. Naming it is the point: "its
  *  secrets are deleted" does not tell a WireGuard user that the private key
  *  they never wrote down anywhere else is about to stop existing. */
-function vaultLoss(profile: VpnProfile): string {
+function vaultLoss(profile: VpnProfile): MessageKey {
   const kind = profile.spec.kind
-  if (kind === 'wireguard') return 'its private key and any preshared keys'
-  if (kind === 'openvpn') {
-    return 'its stored configuration — including any inline certificates and keys — and its saved credentials'
-  }
-  return 'its server token and any proxy secret keys'
+  if (kind === 'wireguard') return 'vpn.profiles.deleteWarnWireguard'
+  if (kind === 'openvpn') return 'vpn.profiles.deleteWarnOpenvpn'
+  return 'vpn.profiles.deleteWarnOther'
+}
+
+const DEPENDENT_KIND: Record<VpnDependent['kind'], MessageKey> = {
+  server: 'vpn.profiles.kindServer',
+  database: 'vpn.profiles.kindDatabase',
+  tunnel: 'vpn.profiles.kindTunnel',
+  session: 'vpn.profiles.kindSession',
+  cicd: 'vpn.profiles.kindCicd'
 }
 
 const OPENVPN_DOWNLOAD = 'https://openvpn.net/community-downloads/'
@@ -117,10 +128,7 @@ const OPSMAXX_DOWNLOAD = 'https://opsmaxx.dev'
  *  (OpenVPN already had a sentence like this one on macOS and Linux; this is
  *  the same answer for the two engines that never got it.) */
 function bundledEngineMissing(label: string): string {
-  return (
-    `${label} ships inside OpsMaxx, and this copy of it is missing or damaged — ` +
-    'antivirus software sometimes quarantines bundled programs. Reinstalling OpsMaxx puts it back.'
-  )
+  return tr('vpn.profiles.bundledMissing', { label })
 }
 
 /** Open a page in the user's browser.
@@ -190,7 +198,7 @@ function remedyFor(
     // unlock and retries by itself, so this button finishes the job the user
     // originally pressed.
     case 'vault-locked':
-      return { label: 'Unlock vault', run: r.start }
+      return { label: tr('ui.unlockVault.label'), run: r.start }
     // WireGuard and frp always ship inside OpsMaxx, and OpenVPN does too
     // everywhere except Windows — so on every other combination a missing
     // engine is a damaged install, which no button in this window can repair.
@@ -198,17 +206,17 @@ function remedyFor(
     // something they already have.
     case 'binary-missing':
       if (kind === 'openvpn' && userSuppliesEngine('openvpn', platform)) {
-        return { label: 'Install OpenVPN', run: () => openExternal(OPENVPN_DOWNLOAD) }
+        return { label: tr('vpn.profiles.installOpenvpn'), run: () => openExternal(OPENVPN_DOWNLOAD) }
       }
       // A damaged install is not unfixable, which is what "no button at all"
       // used to imply. Reinstalling is the actual repair — the same one
       // `binary-untrusted` has always advised — so it is offered rather than
       // left for the user to work out from a build-script name under Details.
       return engineForKindIsBundled(kind, platform)
-        ? { label: 'Reinstall OpsMaxx', run: () => openExternal(OPSMAXX_DOWNLOAD) }
+        ? { label: tr('vpn.profiles.reinstallOpsmaxx'), run: () => openExternal(OPSMAXX_DOWNLOAD) }
         : undefined
     case 'exposure-unacknowledged':
-      return { label: 'Open profile', run: () => r.profile('proxies') }
+      return { label: tr('vpn.profiles.openProfile'), run: () => r.profile('proxies') }
     case 'config-invalid':
     case 'config-rejected':
     case 'dns-failure':
@@ -217,19 +225,19 @@ function remedyFor(
     case 'port-in-use':
     case 'proxy-required':
     case 'server-rejected':
-      return { label: 'Open profile', run: () => r.profile() }
+      return { label: tr('vpn.profiles.openProfile'), run: () => r.profile() }
     // Credentials are never in the profile — they are in the vault, handed to
     // the engine over its management socket — so the profile form is the wrong
     // room to send someone whose password was rejected.
     case 'auth-failed':
-      return { label: 'Open vault', run: r.vault }
+      return { label: tr('vpn.profiles.openVault'), run: r.vault }
     case 'elevation-declined':
     case 'permission-denied':
-      return { label: 'Try again', run: r.start }
+      return { label: tr('vpn.profiles.tryAgain'), run: r.start }
     case 'crash-loop':
     case 'internal':
     case 'tls-handshake-failed':
-      return { label: 'Show log', run: r.log }
+      return { label: tr('vpn.profiles.showLog'), run: r.log }
     default:
       return undefined
   }
@@ -280,6 +288,7 @@ export interface VpnProfiles {
  * places to fix the next time a start can fail in a new way.
  */
 export function useVpnProfiles(): VpnProfiles {
+  const t = useT()
   const profiles = useWorkspaceVpns()
   const vpnStatuses = useApp((s) => s.vpnStatuses)
   const setVpnStatus = useApp((s) => s.setVpnStatus)
@@ -303,7 +312,7 @@ export function useVpnProfiles(): VpnProfiles {
   const [confirmDelete, setConfirmDelete] = useState<{
     profile: VpnProfile
     dependents: VpnDependent[]
-    attached: { id: string; kind: string; name: string }[]
+    attached: { id: string; kind: VpnDependent['kind']; name: string }[]
   } | null>(null)
   const [engines, setEngines] = useState<Partial<Record<VpnKind, VpnEngineInfo>>>({})
   // Feeds `userSuppliesEngine`, which decides whether a missing engine is the
@@ -397,7 +406,7 @@ export function useVpnProfiles(): VpnProfiles {
     // that could be neither started nor stopped until the component unmounted.
     let r: VpnStartResult | undefined
     try {
-      r = await withVaultUnlock(`Starting ${p.name}`, () =>
+      r = await withVaultUnlock(tr('vpn.profiles.unlockReason', { name: p.name }), () =>
         Promise.resolve(window.opsmaxx?.vpn.start(p.id))
       )
     } catch (err) {
@@ -415,7 +424,12 @@ export function useVpnProfiles(): VpnProfiles {
     if (r?.ok) {
       const first = r.listeners?.[0]
       toast(
-        first ? `${p.name} up — listening on ${first.bindHost}:${first.bindPort}` : `${p.name} up`,
+        first
+          ? tr('vpn.profiles.upListening', {
+              name: p.name,
+              address: `${first.bindHost}:${first.bindPort}`
+            })
+          : tr('vpn.profiles.up', { name: p.name }),
         'ok'
       )
       return
@@ -423,7 +437,7 @@ export function useVpnProfiles(): VpnProfiles {
     // Cancel has already said what happened, and so has the status stream when
     // it carried the error. Either way this failure is spoken for.
     if (cancelled || errorSpoken(p.id)) return
-    reportRef.current(p.id, r?.error ?? 'This tunnel could not be started.', r?.errorCode)
+    reportRef.current(p.id, r?.error ?? tr('vpn.profiles.startFailed'), r?.errorCode)
   }, [])
 
   // The single place a VPN failure becomes something on screen — the status
@@ -441,7 +455,14 @@ export function useVpnProfiles(): VpnProfiles {
           vault: () => setActivity('vault')
         })
       : undefined
-    toast(`${p?.name ?? 'VPN'}: ${headline(error)}`, 'error', action)
+    toast(
+      tr('vpn.profiles.errorToast', {
+        name: p?.name ?? tr('vpn.profiles.unnamed'),
+        message: headline(error)
+      }),
+      'error',
+      action
+    )
   }
   reportRef.current = report
 
@@ -461,7 +482,9 @@ export function useVpnProfiles(): VpnProfiles {
       setBusy((b) => ({ ...b, [p.id]: false }))
     }
     if (r?.ok) {
-      toast(cancelling ? `${p.name} — connection attempt cancelled` : `${p.name} stopped`)
+      toast(
+        tr(cancelling ? 'vpn.profiles.cancelled' : 'vpn.profiles.stopped', { name: p.name })
+      )
       return
     }
     // An engine that refuses to die used to produce a red dot, an error toast
@@ -470,7 +493,7 @@ export function useVpnProfiles(): VpnProfiles {
     if (errorSpoken(p.id)) return
     reportRef.current(
       p.id,
-      r?.error ?? `This tunnel could not be ${cancelling ? 'cancelled' : 'stopped'}.`,
+      r?.error ?? tr(cancelling ? 'vpn.profiles.cancelFailed' : 'vpn.profiles.stopFailed'),
       r?.errorCode
     )
   }, [])
@@ -528,10 +551,10 @@ export function useVpnProfiles(): VpnProfiles {
     const attached = [
       ...st.servers
         .filter((sv) => sv.vpnProfileId === p.id)
-        .map((sv) => ({ id: sv.id, kind: 'server', name: sv.name })),
+        .map((sv) => ({ id: sv.id, kind: 'server' as const, name: sv.name })),
       ...st.databases
         .filter((d) => d.vpnProfileId === p.id)
-        .map((d) => ({ id: d.id, kind: 'database', name: d.name }))
+        .map((d) => ({ id: d.id, kind: 'database' as const, name: d.name }))
     ]
     setConfirmDelete({ profile: p, dependents: (deps ?? []).filter((d) => d.live), attached })
   }, [])
@@ -553,13 +576,13 @@ export function useVpnProfiles(): VpnProfiles {
       if (r && !r.ok) {
         reportRef.current(
           p.id,
-          r.error ?? `${p.name} is still running and could not be stopped, so it was not deleted.`,
+          r.error ?? tr('vpn.profiles.notDeleted', { name: p.name }),
           r.errorCode
         )
         return
       }
       removeVpnProfile(p.id)
-      toast(`${p.name} deleted`)
+      toast(tr('vpn.profiles.deleted', { name: p.name }))
     },
     [removeVpnProfile]
   )
@@ -579,7 +602,9 @@ export function useVpnProfiles(): VpnProfiles {
     // keeps the rest one click away.
     const engineProblem = engineForKindIsBundled(p.spec.kind, platform)
       ? bundledEngineMissing(KIND_LABEL[p.spec.kind])
-      : headline(engine?.reason ?? `${KIND_LABEL[p.spec.kind]} is not available on this machine.`)
+      : headline(
+          engine?.reason ?? t('vpn.profiles.notAvailable', { label: KIND_LABEL[p.spec.kind] })
+        )
     const sub = subtitle(p)
     // Mid-start, and slow enough to be worth escaping from.
     const cancellable =
@@ -596,7 +621,7 @@ export function useVpnProfiles(): VpnProfiles {
             // hover, no way to reach it from the keyboard.
             style={{ gap: 8, minWidth: 0, flex: '0 1 auto', textAlign: 'left' }}
             aria-expanded={open}
-            title={open ? 'Hide details' : 'Show assigned IP, endpoint and listeners'}
+            title={open ? t('vpn.profiles.hideDetails') : t('vpn.profiles.showDetails')}
             onClick={() => setExpanded(open ? null : p.id)}
           >
             <ChevronRight
@@ -664,9 +689,9 @@ export function useVpnProfiles(): VpnProfiles {
             disabled={(busy[p.id] && !cancellable) || gated || (!running && engineMissing)}
             title={
               cancellable
-                ? 'Stop waiting and tear the connection attempt down'
+                ? t('vpn.profiles.cancelTitle')
                 : gated
-                  ? 'Confirm what each proxy exposes before starting'
+                  ? t('vpn.profiles.gatedTitle')
                   : engineMissing
                     ? engineProblem
                     : undefined
@@ -674,21 +699,25 @@ export function useVpnProfiles(): VpnProfiles {
             onClick={() => void (cancellable ? cancel(p) : toggle(p))}
           >
             {busy[p.id] ? <Loader2 size={13} className="spin" /> : <Power size={13} />}
-            {cancellable ? 'Cancel' : running ? 'Stop' : 'Start'}
+            {cancellable
+              ? t('common.cancel')
+              : running
+                ? t('vpn.profiles.stop')
+                : t('vpn.profiles.start')}
           </button>
           <button
             className="icon-btn sm"
-            title="Edit profile"
+            title={t('vpn.profiles.editProfile')}
             onClick={() => setEditing({ profile: p })}
           >
             <Pencil size={14} />
           </button>
-          <button className="icon-btn sm" title="Show log" onClick={() => setLogsFor(p)}>
+          <button className="icon-btn sm" title={t('vpn.profiles.showLog')} onClick={() => setLogsFor(p)}>
             <ScrollText size={14} />
           </button>
           <button
             className="icon-btn sm"
-            title="Delete profile"
+            title={t('vpn.profiles.deleteProfile')}
             onClick={() => void requestRemove(p)}
           >
             <Trash2 size={14} />
@@ -712,14 +741,14 @@ export function useVpnProfiles(): VpnProfiles {
                       className="btn sm primary"
                       onClick={() => openExternal(OPENVPN_DOWNLOAD)}
                     >
-                      Install OpenVPN
+                      {t('vpn.profiles.installOpenvpn')}
                     </button>
                   )}
                   <button
                     className="btn sm"
                     onClick={() => setEditing({ profile: p, focus: 'binaryPath' })}
                   >
-                    Set the path
+                    {t('vpn.profiles.setPath')}
                   </button>
                 </>
               )}
@@ -728,13 +757,13 @@ export function useVpnProfiles(): VpnProfiles {
                   disabled Start, a build-script name and no control at all. */}
               {engineForKindIsBundled(p.spec.kind, platform) && (
                 <button className="btn sm primary" onClick={() => openExternal(OPSMAXX_DOWNLOAD)}>
-                  Reinstall OpsMaxx
+                  {t('vpn.profiles.reinstallOpsmaxx')}
                 </button>
               )}
             </div>
             {engine?.reason && engine.reason !== engineProblem && (
               <details className="disclosure">
-                <summary className="disclosure-head">Details</summary>
+                <summary className="disclosure-head">{t('vpn.profiles.details')}</summary>
                 <div className="disclosure-body">
                   <span className="faint" style={{ fontSize: 11 }}>
                     {engine.reason}
@@ -770,14 +799,15 @@ export function useVpnProfiles(): VpnProfiles {
           >
             <AlertTriangle size={12} style={{ flexShrink: 0 }} />
             <span className="grow">
-              Confirm what {ungated.map((x) => x.name).join(', ')}{' '}
-              {ungated.length === 1 ? 'exposes' : 'expose'} before starting.
+              {t(ungated.length === 1 ? 'vpn.profiles.gatedOne' : 'vpn.profiles.gatedMany', {
+                names: ungated.map((x) => x.name).join(', ')
+              })}
             </span>
             <button
               className="btn sm primary"
               onClick={() => setEditing({ profile: p, focus: 'proxies' })}
             >
-              {ungated.length === 1 ? 'Confirm it' : 'Confirm them'}
+              {ungated.length === 1 ? t('vpn.profiles.confirmIt') : t('vpn.profiles.confirmThem')}
             </button>
           </div>
         )}
@@ -820,7 +850,7 @@ export function useVpnProfiles(): VpnProfiles {
       )}
       {confirmStop && (
         <Modal
-          title="Stop this VPN?"
+          title={t('vpn.profiles.stopTitle')}
           subtitle={confirmStop.profile.name}
           onClose={() => setConfirmStop(null)}
         >
@@ -828,25 +858,23 @@ export function useVpnProfiles(): VpnProfiles {
             <div className="row" style={{ gap: 8, color: 'var(--warn)' }}>
               <AlertTriangle size={16} />
               <span style={{ fontSize: 13 }}>
-                {confirmStop.dependents.length}{' '}
-                {confirmStop.dependents.length === 1 ? 'session is' : 'sessions are'} using this VPN.
+                {t('vpn.profiles.sessionsUsing', { count: confirmStop.dependents.length })}
               </span>
             </div>
             <div className="col" style={{ gap: 2 }}>
               {confirmStop.dependents.map((d) => (
                 <span key={`${d.kind}-${d.id}`} className="muted" style={{ fontSize: 12 }}>
-                  {d.name} <span className="faint">({d.kind})</span>
+                  {d.name} <span className="faint">({t(DEPENDENT_KIND[d.kind])})</span>
                 </span>
               ))}
             </div>
             <span className="faint" style={{ fontSize: 11 }}>
-              They are closed first, then the tunnel — nothing is left talking to a network that is
-              no longer there.
+              {t('vpn.profiles.stopNote')}
             </span>
             <div className="row" style={{ gap: 8 }}>
               <span className="grow" />
               <button className="btn sm" onClick={() => setConfirmStop(null)}>
-                Keep it running
+                {t('vpn.profiles.keepRunning')}
               </button>
               <button
                 className="btn danger outline sm"
@@ -856,7 +884,7 @@ export function useVpnProfiles(): VpnProfiles {
                   void stop(p)
                 }}
               >
-                Stop anyway
+                {t('vpn.profiles.stopAnyway')}
               </button>
             </div>
           </div>
@@ -864,7 +892,7 @@ export function useVpnProfiles(): VpnProfiles {
       )}
       {confirmDelete && (
         <Modal
-          title="Delete this VPN profile?"
+          title={t('vpn.profiles.deleteTitle')}
           subtitle={confirmDelete.profile.name}
           onClose={() => setConfirmDelete(null)}
         >
@@ -872,22 +900,18 @@ export function useVpnProfiles(): VpnProfiles {
             <div className="row" style={{ gap: 8, color: 'var(--danger)' }}>
               <AlertTriangle size={16} />
               <span style={{ fontSize: 13 }}>
-                Deleting {confirmDelete.profile.name} deletes {vaultLoss(confirmDelete.profile)}{' '}
-                from the vault. That key material cannot be recovered — if it is not saved anywhere
-                else, this profile cannot be recreated.
+                {t(vaultLoss(confirmDelete.profile), { name: confirmDelete.profile.name })}
               </span>
             </div>
 
             {confirmDelete.dependents.length > 0 && (
               <div className="col" style={{ gap: 2 }}>
                 <span className="field-label">
-                  {confirmDelete.dependents.length}{' '}
-                  {confirmDelete.dependents.length === 1 ? 'live session is' : 'live sessions are'}{' '}
-                  using it, and will be closed
+                  {t('vpn.profiles.liveSessions', { count: confirmDelete.dependents.length })}
                 </span>
                 {confirmDelete.dependents.map((d) => (
                   <span key={`${d.kind}-${d.id}`} className="muted" style={{ fontSize: 12 }}>
-                    {d.name} <span className="faint">({d.kind})</span>
+                    {d.name} <span className="faint">({t(DEPENDENT_KIND[d.kind])})</span>
                   </span>
                 ))}
               </div>
@@ -899,26 +923,23 @@ export function useVpnProfiles(): VpnProfiles {
               // too late to object.
               <div className="col" style={{ gap: 2 }}>
                 <span className="field-label">
-                  {confirmDelete.attached.length}{' '}
-                  {confirmDelete.attached.length === 1 ? 'connection' : 'connections'} will be
-                  detached and will connect directly from now on
+                  {t('vpn.profiles.attached', { count: confirmDelete.attached.length })}
                 </span>
                 {confirmDelete.attached.map((a) => (
                   <span key={`${a.kind}-${a.id}`} className="muted" style={{ fontSize: 12 }}>
-                    {a.name} <span className="faint">({a.kind})</span>
+                    {a.name} <span className="faint">({t(DEPENDENT_KIND[a.kind])})</span>
                   </span>
                 ))}
               </div>
             )}
 
             <span className="faint" style={{ fontSize: 11 }}>
-              The profile itself is only stored here — nothing on the far side of the tunnel
-              changes.
+              {t('vpn.profiles.deleteNote')}
             </span>
             <div className="row" style={{ gap: 8 }}>
               <span className="grow" />
               <button className="btn sm" onClick={() => setConfirmDelete(null)}>
-                Keep it
+                {t('vpn.profiles.keepIt')}
               </button>
               <button
                 className="btn danger outline sm"
@@ -928,7 +949,7 @@ export function useVpnProfiles(): VpnProfiles {
                   void remove(p)
                 }}
               >
-                <Trash2 size={14} /> Delete profile and key material
+                <Trash2 size={14} /> {t('vpn.profiles.deleteConfirm')}
               </button>
             </div>
           </div>

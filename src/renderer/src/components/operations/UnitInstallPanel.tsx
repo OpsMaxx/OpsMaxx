@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ServerCog } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 import { openMonitor, useNav } from '../../store/nav'
 import {
   checkUnitDraft,
@@ -35,6 +37,7 @@ import { withVaultUnlock } from '../../lib/withVaultUnlock'
 // to make easy.
 
 export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.Element {
+  const t = useT()
   const [serverId, setServerId] = useState<string | null>(null)
   const [draft, setDraft] = useState<UnitDraft>({
     name: '',
@@ -67,20 +70,20 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
       window.opsmaxx as
         | {
             services?: {
-              write?: (t: unknown, d: UnitDraft) => Promise<{ ok: boolean; output?: string; error?: string }>
+              write?: (target: unknown, d: UnitDraft) => Promise<{ ok: boolean; output?: string; error?: string }>
             }
           }
         | undefined
     )?.services?.write
     if (typeof w !== 'function') {
-      setResult({ ok: false, text: 'This build cannot write units. Restart the app to rebuild it.' })
+      setResult({ ok: false, text: t('operations.unit.noWrite') })
       return
     }
     // Asked before it happens, and it names the server and the unit, because a
     // file is about to appear on a machine the operator is not looking at.
     if (
       !window.confirm(
-        `Install ${draft.name} on ${target.name}?\n\nIt writes ~/.config/systemd/user/${draft.name} and enables it. It does NOT start it, and any existing unit of that name is backed up first.`
+        t('operations.unit.confirm', { unit: draft.name, server: target.name })
       )
     ) {
       return
@@ -93,10 +96,10 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
       // so nothing was written and the second attempt is the first one
       // finishing, not a second install.
       const res = await withVaultUnlock(
-        `Installing ${draft.name} on ${target.name} needs that server's stored credential.`,
+        t('operations.unit.vaultReason', { unit: draft.name, server: target.name }),
         () => w({ cfg: target }, draft)
       )
-      setResult({ ok: res.ok === true, text: res.output ?? res.error ?? 'No answer.' })
+      setResult({ ok: res.ok === true, text: res.output ?? res.error ?? t('operations.unit.noAnswer') })
     } finally {
       setBusy(false)
     }
@@ -109,25 +112,23 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
     // other tab now.
     <PanelShell
       icon={<ServerCog size={14} />}
-      title="Install a service on a server"
+      title={t('operations.unit.title')}
       about={
         <p>
-          Writes a unit to <code>~/.config/systemd/user/</code> on one server and enables it. It
-          is not started: the server&rsquo;s own systemd owns it from then on, which is the point
-          — it is there when OpsMaxx is not.
+          <Trans i18nKey="operations.unit.about" components={{ code: <code /> }} />
         </p>
       }
       actions={
         <select
           className="input"
-          aria-label="Server"
+          aria-label={t('operations.common.server')}
           value={serverId ?? ''}
           onChange={(e) => {
             setServerId(e.target.value === '' ? null : e.target.value)
             setResult(null)
           }}
         >
-          <option value="">Choose a server…</option>
+          <option value="">{t('operations.common.chooseServer')}</option>
           {servers.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -140,14 +141,14 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
         <input
           className="input"
           placeholder="worker.service"
-          aria-label="Unit name"
+          aria-label={t('operations.unit.nameLabel')}
           value={draft.name}
           onChange={(e) => setDraft({ ...draft, name: e.target.value })}
         />
         <input
           className="input"
-          placeholder="What it is, in one line"
-          aria-label="Description"
+          placeholder={t('operations.unit.descriptionPlaceholder')}
+          aria-label={t('operations.unit.descriptionLabel')}
           value={draft.description}
           onChange={(e) => setDraft({ ...draft, description: e.target.value })}
         />
@@ -160,13 +161,13 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
         />
         <select
           className="input"
-          aria-label="Restart policy"
+          aria-label={t('operations.unit.restartLabel')}
           value={draft.restart}
           onChange={(e) => setDraft({ ...draft, restart: e.target.value as UnitRestart })}
         >
-          <option value="on-failure">Restart on failure</option>
-          <option value="always">Always restart</option>
-          <option value="no">Never restart</option>
+          <option value="on-failure">{t('operations.unit.restart.onFailure')}</option>
+          <option value="always">{t('operations.unit.restart.always')}</option>
+          <option value="no">{t('operations.unit.restart.no')}</option>
         </select>
 
         {/* The exact bytes, before they are written. A file is about to appear
@@ -187,7 +188,7 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
             <>
               {' '}
               <button className="btn ghost sm" onClick={() => openMonitor('services')}>
-                See what this server supervises
+                {t('operations.unit.seeSupervised')}
               </button>
             </>
           )}
@@ -200,10 +201,10 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
       <div className="op-actionbar">
         <span className="op-actionbar-what" data-testid="install-target">
           {target === null
-            ? 'Choose a server.'
+            ? t('operations.unit.chooseServer')
             : !check.ok
               ? check.reason
-              : `Writes ~/.config/systemd/user/${draft.name} on ${target.name} and enables it`}
+              : t('operations.unit.writesTarget', { unit: draft.name, server: target.name })}
         </span>
         <span className="grow" />
         <button
@@ -212,7 +213,7 @@ export function UnitInstallPanel({ servers }: { servers: Server[] }): React.JSX.
           disabled={busy || target === null || !check.ok}
           onClick={() => void install()}
         >
-          Install
+          {t('operations.unit.install')}
         </button>
       </div>
     </PanelShell>

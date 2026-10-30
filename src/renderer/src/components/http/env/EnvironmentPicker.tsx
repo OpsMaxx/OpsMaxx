@@ -8,6 +8,7 @@ import { isMac } from '../../../lib/shortcuts'
 import { ContextMenu, type MenuEntry } from '../../connections/ContextMenu'
 import { VariablesPopover } from './VariablesPopover'
 import { openEnvironmentsTab } from './EnvironmentsTab'
+import { useT } from '../../../lib/i18n'
 import '../nav.css'
 
 /**
@@ -29,6 +30,7 @@ export function EnvironmentPicker({ tabId: forTab, compact }: { tabId?: Id; comp
   const pending = useApi((s) => s.envReview)
   const [menu, setMenu] = useState<DOMRect | null>(null)
   const [vars, setVars] = useState<DOMRect | null>(null)
+  const t = useT()
   // ⌘E: the overlay stays 'env' while the menu it opened is up, and is
   // cleared when the menu closes, so the next ⌘E opens it again.
   useEffect(() => {
@@ -40,18 +42,23 @@ export function EnvironmentPicker({ tabId: forTab, compact }: { tabId?: Id; comp
   }
   const pick = (id: Id | null): void => useApi.getState().setActiveEnvironment(ws, id)
   const entries: MenuEntry[] = [
-    { label: 'No environment', radio: 'env', checked: !active, onClick: () => pick(null) },
+    { label: t('http.envPicker.none'), radio: 'env', checked: !active, onClick: () => pick(null) },
     ...envs.map((e) => ({
-      label: `${e.name}${e.production ? ' (PROD)' : ''}${pending.includes(e.id) ? ' · needs review' : ''}`,
+      label: e.production
+        ? t(pending.includes(e.id) ? 'http.envPicker.entryProdReview' : 'http.envPicker.entryProd', { name: e.name })
+        : pending.includes(e.id)
+          ? t('http.envPicker.entryReview', { name: e.name })
+          : e.name,
       radio: 'env',
       checked: e.id === active?.id,
       onClick: () => pick(e.id)
     })),
     { separator: true, label: '' },
-    ...(tabId ? [{ label: 'Variables in this request…', onClick: () => setVars(menu) }] : []),
-    { label: 'Manage environments…', onClick: () => openEnvironmentsTab() }
+    ...(tabId ? [{ label: t('http.envPicker.variablesInRequest'), onClick: () => setVars(menu) }] : []),
+    { label: t('http.envPicker.manage'), onClick: () => openEnvironmentsTab() }
   ]
-  const label = active ? active.name : 'No environment'
+  const label = active ? active.name : t('http.envPicker.none')
+  const review = !!active && pending.includes(active.id)
   return (
     <>
       <button
@@ -61,16 +68,25 @@ export function EnvironmentPicker({ tabId: forTab, compact }: { tabId?: Id; comp
         className={`hc-env-picker${compact ? ' is-compact' : ''}`}
         aria-haspopup="menu"
         aria-expanded={menu !== null}
-        aria-label={`Environment: ${label}${active?.production ? ', production' : ''}${active && pending.includes(active.id) ? ', needs review' : ''}`}
-        title={`Environment (${isMac() ? '⌘E' : 'Ctrl+E'})`}
+        aria-label={t(
+          active?.production
+            ? review
+              ? 'http.envPicker.ariaProdReview'
+              : 'http.envPicker.ariaProd'
+            : review
+              ? 'http.envPicker.ariaReview'
+              : 'http.envPicker.aria',
+          { label }
+        )}
+        title={t('http.envPicker.title', { key: isMac() ? '⌘E' : 'Ctrl+E' })}
         onClick={(e) => setMenu(e.currentTarget.getBoundingClientRect())}
       >
         <span className={`hc-swatch${active ? ` hc-swatch--${active.color}` : ''}`} aria-hidden="true" />
         {!compact && <span className="hc-env-name">{label}</span>}
-        {active?.production && <span className="hc-prod">PROD</span>}
-        {active && pending.includes(active.id) && (
-          <span className="hc-review" title="Changed on another device; held until reviewed">
-            review
+        {active?.production && <span className="hc-prod">{t('http.envPicker.prod')}</span>}
+        {review && (
+          <span className="hc-review" title={t('http.envPicker.reviewTitle')}>
+            {t('http.envPicker.review')}
           </span>
         )}
         <ChevronDown size={12} aria-hidden="true" />

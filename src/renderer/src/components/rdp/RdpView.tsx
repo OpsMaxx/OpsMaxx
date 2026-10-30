@@ -3,6 +3,8 @@ import { KeyRound, Monitor, RotateCw } from 'lucide-react'
 import type { Server } from '../../types'
 import { clsx } from '../../lib/format'
 import { bridgeHas } from '../../lib/bridge'
+import { t as tr, useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
 // A remote desktop, drawn by the IronRDP WebAssembly client into a canvas
 // owned by the <iron-remote-desktop> web component.
@@ -168,14 +170,14 @@ interface ConfigBuilder {
  * and mapped to sentences here because the raw kinds are the difference between
  * "it didn't work" and knowing whether to fix the password or the account.
  */
-const ERROR_KIND: Record<number, string> = {
-  0: 'The connection failed.',
-  1: 'The password was rejected.',
-  2: 'That account could not log on to this machine.',
-  3: 'That account is not allowed to connect over RDP. It usually needs to be in Remote Desktop Users.',
-  4: 'The connection to the local RDP relay failed.',
-  5: 'The local RDP relay could not reach the server.',
-  6: 'The server refused the security settings offered. If it requires Network Level Authentication, turn NLA on for this server.'
+const ERROR_KIND: Record<number, MessageKey> = {
+  0: 'rdp.error.failed',
+  1: 'rdp.error.password',
+  2: 'rdp.error.logon',
+  3: 'rdp.error.notAllowed',
+  4: 'rdp.error.relay',
+  5: 'rdp.error.relayUnreachable',
+  6: 'rdp.error.security'
 }
 
 function describeError(err: unknown): string {
@@ -183,7 +185,7 @@ function describeError(err: unknown): string {
   // useful content sits behind methods.
   if (err && typeof err === 'object' && 'kind' in err && typeof err.kind === 'function') {
     const kind = (err as { kind: () => number }).kind()
-    const base = ERROR_KIND[kind] ?? ERROR_KIND[0]
+    const base = tr(ERROR_KIND[kind] ?? ERROR_KIND[0])
     const raw =
       'backtrace' in err && typeof err.backtrace === 'function'
         ? (err as { backtrace: () => string }).backtrace()
@@ -198,9 +200,7 @@ function describeError(err: unknown): string {
     // A local account often has to be named `.\name` and a domain one
     // `DOMAIN\name`; a bare username is the usual reason a password that is
     // demonstrably correct is still refused.
-    const hint = backtrace.includes('STATUS_LOGON_FAILURE')
-      ? ' The username or password was refused. For a local account try .\\name, and for a domain account DOMAIN\\name.'
-      : ''
+    const hint = backtrace.includes('STATUS_LOGON_FAILURE') ? ` ${tr('rdp.error.logonHint')}` : ''
     return backtrace ? `${base}${hint} (${backtrace})` : `${base}${hint}`
   }
   if (err instanceof Error) return err.message
@@ -226,6 +226,7 @@ export function RdpView({
    */
   visible: boolean
 }): React.JSX.Element {
+  const t = useT()
   const hostRef = useRef<HTMLDivElement>(null)
   const uiRef = useRef<UserInteraction | null>(null)
   const [phase, setPhase] = useState<Phase>('idle')
@@ -411,7 +412,7 @@ export function RdpView({
         const ui = await ready
         if (!ui) {
           if (!disposed) {
-            setError('The remote desktop client did not finish loading.')
+            setError(tr('rdp.view.clientTimeout'))
             setPhase('failed')
           }
           return
@@ -429,9 +430,7 @@ export function RdpView({
         // that session. Reaching through it throws "cannot read properties of
         // undefined", which describes the symptom and not the fix.
         if (!bridgeHas(window.opsmaxx?.rdp as Record<string, unknown> | undefined, 'ticket')) {
-          setError(
-            'The remote desktop bridge is not available in this session. Restart the app to rebuild the preload script.'
-          )
+          setError(tr('rdp.view.bridgeMissing'))
           setPhase('failed')
           return
         }
@@ -440,7 +439,7 @@ export function RdpView({
         const result = await window.opsmaxx.rdp.ticket(server.id)
         if (disposed) return
         if (!result?.ok || !result.ticket) {
-          setError(result?.error ?? 'The remote desktop bridge is unavailable.')
+          setError(result?.error ?? tr('rdp.view.bridgeUnavailable'))
           setPhase('failed')
           return
         }
@@ -542,7 +541,7 @@ export function RdpView({
             if (!disposed) {
               closeSession()
               setEnded(true)
-              setError('The remote desktop session ended.')
+              setError(tr('rdp.view.sessionEnded'))
               setPhase('failed')
             }
           })
@@ -748,7 +747,7 @@ export function RdpView({
         <button
           type="button"
           className="icon-btn"
-          title="Send Ctrl+Alt+Del"
+          title={t('rdp.view.ctrlAltDel')}
           disabled={phase !== 'connected'}
           onClick={() => uiRef.current?.ctrlAltDel()}
         >
@@ -757,7 +756,7 @@ export function RdpView({
         <button
           type="button"
           className="icon-btn"
-          title="Reconnect"
+          title={t('rdp.view.reconnect')}
           // NOT disabled while connecting, which is the one state a user most
           // needs it in. A host that stalls inside CredSSP never resolves and
           // neither `await ready` nor connect() has a client-side deadline, so
@@ -796,20 +795,20 @@ export function RdpView({
                     reads as a bug in the app rather than as what the user just
                     did. */}
                 <div className="rdp-overlay-title">
-                  {ended ? 'The remote desktop session ended' : 'Could not open the desktop'}
+                  {ended ? t('rdp.view.endedTitle') : t('rdp.view.failedTitle')}
                 </div>
                 <div className="rdp-overlay-msg">{error}</div>
                 <button type="button" className="btn" onClick={retry}>
-                  <RotateCw size={14} /> Reconnect
+                  <RotateCw size={14} /> {t('rdp.view.reconnect')}
                 </button>
               </>
             ) : (
               <div className="rdp-overlay-msg">
                 {phase === 'idle'
-                  ? 'Ready.'
+                  ? t('rdp.view.ready')
                   : phase === 'loading'
-                    ? 'Loading the remote desktop client…'
-                    : `Connecting to ${server.name}…`}
+                    ? t('rdp.view.loading')
+                    : t('rdp.view.connecting', { name: server.name })}
               </div>
             )}
           </div>

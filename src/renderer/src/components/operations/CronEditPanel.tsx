@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { CalendarClock, Pencil, Plus, RefreshCw, ShieldAlert, Trash2 } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import { sshHopsFor } from '../../lib/ssh'
 import { openMonitor, useNav } from '../../store/nav'
 import {
@@ -117,6 +118,7 @@ function JobForm({
   onCancel: () => void
   busy: boolean
 }): React.JSX.Element {
+  const t = useT()
   const scheduleOk = isValidCronSchedule(draft.schedule)
   // The same sentence the Monitoring list shows, computed by the same function,
   // so what the operator reads before saving is what they will read afterwards.
@@ -130,14 +132,14 @@ function JobForm({
           className="input mono"
           style={{ maxWidth: 170 }}
           placeholder="0 3 * * *"
-          aria-label="Schedule"
+          aria-label={t('operations.cron.scheduleLabel')}
           value={draft.schedule}
           onChange={(e) => onChange({ ...draft, schedule: e.target.value })}
         />
         <input
           className="input mono grow"
           placeholder="/usr/bin/backup --all"
-          aria-label="Command"
+          aria-label={t('operations.cron.commandLabel')}
           value={draft.command}
           onChange={(e) => onChange({ ...draft, command: e.target.value })}
         />
@@ -145,19 +147,19 @@ function JobForm({
       <div className="row" style={{ gap: 8, alignItems: 'center' }}>
         <span className={clsx(scheduleOk ? 'faint' : 'warn')}>
           {scheduleOk
-            ? (described ?? 'a schedule cron accepts — no plain-English reading of it is offered')
-            : 'not a schedule cron accepts: five fields, or @reboot, @daily, @hourly and the rest'}
+            ? (described ?? t('operations.cron.scheduleNoReading'))
+            : t('operations.cron.scheduleInvalid')}
         </span>
         <span className="grow" />
         <button className="btn" onClick={onCancel}>
-          Cancel
+          {t('common.cancel')}
         </button>
         <button
           className="btn"
           disabled={busy || !scheduleOk || draft.command.trim() === ''}
           onClick={onReview}
         >
-          Review change
+          {t('operations.cron.reviewChange')}
         </button>
       </div>
     </div>
@@ -165,6 +167,7 @@ function JobForm({
 }
 
 export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Element {
+  const t = useT()
   const [serverId, setServerId] = useState<string | null>(null)
   const [host, setHost] = useState<HostCron | null>(null)
   const [loading, setLoading] = useState(false)
@@ -262,7 +265,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
       const reply = await bridge.planEdit(target, req, { sources: host.sources })
       if (!reply.ok || !reply.command) {
         setPending(null)
-        setNote({ ok: false, text: reply.reason ?? 'the change could not be planned.' })
+        setNote({ ok: false, text: reply.reason ?? t('operations.cron.planFailed') })
         return
       }
       setPhrase('')
@@ -307,7 +310,9 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
       setNote({
         ok: res.ok,
         text: res.ok
-          ? `Changed. The crontab as it was is on the server at ${res.backupPath ?? 'the backup path it reported'}.`
+          ? t('operations.cron.changed', {
+              path: res.backupPath ?? t('operations.cron.backupPathFallback')
+            })
           : res.detail
       })
       setPending(null)
@@ -338,7 +343,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
     if (refusal !== null) {
       return (
         <span className="faint" title={refusal}>
-          not editable
+          {t('operations.cron.notEditable')}
         </span>
       )
     }
@@ -353,7 +358,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
         <button
           className="btn"
           disabled={busy}
-          title="Change this job"
+          title={t('operations.cron.changeJob')}
           onClick={() => {
             setPending(null)
             setNote(null)
@@ -370,7 +375,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
         <button
           className="btn"
           disabled={busy}
-          title="Remove this job"
+          title={t('operations.cron.removeJob')}
           onClick={() => {
             setDraft(null)
             if (entry.line !== undefined) void review({ op: 'remove', line: entry.line })
@@ -392,19 +397,13 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
   return (
     <PanelShell
       icon={<CalendarClock size={14} />}
-      title="Change what a server runs on a schedule"
-      about={
-        <p>
-          Adds, changes or removes one job in the connected account&rsquo;s own crontab, on one
-          server. The whole file is replaced — that is the only way to write one — after a
-          timestamped copy is kept on the server itself.
-        </p>
-      }
+      title={t('operations.cron.title')}
+      about={<p>{t('operations.cron.about')}</p>}
       actions={
         <>
           <select
             className="input"
-            aria-label="Server"
+            aria-label={t('operations.common.server')}
             value={serverId ?? ''}
             onChange={(e) => {
               setServerId(e.target.value === '' ? null : e.target.value)
@@ -414,7 +413,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
               setNote(null)
             }}
           >
-            <option value="">Choose a server…</option>
+            <option value="">{t('operations.common.chooseServer')}</option>
             {eligible.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -426,38 +425,30 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
             disabled={loading || serverId === null}
             onClick={() => serverId && void collect(serverId)}
           >
-            <RefreshCw size={13} className={clsx(loading && 'spin')} /> Read this server
+            <RefreshCw size={13} className={clsx(loading && 'spin')} /> {t('operations.cron.readServer')}
           </button>
         </>
       }
     >
       {!bridge && (
-        <div className="panel-note is-alarm">
-          This build&rsquo;s main process has no crontab edit channels, so nothing here can write.
-          Restart the app to rebuild it.
-        </div>
+        <div className="panel-note is-alarm">{t('operations.cron.noBridge')}</div>
       )}
 
       {note && <div className={clsx('panel-note', note.ok ? '' : 'is-alarm')}>{note.text}</div>}
 
       {host === null ? (
         <div className="panel-empty">
-          <p className="panel-empty-title">Nothing has been read yet.</p>
-          <p className="panel-empty-body">
-            Pick a server and read it. A crontab is written back whole, so this reads the file it is
-            about to replace first — a change planned against a file nobody read is a change that
-            deletes the part nobody saw. The estate-wide view of what is scheduled, including the
-            sources this account is not allowed to read, is on Monitoring.
-          </p>
+          <p className="panel-empty-title">{t('operations.cron.emptyTitle')}</p>
+          <p className="panel-empty-body">{t('operations.cron.emptyBody')}</p>
           <div className="panel-empty-actions">
             <button className="btn ghost sm" onClick={() => openMonitor('cron')}>
-              Open Scheduled jobs
+              {t('operations.cron.openScheduled')}
             </button>
           </div>
         </div>
       ) : host.error ? (
         <div className="panel-note is-alarm">
-          {host.serverName}: {host.error}
+          {t('operations.cron.hostError', { server: host.serverName, error: host.error })}
         </div>
       ) : (
         <>
@@ -466,16 +457,14 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
               read deserves the reason. */}
           {!ownCrontabReadable(host) ? (
             <div className="panel-note is-unknown" data-testid="cron-unreadable">
-              <ShieldAlert size={12} /> This account&rsquo;s crontab on {host.serverName} was not
-              read in full, so nothing here can be written to it. A write replaces the whole file,
-              which means the part that could not be read is the part it would delete.
+              <ShieldAlert size={12} /> {t('operations.cron.unreadable', { server: host.serverName })}
             </div>
           ) : (
             <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6 }}>
               <span className="faint">
                 {summariseCronSources(host.sources ?? []).incomplete.length > 0
-                  ? 'Some other sources on this server were not readable; the list below is what was.'
-                  : 'Every source on this server was read.'}
+                  ? t('operations.cron.someUnreadable')
+                  : t('operations.cron.allRead')}
               </span>
               <span className="grow" />
               <button
@@ -487,7 +476,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
                   setDraft({ schedule: '0 3 * * *', command: '' })
                 }}
               >
-                <Plus size={12} /> Add job
+                <Plus size={12} /> {t('operations.cron.addJob')}
               </button>
             </div>
           )}
@@ -515,8 +504,8 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
                   host. */}
               {(host.sources?.length ?? 0) > 0 &&
               summariseCronSources(host.sources ?? []).incomplete.length === 0
-                ? 'Nothing scheduled on this server.'
-                : 'Nothing found in the sources that could be read.'}
+                ? t('operations.cron.nothingScheduled')
+                : t('operations.cron.nothingFound')}
             </div>
           )}
 
@@ -524,7 +513,11 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
             <div key={`${e.origin}:${i}`}>
               <div className="cron-row">
                 <span className="mono cron-when">
-                  {e.kind === 'systemd-timer' ? (e.nextRun ? `next ${e.nextRun}` : 'no next run') : e.schedule}
+                  {e.kind === 'systemd-timer'
+                    ? e.nextRun
+                      ? t('operations.cron.nextRun', { when: e.nextRun })
+                      : t('operations.cron.noNextRun')
+                    : e.schedule}
                 </span>
                 <span className="faint cron-desc">{e.description ?? ''}</span>
                 <span
@@ -572,24 +565,19 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
                 {pending.reply.summary}
               </div>
               <div className="faint">
-                The whole crontab is replaced — that is the only way to write one — after a
-                timestamped copy of it is kept on {pending.target.serverName}. It is written back
-                only if the file is still the one this was planned against, and it is read back
-                afterwards and compared; if it does not match, the copy goes straight back.
+                {t('operations.cron.replaceNote', { server: pending.target.serverName })}
               </div>
               {pending.reply.addedFinalNewline && (
                 <div className="state-watch">
-                  <ShieldAlert size={11} /> This crontab has no newline at the end of its last line,
-                  so one is being added. Without it the new job would be glued onto the end of the
-                  previous one.
+                  <ShieldAlert size={11} /> {t('operations.cron.finalNewline')}
                 </div>
               )}
               {needed !== null && (
                 <input
                   className="input mono"
                   style={{ maxWidth: 120 }}
-                  aria-label="Confirmation phrase"
-                  placeholder={`Type ${needed}`}
+                  aria-label={t('operations.common.confirmPhrase')}
+                  placeholder={t('operations.common.typePhrase', { phrase: needed })}
                   value={phrase}
                   onChange={(ev) => setPhrase(ev.target.value)}
                 />
@@ -605,13 +593,16 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
           <div className="op-actionbar">
             <span className="op-actionbar-what" data-testid="cron-target">
               {pending?.reply.command
-                ? `Writes ${host.serverName}'s crontab for ${server?.username ?? 'the connected account'}`
-                : 'Add or change a job above, then review it.'}
+                ? t('operations.cron.writesTarget', {
+                    server: host.serverName,
+                    account: server?.username ?? t('operations.cron.connectedAccount')
+                  })
+                : t('operations.cron.reviewHint')}
             </span>
             <span className="grow" />
             {pending !== null && (
               <button className="btn ghost" disabled={busy} onClick={() => setPending(null)}>
-                Cancel
+                {t('common.cancel')}
               </button>
             )}
             <button
@@ -622,7 +613,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
               }
               onClick={() => void apply()}
             >
-              Apply to {host.serverName}
+              {t('operations.cron.applyTo', { server: host.serverName })}
             </button>
           </div>
         </>

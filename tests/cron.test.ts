@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import en from '../src/shared/locales/en.json'
 import { execFileSync } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -866,22 +867,27 @@ describe('the panel that shows it', () => {
   it('does not claim a server has nothing scheduled unless every source answered', () => {
     // The sentence this whole change exists to stop: "Nothing scheduled."
     // under a host whose /etc/cron.d we were simply not allowed to open.
-    expect(panel).toMatch(/incomplete\.length === 0\s*\?\s*'Nothing scheduled\.'/)
-    expect(panel).toMatch(/Nothing found in the sources that could be read/)
+    expect(panel).toMatch(/incomplete\.length === 0\s*\?\s*t\('monitor\.cron\.nothingScheduled'\)/)
+    expect(en['monitor.cron.nothingScheduled']).toBe('Nothing scheduled.')
+    expect(panel).toContain("t('monitor.cron.nothingFound')")
+    expect(en['monitor.cron.nothingFound']).toMatch(/Nothing found in the sources that could be read/)
   })
 
   it('says how much of the picture it has', () => {
-    expect(panel).toMatch(/read \$\{answered\} of \$\{total\} sources/)
+    expect(panel).toContain("t('monitor.cron.readSome', { answered, total })")
+    expect(en['monitor.cron.readSome']).toBe('read {{answered}} of {{total}} sources')
   })
 
   it('treats a missing source report as a gap rather than as completeness', () => {
     // Until main forwards the per-source statuses this field is absent, and a
     // panel that read that as "all five fine" would be inventing the
     // reassurance the change exists to withdraw.
-    expect(panel).toMatch(/did not report which sources it managed to read/)
+    expect(panel).toContain("t('monitor.cron.noSourceReport')")
+    expect(en['monitor.cron.noSourceReport']).toMatch(/did not report which sources it managed to read/)
   })
 
   it('says out loud when something was read as root', () => {
-    expect(panel).toMatch(/read as root/)
+    expect(panel).toContain("t('monitor.cron.readAsRoot')")
+    expect(en['monitor.cron.readAsRoot']).toBe('read as root')
   })
 })

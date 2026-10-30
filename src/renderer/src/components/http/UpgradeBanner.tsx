@@ -2,26 +2,27 @@ import { Info, X } from 'lucide-react'
 import type { MigrationReport } from '../../../../shared/apiMigration'
 import { useApi } from '../../store/api'
 import { useHttp } from '../../store/http'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { Translate } from '../../../../shared/i18n'
 
-const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`
-
-/** "a, b and c", or "" for nothing. */
-const listed = (parts: string[]): string =>
-  parts.length < 2 ? (parts[0] ?? '') : `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}`
+/** "a, b and c", or "" for nothing. Never more than three parts. */
+const listed = (t: Translate, [a, b, c]: string[]): string =>
+  c !== undefined ? t('http.upgrade.listThree', { a, b, c }) : b !== undefined ? t('http.upgrade.listTwo', { a, b }) : (a ?? '')
 
 /**
  * What moved over, from the non-zero counts. A collection that needs its
  * OpenAPI description imported again did not move over in any useful sense,
  * so it is not counted here; the Re-import list says what happened to it.
  */
-export function movedSentence(r: MigrationReport): string | null {
+export function movedSentence(r: MigrationReport, t: Translate): string | null {
   const collections = r.collections - r.needsReimport.length
   const parts = [
-    collections > 0 && plural(collections, 'collection'),
-    r.requests > 0 && plural(r.requests, 'request'),
-    r.environments > 0 && plural(r.environments, 'environment')
+    collections > 0 && t('http.upgrade.collections', { count: collections }),
+    r.requests > 0 && t('http.upgrade.requests', { count: r.requests }),
+    r.environments > 0 && t('http.upgrade.environments', { count: r.environments })
   ].filter((p): p is string => !!p)
-  return parts.length ? `${listed(parts)} moved over.` : null
+  return parts.length ? t('http.upgrade.movedOver', { items: listed(t, parts) }) : null
 }
 
 /** Whether a report says anything the user has to hear about. */
@@ -45,37 +46,39 @@ export function UpgradeBanner({ onRecover }: { onRecover?: () => void }): React.
   const report = useApi((s) => s.report)
   const collections = useApi((s) => s.collections)
   const dismissed = useHttp((s) => s.bannerDismissed)
+  const t = useT()
   if (!reportHasNews(report) || dismissed === report.id) return null
 
-  const nameOf = (id: string): string => collections.find((c) => c.id === id)?.name ?? 'a collection'
+  const nameOf = (id: string): string =>
+    collections.find((c) => c.id === id)?.name ?? t('http.upgrade.aCollection')
   const reimport = (id: string): void => useHttp.getState().openImport(id)
-  const moved = movedSentence(report)
+  const moved = movedSentence(report, t)
 
   return (
     <div className="hc-banner" role="status">
       <Info size={16} aria-hidden />
       <div className="hc-banner-body">
         <div>
-          The HTTP client was rebuilt.
+          {t('http.upgrade.rebuilt')}
           {moved && (
             <>
               {' '}
               <strong>{moved}</strong>
             </>
           )}
-          {report.dropped.includes('cookies') && ' Cookies from the old client were cleared.'}
+          {report.dropped.includes('cookies') && ` ${t('http.upgrade.cookiesCleared')}`}
         </div>
         {report.needsReimport.length > 0 && (
           <div>
             {report.needsReimport.length === 1
-              ? 'This collection was built from an OpenAPI description and needs importing again:'
-              : 'These collections were built from OpenAPI descriptions and need importing again:'}
+              ? t('http.upgrade.needsReimportOne')
+              : t('http.upgrade.needsReimportMany')}
             <ul className="hc-banner-list">
               {report.needsReimport.map((c) => (
                 <li key={c.id}>
                   {c.name}{' '}
                   <button className="btn sm" onClick={() => reimport(c.id)}>
-                    Re-import
+                    {t('http.upgrade.reimport')}
                   </button>
                 </li>
               ))}
@@ -84,30 +87,30 @@ export function UpgradeBanner({ onRecover }: { onRecover?: () => void }): React.
         )}
         {report.baseUrlCollisions.map((c) => (
           <div key={`${c.collectionId}|${c.environment}`}>
-            Environment <em>{c.environment}</em> also defines <code>baseUrl</code>. Requests in{' '}
-            <em>{nameOf(c.collectionId)}</em> will use the environment’s value (<code>{c.value}</code>) while{' '}
-            <em>{c.environment}</em> is active.
+            <Trans
+              i18nKey="http.upgrade.baseUrlCollision"
+              values={{ environment: c.environment, collection: nameOf(c.collectionId), value: c.value }}
+              components={{ em: <em />, code: <code /> }}
+            />
           </div>
         ))}
         {report.rejected.length > 0 && (
           <div>
-            {report.rejected.length === 1
-              ? '1 saved item could not be converted and was kept aside.'
-              : `${report.rejected.length} saved items could not be converted and were kept aside.`}
+            {t('http.upgrade.rejected', { count: report.rejected.length })}
           </div>
         )}
         {onRecover && (
           <div className="hc-banner-actions">
             <button className="btn sm" onClick={onRecover}>
-              Recover old data…
+              {t('http.upgrade.recover')}
             </button>
           </div>
         )}
       </div>
       <button
         className="icon-btn sm"
-        aria-label="Dismiss"
-        title="Dismiss"
+        aria-label={t('common.dismiss')}
+        title={t('common.dismiss')}
         onClick={() => useHttp.getState().dismissBanner(report.id)}
       >
         <X size={14} />

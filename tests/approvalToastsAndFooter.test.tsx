@@ -8,7 +8,8 @@ import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { ApprovalWatcher } from '../src/renderer/src/components/ai/ApprovalWatcher'
 import { ToastSlot, Toasts } from '../src/renderer/src/components/common/Toasts'
-import { KILL_SWITCH_FAILED, useApprovalQueue } from '../src/renderer/src/store/approvalQueue'
+import { KILL_SWITCH_FAILED_KEY, useApprovalQueue } from '../src/renderer/src/store/approvalQueue'
+import { englishT } from '../src/shared/i18n'
 import { toast } from '../src/renderer/src/store/toast'
 import type { ApprovalRequest } from '../src/shared/mcp'
 
@@ -147,7 +148,7 @@ describe('the kill switch failing', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Deny and stop all AI access/ }))
 
     const alert = await screen.findByRole('alert')
-    expect(alert.textContent).toContain(KILL_SWITCH_FAILED)
+    expect(alert.textContent).toContain(englishT(KILL_SWITCH_FAILED_KEY))
     expect(alert.closest('[role="dialog"]')).not.toBeNull()
   })
 })

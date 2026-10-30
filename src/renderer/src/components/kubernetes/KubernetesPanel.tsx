@@ -73,6 +73,8 @@ import { approvalFor, type CommandApproval } from '../../../../shared/broadcast'
 import type { Server } from '../../types'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { EmptyState } from '../common/EmptyState'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 // Pods on a cluster reachable from a server, and what you do about them.
 //
@@ -159,8 +161,6 @@ interface K8sBridge {
 const bridge = (): K8sBridge =>
   ((window.opsmaxx as { k8s?: K8sBridge } | undefined)?.k8s ?? {}) as K8sBridge
 
-const NOT_WIRED = 'This build has no such channel — the main process has not registered it.'
-
 function podTone(p: K8sPod): string {
   if (/CrashLoopBackOff|Error|Failed|Evicted/i.test(p.status)) return 'danger'
   if (p.status === 'Succeeded' || p.status === 'Completed') return ''
@@ -181,10 +181,12 @@ function Denied({ read, what }: { read: { reason: keyof typeof K8S_FAILURE_HELP;
   // `no-previous` and `no-metrics` are not the user's problem to fix and are
   // not failures of this account — dressing them in a red warning triangle
   // teaches people to ignore the triangle.
+  const t = useT()
   const benign = read.reason === 'no-previous' || read.reason === 'no-metrics'
   return (
     <div className={clsx('s-desc', benign ? 'faint' : 'danger')}>
-      {!benign && <TriangleAlert size={12} />} {what}: {K8S_FAILURE_HELP[read.reason]}
+      {!benign && <TriangleAlert size={12} />}{' '}
+      {t('k8s.panel.deniedLine', { what, help: K8S_FAILURE_HELP[read.reason] })}
       <div className="mono" style={{ marginTop: 4, opacity: 0.8, whiteSpace: 'pre-wrap' }}>
         {read.detail}
       </div>
@@ -236,30 +238,31 @@ function LogPane({
   onDock?: () => void
   onClose: () => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <div style={inline ? { paddingBottom: 6 } : undefined}>
       <div className="row muted" style={{ fontSize: 11, marginTop: inline ? 4 : 10 }}>
-        <span className="grow">Logs · {entry.pod}</span>
+        <span className="grow">{t('k8s.panel.logsOf', { pod: entry.pod })}</span>
         {inline && onPopOut && (
           <button
             className="btn ghost sm"
-            title="Read this in the larger panel at the bottom"
+            title={t('k8s.panel.popOutTitle')}
             onClick={onPopOut}
           >
-            Pop out
+            {t('k8s.panel.popOut')}
           </button>
         )}
         {!inline && onDock && (
           <button
             className="btn ghost sm"
-            title="Put this back under its pod’s row"
+            title={t('k8s.panel.dockTitle')}
             onClick={onDock}
           >
-            Dock
+            {t('k8s.panel.dock')}
           </button>
         )}
         <button className="btn ghost sm" onClick={onClose}>
-          Close
+          {t('common.close')}
         </button>
       </div>
       {/* Inline keeps .bc-out's own 26px indent, which reads as "this belongs
@@ -301,17 +304,18 @@ function DiagPane({
   entry: { pod: string; result: K8sDiagnosis | null; error?: string }
   onClose: () => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <div style={{ paddingBottom: 6 }}>
       <div className="row muted" style={{ fontSize: 11, marginTop: 4 }}>
-        <span className="grow">Diagnosis · {entry.pod}</span>
+        <span className="grow">{t('k8s.panel.diagnosisOf', { pod: entry.pod })}</span>
         <button className="btn ghost sm" onClick={onClose}>
-          Close
+          {t('common.close')}
         </button>
       </div>
           {entry.error && <div className="s-desc danger">{entry.error}</div>}
           {!entry.result && !entry.error && (
-            <div className="faint" style={{ fontSize: 12 }}>Reading…</div>
+            <div className="faint" style={{ fontSize: 12 }}>{t('k8s.panel.reading')}</div>
           )}
           {entry.result && (
             <>
@@ -323,23 +327,20 @@ function DiagPane({
               {!entry.result.events.ok ? (
                 <Denied read={entry.result.events} what="Events" />
               ) : entry.result.events.items.length === 0 ? (
-                <div className="faint" style={{ fontSize: 12 }}>
-                  No events for this pod. They expire after about an hour, so this is not proof
-                  nothing happened.
-                </div>
+                <div className="faint" style={{ fontSize: 12 }}>{t('k8s.panel.noPodEvents')}</div>
               ) : (
                 <EventRows events={entry.result.events.items} />
               )}
 
               <div className="s-title" style={{ marginTop: 10 }}>
-                <ScrollText size={12} /> Previous container
+                <ScrollText size={12} /> {t('k8s.panel.previousContainer')}
               </div>
-              {textBlock(entry.result.previousLogs, 'Previous container logs')}
+              {textBlock(entry.result.previousLogs, t('k8s.panel.previousContainerLogs'))}
 
               <div className="s-title" style={{ marginTop: 10 }}>
                 <Boxes size={12} /> describe
               </div>
-              {textBlock(entry.result.describe, 'Describe')}
+              {textBlock(entry.result.describe, t('k8s.panel.describe'))}
             </>
           )}
     </div>
@@ -354,6 +355,8 @@ function readEmpty<T>(r: K8sRead<T>): boolean {
 const LOCAL_ID = 'local'
 
 export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.Element {
+  const t = useT()
+  const NOT_WIRED = t('k8s.panel.notWired')
   const [serverId, setServerId] = useState('')
   const [context, setContext] = useState('')
   const [namespace, setNamespace] = useState('')
@@ -541,7 +544,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
   const hasTarget = localSelected || !!server
   /** What main is told to run kubectl against. */
   const targetCfg = (): unknown => (localSelected ? LOCAL_TARGET : cfgFor(server as Server))
-  const targetName = localSelected ? 'This machine' : server?.name
+  const targetName = localSelected ? t('k8s.panel.thisMachine') : server?.name
 
   const cfgFor = (s: Server): unknown => ({
     sessionId: `k8s-${s.id}`,
@@ -573,7 +576,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     setExecResult(null)
     try {
       const r = await withVaultUnlock(
-        'Reading this cluster needs the server’s stored credential.',
+        t('k8s.panel.vaultReason'),
         async () => bridge().read?.(targetCfg(), ctx || undefined, (ns ?? namespace) || undefined)
       )
       setProbe(r ?? null)
@@ -716,16 +719,16 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
 
   const runCordon = async (): Promise<void> => {
     if (!server || !nodePending) return
-    const t = nodePending.plan.target
-    setNodeBusy(t.node)
+    const target = nodePending.plan.target
+    setNodeBusy(target.node)
     try {
       const fn = bridge().cordon
       const r = fn
-        ? await fn(targetCfg(), t, true)
+        ? await fn(targetCfg(), target, true)
         : {
             ok: false,
-            action: t.action,
-            node: t.node,
+            action: target.action,
+            node: target.node,
             alreadyInState: false,
             output: '',
             node_status: '',
@@ -886,13 +889,13 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     // buildK8sLogsCommand refuses a name it cannot prove safe rather than
     // escaping it, so asking first turns a rejected invoke into a sentence.
     if (!validatePodName(p.name)) {
-      write('This pod has a name logs cannot be requested for safely.')
+      write(t('k8s.panel.logsUnsafeName'))
       return
     }
-    write('Loading…')
+    write(t('common.loading'))
     try {
       const r = await bridge().logs?.(targetCfg(), p.namespace, p.name, 200, context || undefined)
-      write(r?.output || r?.error || 'No output.')
+      write(r?.output || r?.error || t('k8s.panel.noOutput'))
     } catch (e) {
       write(e instanceof Error ? e.message : String(e))
     }
@@ -911,7 +914,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
     const put = (v: { pod: string; result: K8sDiagnosis | null; error?: string }): void =>
       setDiag((d) => ({ ...d, [key]: v }))
     if (!validatePodName(p.name) ) {
-      put({ pod: p.name, result: null, error: 'This pod has a name kubectl cannot be asked about safely.' })
+      put({ pod: p.name, result: null, error: t('k8s.panel.diagnoseUnsafeName') })
       return
     }
     put({ pod: p.name, result: null })
@@ -1016,8 +1019,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       return (
         <EmptyState
           compact
-          title={`No ${label.toLowerCase()}`}
-          message={`This namespace has no ${label.toLowerCase()}. Switch namespace, or clear the filter.`}
+          title={t('k8s.panel.noWorkloadsTitle', { kind: label.toLowerCase() })}
+          message={t('k8s.panel.noWorkloadsMessage', { kind: label.toLowerCase() })}
         />
       )
     return (
@@ -1039,7 +1042,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             )}
             <button
               className="icon-btn sm"
-              title={`kubectl rollout restart ${w.kind}/${w.name} — replaces every pod of this workload`}
+              title={t('k8s.panel.restartTitle', { command: `kubectl rollout restart ${w.kind}/${w.name}` })}
               onClick={() => askToRestart(w)}
             >
               <RotateCw size={13} />
@@ -1058,7 +1061,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         <select
           className="input"
           style={{ maxWidth: 170 }}
-          aria-label="Kubernetes host"
+          aria-label={t('k8s.panel.hostAria')}
           value={selectedId}
           onChange={(e) => {
             setServerId(e.target.value)
@@ -1089,7 +1092,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         >
           {/* First, and present even with no servers: a local kubeconfig is
               what most developers have in front of them. */}
-          <option value={LOCAL_ID}>This machine</option>
+          <option value={LOCAL_ID}>{t('k8s.panel.thisMachine')}</option>
           {eligible.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -1109,7 +1112,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
           <select
             className="input"
             style={{ maxWidth: 200 }}
-            aria-label="Kubernetes context"
+            aria-label={t('k8s.panel.contextAria')}
             value={effectiveContext}
             onChange={(e) => {
               setContext(e.target.value)
@@ -1125,8 +1128,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
           >
             {contextChoices.map((c) => (
               <option key={c.name} value={c.name}>
-                {c.name}
-                {c.current ? ' (current)' : ''}
+                {c.current ? t('k8s.panel.contextCurrent', { name: c.name }) : c.name}
               </option>
             ))}
           </select>
@@ -1160,9 +1162,9 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               if (again.usage) void loadUsage(ns)
               if (again.resources) void loadResources(ns)
             }}
-            title="Scopes the cluster and usage reads. Nodes are cluster-scoped and are never namespace-filtered."
+            title={t('k8s.panel.namespaceTitle')}
           >
-            <option value="">all namespaces</option>
+            <option value="">{t('k8s.panel.allNamespaces')}</option>
             {probe.namespaces.map((n) => (
               <option key={n} value={n}>
                 {n}
@@ -1170,14 +1172,14 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             ))}
           </select>
         )}
-        <Explain why={hasTarget ? `Read Kubernetes on ${targetName}` : 'Choose a host first'}>
+        <Explain why={hasTarget ? t('k8s.panel.readOn', { target: targetName ?? '' }) : t('k8s.panel.chooseHost')}>
           <button
             className="btn"
             disabled={loading || !hasTarget}
             onClick={() => void load(effectiveContext)}
           >
             <RefreshCw size={13} className={clsx(loading && 'spin')} />{' '}
-            {probe ? 'Refresh' : 'Read cluster'}
+            {probe ? t('common.refresh') : t('k8s.panel.readCluster')}
           </button>
         </Explain>
       </div>
@@ -1187,24 +1189,18 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       {/* About whether anything is DIALLED. Every saved host is in the
           dropdown either way, and reading one dials it. */}
       {!anyConnected(servers) && (
-        <div className="s-desc">
-          No server in this workspace is connected — reading the kubeconfig on this machine. Any
-          saved server can still be picked above.
-        </div>
+        <div className="s-desc">{t('k8s.panel.noneConnected')}</div>
       )}
 
       {!probe && !loading && hasTarget && (
         <div className="s-desc">
-          Runs <span className="mono">kubectl</span> on the selected server, using whatever
-          kubeconfig that server already has. Reading only, with one exception:{' '}
-          <span className="mono">rollout restart</span>, which asks first. It never switches your
-          context, never execs into a pod, and never deletes anything.
+          <Trans i18nKey="k8s.panel.intro" components={{ mono: <span className="mono" /> }} />
         </div>
       )}
 
       {/* Failure classes with different fixes. "No pods" for a permissions
           problem is the lie this panel exists to avoid. */}
-      {probe && !probe.ok && <Denied read={probe} what="Reading the cluster" />}
+      {probe && !probe.ok && <Denied read={probe} what={t('k8s.panel.readingCluster')} />}
 
       {probe?.ok && (
         <>
@@ -1222,7 +1218,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                 if (!overview) void loadOverview()
               }}
             >
-              <Layers size={12} /> Workloads, nodes &amp; events
+              <Layers size={12} /> {t('k8s.panel.tabCluster')}
             </button>
             <button
               className={clsx('chip', view === 'usage' && 'on')}
@@ -1231,7 +1227,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                 if (!usage) void loadUsage()
               }}
             >
-              <Gauge size={12} /> Usage
+              <Gauge size={12} /> {t('k8s.panel.tabUsage')}
             </button>
             <button
               className={clsx('chip', view === 'resources' && 'on')}
@@ -1240,7 +1236,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                 if (!resources) void loadResources()
               }}
             >
-              <HardDrive size={12} /> Storage, ingress &amp; access
+              <HardDrive size={12} /> {t('k8s.panel.tabResources')}
             </button>
             <span className="spacer" />
             <span className="muted" style={{ fontSize: 11 }}>
@@ -1253,15 +1249,14 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             <>
               <div className="row muted wrap" style={{ fontSize: 11, marginTop: 8, gap: 12 }}>
                 <span>
-                  {pods.length} pod{pods.length === 1 ? '' : 's'}
-                  {q !== '' && ` of ${allPods.length}`}
+                  {q === ''
+                    ? t('k8s.panel.podCount', { count: pods.length })
+                    : t('k8s.panel.podCountOf', { count: pods.length, total: allPods.length })}
                 </span>
                 {/* An empty list means something different depending on this, so
                     it is never left for the reader to assume. */}
                 {!probe.allNamespaces && (
-                  <span className="warn">
-                    one namespace only — this account cannot list across the cluster
-                  </span>
+                  <span className="warn">{t('k8s.panel.oneNamespaceOnly')}</span>
                 )}
                 {/* A list narrowed by choice is not the same as a list narrowed
                     by RBAC, and saying so is the difference between "you picked
@@ -1271,14 +1266,14 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                     suppressing the chip there left the user's own choice
                     unnamed in exactly the case where both explanations apply. */}
                 {probe.scopedTo && (
-                  <span className="faint">in {probe.scopedTo}</span>
+                  <span className="faint">{t('k8s.panel.scopedTo', { namespace: probe.scopedTo })}</span>
                 )}
                 <span className="spacer" />
                 {allPods.length > 0 && (
                   <input
                     className="input"
                     style={{ maxWidth: 180 }}
-                    placeholder="Filter pods…"
+                    placeholder={t('k8s.panel.filterPods')}
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                   />
@@ -1288,10 +1283,10 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               {allPods.length === 0 && (
                 <div className="faint" style={{ fontSize: 12 }}>
                   {probe.scopedTo
-                    ? `The cluster answered and has no pods in ${probe.scopedTo}.`
+                    ? t('k8s.panel.noPodsIn', { namespace: probe.scopedTo })
                     : probe.allNamespaces
-                      ? 'The cluster answered and has no pods.'
-                      : 'No pods in the namespace this account can read.'}
+                      ? t('k8s.panel.noPods')
+                      : t('k8s.panel.noPodsReadable')}
                 </div>
               )}
 
@@ -1306,13 +1301,13 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       <span className="faint cron-desc">{p.namespace}</span>
                       <span
                         className="mono grow cron-cmd"
-                        title={`${p.name} on ${p.node || 'unscheduled'}`}
+                        title={t('k8s.panel.podOnNode', { pod: p.name, node: p.node || t('k8s.panel.unscheduled') })}
                       >
                         {p.name}
                       </span>
                       {p.restarts > 0 && (
                         <span className={clsx('chip', p.restarts > 5 ? 'danger' : 'warn')}>
-                          {p.restarts} restart{p.restarts === 1 ? '' : 's'}
+                          {t('k8s.panel.restarts', { count: p.restarts })}
                         </span>
                       )}
                       {/* First, and to the left of the log button, because it is
@@ -1323,8 +1318,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                         aria-expanded={!!diag[key]}
                         title={
                           diag[key]
-                            ? 'Close the diagnosis for this pod'
-                            : "Describe, events, and the PREVIOUS container's logs — why this pod is unhealthy"
+                            ? t('k8s.panel.diagnoseCloseTitle')
+                            : t('k8s.panel.diagnoseTitle')
                         }
                         onClick={() => void diagnose(p)}
                       >
@@ -1335,8 +1330,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                         aria-expanded={!!entry}
                         title={
                           entry
-                            ? 'Close the logs for this pod'
-                            : 'Last 200 log lines from the running containers'
+                            ? t('k8s.panel.logsCloseTitle')
+                            : t('k8s.panel.logsTitle')
                         }
                         onClick={() => void openLogs(p)}
                       >
@@ -1350,8 +1345,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       <Explain
                         why={
                           localSelected
-                            ? 'Running a command in a pod is available for a saved server, because the confirmation is recorded against one. Use a local terminal for this cluster.'
-                            : 'Run one command inside this pod — arbitrary code, behind a typed confirmation'
+                            ? t('k8s.panel.execLocalWhy')
+                            : t('k8s.panel.execWhy')
                         }
                       >
                         <button
@@ -1362,7 +1357,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                           // a server is its own decision, not a side effect of a
                           // dropdown option.
                           disabled={localSelected}
-                          aria-label="Run a command in this pod"
+                          aria-label={t('k8s.panel.execAria')}
                           onClick={() => {
                             setExecResult(null)
                             setExecCommand('')
@@ -1387,12 +1382,13 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       <>
         <div className="s-card" style={{ marginTop: 8 }}>
           <div className="s-title">
-            <SquareTerminal size={12} /> Run a command in {execFor.namespace}/{execFor.name}
+            <SquareTerminal size={12} />{' '}
+            {t('k8s.panel.execHeading', { pod: `${execFor.namespace}/${execFor.name}` })}
           </div>
           <div className="input-group" style={{ marginTop: 6 }}>
             <input
               className="input mono"
-              placeholder="e.g. cat /etc/nginx/nginx.conf"
+              placeholder={t('k8s.panel.execPlaceholder', { example: 'cat /etc/nginx/nginx.conf' })}
               value={execCommand}
               onChange={(e) => setExecCommand(e.target.value)}
               autoFocus
@@ -1405,7 +1401,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
           <div className="input-group" style={{ marginTop: 6 }}>
             <input
               className="input mono"
-              placeholder="container (optional — kubectl picks the default and says which)"
+              placeholder={t('k8s.panel.execContainerPlaceholder')}
               value={execContainer}
               onChange={(e) => setExecContainer(e.target.value)}
             />
@@ -1413,18 +1409,13 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
           {execCommand.trim() !== '' && (
             <>
               <div className="s-desc danger">
-                <TriangleAlert size={12} /> This runs arbitrary code inside the container. What it
-                can do is whatever that container&rsquo;s own service account and user allow — exec
-                is its own RBAC subresource and this app cannot read what it grants.
+                <TriangleAlert size={12} /> {t('k8s.panel.execWarning')}
               </div>
-              <div className="s-desc faint">
-                One command, no TTY and no stdin: a program that waits for input will hang until the
-                timeout rather than prompt. This is not a shell session.
-              </div>
+              <div className="s-desc faint">{t('k8s.panel.execNoTty')}</div>
               <div className="input-group" style={{ marginTop: 6 }}>
                 <input
                   className="input"
-                  placeholder="Type EXEC to run it"
+                  placeholder={t('k8s.panel.execPhrase', { phrase: 'EXEC' })}
                   value={execPhrase}
                   onChange={(e) => setExecPhrase(e.target.value)}
                 />
@@ -1437,7 +1428,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               disabled={execBusy || execCommand.trim() === '' || execPhrase.trim() !== 'EXEC'}
               onClick={() => void runExec()}
             >
-              Run
+              {t('k8s.panel.run')}
             </button>
             <button
               className="btn ghost"
@@ -1448,7 +1439,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                 setExecPhrase('')
               }}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div></>
@@ -1457,25 +1448,24 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       <div className={clsx('s-desc', execResult.r.ok ? '' : 'danger')}>
                         <span className="grow">
                           {execResult.r.ok
-                            ? `${execResult.pod}${
-                                execResult.r.containerExit === null
-                                  ? ''
-                                  : ` — the command exited ${execResult.r.containerExit}`
-                              }`
-                            : `${execResult.pod} — ${
-                                execResult.r.reason ? K8S_FAILURE_HELP[execResult.r.reason] : ''
-                              }`}
+                            ? execResult.r.containerExit === null
+                              ? execResult.pod
+                              : t('k8s.panel.execExited', { pod: execResult.pod, code: execResult.r.containerExit })
+                            : t('k8s.panel.execFailed', {
+                                pod: execResult.pod,
+                                help: execResult.r.reason ? K8S_FAILURE_HELP[execResult.r.reason] : ''
+                              })}
                         </span>
                         <pre
                           className="mono"
                           style={{ marginTop: 4, whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto' }}
                         >
                           {execResult.r.ok
-                            ? execResult.r.output || '(the command printed nothing, and worked)'
+                            ? execResult.r.output || t('k8s.panel.execNoOutput')
                             : execResult.r.detail}
                         </pre>
                         <button className="btn ghost sm" onClick={() => setExecResult(null)}>
-                          Close
+                          {t('common.close')}
                         </button>
                       </div>
                     )}
@@ -1497,14 +1487,16 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             <>
               <div className="row muted" style={{ fontSize: 11, marginTop: 8 }}>
                 <span className="grow">
-                  {namespace ? `namespace ${namespace}` : 'all namespaces'}
+                  {namespace ? t('k8s.panel.namespaceNamed', { namespace }) : t('k8s.panel.allNamespaces')}
                 </span>
                 <button className="btn ghost sm" disabled={overviewLoading} onClick={() => void loadOverview()}>
-                  <RefreshCw size={12} className={clsx(overviewLoading && 'spin')} /> Refresh
+                  <RefreshCw size={12} className={clsx(overviewLoading && 'spin')} /> {t('common.refresh')}
                 </button>
               </div>
 
-              {!overview && overviewLoading && <div className="faint" style={{ fontSize: 12 }}>Reading…</div>}
+              {!overview && overviewLoading && (
+                <div className="faint" style={{ fontSize: 12 }}>{t('k8s.panel.reading')}</div>
+              )}
 
               {overview && (
                 <>
@@ -1541,21 +1533,20 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                     <div className="s-note" style={{ marginTop: 10 }}>
                       {watched ? (
                         <>
-                          <b>Watching this cluster for restarting pods.</b> Checked every two
-                          minutes from {servers.find((x) => x.id === serverId)?.name}. An alert is
-                          raised when a pod&rsquo;s restart count goes up between checks — a count
-                          on its own cannot tell a pod that is restarting now from one that
-                          restarted last week.
+                          <Trans
+                            i18nKey="k8s.panel.watching"
+                            values={{ server: servers.find((x) => x.id === serverId)?.name ?? '' }}
+                            components={{ b: <b /> }}
+                          />
                           <button className="btn ghost sm" onClick={() => setWatch(false)}>
-                            Stop watching
+                            {t('k8s.panel.stopWatching')}
                           </button>
                         </>
                       ) : (
                         <>
-                          Not watching this cluster. Nothing is polled until you say which server
-                          to ask, because nothing else can know which of them holds a kubeconfig.
+                          {t('k8s.panel.notWatching')}
                           <button className="btn ghost sm" onClick={() => setWatch(true)}>
-                            Watch for restarting pods
+                            {t('k8s.panel.watch')}
                           </button>
                         </>
                       )}
@@ -1605,8 +1596,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   ) : overview.nodes.items.length === 0 ? (
                     <EmptyState
                       compact
-                      title="No nodes"
-                      message="The cluster reported no nodes. Check the selected context."
+                      title={t('k8s.panel.noNodesTitle')}
+                      message={t('k8s.panel.noNodesMessage')}
                     />
                   ) : (
                     overview.nodes.items.map((n) => (
@@ -1625,7 +1616,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                             disabled={nodeBusy === n.name}
                             onClick={() => askToCordon(n, 'uncordon')}
                           >
-                            Uncordon
+                            {t('k8s.panel.uncordon')}
                           </button>
                         ) : (
                           <button
@@ -1633,16 +1624,16 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                             disabled={nodeBusy === n.name}
                             onClick={() => askToCordon(n, 'cordon')}
                           >
-                            Cordon
+                            {t('k8s.panel.cordon')}
                           </button>
                         )}
-                        <Explain why="Read whether this node can be drained safely. This is a read; nothing moves.">
+                        <Explain why={t('k8s.panel.checkDrainWhy')}>
                           <button
                             className="btn ghost sm"
                             disabled={nodeBusy === n.name || drainCheck?.loading === true}
                             onClick={() => void checkDrain(n.name)}
                           >
-                            Check drain
+                            {t('k8s.panel.checkDrain')}
                           </button>
                         </Explain>
                       </div>
@@ -1650,15 +1641,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   )}
 
                   <div className="s-title" style={{ marginTop: 10 }}>
-                    <Activity size={12} /> Events, newest first
+                    <Activity size={12} /> {t('k8s.panel.eventsNewestFirst')}
                   </div>
                   {!overview.events.ok ? (
                     <Denied read={overview.events} what="Events" />
                   ) : overview.events.items.length === 0 ? (
-                    <div className="faint" style={{ fontSize: 12 }}>
-                      No events. The API server keeps them for about an hour, so a quiet list can
-                      also mean nothing has happened recently.
-                    </div>
+                    <div className="faint" style={{ fontSize: 12 }}>{t('k8s.panel.noEvents')}</div>
                   ) : (
                     <EventRows events={overview.events.items} />
                   )}
@@ -1671,13 +1659,15 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             <>
               <div className="row muted" style={{ fontSize: 11, marginTop: 8 }}>
                 <span className="grow">
-                  <span className="mono">kubectl top</span> — needs a Metrics API in the cluster
+                  <Trans i18nKey="k8s.panel.usageHeading" components={{ mono: <span className="mono" /> }} />
                 </span>
                 <button className="btn ghost sm" disabled={usageLoading} onClick={() => void loadUsage()}>
-                  <RefreshCw size={12} className={clsx(usageLoading && 'spin')} /> Refresh
+                  <RefreshCw size={12} className={clsx(usageLoading && 'spin')} /> {t('common.refresh')}
                 </button>
               </div>
-              {!usage && usageLoading && <div className="faint" style={{ fontSize: 12 }}>Reading…</div>}
+              {!usage && usageLoading && (
+                <div className="faint" style={{ fontSize: 12 }}>{t('k8s.panel.reading')}</div>
+              )}
 
               {/* USAGE AND BOOKED CAPACITY ARE DIFFERENT QUESTIONS, and putting
                   them under one heading is how they get confused. `kubectl top`
@@ -1686,24 +1676,21 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   booked and refuse the next pod, and only the second number
                   explains why. */}
               <div className="row muted" style={{ fontSize: 11, marginTop: 12 }}>
-                <span className="grow">
-                  Requested against allocatable — what the scheduler has promised, not what is
-                  being used. Every namespace, whichever one is selected above.
-                </span>
+                <span className="grow">{t('k8s.panel.allocHeading')}</span>
                 <button
                   className="btn ghost sm"
                   disabled={allocLoading}
                   onClick={() => void loadAllocatable()}
                 >
-                  <RefreshCw size={12} className={clsx(allocLoading && 'spin')} /> Read
+                  <RefreshCw size={12} className={clsx(allocLoading && 'spin')} /> {t('k8s.panel.read')}
                 </button>
               </div>
               {!alloc && allocLoading && (
-                <div className="faint" style={{ fontSize: 12 }}>Reading…</div>
+                <div className="faint" style={{ fontSize: 12 }}>{t('k8s.panel.reading')}</div>
               )}
               {alloc && !alloc.ok && (
                 <div className="faint" style={{ fontSize: 12 }}>
-                  Requested-against-allocatable could not be read: {alloc.detail}
+                  {t('k8s.panel.allocFailed', { detail: alloc.detail ?? '' })}
                 </div>
               )}
               {alloc?.ok && alloc.report && (
@@ -1717,28 +1704,27 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   {alloc.report.nodes.map((n) => (
                     <div key={n.node} className="cron-row">
                       <span className="chip">
-                        {n.cpuPct === null ? 'cpu ?' : `${Math.round(n.cpuPct)}% cpu`}
+                        {n.cpuPct === null ? t('k8s.panel.cpuUnknown') : t('k8s.panel.cpuPct', { pct: Math.round(n.cpuPct) })}
                       </span>
                       <span className="chip">
-                        {n.memPct === null ? 'mem ?' : `${Math.round(n.memPct)}% mem`}
+                        {n.memPct === null ? t('k8s.panel.memUnknown') : t('k8s.panel.memPct', { pct: Math.round(n.memPct) })}
                       </span>
                       <span className="mono grow cron-cmd">{n.node}</span>
                       <span className="faint" style={{ fontSize: 11 }}>
-                        {n.podCount} pod(s)
+                        {t('k8s.panel.allocPods', { count: n.podCount })}
                         {/* Never folded into the percentage: these contribute
                             nothing to it and can grow into whatever is left. */}
-                        {n.cpuUnsetPods > 0 ? `, ${n.cpuUnsetPods} request no cpu` : ''}
-                        {n.partialPods > 0 ? `, ${n.partialPods} sized in part` : ''}
-                        {n.cordoned ? ' — cordoned, so this is not headroom' : ''}
+                        {n.cpuUnsetPods > 0 ? t('k8s.panel.allocNoCpu', { count: n.cpuUnsetPods }) : ''}
+                        {n.partialPods > 0 ? t('k8s.panel.allocPartial', { count: n.partialPods }) : ''}
+                        {n.cordoned ? t('k8s.panel.allocCordoned') : ''}
                       </span>
                     </div>
                   ))}
                   {alloc.report.unplaced.length > 0 && (
                     <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>
-                      Not scheduled anywhere:{' '}
-                      {alloc.report.unplaced
-                        .map((u) => `${u.namespace}/${u.name} (${u.phase})`)
-                        .join(', ')}
+                      {t('k8s.panel.unplaced', {
+                        pods: alloc.report.unplaced.map((u) => `${u.namespace}/${u.name} (${u.phase})`).join(', ')
+                      })}
                     </div>
                   )}
                 </>
@@ -1746,12 +1732,12 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               {usage && (
                 <>
                   {!usage.nodes.ok ? (
-                    <Denied read={usage.nodes} what="Node usage" />
+                    <Denied read={usage.nodes} what={t('k8s.panel.nodeUsage')} />
                   ) : (
                     usage.nodes.items.map((n) => (
                       <div key={n.name} className="cron-row">
-                        <span className="chip">{n.cpuPercent} cpu</span>
-                        <span className="chip">{n.memoryPercent} mem</span>
+                        <span className="chip">{t('k8s.panel.cpuValue', { value: n.cpuPercent })}</span>
+                        <span className="chip">{t('k8s.panel.memValue', { value: n.memoryPercent })}</span>
                         <span className="mono grow cron-cmd">{n.name}</span>
                         <span className="faint mono">
                           {n.cpu} · {n.memory}
@@ -1760,7 +1746,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                     ))
                   )}
                   {!usage.pods.ok ? (
-                    <Denied read={usage.pods} what="Pod usage" />
+                    <Denied read={usage.pods} what={t('k8s.panel.podUsage')} />
                   ) : (
                     usage.pods.items.map((p) => (
                       <div key={`${p.namespace}/${p.name}`} className="cron-row">
@@ -1780,19 +1766,20 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             <>
               <div className="row muted" style={{ fontSize: 11, marginTop: 8 }}>
                 <span className="grow">
-                  {namespace ? `namespace ${namespace}` : 'all namespaces'} — ClusterRoleBindings
-                  and the API scan are cluster-wide either way
+                  {namespace
+                    ? t('k8s.panel.resourcesScopeNamespace', { namespace })
+                    : t('k8s.panel.resourcesScopeAll')}
                 </span>
                 <button
                   className="btn ghost sm"
                   disabled={resourcesLoading}
                   onClick={() => void loadResources()}
                 >
-                  <RefreshCw size={12} className={clsx(resourcesLoading && 'spin')} /> Refresh
+                  <RefreshCw size={12} className={clsx(resourcesLoading && 'spin')} /> {t('common.refresh')}
                 </button>
               </div>
               {!resources && resourcesLoading && (
-                <div className="faint" style={{ fontSize: 12 }}>Reading…</div>
+                <div className="faint" style={{ fontSize: 12 }}>{t('k8s.panel.reading')}</div>
               )}
 
               {resources && (
@@ -1805,8 +1792,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   ) : resources.pvcs.items.length === 0 ? (
                     <EmptyState
                       compact
-                      title="No claims"
-                      message="No persistent volume claims in this namespace."
+                      title={t('k8s.panel.noClaimsTitle')}
+                      message={t('k8s.panel.noClaimsMessage')}
                     />
                   ) : (
                     resources.pvcs.items.map((v) => (
@@ -1816,7 +1803,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                             and no capacity, and showing only the capacity puts a
                             blank where the size is. */}
                         <span className="mono cron-when">
-                          {v.capacity || `${v.requested} asked`}
+                          {v.capacity || t('k8s.panel.requested', { size: v.requested })}
                         </span>
                         <span className="faint cron-desc">{v.namespace}</span>
                         <span className="mono grow cron-cmd">{v.name}</span>
@@ -1834,8 +1821,8 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   ) : resources.ingresses.items.length === 0 ? (
                     <EmptyState
                       compact
-                      title="No ingresses"
-                      message="Nothing in this namespace is exposed through an ingress."
+                      title={t('k8s.panel.noIngressesTitle')}
+                      message={t('k8s.panel.noIngressesMessage')}
                     />
                   ) : (
                     resources.ingresses.items.map((i) => (
@@ -1844,11 +1831,11 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                             claimed this Ingress — and it is what a wrong
                             ingressClassName looks like. */}
                         <span className={clsx('chip', i.address === '' && 'warn')}>
-                          {i.address || 'no address'}
+                          {i.address || t('k8s.panel.noAddress')}
                         </span>
                         <span className="faint cron-desc">{i.namespace}</span>
                         <span className="mono grow cron-cmd" title={i.rules.join(' · ')}>
-                          {i.name} · {i.rules.join(' · ') || 'no rules'}
+                          {i.name} · {i.rules.join(' · ') || t('k8s.panel.noRules')}
                         </span>
                         <span className="faint">{i.className || '—'}</span>
                         {i.tlsSecrets.length > 0 && (
@@ -1859,15 +1846,15 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   )}
 
                   <div className="s-title" style={{ marginTop: 10 }}>
-                    <ShieldQuestion size={12} /> Role bindings
+                    <ShieldQuestion size={12} /> {t('k8s.panel.roleBindings')}
                   </div>
                   {!resources.roleBindings.ok ? (
-                    <Denied read={resources.roleBindings} what="Role bindings" />
+                    <Denied read={resources.roleBindings} what={t('k8s.panel.roleBindings')} />
                   ) : (
                     resources.roleBindings.items.map((b) => (
                       <div key={`${b.clusterScoped ? '' : b.namespace}/${b.name}`} className="cron-row">
                         <span className={clsx('chip', b.clusterScoped && 'warn')}>
-                          {b.clusterScoped ? 'cluster' : b.namespace}
+                          {b.clusterScoped ? t('k8s.panel.clusterScope') : b.namespace}
                         </span>
                         <span className="mono grow cron-cmd">{b.name}</span>
                         <span className="faint cron-desc">
@@ -1881,11 +1868,9 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   )}
 
                   <div className="s-title" style={{ marginTop: 10 }}>
-                    <ShieldQuestion size={12} /> Secrets — names and key names only
+                    <ShieldQuestion size={12} /> {t('k8s.panel.secretsHeading')}
                   </div>
-                  <div className="faint" style={{ fontSize: 11 }}>
-                    No value is read. The query lists key names and cannot reach what is behind them.
-                  </div>
+                  <div className="faint" style={{ fontSize: 11 }}>{t('k8s.panel.secretsNote')}</div>
                   {!resources.secrets.ok ? (
                     <Denied read={resources.secrets} what="Secrets" />
                   ) : (
@@ -1894,13 +1879,13 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                         <span className="chip">{k.type}</span>
                         <span className="faint cron-desc">{k.namespace}</span>
                         <span className="mono grow cron-cmd">{k.name}</span>
-                        <span className="mono faint">{k.keys.join(', ') || 'no keys'}</span>
+                        <span className="mono faint">{k.keys.join(', ') || t('k8s.panel.noKeys')}</span>
                       </div>
                     ))
                   )}
 
                   <div className="s-title" style={{ marginTop: 10 }}>
-                    <TriangleAlert size={12} /> Cluster review
+                    <TriangleAlert size={12} /> {t('k8s.panel.reviewHeading')}
                   </div>
                   {/* Its own button. Thirteen kubectl calls, and the answer only
                       matters when somebody is asking the question it answers —
@@ -1912,14 +1897,16 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       disabled={reviewLoading}
                       onClick={() => void runReview()}
                     >
-                      {review === null ? 'Review this cluster' : 'Review again'}
+                      {review === null ? t('k8s.panel.review') : t('k8s.panel.reviewAgain')}
                     </button>
-                    {reviewLoading && <span className="faint" style={{ fontSize: 11 }}>reading…</span>}
+                    {reviewLoading && (
+                      <span className="faint" style={{ fontSize: 11 }}>
+                        {t('k8s.panel.readingLower')}
+                      </span>
+                    )}
                   </div>
                   {review !== null && !review.ok && (
-                    <div className="s-note is-alarm">
-                      Nothing was read: {review.detail}
-                    </div>
+                    <div className="s-note is-alarm">{t('k8s.panel.reviewFailed', { detail: review.detail })}</div>
                   )}
                   {review?.ok === true &&
                     (() => {
@@ -1933,7 +1920,11 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                               denied read is the difference. */}
                           {r.blind.map((b2) => (
                             <div key={`${b2.section} ${b2.detail}`} className="s-note is-alarm">
-                              <b>{b2.section}</b> was not read, so nothing here says anything about it:{' '}
+                              <Trans
+                                i18nKey="k8s.panel.reviewBlind"
+                                values={{ section: b2.section }}
+                                components={{ b: <b /> }}
+                              />{' '}
                               <span className="mono">{b2.detail}</span>
                             </div>
                           ))}
@@ -1955,25 +1946,27 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                     })()}
 
                   <div className="s-title" style={{ marginTop: 10 }}>
-                    <TriangleAlert size={12} /> Deprecated APIs
+                    <TriangleAlert size={12} /> {t('k8s.panel.deprecatedApis')}
                   </div>
                   {apiScan && (
                     <>
                       <div className="faint" style={{ fontSize: 11 }}>
-                        Server {apiScan.serverVersion ?? 'version unknown'}
+                        {apiScan.serverVersion
+                          ? t('k8s.panel.serverVersion', { version: apiScan.serverVersion })
+                          : t('k8s.panel.serverVersionUnknown')}
                       </div>
                       {apiScan.findings.length === 0 ? (
-                        <div className="faint" style={{ fontSize: 12 }}>
-                          Nothing in the table is still being served.
-                        </div>
+                        <div className="faint" style={{ fontSize: 12 }}>{t('k8s.panel.apiScanClean')}</div>
                       ) : (
                         apiScan.findings.map((f) => (
                           <div key={f.groupVersion} className="cron-row">
                             <span className={clsx('chip', f.pastRemoval ? 'danger' : 'warn')}>
-                              {f.pastRemoval ? `past ${f.removedIn}` : `goes in ${f.removedIn}`}
+                              {f.pastRemoval
+                                ? t('k8s.panel.apiPast', { version: f.removedIn })
+                                : t('k8s.panel.apiGoesIn', { version: f.removedIn })}
                             </span>
                             <span className="mono grow cron-cmd">{f.groupVersion}</span>
-                            <span className="faint">use {f.replacement}</span>
+                            <span className="faint">{t('k8s.panel.apiUse', { api: f.replacement })}</span>
                           </div>
                         ))
                       )}
@@ -1981,7 +1974,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                           "Nothing found" is the sentence people act on, and it
                           is only honest next to what was not looked at. */}
                       <div className="s-desc faint" style={{ marginTop: 4 }}>
-                        What this did not check:
+                        {t('k8s.panel.notChecked')}
                         <ul style={{ margin: '4px 0 0 16px' }}>
                           {apiScan.notChecked.map((n) => (
                             <li key={n}>{n}</li>
@@ -1992,7 +1985,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   )}
 
                   <div className="s-title" style={{ marginTop: 10 }}>
-                    <Layers size={12} /> Helm releases
+                    <Layers size={12} /> {t('k8s.panel.helmReleases')}
                   </div>
                   {helm && !helm.ok && (
                     <div className="faint" style={{ fontSize: 12 }}>
@@ -2001,16 +1994,14 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   )}
                   {helm?.ok &&
                     (helm.releases.length === 0 ? (
-                      <div className="faint" style={{ fontSize: 12 }}>
-                        helm answered and has no releases.
-                      </div>
+                      <div className="faint" style={{ fontSize: 12 }}>{t('k8s.panel.helmNone')}</div>
                     ) : (
                       helm.releases.map((r) => (
                         <div key={`${r.namespace}/${r.name}`} className="cron-row">
                           <span className={clsx('chip', r.status !== 'deployed' && 'warn')}>
                             {r.status}
                           </span>
-                          <span className="mono cron-when">rev {r.revision}</span>
+                          <span className="mono cron-when">{t('k8s.panel.helmRevision', { revision: r.revision })}</span>
                           <span className="faint cron-desc">{r.namespace}</span>
                           <span className="mono grow cron-cmd">{r.name}</span>
                           <span className="faint">{r.chart}</span>
@@ -2028,7 +2019,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       {pending && (
         <div className="bc-confirm">
           <div className="s-title">
-            Restart {pending.plan.target.kind} {pending.plan.target.name}?
+            {t('k8s.panel.restartConfirmTitle', { kind: pending.plan.target.kind, name: pending.plan.target.name })}
           </div>
           <div className="s-desc mono">
             kubectl rollout restart {pending.plan.target.kind}/{pending.plan.target.name} --namespace=
@@ -2036,7 +2027,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             {pending.plan.target.context ? ` --context=${pending.plan.target.context}` : ''}
           </div>
           <div className={clsx('s-desc', pending.plan.risk === 'destructive' ? 'danger' : 'warn')}>
-            <TriangleAlert size={12} /> This changes the cluster — {pending.plan.reasons.join('; ')}.
+            <TriangleAlert size={12} /> {t('k8s.panel.changesCluster', { reasons: pending.plan.reasons.join('; ') })}
           </div>
           {/* Kept apart from the reasons: these are not arguments for pressing
               harder, they are things that would otherwise be discovered from a
@@ -2050,7 +2041,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
             <div className="input-group" style={{ marginTop: 6 }}>
               <input
                 className="input"
-                placeholder={`Type ${pending.plan.confirmation.phrase} to restart`}
+                placeholder={t('k8s.panel.restartPhrase', { phrase: pending.plan.confirmation.phrase })}
                 value={phrase}
                 onChange={(e) => setPhrase(e.target.value)}
                 autoFocus
@@ -2063,7 +2054,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               disabled={!canConfirm || restarting}
               onClick={() => void runRestart()}
             >
-              Restart
+              {t('k8s.panel.restart')}
             </button>
             <button
               className="btn ghost"
@@ -2072,7 +2063,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                 setPhrase('')
               }}
             >
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div>
@@ -2083,8 +2074,9 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         <div className="s-card" style={{ marginTop: 8 }}>
           <div className="s-title">
             <ServerIcon size={12} />{' '}
-            {nodePending.plan.target.action === 'cordon' ? 'Cordon' : 'Uncordon'}{' '}
-            {nodePending.plan.target.node}
+            {nodePending.plan.target.action === 'cordon'
+              ? t('k8s.panel.cordonNode', { node: nodePending.plan.target.node })
+              : t('k8s.panel.uncordonNode', { node: nodePending.plan.target.node })}
           </div>
           <div className="s-desc mono">
             kubectl {nodePending.plan.target.action} {nodePending.plan.target.node}
@@ -2108,7 +2100,11 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               className="input"
               style={{ marginTop: 8 }}
               autoFocus
-              placeholder={`Type ${nodePending.plan.confirmation.phrase} to ${nodePending.plan.target.action}`}
+              placeholder={
+                nodePending.plan.target.action === 'cordon'
+                  ? t('k8s.panel.cordonPhrase', { phrase: nodePending.plan.confirmation.phrase })
+                  : t('k8s.panel.uncordonPhrase', { phrase: nodePending.plan.confirmation.phrase })
+              }
               value={nodePhrase}
               onChange={(e) => setNodePhrase(e.target.value)}
             />
@@ -2119,10 +2115,10 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
               disabled={nodeBusy !== '' || !nodeConfirmed}
               onClick={() => void runCordon()}
             >
-              {nodePending.plan.target.action === 'cordon' ? 'Cordon' : 'Uncordon'}
+              {nodePending.plan.target.action === 'cordon' ? t('k8s.panel.cordon') : t('k8s.panel.uncordon')}
             </button>
             <button className="btn ghost" onClick={() => setNodePending(null)}>
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div>
@@ -2133,23 +2129,23 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
           <span className="grow">
             {nodeResult.ok
               ? nodeResult.output
-              : `${nodeResult.node} was not ${nodeResult.action}ed — ${
-                  nodeResult.reason ? K8S_FAILURE_HELP[nodeResult.reason] : ''
-                }`}
+              : t(nodeResult.action === 'cordon' ? 'k8s.panel.notCordoned' : 'k8s.panel.notUncordoned', {
+                  node: nodeResult.node,
+                  help: nodeResult.reason ? K8S_FAILURE_HELP[nodeResult.reason] : ''
+                })}
           </span>
           {/* Said out loud rather than folded into a plain success: somebody
               else's maintenance window is already open on this node. */}
           {nodeResult.alreadyInState && (
             <div className="warn" style={{ marginTop: 4 }}>
-              Nothing changed — the node was already in that state before this click. Somebody else
-              may be working on it.
+              {t('k8s.panel.alreadyInState')}
             </div>
           )}
           <div className="mono" style={{ marginTop: 4, opacity: 0.8, whiteSpace: 'pre-wrap' }}>
             {nodeResult.ok ? nodeResult.node_status : nodeResult.detail}
           </div>
           <button className="btn ghost sm" onClick={() => setNodeResult(null)}>
-            Close
+            {t('common.close')}
           </button>
         </div>
       )}
@@ -2158,17 +2154,19 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
       {drainCheck && (
         <div className="s-card" style={{ marginTop: 8 }}>
           <div className="s-title">
-            <ShieldQuestion size={12} /> Can {drainCheck.node} be drained?
+            <ShieldQuestion size={12} /> {t('k8s.panel.drainQuestion', { node: drainCheck.node })}
           </div>
-          {drainCheck.loading && <div className="s-desc faint">Reading pods, budgets and endpoints…</div>}
+          {drainCheck.loading && <div className="s-desc faint">{t('k8s.panel.drainReading')}</div>}
           {!drainCheck.loading && !drainCheck.assessment && (
             <div className="s-desc danger">{NOT_WIRED}</div>
           )}
           {drainCheck.assessment && drainCheck.plan && (
             <>
               <div className="s-desc">
-                {drainCheck.assessment.evictable.length} pod(s) would move;{' '}
-                {drainCheck.assessment.daemonSetPods.length} DaemonSet pod(s) stay where they are.
+                {t('k8s.panel.drainSummary', {
+                  moving: drainCheck.assessment.evictable.length,
+                  staying: drainCheck.assessment.daemonSetPods.length
+                })}
               </div>
 
               {/* Reads that did not answer come FIRST and are styled as hard as
@@ -2176,8 +2174,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   denied read looks exactly like a cluster with no budgets. */}
               {drainCheck.assessment.unchecked.map((u) => (
                 <div key={u.read} className="s-desc danger">
-                  <TriangleAlert size={12} /> The {u.read} read did not answer, so nobody can say{' '}
-                  {u.meaning}
+                  <TriangleAlert size={12} /> {t('k8s.panel.drainUnchecked', { read: u.read, meaning: u.meaning })}
                   <div className="mono faint" style={{ marginTop: 2 }}>
                     {u.detail}
                   </div>
@@ -2208,7 +2205,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                   <div className="input-group" style={{ marginTop: 6 }}>
                     <input
                       className="input"
-                      placeholder="Type DRAIN to drain this node"
+                      placeholder={t('k8s.panel.drainPhrase', { phrase: 'DRAIN' })}
                       value={phrase}
                       onChange={(e) => setPhrase(e.target.value)}
                     />
@@ -2219,7 +2216,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       disabled={phrase.trim() !== 'DRAIN' || nodeBusy !== ''}
                       onClick={() => void runDrain()}
                     >
-                      Drain
+                      {t('k8s.panel.drain')}
                     </button>
                     <button
                       className="btn ghost"
@@ -2228,7 +2225,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                         setPhrase('')
                       }}
                     >
-                      Cancel
+                      {t('common.cancel')}
                     </button>
                   </div>
                 </>
@@ -2238,12 +2235,9 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       dialog. There is nothing to press: the main process refuses
                       on its own reading of this same preflight, so offering the
                       control would be offering a button that cannot work. */}
-                  <div className="s-desc">
-                    This drain will not be offered while any of the above is true. Fix the cause, or
-                    read the budget yourself — nothing here overrides it.
-                  </div>
+                  <div className="s-desc">{t('k8s.panel.drainRefused')}</div>
                   <button className="btn ghost sm" onClick={() => setDrainCheck(null)}>
-                    Close
+                    {t('common.close')}
                   </button>
                 </>
               )}
@@ -2256,29 +2250,27 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
         <div className={clsx('s-desc', drainResult.ok ? '' : 'danger')}>
           <span className="grow">
             {drainResult.ok
-              ? `${drainResult.node} drained — ${drainResult.evicted.length} pod(s) evicted.`
-              : `${drainResult.node} was not fully drained.`}
+              ? t('k8s.panel.drained', { node: drainResult.node, count: drainResult.evicted.length })
+              : t('k8s.panel.notDrained', { node: drainResult.node })}
           </span>
           {/* The half that a plain failure message hides. A blocked drain has
               still moved whatever it got through, and telling the operator the
               node is untouched is how somebody reboots it. */}
           {drainResult.partial && (
             <div className="warn" style={{ marginTop: 4 }}>
-              This drain is PARTIAL: {drainResult.evicted.length} pod(s) were already evicted before
-              it stopped, and the node has been cordoned. It is not untouched.
+              {t('k8s.panel.drainPartial', { count: drainResult.evicted.length })}
             </div>
           )}
           {drainResult.pdbRejected.length > 0 && (
             <div style={{ marginTop: 4 }}>
-              Still held by a PodDisruptionBudget: {drainResult.pdbRejected.join(', ')}. That is a
-              &ldquo;try again later&rdquo;, not a broken cluster.
+              {t('k8s.panel.pdbHeld', { pods: drainResult.pdbRejected.join(', ') })}
             </div>
           )}
           <div className="mono" style={{ marginTop: 4, opacity: 0.8, whiteSpace: 'pre-wrap' }}>
             {drainResult.detail ?? drainResult.output}
           </div>
           <button className="btn ghost sm" onClick={() => setDrainResult(null)}>
-            Close
+            {t('common.close')}
           </button>
         </div>
       )}
@@ -2295,15 +2287,16 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
           <span className="grow">
             {restartResult.r.ok
               ? `${restartResult.name}: ${restartResult.r.output}`
-              : `${restartResult.name} was not restarted — ${
-                  restartResult.r.reason ? K8S_FAILURE_HELP[restartResult.r.reason] : ''
-                }`}
+              : t('k8s.panel.notRestarted', {
+                  name: restartResult.name,
+                  help: restartResult.r.reason ? K8S_FAILURE_HELP[restartResult.r.reason] : ''
+                })}
           </span>
           <div className="mono" style={{ marginTop: 4, opacity: 0.8, whiteSpace: 'pre-wrap' }}>
             {restartResult.r.ok ? restartResult.r.status : restartResult.r.detail}
           </div>
           <button className="btn ghost sm" onClick={() => setRestartResult(null)}>
-            Close
+            {t('common.close')}
           </button>
         </div>
       )}

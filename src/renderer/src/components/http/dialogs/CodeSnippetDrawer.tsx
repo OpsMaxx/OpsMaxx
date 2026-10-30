@@ -6,6 +6,7 @@ import { clsx } from '../../../lib/format'
 import { outgoing, toCurl, type Outgoing } from '../../../../../shared/curl'
 import type { GraphQlRequest, HttpRequest, SentView } from '../../../../../shared/apiModel'
 import type { HttpRequestSpec } from '../../../../../shared/httpClient'
+import { t as tr, useT } from '../../../lib/i18n'
 
 /**
  * Generate code for the current request.
@@ -92,7 +93,7 @@ export function snippetFor(
   if (lang === 'curl') return toCurl(req, spec, { secrets })
   const o = outgoing(req, spec, { secrets })
   const notes = [...o.notes]
-  if (o.insecure) notes.push('This request skips certificate checks in OpsMaxx; the snippet does not.')
+  if (o.insecure) notes.push(tr('http.snippet.insecureNote'))
   if (lang === 'fetch') return { text: fetchSnippet(o), notes }
   const plugin = lang === 'python' ? pythonRequests : lang === 'go' ? goNative : shellHttpie
   return { text: plugin.generate(harFor(o) as never) ?? '', notes }
@@ -114,15 +115,17 @@ export function CodeSnippetDrawer({ request, sent, resolveSecrets, onClose }: Co
   // Why "Show secrets" left the view masked. The owner answers null for any
   // build failure without saying which, so the sentence names the usual ones.
   const [unresolved, setUnresolved] = useState(false)
+  const t = useT()
   const snippet = useMemo(
     () => snippetFor(lang, request, live ?? sent, live ? 'include' : 'mask'),
-    [lang, request, sent, live]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `t`: the notes follow a language change
+    [lang, request, sent, live, t]
   )
 
   return (
-    <section className="hc-snippet" aria-label="Generate code">
+    <section className="hc-snippet" aria-label={t('http.snippet.label')}>
       <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
-        <div className="segment" role="tablist" aria-label="Language">
+        <div className="segment" role="tablist" aria-label={t('http.snippet.language')}>
           {LANGS.map((l) => (
             <button
               key={l.id}
@@ -136,26 +139,26 @@ export function CodeSnippetDrawer({ request, sent, resolveSecrets, onClose }: Co
           ))}
         </div>
         <button className="btn secondary size-28" onClick={() => void window.opsmaxx?.clipboard?.write(snippet.text)}>
-          Copy
+          {t('common.copy')}
         </button>
         {resolveSecrets && !live && !confirming && (
           <button className="btn secondary size-28" onClick={() => setConfirming(true)}>
-            Include secrets…
+            {t('http.snippet.includeSecrets')}
           </button>
         )}
         {live && (
           <button className="btn secondary size-28" onClick={() => setLive(null)}>
-            Mask secrets
+            {t('http.snippet.maskSecrets')}
           </button>
         )}
-        <button className="btn secondary size-28" aria-label="Close code" onClick={onClose}>
-          Close
+        <button className="btn secondary size-28" aria-label={t('http.snippet.closeCode')} onClick={onClose}>
+          {t('common.close')}
         </button>
       </div>
       {confirming && (
         <div className="row" role="alert" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
           <span className="field-error">
-            The snippet will show vault values and tokens in plain text, and Copy puts them on the clipboard.
+            {t('http.snippet.secretsWarning')}
           </span>
           <button
             className="btn danger size-28"
@@ -168,20 +171,19 @@ export function CodeSnippetDrawer({ request, sent, resolveSecrets, onClose }: Co
               )
             }}
           >
-            Show secrets
+            {t('http.snippet.showSecrets')}
           </button>
           <button className="btn secondary size-28" onClick={() => setConfirming(false)}>
-            Cancel
+            {t('common.cancel')}
           </button>
         </div>
       )}
       {unresolved && !live && (
         <p className="field-error" role="alert">
-          Secrets could not be filled in, so the snippet stays masked. The vault may be locked, a variable may be
-          unresolved, or a value from history may need entering again; sending the request says which.
+          {t('http.snippet.unresolved')}
         </p>
       )}
-      <pre className="mono" aria-label="Snippet">
+      <pre className="mono" aria-label={t('http.snippet.snippet')}>
         {snippet.text}
       </pre>
       {snippet.notes.map((n) => (

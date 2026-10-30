@@ -9,6 +9,8 @@ import { DEFAULT_SESSION_MODE, resolveDefaultSessionGroup, sessionModeLabel, ses
 import { ModePicker } from './ModePicker'
 import { maskToken } from '../../../../shared/tokenDisplay'
 import { Switch } from '../common/Switch'
+import { t as tr, useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 interface WorkspaceOpt {
   id: string
@@ -36,14 +38,14 @@ async function buildsClause(): Promise<string> {
         // "not reported" rather than "running": a provider that returned no run
         // id has told us nothing since, and guessing would be the one claim
         // nobody checked.
-        const how = r.state === 'unknown' ? 'state not reported' : r.state
-        return `  • ${what} on ${r.connectionName} (${how})`
+        const how = r.state === 'unknown' ? tr('ai.security.buildStateUnknown') : r.state
+        return `  • ${tr('ai.security.buildLine', { run: what, connection: r.connectionName, state: how })}`
       })
       .join('\n')
-    const more = runs.length > 5 ? `\n  • …and ${runs.length - 5} more` : ''
+    const more = runs.length > 5 ? `\n  • ${tr('ai.security.buildsMore', { count: runs.length - 5 })}` : ''
     return (
-      `\n\nThis does NOT stop ${runs.length} build(s) an agent started:\n${lines}${more}` +
-      '\nStop those on the run in CI/CD, or in the provider.'
+      `\n\n${tr('ai.security.buildsNotStopped', { count: runs.length })}\n${lines}${more}` +
+      `\n${tr('ai.security.buildsStopThose')}`
     )
   } catch {
     // The dialog must open even if this cannot be answered.
@@ -52,7 +54,7 @@ async function buildsClause(): Promise<string> {
 }
 
 function fmtTime(iso: string | null): string {
-  if (!iso) return 'Never'
+  if (!iso) return tr('common.never')
   return new Date(iso).toLocaleString()
 }
 
@@ -90,6 +92,7 @@ function CreateSessionForm({
   // Re-hidden whenever a new session is issued, so revealing one token does not
   // silently reveal the next.
   const [revealed, setRevealed] = useState(false)
+  const t = useT()
 
   // workspaces/groups arrive async (an IPC round-trip after this form has
   // already mounted with empty props), so the useState initializers above
@@ -149,13 +152,13 @@ function CreateSessionForm({
       // Two different problems wore the same sentence: "you missed a checkbox"
       // and "there is nothing here to check".
       if (workspaces.length === 0) {
-        toast('There are no workspaces yet, and a session has to be scoped to at least one.', 'error', {
-          label: 'Open Connections',
+        toast(t('ai.authorizations.noWorkspaces'), 'error', {
+          label: t('ai.connect.openConnections'),
           run: () => useApp.getState().setActivity('connections')
         })
         return
       }
-      toast('Pick at least one workspace for this agent to see.', 'error')
+      toast(t('ai.agents.pickWorkspace'), 'error')
       return
     }
     try {
@@ -168,15 +171,15 @@ function CreateSessionForm({
         ttlMinutes: ttl === 0 ? null : ttl,
         mode: chosen
       })
-      if (!result) throw new Error('OpsMaxx returned no session')
+      if (!result) throw new Error(t('ai.agents.noSessionReturned'))
       const status = await window.opsmaxx?.aiMcp.status()
       setRevealed(false)
       setIssued({ token: result.token, port: status?.running ? status.port : null })
       onCreated()
     } catch (err) {
       // Before this the button simply did nothing when the call failed.
-      toast(`The session was not created: ${err instanceof Error ? err.message : String(err)}`, 'error', {
-        label: 'Try again',
+      toast(t('ai.agents.notCreated', { error: err instanceof Error ? err.message : String(err) }), 'error', {
+        label: t('ai.security.tryAgain'),
         run: () => void create()
       })
     }
@@ -190,13 +193,13 @@ function CreateSessionForm({
     if (status?.running && status.port) {
       const port = status.port
       setIssued((i) => (i ? { ...i, port } : i))
-      toast(`AI & MCP access is on, listening on 127.0.0.1:${port}. The snippet below now has the port.`, 'ok')
+      toast(t('ai.agents.turnedOn', { address: `127.0.0.1:${port}` }), 'ok')
       return
     }
     toast(
-      `AI & MCP access did not start${result?.error ? `: ${result.error}` : ''}. Another program may be using the port.`,
+      result?.error ? t('ai.agents.didNotStartError', { error: result.error }) : t('ai.agents.didNotStart'),
       'error',
-      { label: 'Open AI security', run: () => openAi('security') }
+      { label: t('ai.agents.openSecurity'), run: () => openAi('security') }
     )
   }
 
@@ -209,50 +212,47 @@ function CreateSessionForm({
     )
     return (
       <div className="settings-section" style={{ marginBottom: 24 }}>
-        <h3>Session created</h3>
+        <h3>{t('ai.agents.created')}</h3>
         {issued.port === null && (
           // The snippet used to be emitted with "(disabled)" where the port
           // goes, which is a config file that cannot work and does not say why.
           <div className="setting-row" style={{ alignItems: 'flex-start' }}>
             <div className="s-info">
               <div className="s-title">
-                <TriangleAlert size={13} /> Nothing can connect yet
+                <TriangleAlert size={13} /> {t('ai.agents.nothingCanConnect')}
               </div>
-              <div className="s-desc">
-                The token below is valid, but AI &amp; MCP access is switched off, so OpsMaxx is not
-                listening for any agent.
-              </div>
+              <div className="s-desc">{t('ai.agents.switchedOff')}</div>
             </div>
             <button className="btn sm primary" onClick={() => void turnOn()}>
-              Turn on AI access
+              {t('ai.agents.turnOn')}
             </button>
           </div>
         )}
         <div className="s-desc">
-          OpsMaxx keeps only a hash of this token, so this is the only time it can show it to
-          you — if you lose it, revoke the session and create a new one. It is hidden below
-          until you ask for it. Copy the block below into an MCP client that speaks
-          Streamable HTTP (e.g. Gemini CLI). <b>Claude Desktop cannot use it</b> — it ignores{' '}
-          <code className="mono">url</code> and <code className="mono">headers</code> and only
-          launches stdio servers; use <b>Overview → Connect Claude Desktop</b>, which writes the
-          bridge entry it does understand. For Claude Code, <b>Overview → Connect Claude Code</b>{' '}
-          gives you a one-line command; Codex has{' '}
-          <code className="mono">opsmaxx codex</code>.
+          <Trans
+            i18nKey="ai.agents.tokenExplain"
+            components={{
+              b: <b />,
+              url: <code className="mono">url</code>,
+              headers: <code className="mono">headers</code>,
+              codex: <code className="mono">opsmaxx codex</code>
+            }}
+          />
         </div>
         {issued.port !== null && (
           <div className="setting-row">
             <div className="s-info">
-              <div className="s-title">mcp.json snippet</div>
-              <div className="s-desc">For clients configured via a JSON file.</div>
+              <div className="s-title">{t('ai.agents.snippet', { file: 'mcp.json' })}</div>
+              <div className="s-desc">{t('ai.agents.snippetDesc')}</div>
             </div>
             <button
               className="btn sm"
               onClick={() => {
                 navigator.clipboard.writeText(jsonConfig)
-                toast('Config copied')
+                toast(t('ai.agents.configCopied'))
               }}
             >
-              <Copy size={13} /> Copy JSON config
+              <Copy size={13} /> {t('ai.agents.copyConfig')}
             </button>
           </div>
         )}
@@ -264,27 +264,24 @@ function CreateSessionForm({
             <div className="s-title mono" style={{ wordBreak: 'break-all' }}>
               {revealed ? issued.token : maskToken(issued.token)}
             </div>
-            <div className="s-desc">
-              Raw token, if you need it on its own. Reveal only puts it on this screen — anyone who
-              can see the screen can then read it.
-            </div>
+            <div className="s-desc">{t('ai.agents.rawToken')}</div>
           </div>
           <button className="btn sm" aria-pressed={revealed} onClick={() => setRevealed((r) => !r)}>
             {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
-            {revealed ? 'Hide' : 'Reveal'}
+            {revealed ? t('common.hide') : t('ai.connect.reveal')}
           </button>
           <button
             className="btn sm"
             onClick={() => {
               navigator.clipboard.writeText(issued.token)
-              toast('Token copied')
+              toast(t('ai.agents.tokenCopied'))
             }}
           >
-            <Copy size={13} /> Copy token
+            <Copy size={13} /> {t('ai.agents.copyToken')}
           </button>
         </div>
         <button className="btn sm" style={{ marginTop: 12 }} onClick={() => setIssued(null)}>
-          Done
+          {t('common.done')}
         </button>
       </div>
     )
@@ -292,21 +289,18 @@ function CreateSessionForm({
 
   return (
     <div className="settings-section" id="ai-new-session" style={{ marginBottom: 24 }}>
-      <h3>New AI agent session</h3>
+      <h3>{t('ai.agents.newSession')}</h3>
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Agent name</div>
-          <div className="s-desc">A label for the Active Sessions list — e.g. "Claude Code", "Codex".</div>
+          <div className="s-title">{t('ai.agents.agentName')}</div>
+          <div className="s-desc">{t('ai.agents.agentNameDesc')}</div>
         </div>
         <input className="input" value={agentName} onChange={(e) => setAgentName(e.target.value)} />
       </div>
       <div className="setting-row" style={{ alignItems: 'flex-start' }}>
         <div className="s-info">
-          <div className="s-title">Workspaces</div>
-          <div className="s-desc">
-            This session only ever sees servers inside the workspace(s) selected here — pick as
-            many as this agent needs.
-          </div>
+          <div className="s-title">{t('layout.workspaces.heading')}</div>
+          <div className="s-desc">{t('ai.agents.workspacesDesc')}</div>
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'flex-end' }}>
           {workspaces.map((w) => (
@@ -319,21 +313,16 @@ function CreateSessionForm({
       </div>
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Profile</div>
-          <div className="s-desc">
-            What this agent may do, and how much it asks first. Custom uses an access group instead. You can
-            change a running session’s profile at any time.
-          </div>
+          <div className="s-title">{t('ai.modePicker.sectionProfile')}</div>
+          <div className="s-desc">{t('ai.agents.profileDesc')}</div>
         </div>
         <ModePicker value={chosen} onChange={setMode} />
       </div>
       {custom && (
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Access group</div>
-          <div className="s-desc">
-            The Custom profile does exactly what this group says, on the servers in those workspaces.
-          </div>
+          <div className="s-title">{t('ai.connect.accessGroup')}</div>
+          <div className="s-desc">{t('ai.agents.accessGroupDesc')}</div>
         </div>
         <select
           className="input"
@@ -353,7 +342,7 @@ function CreateSessionForm({
               that land on the same answer `create()` then submits, rather than on
               whatever group happened to be listed first.
               defaultSessionGroup.test.tsx pins it; move this line and it goes red. */}
-          <option value="">No AI Access</option>
+          <option value="">{t('ai.connect.noAccess')}</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}
@@ -364,19 +353,19 @@ function CreateSessionForm({
       )}
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Expires after</div>
-          <div className="s-desc">The session stops working once this elapses.</div>
+          <div className="s-title">{t('ai.agents.expiresAfter')}</div>
+          <div className="s-desc">{t('ai.agents.expiresAfterDesc')}</div>
         </div>
         <select className="input" value={ttl} onChange={(e) => setTtl(Number(e.target.value))}>
-          <option value={15}>15 minutes</option>
-          <option value={60}>1 hour</option>
-          <option value={480}>8 hours</option>
-          <option value={10080}>7 days</option>
-          <option value={0}>Never</option>
+          <option value={15}>{t('ai.security.minutes', { count: 15 })}</option>
+          <option value={60}>{t('ai.agents.hours', { count: 1 })}</option>
+          <option value={480}>{t('ai.agents.hours', { count: 8 })}</option>
+          <option value={10080}>{t('ai.agents.days', { count: 7 })}</option>
+          <option value={0}>{t('common.never')}</option>
         </select>
       </div>
       <button className="btn sm primary" onClick={create}>
-        <Plus size={13} /> Create session
+        <Plus size={13} /> {t('ai.agents.createSession')}
       </button>
     </div>
   )
@@ -387,6 +376,7 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
   const [workspaces, setWorkspaces] = useState<WorkspaceOpt[]>([])
   const [groups, setGroups] = useState<AccessGroup[]>([])
   const focusSessionId = useNav((s) => s.aiSessionId)
+  const t = useT()
 
   // Sent here to look at one session (from the approval dialog): scroll to it
   // once the list has it, then forget the request.
@@ -404,8 +394,8 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
 
   useEffect(() => {
     load()
-    const t = setInterval(load, 5000)
-    return () => clearInterval(t)
+    const timer = setInterval(load, 5000)
+    return () => clearInterval(timer)
   }, [])
 
   // Takes the user to the form that issues a session and puts it on screen —
@@ -427,33 +417,32 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
     if (!result) {
       // "Failed" on a safety control is the least useful word available: the
       // user needs to know access is still live, and be able to try again.
-      toast('AI access was not stopped — every session is still live.', 'error', {
-        label: 'Try again',
+      toast(t('ai.security.stopFailed'), 'error', {
+        label: t('ai.security.tryAgain'),
         run: () => void killAll()
       })
       return
     }
     toast(
-      `Stopped every agent: ${result.revoked} session(s) revoked, ${result.denied} waiting request(s) denied.` +
-        (builds === ''
-          ? ' No build an agent started is still in flight.'
-          : builds.replace(/^\n\n/, ' ')),
+      builds === ''
+        ? t('ai.agents.stoppedNoBuilds', { revoked: result.revoked, denied: result.denied })
+        : t('ai.agents.stoppedWithBuilds', {
+            revoked: result.revoked,
+            denied: result.denied,
+            builds: builds.replace(/^\n\n/, '')
+          }),
       'ok'
     )
   }
 
   return (
     <div className="settings-section">
-      <h2>{sessionsOnly ? 'Active Sessions' : 'AI Agents'}</h2>
-      <div className="sub">
-        {sessionsOnly
-          ? 'Every agent currently authorized to talk to OpsMaxx, with its workspace(s) and access group.'
-          : 'Create a scoped session for each AI client, then paste its token into that client\'s MCP configuration.'}
-      </div>
+      <h2>{sessionsOnly ? t('nav.ai.sessions') : t('nav.ai.agents')}</h2>
+      <div className="sub">{sessionsOnly ? t('ai.agents.sessionsIntro') : t('ai.agents.agentsIntro')}</div>
 
       {!sessionsOnly && <CreateSessionForm workspaces={workspaces} groups={groups} onCreated={load} />}
 
-      {sessions.length === 0 && <div className="s-desc">No sessions yet.</div>}
+      {sessions.length === 0 && <div className="s-desc">{t('ai.agents.noSessions')}</div>}
 
       {sessions.map((s) => {
         // Defensive: mcpAuth.ts migrates old single-workspace session
@@ -470,50 +459,54 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
                 {!isLive(s) && (
                   <>
                     {' '}
-                    <span className="chip" data-testid="session-mode-chip" title="Profile">
+                    <span className="chip" data-testid="session-mode-chip" title={t('ai.modePicker.sectionProfile')}>
                       {sessionModeLabel(sessionModeOf(s), s.groupName)}
                     </span>
                   </>
                 )}
               </div>
               <div className="r-sub">
-                Workspace{ws.length > 1 ? 's' : ''}: {ws.map((w) => w.name).join(', ') || '—'} · Started{' '}
-                {fmtTime(s.createdAt)}
-                {s.expiresAt ? ` · Expires ${fmtTime(s.expiresAt)}` : ' · No expiration'}
+                {t(ws.length > 1 ? 'ai.agents.workspacesLine' : 'ai.agents.workspaceLine', {
+                  names: ws.map((w) => w.name).join(', ') || '—',
+                  started: fmtTime(s.createdAt)
+                })}
+                {s.expiresAt ? t('ai.agents.expires', { time: fmtTime(s.expiresAt) }) : t('ai.agents.noExpiry')}
               </div>
             </div>
             <div className="spacer" />
-            <div className="r-stat">{isLive(s) ? 'Active' : s.revoked ? 'Revoked' : 'Expired'}</div>
+            <div className="r-stat">
+              {isLive(s) ? t('ai.agents.active') : s.revoked ? t('ai.agents.revoked') : t('ai.agents.expired')}
+            </div>
             {isLive(s) ? (
               <button
                 className="btn sm danger outline"
                 onClick={async () => {
                   await window.opsmaxx?.aiMcp.revokeSession(s.id)
-                  toast(`${s.agentName} can no longer reach OpsMaxx.`, 'ok')
+                  toast(t('ai.agents.revokedToast', { agent: s.agentName }), 'ok')
                   load()
                 }}
               >
-                <Ban size={13} /> Revoke
+                <Ban size={13} /> {t('ai.agents.revoke')}
               </button>
             ) : (
               // A revoked or expired row is otherwise a dead end: the client
               // still has a token that no longer works, and the form that
               // issues a replacement lives on another page.
-              <button className="btn sm" onClick={newSession} title="Issue a replacement session">
-                <Plus size={13} /> New session
+              <button className="btn sm" onClick={newSession} title={t('ai.agents.replacementTitle')}>
+                <Plus size={13} /> {t('ai.agents.newSessionButton')}
               </button>
             )}
             <button
               className="btn sm"
-              title="Remove this session from the list entirely — revokes it too, if it's still live"
+              title={t('ai.agents.deleteTitle')}
               onClick={async () => {
-                if (!confirm(`Delete the "${s.agentName}" session? This can't be undone.`)) return
+                if (!confirm(t('ai.agents.deleteConfirm', { agent: s.agentName }))) return
                 await window.opsmaxx?.aiMcp.deleteSession(s.id)
-                toast(`Deleted ${s.agentName}`, 'ok')
+                toast(t('ai.agents.deleted', { agent: s.agentName }), 'ok')
                 load()
               }}
             >
-              <Trash2 size={13} /> Delete
+              <Trash2 size={13} /> {t('common.delete')}
             </button>
             {isLive(s) && <SessionAccess session={s} groups={groups} onChanged={load} />}
           </div>
@@ -522,7 +515,7 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
 
       {sessions.some(isLive) && (
         <button className="btn danger outline" style={{ marginTop: 18 }} onClick={killAll}>
-          <Octagon size={14} /> Stop all AI access
+          <Octagon size={14} /> {t('ai.security.stopAll')}
         </button>
       )}
     </div>

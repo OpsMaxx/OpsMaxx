@@ -3,6 +3,7 @@ import { useApp } from '../../store/app'
 import { useServerMetrics } from '../../hooks/useServerMetrics'
 import { Sparkline } from '../common/Sparkline'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import type { Server } from '../../types'
 
 function rate(bytesPerSec: number): string {
@@ -27,6 +28,7 @@ export function MonitorStrip({
   server: Server
   visible: boolean
 }): React.JSX.Element {
+  const t = useT()
   const open = useApp((s) => s.settings.showMonitorStrip)
   const setSettings = useApp((s) => s.setSettings)
   // Sampling runs commands over the same SSH connection the shell uses, so it
@@ -40,9 +42,9 @@ export function MonitorStrip({
 
   if (!open) {
     return (
-      <button className="monitor-strip collapsed" onClick={toggle} title="Show server metrics">
+      <button className="monitor-strip collapsed" onClick={toggle} title={t('panel.monitorStrip.show')}>
         <Activity size={13} />
-        <span>Monitor</span>
+        <span>{t('panel.monitorStrip.title')}</span>
         <span className="spacer" />
         <ChevronUp size={14} />
       </button>
@@ -74,33 +76,33 @@ export function MonitorStrip({
     <div className="monitor-strip">
       <div className="ms-title">
         <Activity size={13} />
-        <span>Monitor</span>
+        <span>{t('panel.monitorStrip.title')}</span>
         {m.error ? (
           <span className="ms-err">{m.error}</span>
         ) : (
           <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>
-            {m.loading ? 'sampling…' : 'live · every 2s'}
+            {m.loading ? t('panel.monitorStrip.sampling') : t('panel.monitorStrip.live')}
           </span>
         )}
         <span className="spacer" />
         {m.host && (
           <span className="faint mono" style={{ fontSize: 'var(--fs-xs)' }}>
-            {m.host.hostname} · {m.host.cores} vCPU
+            {t('panel.monitorStrip.host', { host: m.host.hostname, cores: m.host.cores })}
           </span>
         )}
-        <button className="icon-btn xs" onClick={toggle} title="Hide server metrics">
+        <button className="icon-btn xs" onClick={toggle} title={t('panel.monitorStrip.hide')}>
           <ChevronDown size={14} />
         </button>
       </div>
 
       <div className="ms-grid">
-        {stat(<Cpu size={12} className="faint" />, 'CPU', m.cpu, m.cpuHistory)}
-        {stat(<MemoryStick size={12} className="faint" />, 'Memory', m.ram, m.ramHistory)}
-        {stat(<HardDrive size={12} className="faint" />, 'Disk', m.disk, m.diskHistory)}
+        {stat(<Cpu size={12} className="faint" />, t('panel.monitorStrip.cpu'), m.cpu, m.cpuHistory)}
+        {stat(<MemoryStick size={12} className="faint" />, t('panel.monitorStrip.memory'), m.ram, m.ramHistory)}
+        {stat(<HardDrive size={12} className="faint" />, t('panel.monitorStrip.disk'), m.disk, m.diskHistory)}
         <div className="ms-stat">
           <div className="ms-head">
             <Wifi size={12} className="faint" />
-            <span className="ms-label">Network</span>
+            <span className="ms-label">{t('panel.monitorStrip.network')}</span>
           </div>
           <div className={clsx('ms-net mono')}>
             <span>↓ {rate(m.rx)}</span>

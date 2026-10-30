@@ -36,6 +36,7 @@ import { useToasts } from '../store/toast'
 import { useVault } from '../store/vault'
 import { useWsSessions } from '../store/wsSessions'
 import { sshTargetFor } from './ssh'
+import { t } from './i18n'
 
 // Renderer glue between a tab and main: build, confirm, send, record. The
 // production confirm lives here rather than in any button, so every entry
@@ -99,7 +100,7 @@ export async function confirmIfProduction(ctx: ProductionCtx): Promise<boolean> 
       action,
       target,
       ...(ctx.via && ctx.via !== target ? { via: ctx.via } : {}),
-      skipLabel: `Don't ask again this session for ${action} on ${target}`
+      skipLabel: t('lib.httpSend.skipLabel', { action, target })
     },
     key
   )
@@ -161,7 +162,10 @@ function contextFor(tabId: Id, opts: SendOpts & { vault?: SecretLookup } = {}): 
     try {
       servers = [{ id: routed.id, name: routed.name, tags: routed.tags ?? [], target: sshTargetFor(routed) }]
     } catch (err) {
-      routeError = `${routed.name} cannot be used as a route: ${err instanceof Error ? err.message : String(err)}`
+      routeError = t('lib.httpSend.routeError', {
+        name: routed.name,
+        error: err instanceof Error ? err.message : String(err)
+      })
     }
   }
   const vpns = app.vpns.filter((v) => v.workspaceId === tab.workspaceId).map((v) => ({ id: v.id, name: v.name }))
@@ -192,7 +196,7 @@ function failed(f: BuildFailure): ResponseState {
   return { status: 'error', errorClass: f.errorClass, message: f.message, ...(f.unresolved ? { unresolved: f.unresolved } : {}) }
 }
 
-const DECLINED: ResponseState = { status: 'error', errorClass: 'prod-declined', message: 'Not sent.' }
+const declined = (): ResponseState => ({ status: 'error', errorClass: 'prod-declined', message: t('lib.httpSend.notSent') })
 
 function recordHistory(ctx: SendCtx, sent: SentView, result: Extract<ResponseState, { status: 'done' | 'error' }>): void {
   try {
@@ -232,7 +236,7 @@ async function dispatch(ctx: SendCtx, built: BuildResult, production: Omit<Produ
   }
   const confirmed = await confirmIfProduction({ ...production, environment: ctx.env, server: ctx.server, via: built.sent.route.label })
   if (!confirmed) {
-    setResponse(tabId, DECLINED)
+    setResponse(tabId, declined())
     return
   }
   // Closed while the prompt was up: nothing is sent for a tab that is gone.
@@ -325,7 +329,7 @@ export async function runGraphQl(tabId: Id, operationName?: string, opts: SendOp
 export async function prepareSocket(tabId: Id, opts: SendOpts = {}): Promise<WsBuildResult> {
   const ctx = contextFor(tabId, opts)
   if (!ctx || ctx.req.kind !== 'ws') {
-    return { ok: false, errorClass: 'other', message: 'This tab is not a WebSocket request.' }
+    return { ok: false, errorClass: 'other', message: t('lib.httpSend.notWebSocket') }
   }
   const built = unkeptFailure(ctx) ?? buildWsSpec(ctx.req, ctx.build)
   if (!built.ok) return built
@@ -336,9 +340,9 @@ export async function prepareSocket(tabId: Id, opts: SendOpts = {}): Promise<WsB
     server: ctx.server,
     via: built.sent.route.label
   })
-  if (!confirmed) return { ok: false, errorClass: 'prod-declined', message: 'Not connected.' }
+  if (!confirmed) return { ok: false, errorClass: 'prod-declined', message: t('lib.httpSend.notConnected') }
   // Closed while the prompt was up: a socket for a gone tab would never be closed.
-  if (!findTab(tabId)) return { ok: false, errorClass: 'other', message: 'The tab was closed.' }
+  if (!findTab(tabId)) return { ok: false, errorClass: 'other', message: t('lib.httpSend.tabClosed') }
   return built
 }
 
@@ -442,7 +446,7 @@ function unkeptFailure(ctx: SendCtx): BuildFailure | null {
     const value = valueAtPath(ctx.req, path)
     return hasMask(value) || (/^protocols\.\d+$/.test(path) && value === '')
   })
-  return unkept ? { ok: false, errorClass: 'other', message: 'Enter the values that were not kept' } : null
+  return unkept ? { ok: false, errorClass: 'other', message: t('lib.httpSend.unkept') } : null
 }
 
 /**
@@ -457,7 +461,7 @@ export async function introspect(
 ): Promise<{ ok: true; status: number; text: string } | { ok: false; errorClass: TransportErrorClass; message: string }> {
   const ctx = contextFor(tabId)
   if (!ctx || ctx.req.kind !== 'graphql') {
-    return { ok: false, errorClass: 'other', message: 'This tab is not a GraphQL request.' }
+    return { ok: false, errorClass: 'other', message: t('lib.httpSend.notGraphQl') }
   }
   const built = unkeptFailure(ctx) ?? buildGraphQlSpec({ ...ctx.req, query, variables: '', operationName: undefined }, ctx.build)
   if (!built.ok) return { ok: false, errorClass: built.errorClass, message: maskUrlsIn(built.message) }
@@ -528,12 +532,12 @@ export async function copyAsCurl(tabId: Id, opts: { secrets: 'mask' | 'include' 
   const r = buildOnly(tabId, { allowUnresolved: true, ...(include ? {} : { vault: MASKING_VAULT }) })
   if (!r) return false
   if (!r.built.ok) {
-    useToasts.getState().push(`Could not copy as cURL: ${r.built.message}`, 'error')
+    useToasts.getState().push(t('lib.httpSend.copyCurlFailed', { error: r.built.message }), 'error')
     return false
   }
   const { text, notes } = toCurl(r.req, include ? r.built.spec : r.built.sent, opts)
   window.opsmaxx.clipboard.write(text)
-  useToasts.getState().push(['Copied as cURL.', ...notes].join(' '), 'ok')
+  useToasts.getState().push([t('lib.httpSend.copiedCurl'), ...notes].join(' '), 'ok')
   return true
 }
 

@@ -17,6 +17,7 @@ import { ContextMenu, MenuEntry } from '../connections/ContextMenu'
 import { openDatabaseEditor } from '../../store/dbEditor'
 import type { DatabaseConn, DbKind, Folder } from '../../types'
 import { EmptyState } from '../common/EmptyState'
+import { useT } from '../../lib/i18n'
 
 // A tooltip is a display surface like any other. `d.host` may be a whole
 // connection string on a record saved before the parser was fixed, so it goes
@@ -47,6 +48,7 @@ export const KIND_SHORT: Record<DbKind, string> = {
 }
 
 export function DatabaseSidebar(): React.JSX.Element {
+  const t = useT()
   const databases = useWorkspaceDatabases()
   const folders = useWorkspaceFolders('database')
   const activeId = useApp((s) => s.activeDatabaseId)
@@ -77,21 +79,26 @@ export function DatabaseSidebar(): React.JSX.Element {
   const drop = (folderId: string | null, label: string): void => {
     if (dragId) {
       moveDatabaseToFolder(dragId, folderId)
-      toast(`Moved to ${label}`)
+      toast(t('databases.sidebar.movedTo', { label }))
     }
     setDropTarget(null)
     setDragId(null)
   }
 
   const folderMenu = (id: string, name: string): MenuEntry[] => [
-    { label: 'Rename', icon: <Pencil size={14} />, onClick: () => setRenaming(id) },
+    { label: t('databases.sidebar.rename'), icon: <Pencil size={14} />, onClick: () => setRenaming(id) },
     {
-      label: 'New subfolder',
+      label: t('databases.sidebar.newSubfolder'),
       icon: <FolderPlus size={14} />,
-      onClick: () => setRenaming(addFolder('New folder', id, 'database'))
+      onClick: () => setRenaming(addFolder(t('databases.sidebar.newFolder'), id, 'database'))
     },
     { separator: true, label: '' },
-    { label: `Delete "${name}"`, icon: <Trash2 size={14} />, danger: true, onClick: () => deleteFolder(id) }
+    {
+      label: t('databases.sidebar.deleteFolder', { name }),
+      icon: <Trash2 size={14} />,
+      danger: true,
+      onClick: () => deleteFolder(id)
+    }
   ]
 
   const dbRow = (d: DatabaseConn): React.JSX.Element => (
@@ -199,15 +206,15 @@ export function DatabaseSidebar(): React.JSX.Element {
           }
         }}
         onDragLeave={() => setDropTarget(null)}
-        onDrop={() => drop(null, 'Databases')}
+        onDrop={() => drop(null, t('databases.sidebar.title'))}
       >
-        <Database size={11} /> Databases <span className="count">{databases.length}</span>
+        <Database size={11} /> {t('databases.sidebar.title')} <span className="count">{databases.length}</span>
         <button
           className="icon-btn xs"
-          title="New folder"
+          title={t('databases.sidebar.newFolder')}
           onClick={(e) => {
             e.stopPropagation()
-            setRenaming(addFolder('New folder', null, 'database'))
+            setRenaming(addFolder(t('databases.sidebar.newFolder'), null, 'database'))
           }}
         >
           <FolderPlus size={13} />
@@ -220,8 +227,8 @@ export function DatabaseSidebar(): React.JSX.Element {
       {databases.length === 0 && folders.length === 0 && (
         <EmptyState
           compact
-          title="No database connections"
-          message="Add one to browse schemas, run queries and read the server's own status."
+          title={t('databases.sidebar.emptyTitle')}
+          message={t('databases.sidebar.emptyMessage')}
         />
       )}
 
@@ -231,17 +238,21 @@ export function DatabaseSidebar(): React.JSX.Element {
           y={ctx.y}
           onClose={() => setCtx(null)}
           entries={[
-            { label: 'Open', icon: <Plug size={14} />, onClick: () => openDatabase(ctx.id) },
-            { label: 'Edit connection', icon: <Pencil size={14} />, onClick: () => openDatabaseEditor(ctx.id) },
+            { label: t('common.open'), icon: <Plug size={14} />, onClick: () => openDatabase(ctx.id) },
+            {
+              label: t('databases.editConnection'),
+              icon: <Pencil size={14} />,
+              onClick: () => openDatabaseEditor(ctx.id)
+            },
             { separator: true, label: '' },
             {
-              label: 'Delete',
+              label: t('common.delete'),
               icon: <Trash2 size={14} />,
               danger: true,
               onClick: () => {
                 deleteDatabase(ctx.id)
                 void window.opsmaxx?.secrets.delete(ctx.id)
-                toast(`${ctx.name} deleted`)
+                toast(t('databases.deleted', { name: ctx.name }))
               }
             }
           ]}

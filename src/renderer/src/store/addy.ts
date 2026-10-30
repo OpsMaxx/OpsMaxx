@@ -5,6 +5,8 @@ import { moduleEnabled } from '../../../shared/modules'
 import { useApp } from './app'
 import { openMonitor, openSettings } from './nav'
 import { toast } from './toast'
+import { t } from '../lib/i18n'
+import type { MessageKey } from '../../../shared/i18n'
 
 /**
  * The Sync & devices state that has to outlive the component showing it.
@@ -59,18 +61,21 @@ export function refreshHeld(): void {
   )
 }
 
-const KIND_WORD: Record<HeldRecord['kind'], string> = {
-  server: 'server',
-  database: 'database',
-  cicd: 'CI/CD connection',
-  vpn: 'VPN profile'
+const ARRIVED: Record<HeldRecord['kind'], MessageKey> = {
+  server: 'store.addy.held.arrivedServer',
+  database: 'store.addy.held.arrivedDatabase',
+  cicd: 'store.addy.held.arrivedCicd',
+  vpn: 'store.addy.held.arrivedVpn'
 }
 
 /** What a held record is waiting on, in one sentence a person can check. */
 export function heldSentence(r: HeldRecord): string {
-  if (r.arrived && r.changed.length === 0) return `This ${KIND_WORD[r.kind]} arrived from another of your devices.`
-  const what = r.changed.length === 1 ? r.changed[0] : `${r.changed.slice(0, -1).join(', ')} and ${r.changed[r.changed.length - 1]}`
-  return `Its ${what} ${r.changed.length === 1 ? 'was' : 'were'} changed on another of your devices.`
+  if (r.arrived && r.changed.length === 0) return t(ARRIVED[r.kind])
+  const what =
+    r.changed.length === 1
+      ? r.changed[0]
+      : t('store.addy.held.list', { items: r.changed.slice(0, -1).join(', '), last: r.changed[r.changed.length - 1] })
+  return t('store.addy.held.changed', { what, count: r.changed.length })
 }
 
 /**
@@ -80,20 +85,22 @@ export function heldSentence(r: HeldRecord): string {
  * and a button beside an explanation is still pressed without reading it.
  */
 export async function confirmHeldRecord(r: HeldRecord): Promise<void> {
-  const ws = r.changed.includes('workspace')
-    ? '\n\nIt was also moved to another workspace. Until you confirm, AI access rules from its old workspace still apply to it here.'
-    : ''
+  const ws = r.changed.includes('workspace') ? t('store.addy.confirm.movedWorkspace') : ''
   const ok = window.confirm(
-    `Use "${r.name}" on this device?\n\n${heldSentence(r)} It now points at ${r.destination}.${ws}\n\n` +
-      'Confirm only if you made this change. If you did not, leave it and check the devices listed in Sync & devices.'
+    t('store.addy.confirm.question', {
+      name: r.name,
+      sentence: heldSentence(r),
+      destination: r.destination,
+      workspace: ws
+    })
   )
   if (!ok) return
   try {
     const held = await window.opsmaxx?.addy?.confirmHeld(r.kind, r.id)
     if (held) useAddyUi.setState({ held })
-    toast(`Confirmed. "${r.name}" is used on this device again.`, 'ok')
+    toast(t('store.addy.confirm.done', { name: r.name }), 'ok')
   } catch (err) {
-    toast(err instanceof Error ? err.message : 'Could not confirm it.', 'error')
+    toast(err instanceof Error ? err.message : t('store.addy.confirm.failed'), 'error')
   }
 }
 

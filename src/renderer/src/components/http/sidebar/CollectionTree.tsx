@@ -17,6 +17,7 @@ import { ContextMenu, type MenuEntry } from '../../connections/ContextMenu'
 import { EmptyState } from '../../common/EmptyState'
 import { DeleteCollectionDialog } from '../dialogs/DeleteCollectionDialog'
 import { MoveToDialog } from '../dialogs/MoveToDialog'
+import { t as tr, useT } from '../../../lib/i18n'
 import {
   collectionMenu,
   folderMenu,
@@ -98,7 +99,7 @@ export function duplicateCollection(colId: Id): Id | null {
   const copy: ApiCollectionV2 = {
     ...c,
     id: newId('col'),
-    name: `${c.name} copy`,
+    name: tr('http.tree.copyName', { name: c.name }),
     items: c.items.map(withFreshIds),
     // A pending certificate review carries over: the copy has the same
     // connection settings, and must not send them unreviewed.
@@ -155,6 +156,7 @@ export function CollectionTree(props: CollectionTreeProps): React.JSX.Element {
   const nodes = useRef(new Map<Id, HTMLDivElement>())
   const wantFocus = useRef(false)
   const current = rows.find((r) => r.id === focusId) ?? rows[0]
+  const t = useT()
 
   useEffect(() => {
     if (!wantFocus.current || !focusId) return
@@ -178,7 +180,7 @@ export function CollectionTree(props: CollectionTreeProps): React.JSX.Element {
       fn()
     }
     undo.current.push(once)
-    toast(`Deleted ${label}`, 'info', { label: 'Undo', run: once }, { key })
+    toast(t('http.tree.deleted', { name: label }), 'info', { label: t('http.tree.undo'), run: once }, { key })
   }
 
   const actions: TreeActions = {
@@ -190,7 +192,7 @@ export function CollectionTree(props: CollectionTreeProps): React.JSX.Element {
     },
     newFolder: (colId, parentId) => {
       const id = newId('fld')
-      useApi.getState().addItem(colId, parentId, { kind: 'folder', id, name: 'New folder', items: [] })
+      useApi.getState().addItem(colId, parentId, { kind: 'folder', id, name: t('http.tree.newFolderName'), items: [] })
       setExpanded([colId, ...(parentId ? [parentId] : [])], true)
       setRenaming(id)
     },
@@ -210,7 +212,7 @@ export function CollectionTree(props: CollectionTreeProps): React.JSX.Element {
       const row = rows.find((r) => r.id === id)
       const at = rows.findIndex((r) => r.id === id)
       const next = rows.slice(at + 1).find((r) => r.depth <= (row?.depth ?? 0)) ?? rows[at - 1]
-      pushUndo(useApi.getState().deleteItem(colId, id), row?.name ?? 'item', `http-tree-delete-${id}`)
+      pushUndo(useApi.getState().deleteItem(colId, id), row?.name ?? t('http.tree.item'), `http-tree-delete-${id}`)
       focusRow(next?.id)
     },
     open: (colId, reqId, preview) => useHttp.getState().openRequest({ collectionId: colId, requestId: reqId }, { preview }),
@@ -269,15 +271,15 @@ export function CollectionTree(props: CollectionTreeProps): React.JSX.Element {
     return (
       <EmptyState
         compact
-        title="No collections yet"
-        message="Save a request, or import an OpenAPI spec or a cURL command."
+        title={t('http.tree.emptyTitle')}
+        message={t('http.tree.emptyMessage')}
         action={
           <div className="hc-empty-actions">
             <button type="button" className="btn primary sm" onClick={props.onNewCollection}>
-              New collection
+              {t('http.tree.newCollection')}
             </button>
             <button type="button" className="btn sm" onClick={() => props.onImport()}>
-              Import…
+              {t('http.tree.import')}
             </button>
           </div>
         }
@@ -287,8 +289,8 @@ export function CollectionTree(props: CollectionTreeProps): React.JSX.Element {
 
   return (
     <>
-      <div role="tree" aria-label="Collections" className="hc-tree">
-        {rows.length === 0 && <p className="hc-tree-empty">Nothing matches “{query}”.</p>}
+      <div role="tree" aria-label={t('http.tree.label')} className="hc-tree">
+        {rows.length === 0 && <p className="hc-tree-empty">{t('http.tree.noMatch', { query })}</p>}
         {rows.map((r, i) => {
           const selected = r.kind === 'request' ? activeRef?.requestId === r.id : r.kind === 'collection' && activeRef?.collectionId === r.id && !activeRef.requestId
           return (
@@ -333,7 +335,7 @@ export function CollectionTree(props: CollectionTreeProps): React.JSX.Element {
               {renaming === r.id ? (
                 <input
                   className="hc-tree-rename"
-                  aria-label={`Rename ${r.name}`}
+                  aria-label={t('http.tree.renameNamed', { name: r.name })}
                   defaultValue={r.name}
                   autoFocus
                   onFocus={(e) => e.currentTarget.select()}
@@ -355,8 +357,8 @@ export function CollectionTree(props: CollectionTreeProps): React.JSX.Element {
                 type="button"
                 tabIndex={-1}
                 className="hc-icon-btn hc-tree-more"
-                aria-label={`Actions for ${r.name}`}
-                title="Actions"
+                aria-label={t('http.tree.actionsFor', { name: r.name })}
+                title={t('http.tree.actions')}
                 onClick={(e) => {
                   e.stopPropagation()
                   const b = e.currentTarget.getBoundingClientRect()

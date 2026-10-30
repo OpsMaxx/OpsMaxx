@@ -19,6 +19,9 @@ import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
 import type { OnDemandTarget } from '../../../../shared/ssh'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 
 // What is scheduled across the estate — currently unanswerable without visiting
 // every box.
@@ -94,12 +97,13 @@ const LOCAL_HOST = {
   cfg: LOCAL_TARGET as unknown as CronEditTargetRef['cfg']
 }
 
-const KIND_LABEL: Record<CronEntry['kind'], string> = {
-  'user-crontab': 'user crontab',
+// The two paths are shown as themselves; the rest are words.
+const KIND_LABEL: Record<CronEntry['kind'], { labelKey: MessageKey } | string> = {
+  'user-crontab': { labelKey: 'monitor.cron.kind.userCrontab' },
   'system-crontab': '/etc/crontab',
   'cron.d': 'cron.d',
-  'systemd-timer': 'systemd timer',
-  'other-user-crontab': 'crontab spool'
+  'systemd-timer': { labelKey: 'monitor.cron.kind.systemdTimer' },
+  'other-user-crontab': { labelKey: 'monitor.cron.kind.crontabSpool' }
 }
 
 /**
@@ -133,10 +137,11 @@ function notEditableByReason(host: HostCron): [string, number][] {
 }
 
 function SourceStatus({ sources }: { sources?: CronSourceReport[] }): React.JSX.Element {
+  const t = useT()
   if (!sources || sources.length === 0) {
     return (
       <div className="faint">
-        This server did not report which sources it managed to read, so this list may be incomplete.
+        {t('monitor.cron.noSourceReport')}
       </div>
     )
   }
@@ -145,16 +150,18 @@ function SourceStatus({ sources }: { sources?: CronSourceReport[] }): React.JSX.
   return (
     <div>
       <span className={clsx(complete ? 'faint' : 'warn')}>
-        {complete ? `read all ${total} sources` : `read ${answered} of ${total} sources`}
+        {complete
+          ? t('monitor.cron.readAll', { total })
+          : t('monitor.cron.readSome', { answered, total })}
       </span>
       {/* Reading as root is a thing that happened, not an implementation
           detail. It is surfaced for the same reason the Docker panel surfaces
           it: silent escalation is the wrong trade even when it is the only way
           to get an answer. */}
       {usedSudo && (
-        <span className="faint" title="Some sources were readable only as root, and were read with sudo -n — which never prompts.">
+        <span className="faint" title={t('monitor.cron.sudoTitle')}>
           {' '}
-          · read as root
+          · {t('monitor.cron.readAsRoot')}
         </span>
       )}
       {incomplete.map((s) => (
@@ -168,6 +175,7 @@ function SourceStatus({ sources }: { sources?: CronSourceReport[] }): React.JSX.
 }
 
 export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element {
+  const t = useT()
   const [rows, setRows] = useState<HostCron[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [filter, setFilter] = useState('')
@@ -218,7 +226,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
           | undefined
       )?.fleet?.timer
       if (typeof call !== 'function') {
-        setTimerHealthState({ key, error: 'This build cannot read timers. Restart the app to rebuild it.' })
+        setTimerHealthState({ key, error: t('monitor.cron.noTimerBridge') })
         return
       }
       // sshTargetFor, NOT `server` — the same defect the storage and kernel
@@ -259,7 +267,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
     setLoading(true)
     try {
       const res = await withVaultUnlock(
-        'Reading scheduled jobs needs each server’s stored credential.',
+        t('monitor.cron.unlockReason'),
         async () =>
           window.opsmaxx?.cron?.collect([
             ...eligible.map((s) => ({
@@ -320,7 +328,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
       <button
         className="btn"
         data-testid={`edit-${host.serverId}`}
-        title="Opens Operations › Jobs › Change a schedule, with this job filled in. Changing or removing it writes this account's whole crontab, so it happens on the rail where everything writes."
+        title={t('monitor.cron.editTitle')}
         onClick={() =>
           openCronEdit({
             serverId: host.serverId,
@@ -337,6 +345,9 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
       </button>
     )
   }
+
+  const kindLabel = (l: { labelKey: MessageKey } | string): string =>
+    typeof l === 'string' ? l : t(l.labelKey)
 
   const q = filter.trim().toLowerCase()
   const visible = (rows ?? []).map((h) => ({
@@ -356,19 +367,16 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
       disabled={loading}
       onClick={() => void collect()}
     >
-      <RefreshCw size={13} className={clsx(loading && 'spin')} /> {rows ? 'Refresh' : 'Read schedules'}
+      <RefreshCw size={13} className={clsx(loading && 'spin')} /> {rows ? t('common.refresh') : t('monitor.cron.readSchedules')}
     </button>
   )
 
   return (
     <PanelShell
       icon={<CalendarClock size={14} />}
-      title="Scheduled jobs"
+      title={t('modules.cron.label')}
       about={
-        <p>
-          Every crontab and systemd timer across the estate, and which of them this account was
-          actually allowed to read.
-        </p>
+        <p>{t('monitor.cron.about')}</p>
       }
       actions={
         <>
@@ -376,7 +384,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
             <input
               className="input"
               style={{ maxWidth: 220 }}
-              placeholder="Filter by command or file…"
+              placeholder={t('monitor.cron.filterPlaceholder')}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
@@ -390,15 +398,12 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
         // Before anything has been read this IS the panel, so it is framed as
         // an empty state rather than set at body weight beside the button.
         <div className="panel-empty">
-          <p className="panel-empty-title">Nothing has been read yet.</p>
+          <p className="panel-empty-title">{t('monitor.cron.emptyTitle')}</p>
           <p className="panel-empty-body">
-            Reads crontabs, /etc/crontab, /etc/cron.d, other accounts’ crontabs and systemd timers
-            from every online server, and says which of those it was actually allowed to read.
-            Sources that are root-only are retried with <span className="mono">sudo -n</span>, which
-            never prompts for a password. Nothing is written or changed — this only looks.
+            <Trans i18nKey="monitor.cron.emptyBody" components={{ mono: <span className="mono" /> }} />
           </p>
           <p className="panel-empty-body">
-            Press <b>Read schedules</b> above to start.
+            <Trans i18nKey="monitor.cron.emptyPress" components={{ b: <b /> }} />
           </p>
         </div>
       )}
@@ -407,20 +412,22 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
         <>
           <div className="panel-stats">
             <span>
-              {total} job{total === 1 ? '' : 's'} across {visible.length - failed.length} server
-              {visible.length - failed.length === 1 ? '' : 's'}
+              {t('monitor.cron.jobsAcross', {
+                count: total,
+                servers: t('monitor.cron.servers', { count: visible.length - failed.length })
+              })}
             </span>
             {/* Lines that looked like jobs but did not parse are counted, not
                 hidden. A schedule silently missing from this view is a command
                 running on a box that nobody knows about. */}
-            {unparsed > 0 && <span className="state-unknown">{unparsed} line{unparsed === 1 ? '' : 's'} not understood</span>}
+            {unparsed > 0 && <span className="state-unknown">{t('monitor.cron.unparsed', { count: unparsed })}</span>}
             {/* Counted across the estate as well as per host: with a dozen
                 servers, a single host whose cron.d was refused is easy to
                 scroll past, and it is exactly the host you would want to look
                 at. */}
             {partial > 0 && (
               <span className="state-unknown">
-                {partial} server{partial === 1 ? '' : 's'} only partly readable
+                {t('monitor.cron.partial', { count: partial })}
               </span>
             )}
           </div>
@@ -443,12 +450,12 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                     <button
                       className="btn"
                       data-testid={`add-${h.serverId}`}
-                      title="Opens Operations › Jobs › Change a schedule, on this server. Writing a crontab changes a server, so it lives on the rail where everything does."
+                      title={t('monitor.cron.addTitle')}
                       onClick={() =>
                         openCronEdit({ serverId: h.serverId, schedule: '0 3 * * *', command: '' })
                       }
                     >
-                      <Plus size={12} /> Add job…
+                      <Plus size={12} /> {t('monitor.cron.addJob')}
                     </button>
                   )}
                 </div>
@@ -463,7 +470,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                     className="ui-note"
                     data-testid={`cron-not-editable-${h.serverId}`}
                   >
-                    {n} of these cannot be edited from OpsMaxx: {reason}
+                    {t('monitor.cron.notEditable', { count: n, reason })}
                   </div>
                 ))}
                 {/* Why the pointer is not there, rather than simply not putting
@@ -473,29 +480,33 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                     the part it would delete. */}
                 {!ownCrontabReadable(h) && (
                   <div className="faint">
-                    This account’s crontab was not read in full, so nothing here can be edited.
+                    {t('monitor.cron.notReadInFull')}
                   </div>
                 )}
                 {h.entries.length === 0 && (
                   <div className="faint">
                     {q !== ''
-                      ? 'Nothing matching.'
+                      ? t('monitor.cron.nothingMatching')
                       : // Only claimed when every source actually answered. On a
                         // host where /etc/cron.d was refused, "Nothing
                         // scheduled" is a sentence about our permissions
                         // wearing a sentence about the host.
                         (h.sources?.length ?? 0) > 0 &&
                           summariseCronSources(h.sources ?? []).incomplete.length === 0
-                        ? 'Nothing scheduled.'
-                        : 'Nothing found in the sources that could be read.'}
+                        ? t('monitor.cron.nothingScheduled')
+                        : t('monitor.cron.nothingFound')}
                   </div>
                 )}
                 {h.entries.map((e, i) => (
                   <div key={`${e.origin}:${i}`}>
                   <div className="cron-row">
-                    <span className="chip">{KIND_LABEL[e.kind]}</span>
+                    <span className="chip">{kindLabel(KIND_LABEL[e.kind])}</span>
                     <span className="mono cron-when">
-                      {e.kind === 'systemd-timer' ? (e.nextRun ? `next ${e.nextRun}` : 'no next run') : e.schedule}
+                      {e.kind === 'systemd-timer'
+                        ? e.nextRun
+                          ? t('monitor.cron.nextRun', { when: e.nextRun })
+                          : t('monitor.cron.noNextRun')
+                        : e.schedule}
                     </span>
                     {/* The schedule above says WHEN. This says whether the last
                         run worked, which is a different question and the only
@@ -506,7 +517,9 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                         disabled={timerLoading === `${h.serverId}:${e.origin}`}
                         onClick={() => void loadTimerHealth(h.serverId, e.origin)}
                       >
-                        {timerLoading === `${h.serverId}:${e.origin}` ? 'reading' : 'did it run?'}
+                        {timerLoading === `${h.serverId}:${e.origin}`
+                          ? t('monitor.cron.reading')
+                          : t('monitor.cron.didItRun')}
                       </button>
                     )}
                     {/* Null means "a valid schedule I decline to describe".

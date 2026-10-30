@@ -10,6 +10,9 @@
 export { classifyConnectionError, agentFaultSentence, type ConnectionFault } from '../../../shared/connectionError'
 
 import { classifyConnectionError, type ConnectionFault } from '../../../shared/connectionError'
+import type { MessageKey } from '../../../shared/i18n'
+import { t } from './i18n'
+
 /**
  * The message out of a thrown IPC rejection, without the transport's own
  * preamble.
@@ -58,57 +61,57 @@ export interface FaultAdvice {
   hint?: string
 }
 
-const ADVICE: Record<ConnectionFault, FaultAdvice> = {
+const ADVICE: Record<ConnectionFault, AdviceKeys> = {
   'host-key': {
-    cause: 'The server presented a different host key than the one saved for it.',
+    cause: 'lib.connectionError.hostKey.cause',
     // Deliberately neither. A changed host key is a decision — rebuilt server,
     // or interception — and it is not made by pressing a button on this card.
     retry: false,
     edit: false,
-    hint: 'Forget the saved key in Settings → Security only if you are certain the server changed.'
+    hint: 'lib.connectionError.hostKey.hint'
   },
   'port-in-use': {
-    cause: 'Something on this machine is already listening on that port.',
+    cause: 'lib.connectionError.portInUse.cause',
     retry: false,
     edit: true,
-    hint: 'Pick another local port.'
+    hint: 'lib.connectionError.portInUse.hint'
   },
   passphrase: {
-    cause: 'The private key is encrypted and no passphrase was supplied.',
+    cause: 'lib.connectionError.passphrase.cause',
     retry: false,
     edit: true,
-    hint: 'Add the passphrase to the connection, or load the key into your agent.'
+    hint: 'lib.connectionError.passphrase.hint'
   },
   'key-missing': {
-    cause: 'The private key file is not where the connection says it is.',
+    cause: 'lib.connectionError.keyMissing.cause',
     retry: false,
     edit: true,
-    hint: 'Point the connection at the key, or switch it to password or agent authentication.'
+    hint: 'lib.connectionError.keyMissing.hint'
   },
   auth: {
     // The case that made this necessary. Retrying re-runs the same rejected
     // credential and fails the same way, forever.
-    cause: 'The server rejected the username or the credential.',
+    cause: 'lib.connectionError.auth.cause',
     retry: false,
     edit: true,
-    hint: 'Check the username and the authentication method.'
+    hint: 'lib.connectionError.auth.hint'
   },
   refused: {
     // Nothing is listening. That is usually a wrong port or a stopped daemon —
     // both worth one retry, since a daemon may be restarting.
-    cause: 'Nothing is listening on that port.',
+    cause: 'lib.connectionError.refused.cause',
     retry: true,
     edit: true,
-    hint: 'Check the port, and that sshd is running.'
+    hint: 'lib.connectionError.refused.hint'
   },
   unreachable: {
-    cause: 'The server did not answer in time.',
+    cause: 'lib.connectionError.unreachable.cause',
     retry: true,
     edit: true,
-    hint: 'Check the address, and whether a firewall or VPN sits in the way.'
+    hint: 'lib.connectionError.unreachable.hint'
   },
   permission: {
-    cause: 'The operating system refused access to something the connection needs.',
+    cause: 'lib.connectionError.permission.cause',
     retry: false,
     edit: false
   },
@@ -117,7 +120,7 @@ const ADVICE: Record<ConnectionFault, FaultAdvice> = {
   // first place — the raw text underneath is the honest thing to show.
   exited: {
     // Says what happened, and does not imply anybody did anything wrong.
-    cause: 'The shell exited.',
+    cause: 'lib.connectionError.exited.cause',
     retry: true,
     // There is nothing to correct in a connection that worked.
     edit: false
@@ -127,7 +130,7 @@ const ADVICE: Record<ConnectionFault, FaultAdvice> = {
     // repeat it -- and it does not call a non-zero status an error, because
     // `exit` returns the last command's status and a mistyped command followed
     // by `exit` is the ordinary way to reach it.
-    cause: 'The shell exited, carrying the status of its last command.',
+    cause: 'lib.connectionError.exitedNonzero.cause',
     retry: true,
     // Same reason as `exited`: there is nothing to correct in a connection that
     // worked. Offering to edit the credentials here is what made an ordinary
@@ -135,14 +138,18 @@ const ADVICE: Record<ConnectionFault, FaultAdvice> = {
     edit: false
   },
   unknown: {
-    cause: 'OpsMaxx could not tell what went wrong from what the server said.',
+    cause: 'lib.connectionError.unknown.cause',
     retry: true,
     edit: true
   }
 }
 
+/** FaultAdvice with its sentences as catalog keys, translated when asked for. */
+type AdviceKeys = Omit<FaultAdvice, 'cause' | 'hint'> & { cause: MessageKey; hint?: MessageKey }
+
 export function faultAdvice(fault: ConnectionFault): FaultAdvice {
-  return ADVICE[fault]
+  const { cause, hint, ...rest } = ADVICE[fault]
+  return { cause: t(cause), ...rest, ...(hint ? { hint: t(hint) } : {}) }
 }
 
 /** Advice straight from the raw failure text. */

@@ -3,6 +3,7 @@ import { Copy, X } from 'lucide-react'
 import { bytes, clsx } from '../../../lib/format'
 import type { WsFrame } from '../../../store/wsSessions'
 import { dirLabel, frameText, prettyJson, stamp } from './frames'
+import { useT } from '../../../lib/i18n'
 
 /** One frame, whole. Text only: a frame is whatever the far end chose to send. */
 export function MessageDetail({
@@ -16,6 +17,7 @@ export function MessageDetail({
 }): React.JSX.Element {
   const [pretty, setPretty] = useState(true)
   const [wrap, setWrap] = useState(true)
+  const t = useT()
   const text = frameText(frame)
   const shown = useMemo(() => (pretty ? (prettyJson(text) ?? text) : text), [pretty, text])
   const partial = frame.text === undefined && !frame.binary && frame.dir !== 'system'
@@ -23,7 +25,7 @@ export function MessageDetail({
   return (
     <section
       className={clsx('hc-ws-detail', `is-${placement}`)}
-      aria-label="Message detail"
+      aria-label={t('http.ws.messageDetail')}
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation()
@@ -36,29 +38,41 @@ export function MessageDetail({
           {dirLabel(frame)} · {stamp(frame.at)} · {bytes(frame.size)}
         </span>
         <span className="hc-ws-spacer" />
-        <div className="hc-ws-seg" role="radiogroup" aria-label="View">
+        <div className="hc-ws-seg" role="radiogroup" aria-label={t('http.ws.view')}>
           <button type="button" role="radio" aria-checked={pretty} className={clsx('btn ghost sm', pretty && 'is-on')} onClick={() => setPretty(true)}>
-            Pretty
+            {t('http.ws.pretty')}
           </button>
           <button type="button" role="radio" aria-checked={!pretty} className={clsx('btn ghost sm', !pretty && 'is-on')} onClick={() => setPretty(false)}>
-            Raw
+            {t('http.ws.raw')}
           </button>
         </div>
         <label className="hc-ws-check">
-          <input type="checkbox" checked={wrap} onChange={(e) => setWrap(e.target.checked)} /> Wrap
+          <input type="checkbox" checked={wrap} onChange={(e) => setWrap(e.target.checked)} /> {t('http.ws.wrap')}
         </label>
-        <button type="button" className="btn ghost sm" aria-label="Copy message" title="Copy message" onClick={() => window.opsmaxx?.clipboard?.write(text)}>
+        <button
+          type="button"
+          className="btn ghost sm"
+          aria-label={t('http.ws.copyMessage')}
+          title={t('http.ws.copyMessage')}
+          onClick={() => window.opsmaxx?.clipboard?.write(text)}
+        >
           <Copy size={13} />
         </button>
-        <button type="button" className="btn ghost sm" aria-label="Close detail (Esc)" title="Close detail (Esc)" onClick={onClose}>
+        <button
+          type="button"
+          className="btn ghost sm"
+          aria-label={t('http.ws.closeDetail')}
+          title={t('http.ws.closeDetail')}
+          onClick={onClose}
+        >
           <X size={13} />
         </button>
       </div>
       {(partial || frame.truncated) && (
         <p className="hc-ws-note">
           {frame.truncated
-            ? 'OpsMaxx cut this frame before it reached the window; what arrived is shown.'
-            : `Showing the first 64 KiB of ${bytes(frame.size)}.`}
+            ? t('http.ws.frameTruncated')
+            : t('http.ws.framePartial', { size: bytes(frame.size) })}
         </p>
       )}
       <pre className={clsx('hc-ws-detail-body mono selectable', wrap && 'is-wrap')}>{shown}</pre>

@@ -30,6 +30,8 @@ import { TlsChip } from '../TlsChip'
 import { Composer, ComposerToolbar } from './Composer'
 import { INITIAL_VIEW, MessageLog, MessageToolbar, type LogView } from './MessageLog'
 import { isLive, submitWs, updateWs, wsRequestOf } from './wsActions'
+import { t as tr, useT } from '../../../lib/i18n'
+import { Trans } from '../../../lib/Trans'
 import './ws.css'
 
 type Section = 'message' | 'params' | 'auth' | 'headers' | 'settings'
@@ -60,21 +62,26 @@ export function statusText(session: WsSession | undefined, now: number): string 
   const s = session
   switch (s?.state) {
     case 'connecting':
-      return 'Connecting…'
-    case 'open': {
-      const msgs = s.stats.sent + s.stats.received
-      return `Connected · ${clock(now - (s.openedAt ?? now))} · ${msgs} msg${msgs === 1 ? '' : 's'}`
-    }
+      return tr('http.ws.connecting')
+    case 'open':
+      return tr('http.ws.connected', {
+        clock: clock(now - (s.openedAt ?? now)),
+        count: s.stats.sent + s.stats.received
+      })
     case 'closing':
-      return 'Disconnecting…'
+      return tr('http.ws.disconnecting')
     case 'closed':
       return s.close?.wasClean === false
-        ? `Closed (${s.close.code})${s.close.reason ? ` · ${s.close.reason}` : ''}`
-        : `Disconnected${s.close ? ` (${s.close.code})` : ''}`
+        ? s.close.reason
+          ? tr('http.ws.closedCodeReason', { code: s.close.code, reason: s.close.reason })
+          : tr('http.ws.closedCode', { code: s.close.code })
+        : s.close
+          ? tr('http.ws.disconnectedCode', { code: s.close.code })
+          : tr('http.ws.disconnected')
     case 'error':
-      return s.failure?.message ?? 'Could not connect'
+      return s.failure?.message ?? tr('http.ws.couldNotConnect')
     default:
-      return s?.failure?.class === 'prod-declined' ? s.failure.message : 'Not connected'
+      return s?.failure?.class === 'prod-declined' ? s.failure.message : tr('http.ws.notConnected')
   }
 }
 
@@ -82,11 +89,13 @@ export function statusText(session: WsSession | undefined, now: number): string 
 export function announcement(session: WsSession | undefined): string {
   switch (session?.state) {
     case 'open':
-      return 'WebSocket connected'
+      return tr('http.ws.announceConnected')
     case 'closed':
-      return session.close ? `WebSocket closed, code ${session.close.code}` : 'WebSocket closed'
+      return session.close
+        ? tr('http.ws.announceClosedCode', { code: session.close.code })
+        : tr('http.ws.announceClosed')
     case 'error':
-      return session.failure?.message ?? 'WebSocket could not connect'
+      return session.failure?.message ?? tr('http.ws.announceFailed')
     default:
       return ''
   }
@@ -117,6 +126,7 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
   const state = session?.state ?? 'idle'
   const live = isLive(state)
   const now = useNow(state === 'open')
+  const t = useT()
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const req = useMemo(() => wsRequestOf(tab), [tab, collections])
@@ -145,12 +155,12 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
 
   const bar = (
     <div className="hc-ws-bar" ref={barRef} data-step={step}>
-      <span className="hc-ws-badge" aria-label="WebSocket">
+      <span className="hc-ws-badge" aria-label={t('http.ws.badge')}>
         WS
       </span>
       <div className="hc-ws-url">
         {live ? (
-          <span className="hc-ws-url-locked mono" title="Disconnect to edit" aria-label="WebSocket URL">
+          <span className="hc-ws-url-locked mono" title={t('http.ws.disconnectToEdit')} aria-label={t('http.ws.url')}>
             {req.url}
           </span>
         ) : (
@@ -159,7 +169,7 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
             onChange={setUrl}
             chain={chain}
             placeholder="wss://host/socket"
-            ariaLabel="WebSocket URL"
+            ariaLabel={t('http.ws.url')}
             onSubmit={() => void submitWs(tabId)}
           />
         )}
@@ -172,16 +182,20 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
 
   const requestTabs = (
     <Tabs
-      ariaLabel="Request"
+      ariaLabel={t('http.layout.request')}
       idPrefix={reqP}
       active={section}
       onChange={(id) => setSection(id as Section)}
       tabs={[
-        { id: 'message', label: 'Message' },
-        { id: 'params', label: 'Params', count: enabledCount(req.params) },
-        { id: 'auth', label: 'Auth', dot: req.auth.type === 'none' || req.auth.type === 'inherit' ? undefined : 'set' },
-        { id: 'headers', label: 'Headers', count: enabledCount(req.headers) },
-        { id: 'settings', label: 'Settings' }
+        { id: 'message', label: t('http.ws.tabMessage') },
+        { id: 'params', label: t('http.request.params'), count: enabledCount(req.params) },
+        {
+          id: 'auth',
+          label: t('http.request.auth'),
+          dot: req.auth.type === 'none' || req.auth.type === 'inherit' ? undefined : 'set'
+        },
+        { id: 'headers', label: t('http.request.headers'), count: enabledCount(req.headers) },
+        { id: 'settings', label: t('http.request.settings') }
       ]}
     />
   )
@@ -191,7 +205,7 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
     section === 'message' ? (
       <ComposerToolbar tabId={tabId} />
     ) : locked ? (
-      <p className="hc-ws-locked-note">Disconnect to edit: these went out with the upgrade request.</p>
+      <p className="hc-ws-locked-note">{t('http.ws.lockedNote')}</p>
     ) : undefined
 
   const body: ReactNode =
@@ -241,7 +255,7 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
     )
   }
   const fix = !fixOf ? null : fixOf.action === 'unlock' ? (
-    <UnlockVaultButton reason="The upgrade request reads a credential from the vault." onUnlocked={() => void openSocket(tabId)} />
+    <UnlockVaultButton reason={t('http.ws.unlockReason')} onUnlocked={() => void openSocket(tabId)} />
   ) : fixOf.action === 'disconnect-idle' ? (
     <button type="button" className="btn sm" onClick={(e) => setMenu({ x: e.clientX, y: e.clientY, entries: otherSockets(tabId) })}>
       {fixOf.label}
@@ -256,7 +270,7 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
           void openSocket(tabId)
         }}
       >
-        Retry with ws://
+        {t('http.ws.retryWs')}
       </button>
     ) : null
   ) : fixOf.action === 'choose-vault' ? (
@@ -272,7 +286,7 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
   const connectAnyway =
     failure?.class === 'unresolved-variable' && !unresolvedInOrigin(req.url, failure.unresolved ?? []) ? (
       <button type="button" className="btn ghost sm" onClick={() => void openSocket(tabId, { allowUnresolved: true })}>
-        Connect anyway
+        {t('http.ws.connectAnyway')}
       </button>
     ) : null
 
@@ -286,20 +300,20 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
         {connectAnyway}
         {(state === 'closed' || state === 'error') && (
           <button type="button" className="btn ghost sm" onClick={() => void openSocket(tabId)}>
-            Reconnect
+            {t('http.ws.reconnect')}
           </button>
         )}
         <span className="hc-ws-spacer" />
         <SplitToggles tabId={tabId} />
       </div>
       <Tabs
-        ariaLabel="Response"
+        ariaLabel={t('http.layout.response')}
         idPrefix={resP}
         active={responseTab}
         onChange={(id) => setResponseTab(id as 'messages' | 'handshake')}
         tabs={[
-          { id: 'messages', label: 'Messages' },
-          { id: 'handshake', label: 'Handshake' }
+          { id: 'messages', label: t('http.ws.messages') },
+          { id: 'handshake', label: t('http.ws.handshake') }
         ]}
         trailing={
           responseTab === 'messages' ? (
@@ -314,8 +328,8 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
             width={responseWidth}
             view={view}
             onView={(p) => setView((v) => ({ ...v, ...p }))}
-            onLoadIntoComposer={(t) => {
-              useWsSessions.getState().setComposer(tabId, { text: t })
+            onLoadIntoComposer={(text) => {
+              useWsSessions.getState().setComposer(tabId, { text })
               openSection('message')
             }}
           />
@@ -332,18 +346,19 @@ export function WsRequestPane({ tabId }: { tabId: Id }): React.JSX.Element | nul
 
   const requestSummary = (
     <span className="hc-ws-summary">
-      Request ·{' '}
+      {t('http.layout.request')} ·{' '}
       <button type="button" className="btn ghost sm" onClick={() => openSection('message')}>
-        Message
+        {t('http.ws.tabMessage')}
       </button>
       <button type="button" className="btn ghost sm" onClick={() => openSection('params')}>
-        Params {enabledCount(req.params)}
+        {t('http.request.params')} {enabledCount(req.params)}
       </button>
       <button type="button" className="btn ghost sm" onClick={() => openSection('auth')}>
-        Auth{req.auth.type !== 'none' && req.auth.type !== 'inherit' ? ' •' : ''}
+        {t('http.request.auth')}
+        {req.auth.type !== 'none' && req.auth.type !== 'inherit' ? ' •' : ''}
       </button>
       <button type="button" className="btn ghost sm" onClick={() => openSection('headers')}>
-        Headers {enabledCount(req.headers)}
+        {t('http.request.headers')} {enabledCount(req.headers)}
       </button>
     </span>
   )
@@ -381,6 +396,7 @@ function ConnectButton({
   iconOnly: boolean
 }): React.JSX.Element {
   const state = session?.state ?? 'idle'
+  const t = useT()
   if (state === 'open' || state === 'closing') {
     return (
       <button
@@ -388,10 +404,11 @@ function ConnectButton({
         className="btn danger hc-ws-connect"
         disabled={state === 'closing'}
         onClick={() => useWsSessions.getState().disconnect(tabId)}
-        aria-label={iconOnly ? 'Disconnect' : undefined}
-        title={iconOnly ? 'Disconnect' : undefined}
+        aria-label={iconOnly ? t('http.ws.disconnect') : undefined}
+        title={iconOnly ? t('http.ws.disconnect') : undefined}
       >
-        <PlugZap size={14} aria-hidden /> {!iconOnly && (state === 'closing' ? 'Disconnecting…' : 'Disconnect')}
+        <PlugZap size={14} aria-hidden />{' '}
+        {!iconOnly && (state === 'closing' ? t('http.ws.disconnecting') : t('http.ws.disconnect'))}
       </button>
     )
   }
@@ -402,12 +419,12 @@ function ConnectButton({
       className="btn primary hc-ws-connect"
       disabled={disabled || connecting}
       aria-busy={connecting}
-      aria-label={iconOnly ? `Connect (${isMac() ? '⌘↵' : 'Ctrl+Enter'})` : undefined}
-      title={iconOnly ? `Connect (${isMac() ? '⌘↵' : 'Ctrl+Enter'})` : undefined}
+      aria-label={iconOnly ? t('http.ws.connectKey', { key: isMac() ? '⌘↵' : 'Ctrl+Enter' }) : undefined}
+      title={iconOnly ? t('http.ws.connectKey', { key: isMac() ? '⌘↵' : 'Ctrl+Enter' }) : undefined}
       onClick={() => void openSocket(tabId)}
     >
       {connecting ? <Loader2 size={14} className="hc-ws-spin" aria-hidden /> : <Plug size={14} aria-hidden />}
-      {!iconOnly && (connecting ? 'Connecting…' : 'Connect')}
+      {!iconOnly && (connecting ? t('http.ws.connecting') : t('http.ws.connect'))}
     </button>
   )
 }
@@ -429,6 +446,7 @@ function WsSettings({
 }): React.JSX.Element {
   // The field keeps what was typed, so "a, " survives long enough to type "b".
   const [text, setText] = useState(() => req.protocols.join(', '))
+  const t = useT()
   const set = (protocols: string[]): void => {
     setText(protocols.join(', '))
     onProtocols(protocols)
@@ -453,10 +471,10 @@ function WsSettings({
   return (
     <div className="hc-ws-settings">
       <label className="hc-ws-field">
-        <span className="ui-label">Subprotocols</span>
+        <span className="ui-label">{t('http.ws.subprotocols')}</span>
         <input
           className="input mono"
-          aria-label="Subprotocols"
+          aria-label={t('http.ws.subprotocols')}
           placeholder="graphql-ws, v2.json"
           value={text}
           readOnly={readOnly}
@@ -470,24 +488,30 @@ function WsSettings({
             )
           }}
         />
-        <span className="hc-ws-hint">A comma list, offered in the upgrade request&apos;s Sec-WebSocket-Protocol header.</span>
+        <span className="hc-ws-hint">{t('http.ws.subprotocolsHint')}</span>
       </label>
       {lost !== -1 && (
         <p className="hc-ws-warn" role="note">
-          Not kept from last session: subprotocol {lost + 1} carried a credential.{' '}
-          <button type="button" className="btn ghost sm" disabled={readOnly} onClick={() => void paste()}>
-            Paste
-          </button>{' '}
-          Or write a {'{{variable}}'} there, whose value can live in the vault.
+          <Trans
+            i18nKey="http.ws.lostProtocol"
+            values={{ n: lost + 1, example: '{{variable}}' }}
+            components={{
+              button: <button type="button" className="btn ghost sm" disabled={readOnly} onClick={() => void paste()} />
+            }}
+          />
         </p>
       )}
       {secret !== undefined && (
         <p className="hc-ws-warn" role="note">
-          A subprotocol looks like a credential rather than a protocol name. Not saved: kept for this session only.{' '}
-          <button type="button" className="btn ghost sm" disabled={readOnly} onClick={(e) => asVariable(e, secret)}>
-            Set as variable…
-          </button>{' '}
-          then write {'{{subprotocol}}'} in its place, and the vault can hold it.
+          <Trans
+            i18nKey="http.ws.secretProtocol"
+            values={{ example: '{{subprotocol}}' }}
+            components={{
+              button: (
+                <button type="button" className="btn ghost sm" disabled={readOnly} onClick={(e) => asVariable(e, secret)} />
+              )
+            }}
+          />
         </p>
       )}
     </div>
@@ -495,22 +519,23 @@ function WsSettings({
 }
 
 function Handshake({ session }: { session: WsSession | undefined }): React.JSX.Element {
+  const t = useT()
   const sent = session?.sent
   const protocol = session?.protocol
-  if (!sent && protocol === undefined) return <p className="hc-ws-empty">Connect to see the upgrade request.</p>
+  if (!sent && protocol === undefined) return <p className="hc-ws-empty">{t('http.ws.handshakeEmpty')}</p>
   // Subprotocols can carry a bearer token (Kubernetes does). What was offered
   // is in the sent headers, masked by the build; what the server chose is
   // masked here by the same rule.
   return (
     <div className="hc-ws-handshake selectable">
       {protocol !== undefined && (
-        <p className="hc-ws-note">Subprotocol: {protocol === '' ? 'none chosen by the server' : shownProtocol(protocol)}</p>
+        <p className="hc-ws-note">
+          {t('http.ws.subprotocol', { protocol: protocol === '' ? t('http.ws.noneChosen') : shownProtocol(protocol) })}
+        </p>
       )}
       {sent && (
         <>
-          <p className="hc-ws-note mono">
-            GET {sent.url} · via {sent.route.label}
-          </p>
+          <p className="hc-ws-note mono">{t('http.ws.handshakeLine', { url: sent.url, route: sent.route.label })}</p>
           <table className="hc-ws-headers">
             <tbody>
               {sent.headers.map(([name, value], i) => (
@@ -532,9 +557,9 @@ function otherSockets(tabId: Id): MenuEntry[] {
   const { sessions, disconnect } = useWsSessions.getState()
   const { tabs } = useHttp.getState()
   const open = Object.entries(sessions).filter(([id, s]) => id !== tabId && s.state === 'open')
-  if (open.length === 0) return [{ label: 'No other socket is open in this window', disabled: true }]
+  if (open.length === 0) return [{ label: tr('http.ws.noOtherSocket'), disabled: true }]
   return open.map(([id]) => {
-    const req = wsRequestOf(tabs.find((t) => t.id === id))
-    return { label: `Disconnect ${req?.name ?? 'WebSocket'}`, onClick: () => disconnect(id) }
+    const req = wsRequestOf(tabs.find((x) => x.id === id))
+    return { label: tr('http.ws.disconnectNamed', { name: req?.name ?? tr('http.ws.webSocket') }), onClick: () => disconnect(id) }
   })
 }

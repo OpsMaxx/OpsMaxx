@@ -18,6 +18,10 @@ import { NO_PROMPT, applyMark, movementFor, isClickNotDrag, type PromptState } f
 import type { TerminalTransport } from '../lib/transport'
 import type { ClipboardImage } from '../../../shared/ssh'
 import { toast } from '../store/toast'
+import { t } from '../lib/i18n'
+// `dead` is read by classifyConnectionError, which matches English, and sits beside main's
+// own English messages; it stays English and the card shows the translated classification.
+import { englishT } from '../../../shared/i18n'
 
 // The xterm primitives live here rather than in TerminalView because the hook
 // is their only real consumer; TerminalView imports them back for the demo
@@ -427,7 +431,7 @@ export function useTerminalSession(
   // leave a terminal that could not be typed into and could not be brought
   // back — the only way out was closing the tab and opening the server again.
   const [dead, setDead] = useState<string | null>(
-    dormant ? 'Restored from your last session — not connected yet.' : null
+    dormant ? t('hooks.terminalSession.restored') : null
   )
   // Bumped to rebuild the session. The effect already tears everything down on
   // cleanup, so a reconnect is the same code path as the first connect.
@@ -620,7 +624,12 @@ export function useTerminalSession(
 
     if (generation > 0) term.writeln('')
     term.writeln(brandBanner())
-    term.writeln(`Connecting to \x1b[1m${transport.title}\x1b[0m (${transport.endpoint})…`)
+    term.writeln(
+      t('hooks.terminalSession.connecting', {
+        title: `\x1b[1m${transport.title}\x1b[0m`,
+        endpoint: transport.endpoint
+      })
+    )
 
     const offData = transport.onData(sessionId, (d) => {
       // xterm calls back once the chunk has been parsed into the buffer. Main
@@ -641,18 +650,22 @@ export function useTerminalSession(
         setOnline(true)
         if (tabId) setTabSession(tabId, sessionId)
       } else {
-        term.writeln(`\r\n\x1b[31mConnection failed: ${s.message ?? 'unknown error'}\x1b[0m`)
+        term.writeln(
+          `\r\n\x1b[31m${t('hooks.terminalSession.connectionFailedWith', { error: s.message ?? 'unknown error' })}\x1b[0m`
+        )
         transport.onLifecycle?.('offline')
         setOnline(false)
-        setDead(s.message ?? 'Connection failed')
+        setDead(s.message ?? englishT('hooks.terminalSession.connectionFailed'))
       }
     })
     const offClose = transport.onClose(sessionId, (why) => {
-      term.writeln(`\r\n\x1b[90m[session closed${why ? ` · ${why}` : ''}]\x1b[0m`)
-      term.writeln('\x1b[90mPress Enter to reconnect in this tab.\x1b[0m')
+      term.writeln(
+        `\r\n\x1b[90m[${why ? t('hooks.terminalSession.closedLineWhy', { why }) : t('hooks.terminalSession.closedLine')}]\x1b[0m`
+      )
+      term.writeln(`\x1b[90m${t('hooks.terminalSession.pressEnter')}\x1b[0m`)
       transport.onLifecycle?.('offline')
       setOnline(false)
-      setDead(why ? `Session closed · ${why}` : 'Session closed')
+      setDead(why ? englishT('hooks.terminalSession.closedWhy', { why }) : englishT('hooks.terminalSession.closed'))
       // A closed session is not one anything should write to — the Files
       // pane's cd button reads this to know whether a shell is there.
       if (tabId) setTabSession(tabId, null)
@@ -662,7 +675,7 @@ export function useTerminalSession(
     void transport.connect(sessionId, term.cols, term.rows).catch((err) => {
       transport.onLifecycle?.('offline')
       setOnline(false)
-      setDead(`Session closed · ${err instanceof Error ? err.message : String(err)}`)
+      setDead(englishT('hooks.terminalSession.closedWhy', { why: err instanceof Error ? err.message : String(err) }))
     })
 
     const onInput = term.onData((d) => transport.write(sessionId, d))
@@ -774,7 +787,8 @@ export function useTerminalSession(
         const path = await transport.pasteImage(id, png)
         if (sessionRef.current === id) termRef.current?.paste(path)
       } catch (err) {
-        toast(`Image not pasted: ${err instanceof Error ? err.message : String(err)}`, 'error')
+        const error = err instanceof Error ? err.message : String(err)
+        toast(t('hooks.terminalSession.imageNotPasted', { error }), 'error')
       }
     },
     [transport]

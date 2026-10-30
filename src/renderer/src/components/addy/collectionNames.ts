@@ -1,3 +1,6 @@
+import type { MessageKey } from '../../../../shared/i18n'
+import { t } from '../../lib/i18n'
+
 /**
  * What each synced collection is, in the words the app uses elsewhere.
  *
@@ -7,27 +10,28 @@
  * `SYNCED_COLLECTIONS`, which exist so two implementations agree with each
  * other and not so anybody reads them.
  */
-const COLLECTION_NAMES: Record<string, string> = {
-  apiCollections: 'your HTTP collections',
-  apiWorkspace: 'your HTTP environments and variables',
-  cicdConnections: 'your CI/CD connections',
-  databases: 'your saved databases',
-  deviceNames: 'what you call your devices',
-  env: 'your environment variables',
-  folders: 'your folders',
-  httpChecks: 'your HTTP checks',
-  knownHosts: 'your trusted SSH host keys',
-  manifest: 'your provisioning manifest',
-  monitorGroups: 'your monitor groups',
-  servers: 'your servers',
-  tunnels: 'your tunnels',
-  vault: 'your vault',
-  vpns: 'your VPN profiles',
-  workspaces: 'your workspaces'
+const COLLECTION_NAMES: Record<string, MessageKey> = {
+  apiCollections: 'addy.collections.apiCollections',
+  apiWorkspace: 'addy.collections.apiWorkspace',
+  cicdConnections: 'addy.collections.cicdConnections',
+  databases: 'addy.collections.databases',
+  deviceNames: 'addy.collections.deviceNames',
+  env: 'addy.collections.env',
+  folders: 'addy.collections.folders',
+  httpChecks: 'addy.collections.httpChecks',
+  knownHosts: 'addy.collections.knownHosts',
+  manifest: 'addy.collections.manifest',
+  monitorGroups: 'addy.collections.monitorGroups',
+  servers: 'addy.collections.servers',
+  tunnels: 'addy.collections.tunnels',
+  vault: 'addy.collections.vault',
+  vpns: 'addy.collections.vpns',
+  workspaces: 'addy.collections.workspaces'
 }
 
 export function collectionName(collection: string): string {
-  return COLLECTION_NAMES[collection] ?? collection
+  const key = COLLECTION_NAMES[collection]
+  return key ? t(key) : collection
 }
 
 /**
@@ -41,5 +45,5 @@ export function syncErrorText(message: string): string {
   const at = message.indexOf(': ')
   const id = at > 0 ? message.slice(0, at) : ''
   if (!(id in COLLECTION_NAMES)) return message
-  return `could not carry ${COLLECTION_NAMES[id]} — ${message.slice(at + 2)}`
+  return t('addy.collections.syncError', { what: t(COLLECTION_NAMES[id]), reason: message.slice(at + 2) })
 }

@@ -12,6 +12,7 @@ import {
 import { isSensitiveName, type ResponseState } from '../../../../../shared/apiModel'
 import { isLiteralSecret } from '../request/AuthEditor'
 import { introspectionQuery, isDepthOrComplexityError, readGraphQlResponse } from '../../../../../shared/graphql'
+import { t } from '../../../lib/i18n'
 
 // The GraphQL editor's language: cm6-graphql for highlighting, completion and
 // schema validation, plus `graphql`'s own parser for syntax errors when no
@@ -106,10 +107,10 @@ export async function loadSchema(
     const errors = read.response?.errors
     if (errors?.length) {
       if (!lean && isDepthOrComplexityError(errors)) return 'too-big'
-      throw new Error(`The server refused introspection: ${errors[0].message}`)
+      throw new Error(t('http.gql.introspectionRefused', { message: errors[0].message }))
     }
     const data = read.response?.data as IntrospectionQuery | undefined
-    if (!data?.__schema) throw new Error('The response has no __schema: introspection may be turned off on this server.')
+    if (!data?.__schema) throw new Error(t('http.gql.noSchema'))
     try {
       return buildClientSchema(data)
     } catch (err) {
@@ -123,7 +124,7 @@ export async function loadSchema(
   const full = await attempt(false)
   if (full !== 'too-big') return full
   const lean = (await attempt(true)) as GraphQLSchema
-  return { schema: lean, note: 'Loaded without descriptions or deprecated fields: the server refused the full query for its depth or complexity.' }
+  return { schema: lean, note: t('http.gql.leanNote') }
 }
 
 const STRIP_MAX_BYTES = 2 * 1024 * 1024
@@ -137,8 +138,8 @@ export function errorsStrip(res: ResponseState | undefined): string | null {
   const read = readGraphQlResponse(res.response.status, new TextDecoder().decode(res.response.body))
   const errors = read.response?.errors
   if (!Array.isArray(errors) || errors.length === 0) return null
-  const first = typeof errors[0]?.message === 'string' ? errors[0].message : 'no message'
-  return `${errors.length} error${errors.length === 1 ? '' : 's'} · first: ${first}`
+  const first = typeof errors[0]?.message === 'string' ? errors[0].message : t('http.gql.noMessage')
+  return t('http.responsePane.gqlErrors', { count: errors.length, first })
 }
 
 /**

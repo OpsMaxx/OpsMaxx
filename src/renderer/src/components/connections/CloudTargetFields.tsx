@@ -34,6 +34,8 @@ import {
   type CloudInstance,
   type CloudLocation
 } from '../../../../shared/cloudCommands'
+import { t as tr, useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
 /**
  * The cloud half of the connection editor.
@@ -50,9 +52,13 @@ import {
  */
 
 interface Labels {
-  account: string
-  location: string
-  instance: string
+  account: MessageKey
+  location: MessageKey
+  instance: MessageKey
+  /** The same three in running text: "a valid project", "type the zone in". */
+  accountNoun: MessageKey
+  locationNoun: MessageKey
+  instanceNoun: MessageKey
   accountPlaceholder: string
   locationPlaceholder: string
   instancePlaceholder: string
@@ -63,25 +69,34 @@ interface Labels {
 // defaults because the condition was written once and read three times.
 const LABELS: Record<CloudProvider, Labels> = {
   gcp: {
-    account: 'Project',
-    location: 'Zone',
-    instance: 'Instance',
+    account: 'connections.cloud.label.project',
+    location: 'connections.cloud.label.zone',
+    instance: 'connections.cloud.label.instance',
+    accountNoun: 'connections.cloud.noun.project',
+    locationNoun: 'connections.cloud.noun.zone',
+    instanceNoun: 'connections.cloud.noun.instance',
     accountPlaceholder: 'my-project-id',
     locationPlaceholder: 'me-central2-c',
     instancePlaceholder: 'prod-web-01'
   },
   aws: {
-    account: 'Profile',
-    location: 'Region',
-    instance: 'Instance',
+    account: 'connections.cloud.label.profile',
+    location: 'connections.cloud.label.region',
+    instance: 'connections.cloud.label.instance',
+    accountNoun: 'connections.cloud.noun.profile',
+    locationNoun: 'connections.cloud.noun.region',
+    instanceNoun: 'connections.cloud.noun.instance',
     accountPlaceholder: 'production',
     locationPlaceholder: 'me-central-1',
     instancePlaceholder: 'i-0123456789abcdef0'
   },
   azure: {
-    account: 'Subscription',
-    location: 'Resource group',
-    instance: 'VM',
+    account: 'connections.cloud.label.subscription',
+    location: 'connections.cloud.label.resourceGroup',
+    instance: 'connections.cloud.label.vm',
+    accountNoun: 'connections.cloud.noun.subscription',
+    locationNoun: 'connections.cloud.noun.resourceGroup',
+    instanceNoun: 'connections.cloud.noun.vm',
     accountPlaceholder: 'Production',
     locationPlaceholder: 'production-rg',
     instancePlaceholder: 'prod-server-01'
@@ -213,6 +228,7 @@ export function CloudTargetFields({
   draft: CloudDraft
   onChange: (next: CloudDraft) => void
 }): React.JSX.Element {
+  const t = useT()
   const labels = LABELS[provider]
   const [detection, setDetection] = useState<Detection>(NOT_CHECKED)
   const [accounts, setAccounts] = useState<Level<CloudAccount>>(emptyLevel)
@@ -233,7 +249,7 @@ export function CloudTargetFields({
     setDetection({ ...NOT_CHECKED, checked: false })
     const found = await window.opsmaxx?.cloud.detect(provider, force)
     if (!found || !found.ok) {
-      setDetection({ ...NOT_CHECKED, checked: true, error: found?.error ?? 'Detection failed.' })
+      setDetection({ ...NOT_CHECKED, checked: true, error: found?.error ?? tr('connections.cloud.detectionFailed') })
       return
     }
     const d = found.value
@@ -241,7 +257,7 @@ export function CloudTargetFields({
       setDetection({
         ...NOT_CHECKED,
         checked: true,
-        error: d.error ?? `${CLOUD_PROVIDER_CLI_NAME[provider]} was not detected.`
+        error: d.error ?? tr('connections.cloud.notDetected', { name: CLOUD_PROVIDER_CLI_NAME[provider] })
       })
       return
     }
@@ -275,7 +291,7 @@ export function CloudTargetFields({
       setAccounts(
         res?.ok
           ? { items: res.value, loading: false, error: '' }
-          : { items: [], loading: false, error: res?.error ?? 'Could not list them.' }
+          : { items: [], loading: false, error: res?.error ?? tr('connections.cloud.listFailed') }
       )
     })()
     return () => {
@@ -296,7 +312,7 @@ export function CloudTargetFields({
       setLocations(
         res?.ok
           ? { items: res.value, loading: false, error: '' }
-          : { items: [], loading: false, error: res?.error ?? 'Could not list them.' }
+          : { items: [], loading: false, error: res?.error ?? tr('connections.cloud.listFailed') }
       )
     })()
     return () => {
@@ -321,7 +337,7 @@ export function CloudTargetFields({
       setInstances(
         res?.ok
           ? { items: res.value, loading: false, error: '' }
-          : { items: [], loading: false, error: res?.error ?? 'Could not list them.' }
+          : { items: [], loading: false, error: res?.error ?? tr('connections.cloud.listFailed') }
       )
     })()
     return () => {
@@ -336,7 +352,9 @@ export function CloudTargetFields({
       {detection.installed && (
         <>
           <Picker
-            label={labels.account}
+            id="cloud-account"
+            label={t(labels.account)}
+            noun={t(labels.accountNoun)}
             value={draft.account}
             placeholder={labels.accountPlaceholder}
             level={accounts}
@@ -345,7 +363,9 @@ export function CloudTargetFields({
           />
 
           <Picker
-            label={labels.location}
+            id="cloud-location"
+            label={t(labels.location)}
+            noun={t(labels.locationNoun)}
             value={draft.location}
             placeholder={labels.locationPlaceholder}
             level={locations}
@@ -355,7 +375,9 @@ export function CloudTargetFields({
           />
 
           <Picker
-            label={labels.instance}
+            id="cloud-instance"
+            label={t(labels.instance)}
+            noun={t(labels.instanceNoun)}
             value={draft.instance}
             placeholder={labels.instancePlaceholder}
             level={instances}
@@ -372,7 +394,7 @@ export function CloudTargetFields({
           {provider === 'aws' && (
             <div className="field">
               <label className="field-label" htmlFor="cloud-osuser">
-                OS user
+                {t('connections.cloud.osUserLabel')}
               </label>
               <input
                 id="cloud-osuser"
@@ -381,17 +403,14 @@ export function CloudTargetFields({
                 placeholder="ubuntu"
                 onChange={(e) => set({ osUser: e.target.value })}
               />
-              <span className="field-hint">
-                The account on the instance. EC2 Instance Connect publishes a key for this user for
-                sixty seconds; nothing is stored.
-              </span>
+              <span className="field-hint">{t('connections.cloud.osUserHint')}</span>
             </div>
           )}
 
           {provider !== 'azure' && (
             <div className="field">
               <label className="field-label" htmlFor="cloud-transport">
-                Transport
+                {t('connections.cloud.transportLabel')}
               </label>
               <select
                 id="cloud-transport"
@@ -399,23 +418,20 @@ export function CloudTargetFields({
                 value={draft.transport}
                 onChange={(e) => set({ transport: e.target.value })}
               >
-                {(provider === 'gcp' ? GCP_TRANSPORTS : AWS_TRANSPORTS).map((t) => (
-                  <option key={t} value={t}>
-                    {TRANSPORT_LABEL[t]}
+                {(provider === 'gcp' ? GCP_TRANSPORTS : AWS_TRANSPORTS).map((tp) => (
+                  <option key={tp} value={tp}>
+                    {t(TRANSPORT_LABEL[tp])}
                   </option>
                 ))}
               </select>
-              <span className="field-hint">{TRANSPORT_HINT[provider]}</span>
+              <span className="field-hint">{TRANSPORT_HINT[provider] ? t(TRANSPORT_HINT[provider]) : ''}</span>
             </div>
           )}
 
           {provider === 'azure' && (
             <div className="field">
-              <label className="field-label">Authentication</label>
-              <div className="field-hint">
-                Microsoft Entra ID. Azure issues a short-lived certificate for each connection; no
-                key is stored and access expires on its own.
-              </div>
+              <label className="field-label">{t('connections.cloud.authLabel')}</label>
+              <div className="field-hint">{t('connections.cloud.azureAuthHint')}</div>
             </div>
           )}
 
@@ -447,6 +463,7 @@ function CommandPreview({
   provider: CloudProvider
   draft: CloudDraft
 }): React.JSX.Element | null {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const target = draftToTarget(provider, draft)
   if (!target) return null
@@ -465,7 +482,7 @@ function CommandPreview({
     <div className="field">
       <button type="button" className="disclosure" onClick={() => setOpen(!open)}>
         <ChevronRight size={12} className={clsx('disclosure-chevron', open && 'open')} />
-        What OpsMaxx will run
+        {t('connections.cloud.previewToggle')}
       </button>
       {open && (
         <>
@@ -473,15 +490,14 @@ function CommandPreview({
             {text}
           </pre>
           <span className="field-hint">
-            Run with your own {CLOUD_PROVIDER_CLI_NAME[provider]}, as you. OpsMaxx connects to what
-            these hand back; it never runs an SSH client of its own.
+            {t('connections.cloud.previewHint', { name: CLOUD_PROVIDER_CLI_NAME[provider] })}
           </span>
           <button
             type="button"
             className="btn size-28"
             onClick={() => void navigator.clipboard?.writeText(text)}
           >
-            <Copy size={12} /> Copy
+            <Copy size={12} /> {t('common.copy')}
           </button>
         </>
       )}
@@ -534,18 +550,18 @@ function previewCommands(target: CloudTarget): string[][] {
   ]
 }
 
-const TRANSPORT_LABEL: Record<string, string> = {
-  auto: 'Auto',
-  direct: 'Direct',
-  iap: 'IAP tunnel',
-  ip: 'Public or private IP',
-  eice: 'EC2 Instance Connect Endpoint'
+const TRANSPORT_LABEL: Record<string, MessageKey> = {
+  auto: 'connections.cloud.transport.auto',
+  direct: 'connections.cloud.transport.direct',
+  iap: 'connections.cloud.transport.iap',
+  ip: 'connections.cloud.transport.ip',
+  eice: 'connections.cloud.transport.eice'
 }
 
-const TRANSPORT_HINT: Record<CloudProvider, string> = {
-  gcp: 'Auto tunnels through IAP when the instance has no external address.',
-  aws: 'Auto uses an EC2 Instance Connect Endpoint when there is no public address.',
-  azure: ''
+const TRANSPORT_HINT: Record<CloudProvider, MessageKey | null> = {
+  gcp: 'connections.cloud.transportHint.gcp',
+  aws: 'connections.cloud.transportHint.aws',
+  azure: null
 }
 
 /**
@@ -574,7 +590,9 @@ const TRANSPORT_HINT: Record<CloudProvider, string> = {
  * the user knows whichever one they know.
  */
 function Picker({
+  id,
   label,
+  noun,
   value,
   placeholder,
   level,
@@ -582,7 +600,10 @@ function Picker({
   onChange,
   disabled
 }: {
+  id: string
   label: string
+  /** `label` as it reads mid-sentence. */
+  noun: string
   value: string
   placeholder: string
   level: Level<unknown>
@@ -590,7 +611,7 @@ function Picker({
   onChange: (value: string) => void
   disabled?: boolean
 }): React.JSX.Element {
-  const id = `cloud-${label.toLowerCase().replace(/\s+/g, '-')}`
+  const t = useT()
   const [picking, setPicking] = useState(false)
 
   // Capped, like the log tail's picker: past a couple of hundred rows the list
@@ -633,7 +654,7 @@ function Picker({
           <button
             type="button"
             className="btn ghost sm"
-            title={`Pick from ${options.length}`}
+            title={t('connections.cloud.pickFrom', { count: options.length })}
             disabled={disabled}
             aria-expanded={picking}
             onClick={() => setPicking((v) => !v)}
@@ -646,8 +667,7 @@ function Picker({
         <div className="cloud-pick">
           {shown.length === 0 ? (
             <div className="faint" style={{ padding: '6px 10px' }}>
-              Nothing matches what you have typed. It is still a valid {label.toLowerCase()} if
-              you know it — the list is only what we could enumerate.
+              {t('connections.cloud.noMatch', { noun })}
             </div>
           ) : (
             shown.map((o) => (
@@ -667,7 +687,7 @@ function Picker({
           )}
           {options.length > shown.length && (
             <div className="faint" style={{ padding: '4px 10px' }}>
-              {shown.length} of {options.length} — keep typing to narrow.
+              {t('connections.cloud.shownOf', { shown: shown.length, total: options.length })}
             </div>
           )}
         </div>
@@ -675,12 +695,12 @@ function Picker({
       {chosen && chosen.label !== value && <span className="field-hint">{chosen.label}</span>}
       {level.loading && (
         <span className="field-hint">
-          <Loader2 size={11} className="spin" /> Looking…
+          <Loader2 size={11} className="spin" /> {t('connections.cloud.looking')}
         </span>
       )}
       {!level.loading && level.error && (
         <span className="field-hint">
-          {level.error} You can still type the {label.toLowerCase()} in.
+          {t('connections.cloud.listErrorTypeIn', { error: level.error, noun })}
         </span>
       )}
     </div>
@@ -703,13 +723,14 @@ function CliStatus({
   detection: Detection
   onRetry: () => void
 }): React.JSX.Element {
+  const t = useT()
   const name = CLOUD_PROVIDER_CLI_NAME[provider]
 
   if (!detection.checked) {
     return (
       <div className="field">
         <span className="field-hint">
-          <Loader2 size={11} className="spin" /> Looking for {name}…
+          <Loader2 size={11} className="spin" /> {t('connections.cloud.lookingFor', { name })}
         </span>
       </div>
     )
@@ -719,14 +740,11 @@ function CliStatus({
     return (
       <div className="field">
         <span className="field-hint danger">
-          <AlertTriangle size={11} /> {detection.error || `${name} was not detected.`}
+          <AlertTriangle size={11} /> {detection.error || t('connections.cloud.notDetected', { name })}
         </span>
-        <span className="field-hint">
-          OpsMaxx uses the {name} you already have installed, and never installs one itself. Install
-          it, sign in, then check again.
-        </span>
+        <span className="field-hint">{t('connections.cloud.installHint', { name })}</span>
         <button type="button" className="btn size-28" onClick={onRetry}>
-          <RefreshCw size={12} /> Check again
+          <RefreshCw size={12} /> {t('connections.cloud.checkAgain')}
         </button>
       </div>
     )
@@ -741,10 +759,10 @@ function CliStatus({
         <Terminal size={11} /> {detection.path}
       </span>
       {detection.authenticated ? (
-        <span className="field-hint ok">Signed in as {detection.account}</span>
+        <span className="field-hint ok">{t('connections.cloud.signedInAs', { account: detection.account })}</span>
       ) : (
         <span className="field-hint danger">
-          <AlertTriangle size={11} /> Not signed in. Sign in with {name}, then check again.
+          <AlertTriangle size={11} /> {t('connections.cloud.notSignedIn', { name })}
         </span>
       )}
     </div>

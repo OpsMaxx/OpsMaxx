@@ -2,6 +2,7 @@ import { RefreshCw, Settings2 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { useFleetStatus, sweepBlock } from '../../store/fleetStatus'
 import { openSettings } from '../../store/nav'
+import { useT } from '../../lib/i18n'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import { SweepProgress } from './SweepProgress'
 
@@ -41,6 +42,7 @@ export function SweepEmpty({
   /** Only called for the 'check-now' action; the other kinds cannot be fixed by sweeping. */
   onCheckNow: () => void
 }): React.JSX.Element {
+  const t = useT()
   const status = useFleetStatus((s) => s.status)
   const enabled = useApp((s) => s.settings.fleetSamplingEnabled)
   const block = sweepBlock(status, enabled)
@@ -68,7 +70,7 @@ export function SweepEmpty({
         {block.action === 'unlock-vault' && (
           <UnlockVaultButton
             className="btn primary sm"
-            reason="Unlocking lets background checking resume, so this panel can fill."
+            reason={t('monitor.sweep.unlockReason')}
             // Only on success — sweeping after a cancelled prompt runs the same
             // sweep that is still breaking on the same lock.
             onUnlocked={onCheckNow}
@@ -76,14 +78,14 @@ export function SweepEmpty({
         )}
         {block.action === 'open-settings' && (
           <button className="btn primary sm" onClick={() => openSettings('monitoring')}>
-            <Settings2 size={13} /> Open Monitoring settings
+            <Settings2 size={13} /> {t('monitor.common.openMonitoringSettings')}
           </button>
         )}
         {block.action === 'check-now' && (
           <>
             <button className="btn primary sm" disabled={busy} onClick={onCheckNow}>
               <RefreshCw size={13} className={busy ? 'spin' : undefined} />
-              {busy ? 'Checking…' : 'Check now'}
+              {busy ? t('monitor.common.checking') : t('monitor.common.checkNow')}
             </button>
             {/* The empty state is where waiting is hardest to read: there is no
                 table to watch for a change, so a spinning icon alone leaves the

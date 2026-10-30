@@ -19,6 +19,8 @@ import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 // "A unit failed" is the question the monitor now answers. This is "why".
 //
@@ -86,6 +88,7 @@ export interface LogTailJump {
 }
 
 export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogTailJump }): React.JSX.Element {
+  const t = useT()
   const [kind, setKind] = useState<LogSource['kind']>('unit')
   const [target, setTarget] = useState('')
   const [priority, setPriority] = useState<LogPriority | ''>('')
@@ -243,7 +246,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
     }
     const targets = eligible.filter((s) => targetIds.includes(s.id))
     if (targets.length === 0) {
-      setError('Pick at least one server.')
+      setError(t('monitor.logTail.pickServer'))
       return
     }
     setError(null)
@@ -256,7 +259,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
     setRunning(true)
     try {
       const res = await withVaultUnlock(
-        'Tailing logs needs each server’s stored credential.',
+        t('monitor.logTail.unlockReason'),
         async () =>
           window.opsmaxx?.logtail?.start(
             id,
@@ -282,7 +285,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
       // will never produce a line. Treating only `{ok:false}` as failure left
       // the panel showing Stop over a stream that was never going to start.
       if (!res || !res.ok) {
-        setError(res?.error ?? 'Could not start the tail.')
+        setError(res?.error ?? t('monitor.logTail.startFailed'))
         setRunning(false)
       }
     } catch (e) {
@@ -317,7 +320,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
   const togglePause = async (): Promise<void> => {
     const call = paused ? bridge?.resume : bridge?.pause
     if (typeof call !== 'function') {
-      setError('This build cannot pause a tail — the pause bridge is not wired.')
+      setError(t('monitor.logTail.noPauseBridge'))
       return
     }
     try {
@@ -417,12 +420,9 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
   return (
     <PanelShell
       icon={<ScrollText size={14} />}
-      title="Log tail"
+      title={t('monitor.logTail.title')}
       about={
-        <p>
-          Follows a systemd unit, a file or a container&rsquo;s output across the servers you pick,
-          interleaved into one stream. A server that refuses is named rather than left out.
-        </p>
+        <p>{t('monitor.logTail.about')}</p>
       }
       actions={
         // One flex row of its own inside the action cluster, so the segmented
@@ -431,17 +431,17 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
         <div className="lt-controls">
         <div className="segment">
           <button className={clsx('seg-btn', kind === 'unit' && 'active')} disabled={running} onClick={() => setKind('unit')}>
-            Unit
+            {t('monitor.logTail.kindUnit')}
           </button>
           <button className={clsx('seg-btn', kind === 'file' && 'active')} disabled={running} onClick={() => setKind('file')}>
-            File
+            {t('monitor.logTail.kindFile')}
           </button>
           <button
             className={clsx('seg-btn', kind === 'container' && 'active')}
             disabled={running}
             onClick={() => setKind('container')}
           >
-            Container
+            {t('monitor.logTail.kindContainer')}
           </button>
         </div>
         {/* A picker for units, a free field for paths.
@@ -457,11 +457,11 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           placeholder={
             kind === 'container'
               ? containers.length
-                ? `${containers[0]} — ${containers.length} on this server`
+                ? t('monitor.logTail.onThisServer', { example: containers[0], count: containers.length })
                 : 'new_system-redis-1'
               : kind === 'unit'
               ? units.length
-                ? `nginx.service — ${units.length} on this server`
+                ? t('monitor.logTail.onThisServer', { example: 'nginx.service', count: units.length })
                 : 'nginx.service'
               : '/var/log/syslog'
           }
@@ -482,8 +482,8 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           className="btn ghost sm"
           title={
             options.length
-              ? `Pick from ${options.length} on this server`
-              : 'Select a server to load the list'
+              ? t('monitor.logTail.pickFrom', { count: options.length })
+              : t('monitor.logTail.selectServer')
           }
           disabled={running || options.length === 0}
           onClick={() => setPicking((v) => !v)}
@@ -491,17 +491,17 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           <ChevronDown size={13} />
         </button>
         {running && (
-          <button className="btn" onClick={() => void togglePause()} title="Hold the stream without closing the connection">
-            {paused ? <Play size={13} /> : <Pause size={13} />} {paused ? 'Resume' : 'Pause'}
+          <button className="btn" onClick={() => void togglePause()} title={t('monitor.logTail.pauseTitle')}>
+            {paused ? <Play size={13} /> : <Pause size={13} />} {paused ? t('monitor.logTail.resume') : t('monitor.logTail.pause')}
           </button>
         )}
         {running ? (
           <button className="btn danger" onClick={() => void stop()}>
-            <Square size={13} /> Stop
+            <Square size={13} /> {t('monitor.common.stop')}
           </button>
         ) : (
           <button className="btn primary" disabled={target.trim() === ''} onClick={() => void start()}>
-            <Play size={13} /> Tail
+            <Play size={13} /> {t('monitor.logTail.tail')}
           </button>
         )}
         </div>
@@ -516,18 +516,21 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
             value={priority}
             disabled={running}
             onChange={(e) => setPriority(e.target.value as LogPriority | '')}
-            title="journalctl -p: this severity and worse"
+            title={t('monitor.logTail.priorityTitle')}
           >
-            <option value="">Any priority</option>
+            <option value="">{t('monitor.logTail.anyPriority')}</option>
             {LOG_PRIORITIES.map((p) => (
               <option key={p} value={p}>
-                {p} and worse
+                {t('monitor.logTail.andWorse', { priority: p })}
               </option>
             ))}
           </select>
           <input
             className="input grow"
-            placeholder="Since — 2 hours ago, yesterday, 2024-01-01 09:30"
+            // The examples are journalctl --since syntax, which is English whatever the UI is.
+            placeholder={t('monitor.logTail.sincePlaceholder', {
+              examples: '2 hours ago, yesterday, 2024-01-01 09:30'
+            })}
             value={since}
             disabled={running}
             onChange={(e) => {
@@ -542,7 +545,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
         <div className="lt-picker">
           {pickShown.length === 0 ? (
             <div className="faint" style={{ padding: '6px 10px' }}>
-              Nothing matches what you have typed.
+              {t('monitor.logTail.nothingMatches')}
             </div>
           ) : (
             pickShown.map((o) => (
@@ -561,7 +564,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           )}
           {options.length > pickShown.length && (
             <div className="faint" style={{ padding: '4px 10px' }}>
-              {pickShown.length} of {options.length} — keep typing to narrow.
+              {t('monitor.logTail.narrow', { shown: pickShown.length, total: options.length })}
             </div>
           )}
         </div>
@@ -586,7 +589,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           stream — otherwise its absence reads as "that host is quiet". */}
       {failed.map((f) => (
         <div key={f.serverId} className="panel-note is-alarm">
-          {f.serverName}: {f.error ?? 'could not tail'}
+          {f.serverName}: {f.error ?? t('monitor.logTail.couldNotTail')}
         </div>
       ))}
 
@@ -601,8 +604,8 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
                 able to see at any moment that these lines came from a
                 privileged read, not only in the second after they started it. */}
             {d.usedSudo && (
-              <span className="chip warn" title="This server refused the unprivileged read, so it was retried with sudo -n">
-                <ShieldAlert size={11} /> reading as root
+              <span className="chip warn" title={t('monitor.logTail.sudoTitle')}>
+                <ShieldAlert size={11} /> {t('monitor.logTail.readingAsRoot')}
               </span>
             )}
             {/* `waiting` separates "nothing yet, and that may be fine" — a file
@@ -620,7 +623,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
             {/* Only when it would help and cannot prompt. */}
             {!d.usedSudo && d.sudoAvailable && (d.issue === 'journal-unreadable' || d.issue === 'file-denied') && (
               <button className="btn" onClick={() => void retryAsRoot()}>
-                Retry as root
+                {t('monitor.logTail.retryAsRoot')}
               </button>
             )}
           </div>
@@ -633,7 +636,7 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
             <Filter size={13} className="faint" />
             <input
               className="input grow mono"
-              placeholder="Filter — text, /regex/, or !exclude"
+              placeholder={t('monitor.logTail.filterPlaceholder')}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
@@ -641,20 +644,21 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           <div className="row muted" style={{ justifyContent: 'space-between', marginTop: 8 }}>
             <span>
               {filter.trim() === '' ? (
-                <>
-                  {lines.length}
-                  {lines.length >= LOG_RING ? `+ lines (oldest dropped past ${LOG_RING})` : ' lines'}
-                </>
+                lines.length >= LOG_RING ? (
+                  t('monitor.logTail.linesCapped', { count: lines.length, ring: LOG_RING })
+                ) : (
+                  t('monitor.logTail.lines', { count: lines.length })
+                )
               ) : (
                 // The denominator matters: "12 lines" under a filter reads as a
                 // quiet host unless it says what it is 12 of.
-                `${shown.length} of ${lines.length} lines match`
+                t('monitor.logTail.linesMatch', { shown: shown.length, total: lines.length })
               )}
-              {paused && ' — paused, the server is still being followed'}
+              {paused && ` — ${t('monitor.logTail.paused')}`}
             </span>
             <label className="row" style={{ gap: 6 }}>
               <Switch checked={follow} onChange={setFollow} style={{ transform: 'scale(0.8)' }} />
-              Follow
+              {t('monitor.logTail.follow')}
             </label>
           </div>
           <div className="bc-out log-stream" ref={scroller} style={{ maxHeight: 360, marginLeft: 0 }}>
@@ -674,14 +678,16 @@ export function LogTailPanel({ servers, jump }: { servers: Server[]; jump?: LogT
           opens in. It used to render the composer and then stop. */}
       {!running && lines.length === 0 && error === null && failed.length === 0 && (
         <div className="panel-empty">
-          <p className="panel-empty-title">No stream open.</p>
+          <p className="panel-empty-title">{t('monitor.logTail.emptyTitle')}</p>
           <p className="panel-empty-body">
             {selected.size === 0
-              ? 'Pick one or more servers above, name a unit, file or container, then press Tail.'
-              : `Name a ${kind === 'unit' ? 'unit' : kind === 'file' ? 'file path' : 'container'} above, then press Tail.`}{' '}
-            Lines from every selected server arrive in one stream, colour-coded by server, and the
-            filter accepts text, <span className="mono">/regex/</span> or{' '}
-            <span className="mono">!exclude</span>.
+              ? t('monitor.logTail.emptyPick')
+              : kind === 'unit'
+                ? t('monitor.logTail.emptyNameUnit')
+                : kind === 'file'
+                  ? t('monitor.logTail.emptyNameFile')
+                  : t('monitor.logTail.emptyNameContainer')}{' '}
+            <Trans i18nKey="monitor.logTail.emptyStream" components={{ mono: <span className="mono" /> }} />
           </p>
         </div>
       )}

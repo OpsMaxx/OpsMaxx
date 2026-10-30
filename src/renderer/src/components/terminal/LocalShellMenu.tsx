@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, Terminal as TerminalIcon, RotateCw } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { ContextMenu, MenuEntry } from '../connections/ContextMenu'
+import { useT } from '../../lib/i18n'
 
 // The caret half of the tab bar's split `+` button: a dropdown of the shells
 // this machine actually has, so a local terminal can be opened without there
@@ -18,6 +19,7 @@ import { ContextMenu, MenuEntry } from '../connections/ContextMenu'
 // surface depend on the other being mounted would be worse than asking twice.
 // What is NOT safe is removing both and assuming something else does it.
 export function LocalShellMenu(): React.JSX.Element | null {
+  const t = useT()
   const shells = useApp((s) => s.localShells)
   const refreshLocalShells = useApp((s) => s.refreshLocalShells)
   const openLocal = useApp((s) => s.openLocal)
@@ -44,9 +46,9 @@ export function LocalShellMenu(): React.JSX.Element | null {
 
   const entries: MenuEntry[] =
     ordered.length === 0
-      ? [{ label: 'No shells found on this machine', disabled: true }]
+      ? [{ label: t('terminal.localShell.noneFound'), disabled: true }]
       : ordered.map((sh) => ({
-          label: sh.isDefault ? `${sh.label} — default` : sh.label,
+          label: sh.isDefault ? t('terminal.localShell.defaultShell', { name: sh.label }) : sh.label,
           icon: <TerminalIcon size={14} />,
           onClick: () => openLocal(sh)
         }))
@@ -57,8 +59,8 @@ export function LocalShellMenu(): React.JSX.Element | null {
         ref={btnRef}
         className="tab-new"
         style={{ width: 22 }}
-        title="New local shell"
-        aria-label="New local shell"
+        title={t('terminal.localShell.newShell')}
+        aria-label={t('terminal.localShell.newShell')}
         onClick={() => {
           const r = btnRef.current?.getBoundingClientRect()
           setAt({ x: r?.left ?? 0, y: (r?.bottom ?? 0) + 4 })
@@ -74,7 +76,8 @@ export function LocalShellMenu(): React.JSX.Element | null {
             ...entries,
             { separator: true, label: '' },
             {
-              label: 'Rescan shells',
+              label: t('terminal.localShell.rescan')
+,
               icon: <RotateCw size={14} />,
               // `true` makes main re-enumerate instead of answering from its
               // cache, which is the only reason this entry exists — a shell

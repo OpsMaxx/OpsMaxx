@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronLeft, X } from 'lucide-react'
 import { clsx, duration } from '../../lib/format'
 import { useApp } from '../../store/app'
+import { t as tNow, useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 import { useDragSize } from '../../hooks/useDragSize'
 import { EmptyState } from '../common/EmptyState'
 import { remoteText } from '../../../../shared/remoteText'
@@ -53,6 +55,7 @@ export function CicdRunWorkbench({
   bridge?: CicdBridge
   onClose: () => void
 }): React.JSX.Element {
+  const t = useT()
   const [fetched, setFetched] = useState<CicdStep[] | null>(null)
   // Given steps win; otherwise ask. `null` is "not asked yet or failed", which
   // the pane below renders as "no job list was read" rather than "no jobs".
@@ -115,28 +118,30 @@ export function CicdRunWorkbench({
           onClick={onClose}
         >
           <ChevronLeft size={14} />
-          Back to runs
+          {t('cicd.run.backToRuns')}
         </button>
         <StatusWord outcome={run.outcome} />
         <b className="grow ellipsis">
           {pipeline.name} · {run.label}
-          {run.attempt > 1 && <span className="faint"> attempt {run.attempt}</span>}
+          {run.attempt > 1 && (
+            <span className="faint"> {t('cicd.run.attempt', { attempt: run.attempt })}</span>
+          )}
         </b>
-        <button className="icon-btn close" aria-label="Close the run" onClick={onClose}>
+        <button className="icon-btn close" aria-label={t('cicd.run.close')} onClick={onClose}>
           <X size={16} />
         </button>
       </div>
 
       <div className="cicd-workbench-body">
         <div className="cicd-steps" style={{ width: stepPane.size }}>
-          <div className="ui-label cicd-pane-label">Jobs</div>
+          <div className="ui-label cicd-pane-label">{t('cicd.run.jobs')}</div>
           {shown.length === 0 ? (
             /* Not "no jobs". A run whose YAML failed to parse has zero jobs and
                a run whose steps we could not read has none either, and calling
                both of them empty is the reassuring fiction this module exists
                to avoid. */
             <div className="ui-note cicd-pane-note">
-              No job list was read for this run. The whole run&apos;s log is shown instead.
+              {t('cicd.run.noJobList')}
             </div>
           ) : (
             <div className="cicd-step-list">
@@ -144,7 +149,7 @@ export function CicdRunWorkbench({
                 className={clsx('cicd-step', stepName === undefined && 'active')}
                 onClick={() => setStepName(undefined)}
               >
-                <span className="grow ellipsis">Whole run</span>
+                <span className="grow ellipsis">{t('cicd.run.wholeRun')}</span>
               </button>
               {shown.map((s) => (
                 <button
@@ -157,7 +162,9 @@ export function CicdRunWorkbench({
                     {s.name}
                   </span>
                   {s.durationMs !== undefined && (
-                    <span className="faint">{Math.round(s.durationMs / 1000)}s</span>
+                    <span className="faint">
+                      {t('cicd.common.seconds', { secs: Math.round(s.durationMs / 1000) })}
+                    </span>
                   )}
                 </button>
               ))}
@@ -169,7 +176,7 @@ export function CicdRunWorkbench({
           className={clsx('resizer static', stepPane.dragging && 'dragging')}
           onMouseDown={stepPane.onMouseDown}
           role="separator"
-          aria-label="Resize the job list"
+          aria-label={t('cicd.run.resizeJobs')}
         />
 
         <div className="cicd-log-column">
@@ -186,29 +193,29 @@ export function CicdRunWorkbench({
             className={clsx('resizer-h', detailPane.dragging && 'dragging')}
             onMouseDown={detailPane.onMouseDown}
             role="separator"
-            aria-label="Resize the run detail"
+            aria-label={t('cicd.run.resizeDetail')}
           />
 
           <div className="cicd-detail" style={{ height: detailPane.size }}>
-            <div className="ui-label cicd-pane-label">This run</div>
+            <div className="ui-label cicd-pane-label">{t('cicd.run.thisRun')}</div>
             <dl className="cicd-detail-grid">
-              <dt>Pipeline</dt>
+              <dt>{t('cicd.run.pipeline')}</dt>
               <dd className="ellipsis">
                 {pathLabel(pipeline)}
                 {pathLabel(pipeline) && ' / '}
                 {pipeline.name}
               </dd>
-              <dt>Connection</dt>
+              <dt>{t('cicd.run.connection')}</dt>
               <dd className="ellipsis">{connection.name}</dd>
               {run.branch !== undefined && (
                 <>
-                  <dt>Branch</dt>
+                  <dt>{t('cicd.run.branch')}</dt>
                   <dd className="mono ellipsis">{remoteText(run.branch)}</dd>
                 </>
               )}
               {run.actor !== undefined && (
                 <>
-                  <dt>Started by</dt>
+                  <dt>{t('cicd.run.startedBy')}</dt>
                   {/* remoteText, always. Anyone who can open a pull request
                       writes this field. */}
                   <dd className="ellipsis">{remoteText(run.actor)}</dd>
@@ -216,21 +223,25 @@ export function CicdRunWorkbench({
               )}
               {run.title !== undefined && (
                 <>
-                  <dt>Title</dt>
+                  <dt>{t('cicd.run.title')}</dt>
                   <dd className="ellipsis">{remoteText(run.title)}</dd>
                 </>
               )}
-              <dt>Started</dt>
-              <dd>{run.startedAt === undefined ? 'not reported' : `${duration(run.startedAt)} ago`}</dd>
+              <dt>{t('cicd.run.started')}</dt>
+              <dd>
+                {run.startedAt === undefined
+                  ? t('cicd.run.notReported')
+                  : t('cicd.common.ago', { duration: duration(run.startedAt) })}
+              </dd>
               {run.durationMs !== undefined && (
                 <>
-                  <dt>Took</dt>
-                  <dd>{Math.round(run.durationMs / 1000)}s</dd>
+                  <dt>{t('cicd.run.took')}</dt>
+                  <dd>{t('cicd.common.seconds', { secs: Math.round(run.durationMs / 1000) })}</dd>
                 </>
               )}
               {!running && (
                 <>
-                  <dt>Finished</dt>
+                  <dt>{t('cicd.run.finished')}</dt>
                   <dd>
                     {/* Disabled with the reason on the control, never hidden —
                         an option that vanishes teaches the user the product
@@ -246,7 +257,7 @@ export function CicdRunWorkbench({
                       title={
                         connection.provider === 'github'
                           ? undefined
-                          : `Re-running a finished run is a GitHub Actions concept. On ${connection.provider}, start a new run instead.`
+                          : t('cicd.run.rerunUnsupported', { provider: connection.provider })
                       }
                       onClick={() => {
                         setRerunning(true)
@@ -258,14 +269,14 @@ export function CicdRunWorkbench({
                           .finally(() => setRerunning(false))
                       }}
                     >
-                      {rerunning ? 'Re-running…' : 'Re-run'}
+                      {rerunning ? t('cicd.run.rerunning') : t('cicd.run.rerun')}
                     </button>
                   </dd>
                 </>
               )}
               {running && (
                 <>
-                  <dt>Running</dt>
+                  <dt>{t('cicd.run.running')}</dt>
                   <dd>
                     {/* The operator's stop button.
                         `cancel_run` existed as an MCP tool and as a bridge
@@ -282,7 +293,7 @@ export function CicdRunWorkbench({
                       title={
                         cicdBridgeHas(bridge, 'cancel')
                           ? undefined
-                          : 'This build cannot stop a run on demand.'
+                          : t('cicd.run.cannotStop')
                       }
                       onClick={() => {
                         setStopping(true)
@@ -294,14 +305,14 @@ export function CicdRunWorkbench({
                           .finally(() => setStopping(false))
                       }}
                     >
-                      {stopping ? 'Stopping…' : 'Stop this run'}
+                      {stopping ? t('cicd.run.stopping') : t('cicd.run.stop')}
                     </button>
                   </dd>
                 </>
               )}
               {stopNote !== null && (
                 <>
-                  <dt>Last action</dt>
+                  <dt>{t('cicd.run.lastAction')}</dt>
                   <dd>
                     {/* Verbatim from the adapter, because the three providers
                         genuinely differ about what a stop means: Jenkins will
@@ -317,7 +328,7 @@ export function CicdRunWorkbench({
               )}
               {run.webUrl !== undefined && (
                 <>
-                  <dt>In the provider</dt>
+                  <dt>{t('cicd.run.inProvider')}</dt>
                   <dd className="ellipsis">
                     <a href={run.webUrl} target="_blank" rel="noreferrer">
                       {run.webUrl}
@@ -346,16 +357,16 @@ export function CicdRunWorkbench({
  * disabled control — an option that vanishes teaches the user the product
  * cannot do something, when the truth is that this provider cannot.
  */
-const MODE_LABEL: Record<CicdLogMode, string> = {
-  live: 'LIVE · following',
-  reread: 'LIVE · re-read every 5s',
-  snapshot: 'SNAPSHOT · complete',
-  pending: 'NO LOG YET'
+const MODE_LABEL: Record<CicdLogMode, MessageKey> = {
+  live: 'cicd.log.modeLive',
+  reread: 'cicd.log.modeReread',
+  snapshot: 'cicd.log.modeSnapshot',
+  pending: 'cicd.log.modePending'
 }
 
-const NO_FOLLOW: Partial<Record<CicdLogMode, string>> = {
-  snapshot: 'The run has finished and this log is the complete, final copy. There is nothing left to follow.',
-  pending: 'GitHub publishes a run’s logs when the run ends, so there is nothing to follow yet.'
+const NO_FOLLOW: Partial<Record<CicdLogMode, MessageKey>> = {
+  snapshot: 'cicd.log.noFollowSnapshot',
+  pending: 'cicd.log.noFollowPending'
 }
 
 const REREAD_MS = 5000
@@ -375,6 +386,7 @@ export function LogPane({
   stepName?: string
   steps: CicdStep[]
 }): React.JSX.Element {
+  const t = useT()
   const [chunk, setChunk] = useState<CicdLogChunk | null>(null)
   const [text, setText] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -384,7 +396,7 @@ export function LogPane({
   const read = useCallback(
     async (resume: boolean): Promise<void> => {
       if (!bridge) {
-        setError('This build cannot read a CI log. Restart the app to rebuild the bridge.')
+        setError(tNow('cicd.log.noBridge'))
         return
       }
       try {
@@ -426,12 +438,13 @@ export function LogPane({
   }, [following, chunk?.mode, read])
 
   const mode: CicdLogMode = chunk?.mode ?? 'pending'
-  const cannotFollow = NO_FOLLOW[mode]
+  const cannotFollowKey = NO_FOLLOW[mode]
+  const cannotFollow = cannotFollowKey === undefined ? undefined : t(cannotFollowKey)
 
   return (
     <div className="cicd-log">
       <div className="cicd-log-head">
-        <span className="ui-label">{MODE_LABEL[mode]}</span>
+        <span className="ui-label">{t(MODE_LABEL[mode])}</span>
         <span className="grow" />
         <button
           className="btn secondary size-24"
@@ -441,10 +454,10 @@ export function LogPane({
           title={cannotFollow}
           onClick={() => setFollowing((v) => !v)}
         >
-          {following ? 'Stop following' : 'Follow'}
+          {following ? t('cicd.log.stopFollowing') : t('cicd.log.follow')}
         </button>
         <button className="btn secondary size-24" onClick={() => void read(false)}>
-          Refresh
+          {t('common.refresh')}
         </button>
       </div>
 
@@ -459,8 +472,8 @@ export function LogPane({
               saying why reads as a failure. */}
           <EmptyState
             compact
-            title="No logs yet"
-            message="GitHub publishes a run’s logs when the run ends, so there is nothing to fetch while it is in progress. The job statuses below are live."
+            title={t('cicd.log.noLogsTitle')}
+            message={t('cicd.log.noLogsMessage')}
           />
           {steps.length > 0 && (
             <div className="cicd-step-list">
@@ -475,7 +488,7 @@ export function LogPane({
         </div>
       ) : text === '' ? (
         <div className="cicd-log-body">
-          <EmptyState compact title="Nothing in this log" message="The provider returned an empty log for this run." />
+          <EmptyState compact title={t('cicd.log.emptyTitle')} message={t('cicd.log.emptyMessage')} />
         </div>
       ) : (
         <pre className="cicd-log-body mono">{text}</pre>
@@ -483,8 +496,7 @@ export function LogPane({
 
       {chunk?.withheldBytes !== undefined && chunk.withheldBytes > 0 && (
         <div className="panel-note is-watch">
-          {chunk.withheldBytes.toLocaleString()} bytes were left out of this log by the size cap.
-          Open the run in the provider to read all of it.
+          {t('cicd.log.withheld', { bytes: chunk.withheldBytes.toLocaleString() })}
         </div>
       )}
     </div>

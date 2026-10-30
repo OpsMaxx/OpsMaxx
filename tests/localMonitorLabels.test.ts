@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { parseWindowsMetrics } from '../src/shared/localMetricsWindows'
+import en from '../src/shared/locales/en.json'
 
 const read = (p: string): string => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8')
 const PANEL = read('../src/renderer/src/components/panel/WorkspacePanel.tsx')
@@ -40,7 +41,8 @@ describe('the local machine’s OS', () => {
 
 describe('which volume the disk figures are for', () => {
   it('comes from the collector, not from the view', () => {
-    expect(VIEW).toMatch(/Used disk \(\$\{m\.host\.diskRoot \?\? '\/'\}\)/)
+    expect(VIEW).toMatch(/t\('panel\.monitor\.info\.usedDisk', \{ root: m\.host\.diskRoot \?\? '\/' \}\)/)
+    expect(en['panel.monitor.info.usedDisk']).toBe('Used disk ({{root}})')
   })
 
   it('is the system drive on Windows', () => {

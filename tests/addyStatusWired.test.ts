@@ -37,6 +37,7 @@ const MAIN = read('src/main/index.ts')
 const PRELOAD = read('src/preload/index.ts')
 const SESSION = read('src/main/services/addy/session.ts')
 const STATUS = read('src/renderer/src/components/addy/addyStatus.ts')
+const EN = JSON.parse(read('src/shared/locales/en.json')) as Record<string, string>
 
 describe('the status the panel asks for is reachable from the panel', () => {
   it('main answers the channel the preload invokes', () => {
@@ -310,7 +311,8 @@ describe('an account can be recovered from the phrase', () => {
     // actually in — and pinning the old sentence would have made the fix that
     // put recovery on the first screen look like a regression.
     expect(SETUP).toMatch(/setMode\('recover'\)/)
-    expect(SETUP).toMatch(/Recover this account/)
+    expect(SETUP).toContain("t('addy.setup.recoverRun')")
+    expect(EN['addy.setup.recoverRun']).toBe('Recover this account')
   })
 
   it('drops the root key whether it worked or not', () => {
@@ -324,7 +326,8 @@ describe('an account can be recovered from the phrase', () => {
     // is most able to notice a device they do not recognise is the moment they
     // have just been handed the list.
     const SETUP = read('src/renderer/src/components/addy/AddySetup.tsx')
-    expect(SETUP).toMatch(/Check the device list/)
+    expect(SETUP).toContain("t('addy.setup.recovered.check', { count: recovered.devices })")
+    expect(EN['addy.setup.recovered.check_other']).toMatch(/^Check the device list/)
   })
 })
 

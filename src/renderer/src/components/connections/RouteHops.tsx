@@ -1,6 +1,7 @@
 import { ArrowDown, ArrowUp, KeyRound, Plus, Shield, Trash2 } from 'lucide-react'
 import { useWorkspaceServers } from '../../store/app'
 import type { Hop } from '../../types'
+import { useT } from '../../lib/i18n'
 
 let hopSeq = 0
 
@@ -14,6 +15,7 @@ interface Props {
 // Shared jump-route editor. Used both inside the add/edit server dialog and by
 // the standalone route editor, so the two can never drift apart.
 export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX.Element {
+  const t = useT()
   const servers = useWorkspaceServers()
 
   const add = (): void =>
@@ -21,7 +23,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
       ...hops,
       {
         id: `nh-${hopSeq++}`,
-        label: `Jump ${hops.length + 1}`,
+        label: t('connections.hops.defaultLabel', { n: hops.length + 1 }),
         host: '',
         port: 22,
         username: '',
@@ -78,18 +80,18 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
     <div className="field">
       <div className="row" style={{ marginBottom: 6 }}>
         <label className="field-label" style={{ margin: 0 }}>
-          Jump hosts {hops.length > 0 && `(${hops.length})`}
+          {hops.length > 0
+            ? t('connections.hops.headingCount', { count: hops.length })
+            : t('connections.hops.heading')}
         </label>
         <span className="spacer" />
         <button className="btn sm" onClick={add}>
-          <Plus size={13} /> Add jump host
+          <Plus size={13} /> {t('connections.hops.add')}
         </button>
       </div>
 
       {hops.length === 0 && (
-        <span className="field-hint">
-          Connects directly. Add a jump host to reach a server that is only routable from a bastion.
-        </span>
+        <span className="field-hint">{t('connections.hops.empty')}</span>
       )}
 
       {hops.map((h, i) => (
@@ -97,16 +99,16 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
           <div className="row" style={{ gap: 6 }}>
             <Shield size={14} style={{ color: 'var(--warn)' }} />
             <span className="faint" style={{ fontSize: 11 }}>
-              Hop {i + 1}
+              {t('connections.hops.hopN', { n: i + 1 })}
             </span>
             <span className="spacer" />
-            <button className="icon-btn sm" title="Move up" onClick={() => move(i, -1)}>
+            <button className="icon-btn sm" title={t('ui.kv.moveUp')} onClick={() => move(i, -1)}>
               <ArrowUp size={13} />
             </button>
-            <button className="icon-btn sm" title="Move down" onClick={() => move(i, 1)}>
+            <button className="icon-btn sm" title={t('ui.kv.moveDown')} onClick={() => move(i, 1)}>
               <ArrowDown size={13} />
             </button>
-            <button className="icon-btn sm" title="Remove" onClick={() => remove(h.id)}>
+            <button className="icon-btn sm" title={t('common.remove')} onClick={() => remove(h.id)}>
               <Trash2 size={13} />
             </button>
           </div>
@@ -115,14 +117,14 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
             className="input"
             value={h.serverId ?? ''}
             onChange={(e) => selectSavedServer(h.id, e.target.value)}
-            title="Reuse a saved server, including its stored credentials"
+            title={t('connections.hops.savedTitle')}
           >
-            <option value="">Custom server — set details below</option>
+            <option value="">{t('connections.hops.custom')}</option>
             {servers
               .filter((s) => s.id !== excludeServerId)
               .map((s) => (
                 <option key={s.id} value={s.id}>
-                  Use saved: {s.name} ({s.username}@{s.host})
+                  {t('connections.hops.useSaved', { name: s.name, target: `${s.username}@${s.host}` })}
                 </option>
               ))}
           </select>
@@ -155,7 +157,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
               dialog rather than overflowing it. */}
           <div className="hop-fields">
             <label className="hop-field hop-name">
-              <span className="field-label">Label</span>
+              <span className="field-label">{t('connections.hops.labelLabel')}</span>
               <input
                 className="input"
                 placeholder="bastion"
@@ -164,7 +166,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
               />
             </label>
             <label className="hop-field hop-host">
-              <span className="field-label">Server / IP</span>
+              <span className="field-label">{t('connections.addServer.hostLabel')}</span>
               <input
                 className="input"
                 placeholder="10.20.0.10"
@@ -174,7 +176,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
               />
             </label>
             <label className="hop-field hop-port">
-              <span className="field-label">Port</span>
+              <span className="field-label">{t('connections.addServer.portLabel')}</span>
               <input
                 className="input"
                 value={h.port}
@@ -183,7 +185,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
               />
             </label>
             <label className="hop-field hop-user">
-              <span className="field-label">Username</span>
+              <span className="field-label">{t('connections.addServer.usernameLabel')}</span>
               <input
                 className="input"
                 value={h.username}
@@ -196,7 +198,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
           <div className="input-group">
             <input
               className="input"
-              placeholder={h.serverId ? 'using the saved server’s credentials' : 'private key file'}
+              placeholder={h.serverId ? t('connections.hops.usingSaved') : t('connections.hops.keyFile')}
               value={h.serverId ? '' : h.keyPath ?? ''}
               disabled={!!h.serverId}
               onChange={(e) => patch(h.id, 'keyPath', e.target.value)}
@@ -207,7 +209,7 @@ export function RouteHops({ hops, onChange, excludeServerId }: Props): React.JSX
               disabled={!!h.serverId}
               onClick={() => void pickKey(h.id)}
             >
-              <KeyRound size={13} /> Browse
+              <KeyRound size={13} /> {t('connections.addServer.browse')}
             </button>
           </div>
         </div>

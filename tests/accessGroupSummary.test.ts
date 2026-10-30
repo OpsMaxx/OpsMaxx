@@ -4,11 +4,14 @@ import {
   summariseFilePolicies,
   capabilityDecisions,
   ELEVATED_CAPABILITIES,
-  RISKY_CLAUSE
+  RISKY_CLAUSE_KEY
 } from '../src/renderer/src/components/ai/accessGroupSummary'
+import { englishT } from '../src/shared/i18n'
 import { evaluateCapability, evaluateFilePath } from '../src/main/services/policyEngine'
 import { AI_CAPABILITIES } from '../src/shared/mcp'
 import type { AccessGroup, AiCapabilityPolicy, PermissionValue } from '../src/shared/mcp'
+
+const RISKY_CLAUSE = englishT(RISKY_CLAUSE_KEY)
 
 // Mirrors policyStore.allowAll(): the seeded groups are built by overriding an
 // all-allow baseline, and the summaries below are only meaningful if the

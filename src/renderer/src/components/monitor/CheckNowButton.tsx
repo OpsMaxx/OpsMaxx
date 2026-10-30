@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { RefreshCw, Check, AlertTriangle, Settings2 } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { openSettings } from '../../store/nav'
+import { useT } from '../../lib/i18n'
 import { SweepProgress } from './SweepProgress'
 
 /**
@@ -49,6 +50,7 @@ export function CheckNowButton({
   disabled = false,
   collects
 }: CheckNowButtonProps): React.JSX.Element {
+  const t = useT()
   const [phase, setPhase] = useState<Phase>({ kind: 'idle' })
   const working = phase.kind === 'working'
 
@@ -62,7 +64,7 @@ export function CheckNowButton({
     if (!bridge || typeof bridge.collectNow !== 'function') {
         setPhase({
         kind: 'refused',
-        message: 'Restart OpsMaxx to use this — the window is newer than the process behind it.'
+        message: t('monitor.checkNow.restart')
       })
       return
     }
@@ -73,14 +75,12 @@ export function CheckNowButton({
           r?.reason === 'disabled'
             ? {
                 kind: 'refused',
-                message:
-                  'Fleet sampling is switched off, so nothing was collected. Turn it on in Settings → Monitoring.',
+                message: t('monitor.checkNow.samplingOff'),
                 fix: 'monitoring-settings'
               }
             : {
                 kind: 'refused',
-                message:
-                  'No servers are being sampled in this workspace, so there was nothing to collect.'
+                message: t('monitor.checkNow.noServers')
               }
         )
         return
@@ -95,10 +95,10 @@ export function CheckNowButton({
     } catch (e) {
         setPhase({
         kind: 'refused',
-        message: e instanceof Error ? e.message : 'The check could not be run.'
+        message: e instanceof Error ? e.message : t('monitor.checkNow.failed')
       })
     }
-  }, [serverIds, onCollected])
+  }, [serverIds, onCollected, t])
 
   return (
     <div className="check-now">
@@ -106,10 +106,10 @@ export function CheckNowButton({
         className={primary ? 'btn primary sm' : 'btn ghost sm'}
         disabled={disabled || working}
         onClick={() => void run()}
-        title={`Collects ${collects} from every selected server now, ignoring the hourly schedule.`}
+        title={t('monitor.checkNow.title', { collects })}
       >
         <RefreshCw size={13} className={clsx(working && 'spin')} />
-        {working ? 'Checking…' : 'Check now'}
+        {working ? t('monitor.common.checking') : t('monitor.common.checkNow')}
       </button>
 
       {/**
@@ -126,7 +126,7 @@ export function CheckNowButton({
        * waiting for an earlier one to finish, because that is genuinely
        * unknowable from here.
        */}
-      <SweepProgress active={working} label={`Collecting ${collects}`} />
+      <SweepProgress active={working} label={t('monitor.checkNow.progressLabel', { collects })} />
 
       {/**
        * The result, in words.
@@ -159,14 +159,17 @@ export function CheckNowButton({
             phase.answered === phase.servers ? (
               <>
                 <Check size={12} />
-                Collected from {phase.servers} {phase.servers === 1 ? 'server' : 'servers'}
+                {t('monitor.checkNow.collected', { count: phase.servers })}
               </>
             ) : (
               <>
                 <AlertTriangle size={12} />
                 {phase.answered === 0
-                  ? `No server answered — nothing was collected`
-                  : `Collected from ${phase.answered} of ${phase.servers}; the rest did not answer`}
+                  ? t('monitor.checkNow.noneAnswered')
+                  : t('monitor.checkNow.someAnswered', {
+                      answered: phase.answered,
+                      total: phase.servers
+                    })}
               </>
             )
           ) : (
@@ -190,7 +193,7 @@ export function CheckNowButton({
        */}
       {phase.kind === 'refused' && phase.fix === 'monitoring-settings' && (
         <button className="btn ghost sm" onClick={() => openSettings('monitoring')}>
-          <Settings2 size={13} /> Open Monitoring settings
+          <Settings2 size={13} /> {t('monitor.common.openMonitoringSettings')}
         </button>
       )}
     </div>

@@ -18,6 +18,8 @@ import { BodyViewer } from './BodyViewer'
 import { ResponseStatus, useElapsed, useResponse } from './ResponseStatus'
 import { CookiesView, HeadersView, TimelineView } from './ResponseTables'
 import { decodeText, headerValue, jsonNodeAt, suggestedFileName } from './bodyWindow'
+import { t as tr, useT } from '../../../lib/i18n'
+import type { MessageKey, Translate } from '../../../../../shared/i18n'
 import './response.css'
 
 /** Reads `useHttp((s) => s.responses[tabId])` itself. */
@@ -52,9 +54,13 @@ export function tabById(s: { tabs: HttpTabState[]; ghost: Record<Id, HttpTabStat
 }
 
 /** The one sentence a screen reader hears per send. Never per frame, never per keystroke. */
-function announcement(r: ResponseState): string {
+function announcement(t: Translate, r: ResponseState): string {
   if (r.status === 'done') {
-    return `${r.response.status} ${r.response.statusText}, ${Math.round(r.response.durationMs)} milliseconds`
+    return t('http.responsePane.announce', {
+      status: r.response.status,
+      statusText: r.response.statusText,
+      ms: Math.round(r.response.durationMs)
+    })
   }
   if (r.status === 'error' && r.errorClass !== 'prod-declined') return presentError(r.errorClass, r.message).message
   return ''
@@ -74,7 +80,7 @@ export function unresolvedInOrigin(url: string, names: string[]): boolean {
 export function graphqlErrors(text: string): string[] {
   try {
     const parsed = JSON.parse(text) as { errors?: { message?: unknown }[] }
-    return Array.isArray(parsed.errors) ? parsed.errors.map((e) => String(e?.message ?? 'Unknown error')) : []
+    return Array.isArray(parsed.errors) ? parsed.errors.map((e) => String(e?.message ?? tr('http.responsePane.unknownError'))) : []
   } catch {
     return []
   }
@@ -86,6 +92,7 @@ function dispatch<T>(el: HTMLElement | null, type: string, detail: T): void {
 
 export function ResponsePane({ tabId }: ResponsePaneProps): React.JSX.Element {
   const r = useResponse(tabId)
+  const t = useT()
   return (
     <div className="hc-resp">
       <div className="hc-response-status">
@@ -101,7 +108,7 @@ export function ResponsePane({ tabId }: ResponsePaneProps): React.JSX.Element {
         </div>
       )}
       <div className="hc-sr" aria-live="polite">
-        {announcement(r)}
+        {announcement(t, r)}
       </div>
     </div>
   )
@@ -110,12 +117,14 @@ export function ResponsePane({ tabId }: ResponsePaneProps): React.JSX.Element {
 function StateView({ tabId, r }: { tabId: Id; r: Exclude<ResponseState, { status: 'done' }> }): React.JSX.Element | null {
   const elapsed = useElapsed(r.status === 'sending' ? r.startedAt : null)
   const tab = useHttp((s) => tabById(s, tabId))
+  const t = useT()
 
-  if (r.status === 'idle') return <p className="hc-state-hint">Send the request to see the response · {mod()}↵</p>
+  if (r.status === 'idle')
+    return <p className="hc-state-hint">{t('http.responsePane.idleHint', { key: `${mod()}↵` })}</p>
   if (r.status === 'sending') {
     return (
       <p className="hc-state-hint">
-        <Loader2 size={16} className="spin" aria-hidden /> Waiting for response · {elapsed} · Esc cancels
+        <Loader2 size={16} className="spin" aria-hidden /> {t('http.responsePane.waiting', { elapsed })}
       </p>
     )
   }
@@ -145,11 +154,11 @@ function StateView({ tabId, r }: { tabId: Id; r: Exclude<ResponseState, { status
       {shown.detail && <p className="hc-error-detail">{shown.detail}</p>}
       <div className="hc-error-actions">
         {shown.fix?.action === 'unlock' ? (
-          <UnlockVaultButton reason="This request uses a value from the vault." className="btn sm primary" />
+          <UnlockVaultButton reason={t('http.responsePane.unlockReason')} className="btn sm primary" />
         ) : (
           shown.fix && fix(shown.fix.action, shown.fix.label, true)
         )}
-        {canSendAnyway && fix('send-anyway', 'Send anyway', false)}
+        {canSendAnyway && fix('send-anyway', t('http.responsePane.sendAnyway'), false)}
       </div>
     </div>
   )
@@ -165,6 +174,7 @@ function DoneView({ tabId, response, sent }: { tabId: Id; response: HttpResponse
   const setPrefs = useHttp((s) => s.setPrefs)
   const httpTab = useHttp((s) => tabById(s, tabId))
   const push = useToasts((s) => s.push)
+  const t = useT()
   const contentType = headerValue(response.headers, 'content-type')
   const fullText = useMemo(() => decodeText(new Uint8Array(response.body), contentType), [response, contentType])
   const kind = httpTab?.draft?.kind
@@ -179,13 +189,13 @@ function DoneView({ tabId, response, sent }: { tabId: Id; response: HttpResponse
     return () => ro.disconnect()
   }, [])
 
-  const copy = (text: string, what: string): void => {
+  const copy = (text: string, done: MessageKey): void => {
     window.opsmaxx.clipboard.write(text)
-    push(`${what} copied`, 'ok')
+    push(t(done), 'ok')
   }
   const save = async (): Promise<void> => {
     const path = await window.opsmaxx.http.saveResponse(suggestedFileName(sent.url, contentType), response.body)
-    if (path) push(`Saved to ${path}`, 'ok')
+    if (path) push(t('http.urlBar.savedTo', { path }), 'ok')
   }
   const withView = (fn: (v: EditorView) => unknown) => (): void => {
     if (editorRef.current) fn(editorRef.current)
@@ -207,22 +217,30 @@ function DoneView({ tabId, response, sent }: { tabId: Id; response: HttpResponse
   const bodyMenu = (): MenuEntry[] => {
     const node = target()
     return [
-      { label: 'Copy', disabled: selection() === '', onClick: () => copy(selection(), 'Selection') },
       {
-        label: 'Select all',
+        label: t('common.copy'),
+        disabled: selection() === '',
+        onClick: () => copy(selection(), 'http.responsePane.selectionCopied')
+      },
+      {
+        label: t('http.responsePane.selectAll'),
         onClick: withView((v) => {
           v.dispatch({ selection: { anchor: 0, head: v.state.doc.length } })
           v.focus()
         })
       },
-      { label: 'Find…', shortcut: `${mod()}F`, onClick: withView(openSearchPanel) },
-      { label: 'Wrap lines', checked: wrap, onClick: () => setPrefs({ wrap: !wrap }) },
-      { label: 'Fold all', onClick: withView(foldAll) },
-      { label: 'Unfold all', onClick: withView(unfoldAll) },
+      { label: t('http.responsePane.find'), shortcut: `${mod()}F`, onClick: withView(openSearchPanel) },
+      { label: t('http.responsePane.wrapLines'), checked: wrap, onClick: () => setPrefs({ wrap: !wrap }) },
+      { label: t('http.responsePane.foldAll'), onClick: withView(foldAll) },
+      { label: t('http.responsePane.unfoldAll'), onClick: withView(unfoldAll) },
       { label: '', separator: true },
-      { label: 'Copy value', disabled: !node, onClick: () => node && copy(node.value, 'Value') },
       {
-        label: 'Set as variable…',
+        label: t('http.responsePane.copyValue'),
+        disabled: !node,
+        onClick: () => node && copy(node.value, 'http.responsePane.valueCopied')
+      },
+      {
+        label: t('http.responsePane.setAsVariable'),
         disabled: !node,
         onClick: () =>
           node &&
@@ -233,8 +251,8 @@ function DoneView({ tabId, response, sent }: { tabId: Id; response: HttpResponse
           })
       },
       { label: '', separator: true },
-      { label: 'Copy response', onClick: () => copy(fullText, 'Response') },
-      { label: 'Save response to file…', onClick: () => void save() }
+      { label: t('http.responsePane.copyResponse'), onClick: () => copy(fullText, 'http.responsePane.responseCopied') },
+      { label: t('http.responsePane.saveResponseMenu'), onClick: () => void save() }
     ]
   }
 
@@ -243,8 +261,8 @@ function DoneView({ tabId, response, sent }: { tabId: Id; response: HttpResponse
       <span className="hc-tools">
         <button
           className="btn ghost sm"
-          aria-label={`Find (${mod()}F)`}
-          title={`Find (${mod()}F)`}
+          aria-label={t('http.responsePane.findKey', { key: `${mod()}F` })}
+          title={t('http.responsePane.findKey', { key: `${mod()}F` })}
           onClick={withView(openSearchPanel)}
         >
           <Search size={14} />
@@ -253,8 +271,8 @@ function DoneView({ tabId, response, sent }: { tabId: Id; response: HttpResponse
           <>
             <button
               className="btn ghost sm"
-              aria-label="Wrap lines"
-              title="Wrap lines"
+              aria-label={t('http.responsePane.wrapLines')}
+              title={t('http.responsePane.wrapLines')}
               aria-pressed={wrap}
               onClick={() => setPrefs({ wrap: !wrap })}
             >
@@ -262,16 +280,16 @@ function DoneView({ tabId, response, sent }: { tabId: Id; response: HttpResponse
             </button>
             <button
               className="btn ghost sm"
-              aria-label="Copy response"
-              title="Copy response"
-              onClick={() => copy(fullText, 'Response')}
+              aria-label={t('http.responsePane.copyResponse')}
+              title={t('http.responsePane.copyResponse')}
+              onClick={() => copy(fullText, 'http.responsePane.responseCopied')}
             >
               <Copy size={14} />
             </button>
             <button
               className="btn ghost sm"
-              aria-label="Save response to file"
-              title="Save response to file"
+              aria-label={t('http.responsePane.saveResponse')}
+              title={t('http.responsePane.saveResponse')}
               onClick={() => void save()}
             >
               <Download size={14} />
@@ -280,8 +298,8 @@ function DoneView({ tabId, response, sent }: { tabId: Id; response: HttpResponse
         )}
         <button
           className="btn ghost sm"
-          aria-label="More body actions"
-          title="More body actions"
+          aria-label={t('http.responsePane.moreActions')}
+          title={t('http.responsePane.moreActions')}
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect()
             setMenu({ x: rect.left, y: rect.bottom })
@@ -295,21 +313,21 @@ function DoneView({ tabId, response, sent }: { tabId: Id; response: HttpResponse
   return (
     <div className="hc-response-done" ref={rootRef}>
       <Tabs
-        ariaLabel="Response"
+        ariaLabel={t('http.responsePane.response')}
         idPrefix={`${tabId}-resp`}
         active={tab}
         onChange={(id) => setTab(id as ResponseTab)}
         tabs={[
-          { id: 'body', label: 'Body' },
-          { id: 'headers', label: 'Headers', count: Object.keys(response.headers).length },
-          { id: 'cookies', label: 'Cookies', count: response.setCookie?.length ?? 0 },
-          { id: 'timeline', label: 'Timeline' }
+          { id: 'body', label: t('http.responsePane.body') },
+          { id: 'headers', label: t('http.responsePane.headers'), count: Object.keys(response.headers).length },
+          { id: 'cookies', label: t('http.responsePane.cookies'), count: response.setCookie?.length ?? 0 },
+          { id: 'timeline', label: t('http.responsePane.timeline') }
         ]}
         trailing={tools}
       />
       {gqlErrors.length > 0 && tab === 'body' && (
         <div className="hc-strip hc-danger" role="note">
-          {gqlErrors.length} error{gqlErrors.length === 1 ? '' : 's'} · first: {gqlErrors[0]}
+          {t('http.responsePane.gqlErrors', { count: gqlErrors.length, first: gqlErrors[0] })}
         </div>
       )}
       <div
@@ -336,7 +354,7 @@ function DoneView({ tabId, response, sent }: { tabId: Id; response: HttpResponse
             wrap={wrap}
             editorRef={editorRef}
             onSave={() => void save()}
-            onCopyAll={() => copy(fullText, 'Response')}
+            onCopyAll={() => copy(fullText, 'http.responsePane.responseCopied')}
           />
         )}
         {tab === 'headers' && <HeadersView headers={response.headers} />}

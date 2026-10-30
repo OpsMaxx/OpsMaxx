@@ -1,6 +1,7 @@
 import type { ApiCollectionV2, HttpRequest, Id } from '../../../../../shared/apiModel'
 import { DEFAULT_TIMEOUT_MS, MAX_REDIRECT_HOPS, MAX_TIMEOUT_MS } from '../../../../../shared/httpClient'
 import { HTTP_FIX_EVENT, type HttpFixDetail } from '../response/ResponsePane'
+import { useT } from '../../../lib/i18n'
 
 export interface RequestSettingsProps {
   tabId: Id
@@ -11,23 +12,24 @@ export interface RequestSettingsProps {
 }
 
 export function RequestSettings({ tabId, req, onChange, collection, readOnly }: RequestSettingsProps): React.JSX.Element {
+  const t = useT()
   const fallback = collection?.timeoutMs ?? DEFAULT_TIMEOUT_MS
   const settings = (patch: Partial<HttpRequest['settings']>): void => {
     if (!readOnly) onChange({ ...req, settings: { ...req.settings, ...patch } })
   }
   const certs = !collection
-    ? 'Certificates: verified'
+    ? t('http.settings.certsVerified')
     : collection.insecureTls
-      ? `Certificates: NOT verified (collection ${collection.name})`
+      ? t('http.settings.certsNotVerified', { name: collection.name })
       : collection.caPem
-        ? `Certificates: verified with a custom CA from collection ${collection.name}`
-        : 'Certificates: verified'
+        ? t('http.settings.certsCustomCa', { name: collection.name })
+        : t('http.settings.certsVerified')
 
   return (
     <div className="hc-settings">
       <div className="hc-field">
         <label className="ui-label" htmlFor={`${tabId}-timeout`}>
-          Timeout (seconds)
+          {t('http.settings.timeout')}
         </label>
         <input
           id={`${tabId}-timeout`}
@@ -45,7 +47,9 @@ export function RequestSettings({ tabId, req, onChange, collection, readOnly }: 
           }}
         />
         <span className="hc-note">
-          Empty uses {collection?.timeoutMs ? 'the collection’s' : 'the default'} {fallback / 1000} s. At most 10 minutes.
+          {collection?.timeoutMs
+            ? t('http.settings.timeoutCollection', { seconds: fallback / 1000 })
+            : t('http.settings.timeoutDefault', { seconds: fallback / 1000 })}
         </span>
       </div>
       <label className="hc-check">
@@ -55,10 +59,10 @@ export function RequestSettings({ tabId, req, onChange, collection, readOnly }: 
           disabled={readOnly}
           onChange={(e) => settings({ followRedirects: e.target.checked })}
         />
-        Follow redirects
+        {t('http.settings.followRedirects')}
       </label>
       <label className="hc-field">
-        <span className="ui-label">Max redirects</span>
+        <span className="ui-label">{t('http.settings.maxRedirects')}</span>
         <input
           className="hc-input hc-num"
           type="number"
@@ -84,7 +88,7 @@ export function RequestSettings({ tabId, req, onChange, collection, readOnly }: 
                 )
               }
             >
-              Change
+              {t('http.settings.change')}
             </button>
           </>
         )}

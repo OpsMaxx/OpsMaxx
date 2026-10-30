@@ -6,6 +6,7 @@ import { useVault, bioBlockedReason } from '../../store/vault'
 import { VaultReset } from './VaultReset'
 import { useVaultPrompt } from '../../store/vaultPrompt'
 import { VAULT_MIN_PASSWORD } from '../../../../shared/vault'
+import { useT } from '../../lib/i18n'
 
 const BIO_LABEL: Record<string, string> = {
   'touch-id': 'Touch ID',
@@ -43,6 +44,7 @@ const BIO_LABEL: Record<string, string> = {
 // So when there is no vault this is not a gate at all — it is the create
 // screen, wearing the caller's context as its subtitle.
 export function VaultUnlockModal(): React.JSX.Element | null {
+  const t = useT()
   const open = useVaultPrompt((s) => s.open)
   const reason = useVaultPrompt((s) => s.reason)
   const finish = useVaultPrompt((s) => s.finish)
@@ -174,12 +176,12 @@ export function VaultUnlockModal(): React.JSX.Element | null {
     <Modal
       title={
         damaged
-          ? 'Vault file unreadable'
+          ? t('vault.unlock.titleDamaged')
           : checking
-            ? 'Vault'
+            ? t('vault.unlock.titleChecking')
             : creating
-              ? 'Create your vault'
-              : 'Vault locked'
+              ? t('vault.gate.createTitle')
+              : t('vault.gate.lockedTitle')
       }
       subtitle={damaged ? undefined : reason}
       onClose={() => close(false)}
@@ -198,14 +200,12 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           <div className="row" style={{ gap: 10, alignItems: 'flex-start' }}>
             <AlertTriangle size={18} style={{ color: 'var(--danger)', marginTop: 2 }} />
             <div className="s-desc">
-              Your vault is still on this machine and nothing has been deleted — but the file
-              cannot be read, so no master password will open it. Restore it from a backup, or
-              delete it here and start a new vault.
+              {t('vault.unlock.damaged')}
             </div>
           </div>
           <div className="row" style={{ gap: 8 }}>
             <button className="btn primary" onClick={() => close(false)}>
-              Close
+              {t('common.close')}
             </button>
           </div>
           <VaultReset />
@@ -220,10 +220,10 @@ export function VaultUnlockModal(): React.JSX.Element | null {
         )}
         <div className="s-desc">
           {checking
-            ? 'Checking this machine for a vault…'
+            ? t('vault.unlock.checking')
             : creating
-              ? `There is no vault on this machine yet, so there is nowhere to keep this secret. The vault keeps passwords, SSH keys and other secrets encrypted here, so OpsMaxx can use them without you retyping them. Pick a master password to protect it — it is never stored anywhere, so if you lose it the contents cannot be recovered.`
-              : 'This credential is stored in your vault. Unlock it to continue — it stays unlocked for the rest of this session.'}
+              ? t('vault.unlock.createIntro')
+              : t('vault.unlock.unlockIntro')}
         </div>
       </div>
 
@@ -234,7 +234,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           disabled={busy}
           onClick={() => void unlockWithBiometrics().then((ok) => ok && close(true))}
         >
-          <Fingerprint size={15} /> Unlock with {BIO_LABEL[bioKind] ?? 'biometrics'}
+          <Fingerprint size={15} /> {t('vault.gate.unlockWith', { method: BIO_LABEL[bioKind] ?? t('vault.gate.biometrics') })}
         </button>
       )}
 
@@ -243,8 +243,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           having broken. */}
       {bioBlocked && !creating && !checking && (
         <div className="s-desc" style={{ marginBottom: 10 }}>
-          Biometric unlock is switched on for this vault but is not available right now —{' '}
-          {bioBlocked} Unlock with your master password below.
+          {t('vault.gate.bioBlocked', { reason: bioBlocked })}
         </div>
       )}
 
@@ -255,7 +254,9 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           type={show ? 'text' : 'password'}
           autoFocus
           placeholder={
-            creating ? `Master password (min ${VAULT_MIN_PASSWORD} characters)` : 'Master password'
+            creating
+              ? t('vault.gate.passwordMin', { min: VAULT_MIN_PASSWORD })
+              : t('vault.gate.password')
           }
           value={password}
           onChange={(e) => {
@@ -264,7 +265,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           }}
           onKeyDown={(e) => e.key === 'Enter' && void submit()}
         />
-        <button className="icon-btn" title={show ? 'Hide' : 'Show'} onClick={() => setShow((v) => !v)}>
+        <button className="icon-btn" title={show ? t('common.hide') : t('common.show')} onClick={() => setShow((v) => !v)}>
           {show ? <EyeOff size={16} /> : <Eye size={16} />}
         </button>
       </div>
@@ -277,7 +278,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           className="input"
           style={{ marginTop: 6, width: '100%' }}
           type={show ? 'text' : 'password'}
-          placeholder="Confirm master password"
+          placeholder={t('vault.gate.confirmPassword')}
           value={confirm}
           onChange={(e) => {
             clearError()
@@ -289,7 +290,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
 
       {mismatch && (
         <div className="vault-error" style={{ marginTop: 8 }}>
-          The two passwords do not match.
+          {t('vault.unlock.mismatch')}
         </div>
       )}
       {error && (
@@ -303,8 +304,7 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           the config they just pasted survives — so they guess, and half of them
           guess wrong. */}
       <div className="s-desc" style={{ marginTop: 10 }}>
-        Cancelling leaves what you were doing as it is; nothing you have entered is discarded.
-        {creating && ' You can turn on biometric unlock in the Vault once this is set up.'}
+        {creating ? t('vault.unlock.cancelNoteCreating') : t('vault.unlock.cancelNote')}
       </div>
 
       {/* Cancel first, primary last — the order every other dialog in the app
@@ -313,10 +313,14 @@ export function VaultUnlockModal(): React.JSX.Element | null {
           was the confirm. */}
       <div className="row" style={{ gap: 8, marginTop: 14 }}>
         <button className="btn sm" onClick={() => close(false)}>
-          Cancel
+          {t('common.cancel')}
         </button>
         <button className="btn sm primary" disabled={!ready} onClick={() => void submit()}>
-          {checking ? 'Checking…' : creating ? 'Create vault and continue' : 'Unlock and continue'}
+          {checking
+            ? t('vault.unlock.checkingButton')
+            : creating
+              ? t('vault.unlock.createAndContinue')
+              : t('vault.unlock.unlockAndContinue')}
         </button>
       </div>
         </>

@@ -2,9 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { AlertTriangle, Check, Copy, Play, Radar, ShieldCheck, Square, Trash2, X } from 'lucide-react'
 import { EmptyState } from '../common/EmptyState'
 import { clsx } from '../../lib/format'
+import { t as translate, useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 import { useInspect } from './useInspect'
 import { InspectFlowDetail } from './InspectFlowDetail'
-import type { InspectFlow, InspectSourceKind } from '../../../../shared/inspect'
+import type { InspectFlow, InspectSourceKind, InspectTrustStore } from '../../../../shared/inspect'
 import { INSPECT_CA_EXPIRY_WARN_SEC, isSensitiveHeader } from '../../../../shared/inspect'
 
 /**
@@ -18,6 +21,7 @@ import { INSPECT_CA_EXPIRY_WARN_SEC, isSensitiveHeader } from '../../../../share
  * worse than no traffic inspector, because it is believed.
  */
 export function InspectView(): React.JSX.Element {
+  const t = useT()
   const { status, flows, selectedId, busy, error, manualTrustCommand } = useInspect()
   const wire = useInspect((s) => s.wire)
   const refresh = useInspect((s) => s.refresh)
@@ -56,11 +60,11 @@ export function InspectView(): React.JSX.Element {
     <div className="content">
       <div className="content-header">
         <div>
-          <h1>Traffic</h1>
+          <h1>{t('inspect.title')}</h1>
           <div className="sub">
             {running && status?.listening
-              ? `Capturing on ${status.listening.host}:${status.listening.port}`
-              : 'Inspect the HTTP and HTTPS requests leaving this machine'}
+              ? t('inspect.capturingOn', { host: status.listening.host, port: status.listening.port })
+              : t('inspect.sub')}
           </div>
         </div>
         <div className="spacer" />
@@ -70,22 +74,22 @@ export function InspectView(): React.JSX.Element {
             className="input size-28"
             value={source}
             onChange={(e) => setSource(e.target.value as InspectSourceKind)}
-            aria-label="What to capture"
+            aria-label={t('inspect.sourceLabel')}
             style={{ maxWidth: 260 }}
           >
-            <option value="sessions">Terminals OpsMaxx opens</option>
-            <option value="system">This whole machine</option>
-            <option value="manual">Nothing automatically</option>
+            <option value="sessions">{t('inspect.source.sessions')}</option>
+            <option value="system">{t('inspect.source.system')}</option>
+            <option value="manual">{t('inspect.source.manual')}</option>
           </select>
         )}
 
         {running ? (
           <button className="btn secondary size-28" onClick={() => void stop()} disabled={busy}>
-            <Square size={14} /> Stop
+            <Square size={14} /> {t('inspect.stop')}
           </button>
         ) : (
           <button className="btn primary size-28" onClick={() => void start({ source })} disabled={busy}>
-            <Play size={14} /> Start capture
+            <Play size={14} /> {t('inspect.startCapture')}
           </button>
         )}
         {running && <CopyEnvButton />}
@@ -94,7 +98,7 @@ export function InspectView(): React.JSX.Element {
           onClick={() => void clear()}
           disabled={flows.length === 0}
         >
-          <Trash2 size={14} /> Clear
+          <Trash2 size={14} /> {t('inspect.clear')}
         </button>
       </div>
 
@@ -109,8 +113,7 @@ export function InspectView(): React.JSX.Element {
           as a subtle badge. */}
       {running && status?.lanExposed && (
         <div className="banner warn">
-          <AlertTriangle size={14} /> This proxy is reachable from your local network, not just
-          this machine.
+          <AlertTriangle size={14} /> {t('inspect.lanExposed')}
         </div>
       )}
 
@@ -124,15 +127,13 @@ export function InspectView(): React.JSX.Element {
           empty flow list. */}
       {running && status?.systemProxyDrifted && (
         <div className="banner warn">
-          <AlertTriangle size={14} /> This machine&rsquo;s proxy settings no longer point at
-          OpsMaxx, so nothing is being captured. Stop and start the inspector to set them again.
+          <AlertTriangle size={14} /> {t('inspect.proxyDrifted')}
         </div>
       )}
 
       {running && status?.insecureUpstream && (
         <div className="banner danger">
-          <AlertTriangle size={14} /> Upstream certificates are not being verified. Every connection
-          through this proxy is unauthenticated.
+          <AlertTriangle size={14} /> {t('inspect.insecureUpstream')}
         </div>
       )}
 
@@ -147,9 +148,7 @@ export function InspectView(): React.JSX.Element {
       {status?.ca && systemTrust && systemTrust.state !== 'trusted' && (
         <div className="banner">
           <ShieldCheck size={14} />
-          <span>
-            {systemTrust.hint ?? 'Install OpsMaxx’s certificate to read HTTPS traffic.'}
-          </span>
+          <span>{systemTrust.hint ?? t('inspect.installHint')}</span>
           <div className="spacer" />
           {systemTrust.installable && (
             <button
@@ -157,7 +156,7 @@ export function InspectView(): React.JSX.Element {
               onClick={() => void installTrust('system')}
               disabled={busy}
             >
-              Install certificate
+              {t('inspect.installCert')}
             </button>
           )}
         </div>
@@ -172,7 +171,7 @@ export function InspectView(): React.JSX.Element {
         <div className="banner warn col" style={{ gap: 6, alignItems: 'stretch' }}>
           <div className="row" style={{ gap: 'var(--sp-2)' }}>
             <AlertTriangle size={14} />
-            <span>Finish the install in Terminal, then press Install certificate again.</span>
+            <span>{t('inspect.manualTrust')}</span>
           </div>
           <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
             <code className="mono" style={{ flex: 1, minWidth: 0, overflowX: 'auto', userSelect: 'text' }}>
@@ -186,7 +185,7 @@ export function InspectView(): React.JSX.Element {
                 setTimeout(() => setCommandCopied(false), 1500)
               }}
             >
-              {commandCopied ? <Check size={13} /> : <Copy size={13} />} Copy
+              {commandCopied ? <Check size={13} /> : <Copy size={13} />} {t('common.copy')}
             </button>
           </div>
         </div>
@@ -198,12 +197,15 @@ export function InspectView(): React.JSX.Element {
         <div className="banner warn" key={p.host}>
           <AlertTriangle size={14} />
           <span>
-            <strong>{p.host}</strong> checks its certificate and will not accept OpsMaxx’s. It
-            cannot be inspected.
+            <Trans
+              i18nKey="inspect.pinned"
+              values={{ host: p.host }}
+              components={{ strong: <strong /> }}
+            />
           </span>
           <div className="spacer" />
           <button className="btn secondary size-24" onClick={() => void allowPinned(p.host)}>
-            Let it through untouched
+            {t('inspect.letThrough')}
           </button>
         </div>
       ))}
@@ -215,12 +217,15 @@ export function InspectView(): React.JSX.Element {
         <div className="banner warn" key={o.host}>
           <AlertTriangle size={14} />
           <span>
-            <strong>{o.host}</strong> is not HTTP or HTTPS. OpsMaxx cannot inspect it, and
-            intercepting it stops it working.
+            <Trans
+              i18nKey="inspect.opaque"
+              values={{ host: o.host }}
+              components={{ strong: <strong /> }}
+            />
           </span>
           <div className="spacer" />
           <button className="btn secondary size-24" onClick={() => void allowPinned(o.host)}>
-            Let it through untouched
+            {t('inspect.letThrough')}
           </button>
         </div>
       ))}
@@ -231,13 +236,10 @@ export function InspectView(): React.JSX.Element {
       {status?.ca && status.ca.expiresInSec <= 0 && (
         <div className="banner danger">
           <AlertTriangle size={14} />
-          <span>
-            OpsMaxx’s certificate expired. Nothing can be inspected until you create a new one
-            and install it.
-          </span>
+          <span>{t('inspect.caExpired')}</span>
           <div className="spacer" />
           <button className="btn primary size-24" onClick={() => void regenerate()} disabled={busy}>
-            Create a new certificate
+            {t('inspect.newCert')}
           </button>
         </div>
       )}
@@ -247,8 +249,7 @@ export function InspectView(): React.JSX.Element {
           <div className="banner warn">
             <AlertTriangle size={14} />
             <span>
-              OpsMaxx’s certificate expires in {Math.ceil(status.ca.expiresInSec / 86400)} days.
-              After that nothing can be inspected until you create and install a new one.
+              {t('inspect.caExpiring', { count: Math.ceil(status.ca.expiresInSec / 86400) })}
             </span>
           </div>
         )}
@@ -259,10 +260,7 @@ export function InspectView(): React.JSX.Element {
       {running && status?.requiresCredentials && (
         <div className="banner">
           <ShieldCheck size={14} />
-          <span>
-            This proxy is off loopback, so it requires a username and password. “Copy shell setup”
-            includes them.
-          </span>
+          <span>{t('inspect.requiresCredentials')}</span>
         </div>
       )}
 
@@ -271,31 +269,31 @@ export function InspectView(): React.JSX.Element {
       <div className="row" style={{ gap: 'var(--sp-2)', padding: '8px 0' }}>
         <input
           className="input size-28"
-          placeholder="Filter by method, host or path"
+          placeholder={t('inspect.filterPlaceholder')}
           value={filter}
           onChange={(e) => setFilter(e.target.value)}
-          aria-label="Filter flows"
+          aria-label={t('inspect.filterLabel')}
         />
         <div className="sub">
           {shown.length === flows.length
-            ? `${flows.length} ${flows.length === 1 ? 'request' : 'requests'}`
-            : `${shown.length} of ${flows.length}`}
+            ? t('inspect.count', { count: flows.length })
+            : t('inspect.filteredCount', { shown: shown.length, total: flows.length })}
         </div>
       </div>
 
       {flows.length === 0 ? (
         <EmptyState
           icon={<Radar size={26} />}
-          title={running ? 'Listening' : 'Nothing captured yet'}
+          title={running ? t('inspect.listeningTitle') : t('inspect.nothingYet')}
           message={
             running
               ? listeningMessage(status?.source ?? 'manual')
-              : 'Start capture, then use a terminal or your browser. OpsMaxx decrypts HTTPS with a certificate authority it generates for this machine.'
+              : t('inspect.idleMessage')
           }
           action={
             running ? undefined : (
               <button className="btn primary" onClick={() => void start({ source })}>
-                <Play size={15} /> Start capture
+                <Play size={15} /> {t('inspect.startCapture')}
               </button>
             )
           }
@@ -325,14 +323,9 @@ export function InspectView(): React.JSX.Element {
  * started is not routed and cannot be made routed from outside it.
  */
 export function listeningMessage(source: InspectSourceKind): string {
-  const lead = 'Requests appear here as they happen.'
-  if (source === 'sessions') {
-    return `${lead} Terminals you open from now on are routed through the inspector automatically — ones that were already open are not.`
-  }
-  if (source === 'system') {
-    return `${lead} This machine's proxy settings point at the inspector, so anything that honours them is captured.`
-  }
-  return `${lead} Nothing is pointed at the inspector automatically on this setting — use “Copy shell setup” to point a shell at it yourself.`
+  if (source === 'sessions') return translate('inspect.listening.sessions')
+  if (source === 'system') return translate('inspect.listening.system')
+  return translate('inspect.listening.manual')
 }
 
 /**
@@ -365,6 +358,7 @@ export function envLines(env: Record<string, string>, platform: NodeJS.Platform)
 }
 
 function CopyEnvButton(): React.JSX.Element {
+  const t = useT()
   const [copied, setCopied] = useState(false)
   // Resolved once, from main. `navigator.platform` is deprecated, lies under
   // Electron's user-agent handling, and would be the wrong question anyway:
@@ -385,11 +379,11 @@ function CopyEnvButton(): React.JSX.Element {
       }}
       title={
         platform === 'win32'
-          ? 'Copy the PowerShell lines that point a shell at the inspector'
-          : 'Copy the export lines that point a shell at the inspector'
+          ? t('inspect.copyEnvTitleWin')
+          : t('inspect.copyEnvTitle')
       }
     >
-      {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? 'Copied' : 'Copy shell setup'}
+      {copied ? <Check size={14} /> : <Copy size={14} />} {copied ? t('common.copied') : t('inspect.copyShellSetup')}
     </button>
   )
 }
@@ -403,17 +397,18 @@ function FlowTable({
   selectedId: string | null
   onSelect: (id: string | null) => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <div className="table-scroll" style={{ flex: 1, minWidth: 0, overflow: 'auto' }}>
       <table className="table">
         <thead>
           <tr>
-            <th style={{ width: 64 }}>Status</th>
-            <th style={{ width: 72 }}>Method</th>
-            <th>Host</th>
-            <th>Path</th>
-            <th style={{ width: 90, textAlign: 'right' }}>Size</th>
-            <th style={{ width: 80, textAlign: 'right' }}>Time</th>
+            <th style={{ width: 64 }}>{t('inspect.col.status')}</th>
+            <th style={{ width: 72 }}>{t('inspect.col.method')}</th>
+            <th>{t('inspect.col.host')}</th>
+            <th>{t('inspect.col.path')}</th>
+            <th style={{ width: 90, textAlign: 'right' }}>{t('inspect.col.size')}</th>
+            <th style={{ width: 80, textAlign: 'right' }}>{t('inspect.col.time')}</th>
           </tr>
         </thead>
         <tbody>
@@ -460,14 +455,23 @@ function FlowTable({
 /** Status as a shape as well as a number, so what needs attention reads at a
  *  glance rather than being decoded from three digits. */
 function StatusChip({ flow }: { flow: InspectFlow }): React.JSX.Element {
+  const t = useT()
   if (flow.state === 'pending') return <span className="chip">···</span>
-  if (flow.state === 'failed') return <span className="chip danger">fail</span>
+  if (flow.state === 'failed') return <span className="chip danger">{t('inspect.fail')}</span>
   const s = flow.status ?? 0
   const tone = s >= 500 ? 'danger' : s >= 400 ? 'warn' : s >= 300 ? '' : 'ok'
   return <span className={clsx('chip', tone)}>{s}</span>
 }
 
+const TRUST_STATE: Record<InspectTrustStore['state'], MessageKey> = {
+  trusted: 'inspect.trustState.trusted',
+  untrusted: 'inspect.trustState.untrusted',
+  unknown: 'inspect.trustState.unknown',
+  unsupported: 'inspect.trustState.unsupported'
+}
+
 function CaCard(): React.JSX.Element {
+  const t = useT()
   const status = useInspect((s) => s.status)
   const installTrust = useInspect((s) => s.installTrust)
   const removeTrust = useInspect((s) => s.removeTrust)
@@ -499,64 +503,66 @@ function CaCard(): React.JSX.Element {
             setTimeout(() => setCopied(false), 1500)
           }}
         >
-          {copied ? <Check size={13} /> : <Copy size={13} />} Fingerprint
+          {copied ? <Check size={13} /> : <Copy size={13} />} {t('inspect.ca.fingerprint')}
         </button>
         <button className="btn secondary size-24" onClick={() => setOpen((v) => !v)}>
-          {open ? 'Hide' : 'Trust stores'}
+          {open ? t('common.hide') : t('inspect.ca.trustStores')}
         </button>
       </div>
 
       {!ca.keyPersisted && (
         <div className="banner warn" style={{ marginTop: 8 }}>
-          <AlertTriangle size={14} /> This machine’s keychain would not store the certificate’s
-          key, so a new certificate is created each time OpsMaxx starts. You will have to
-          install it again after a restart.
+          <AlertTriangle size={14} /> {t('inspect.ca.keyNotPersisted')}
         </div>
       )}
 
       {open && (
         <div className="col" style={{ gap: 6, marginTop: 10 }}>
-          {status?.trust.map((t) => (
-            <div className="row" key={t.id} style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
+          {status?.trust.map((ts) => (
+            <div className="row" key={ts.id} style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
               <span
                 className={clsx(
                   'chip',
-                  t.state === 'trusted' ? 'ok' : t.state === 'untrusted' ? 'warn' : ''
+                  ts.state === 'trusted' ? 'ok' : ts.state === 'untrusted' ? 'warn' : ''
                 )}
               >
-                {t.state}
+                {t(TRUST_STATE[ts.state])}
               </span>
               <div style={{ minWidth: 0 }}>
-                <div>{t.label}</div>
-                {t.hint && <div className="sub">{t.hint}</div>}
+                <div>{ts.label}</div>
+                {ts.hint && <div className="sub">{ts.hint}</div>}
               </div>
               <div className="spacer" />
-              {t.installable &&
-                (t.state === 'trusted' ? (
+              {ts.installable &&
+                (ts.state === 'trusted' ? (
                   <button
                     className="btn secondary size-24"
                     disabled={busy}
-                    onClick={() => void removeTrust(t.id as 'system' | 'nss')}
+                    onClick={() => void removeTrust(ts.id as 'system' | 'nss')}
                   >
-                    <X size={13} /> Remove
+                    <X size={13} /> {t('common.remove')}
                   </button>
                 ) : (
                   <button
                     className="btn secondary size-24"
                     disabled={busy}
-                    onClick={() => void installTrust(t.id as 'system' | 'nss')}
+                    onClick={() => void installTrust(ts.id as 'system' | 'nss')}
                   >
-                    Install
+                    {t('inspect.ca.install')}
                   </button>
                 ))}
             </div>
           ))}
           <div className="row" style={{ gap: 'var(--sp-2)', marginTop: 4 }}>
             <div className="sub" style={{ flex: 1 }}>
-              Certificate file: <span className="mono">{ca.certPath}</span>
+              <Trans
+                i18nKey="inspect.ca.certFile"
+                values={{ path: ca.certPath }}
+                components={{ path: <span className="mono" /> }}
+              />
             </div>
             <button className="btn secondary size-24" disabled={busy} onClick={() => void regenerateCa()}>
-              Regenerate
+              {t('inspect.ca.regenerate')}
             </button>
           </div>
         </div>

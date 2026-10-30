@@ -11,8 +11,16 @@ import type {
   SessionMode
 } from '../../../../shared/mcp'
 import { ModePicker } from './ModePicker'
+import type { MessageKey } from '../../../../shared/i18n'
+import { t as tr, useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
-const VERDICT: Record<PermissionValue, string> = { allow: 'Allow', ask: 'Ask', deny: 'Deny' }
+const VERDICT_KEYS: Record<PermissionValue, MessageKey> = {
+  allow: 'ai.sessionAccess.verdict.allow',
+  ask: 'ai.sessionAccess.verdict.ask',
+  deny: 'ai.sessionAccess.verdict.deny'
+}
+const verdict = (v: PermissionValue): string => tr(VERDICT_KEYS[v])
 
 /** Protected targets inside this session's workspaces: each protected
  *  workspace once, plus each protected server whose workspace is not. */
@@ -33,10 +41,16 @@ async function protectedCountFor(session: McpAgentSession): Promise<number> {
 /** A workspace or server in this session's reach that carries an assignment. */
 interface Restriction {
   id: string
-  where: string
+  /** A workspace is named as one; a server by its name alone. */
+  kind: 'workspace' | 'server'
+  name: string
   groupId: string | null
-  groupName: string
+  /** Null when the assignment names no group that exists: No AI Access. */
+  groupName: string | null
 }
+
+const whereOf = (r: Restriction): string =>
+  r.kind === 'workspace' ? tr('ai.sessionAccess.workspaceTarget', { name: r.name }) : r.name
 
 /**
  * Every assignment inside the session's workspaces, as the thing it is: a
@@ -52,47 +66,52 @@ async function restrictionsFor(session: McpAgentSession, groups: AccessGroup[]):
   const serverById = new Map((servers ?? []).map((s) => [s.id, s]))
   const out: Restriction[] = []
   for (const a of assignments ?? []) {
-    let where: string | null = null
+    let where: Pick<Restriction, 'kind' | 'name'> | null = null
     if (a.scope.level === 'workspace') {
       const name = mine.get(a.scope.workspaceId)
-      if (name !== undefined) where = `the ${name} workspace`
+      if (name !== undefined) where = { kind: 'workspace', name }
     } else {
       const server = serverById.get(a.scope.serverId)
-      if (server && mine.has(server.workspaceId)) where = server.name
+      if (server && mine.has(server.workspaceId)) where = { kind: 'server', name: server.name }
     }
     if (!where) continue
     const group = groups.find((g) => g.id === a.groupId)
-    out.push({ id: a.id, where, groupId: a.groupId, groupName: group?.name ?? 'No AI Access' })
+    out.push({ id: a.id, ...where, groupId: a.groupId, groupName: group?.name ?? null })
   }
   return out
 }
 
 /** The outcome buckets, in the order a person reads them. */
-const BUCKETS: { key: string; title: string; tone: string; test: (r: CapabilityExplanation) => boolean }[] = [
-  { key: 'allow', title: 'Runs without asking', tone: 'ok', test: (r) => r.decision === 'allow' && !r.partlyAsks },
+const BUCKETS: { key: string; titleKey: MessageKey; tone: string; test: (r: CapabilityExplanation) => boolean }[] = [
+  {
+    key: 'allow',
+    titleKey: 'ai.sessionAccess.bucket.allow',
+    tone: 'ok',
+    test: (r) => r.decision === 'allow' && !r.partlyAsks
+  },
   {
     key: 'partly',
-    title: 'Runs — but risky actions ask',
+    titleKey: 'ai.sessionAccess.bucket.partly',
     tone: 'info',
     test: (r) => r.decision === 'allow' && r.partlyAsks
   },
-  { key: 'ask', title: 'Asks you first', tone: 'warn', test: (r) => r.decision === 'ask' },
-  { key: 'deny', title: 'Blocked', tone: 'danger', test: (r) => r.decision === 'deny' }
+  { key: 'ask', titleKey: 'ai.sessionAccess.bucket.ask', tone: 'warn', test: (r) => r.decision === 'ask' },
+  { key: 'deny', titleKey: 'ai.sessionAccess.bucket.deny', tone: 'danger', test: (r) => r.decision === 'deny' }
 ]
 
 /** What the whole profile means for this session, in one sentence. */
 function modeSummary(mode: SessionMode, groupName: string): string {
   switch (mode) {
     case 'bypass':
-      return 'Bypass: everything runs without asking, whatever any restriction says. Only Protected targets and No AI Access still hold.'
+      return tr('ai.sessionAccess.summary.bypass')
     case 'readOnly':
-      return 'Read only: it can look at everything, and every change is refused.'
+      return tr('ai.sessionAccess.summary.readOnly')
     case 'ask':
-      return 'Ask first: it can look at everything, and every change is asked for before it runs.'
+      return tr('ai.sessionAccess.summary.ask')
     case 'auto':
-      return 'Auto: routine work runs without asking; sudo and risky actions — destructive commands, database writes, tunnels, VPNs, server changes, CI runs — ask first.'
+      return tr('ai.sessionAccess.summary.auto')
     default:
-      return `Custom: exactly what the ${groupName} access group says.`
+      return tr('ai.sessionAccess.summary.custom', { group: groupName })
   }
 }
 
@@ -103,19 +122,25 @@ function modeSummary(mode: SessionMode, groupName: string): string {
  */
 function why(r: CapabilityExplanation, groupName: string): string {
   if (r.bypassed) {
-    const source =
-      r.decidedBy === 'scope' ? `${r.scopeWorkspaceName ?? 'the target'}’s restriction` : groupName
-    return `${source} says ${VERDICT[r.beforeMode]} — Bypass lifts it`
+    return r.decidedBy === 'scope'
+      ? tr('ai.sessionAccess.why.bypassScope', {
+          target: r.scopeWorkspaceName ?? tr('ai.sessionAccess.why.theTarget'),
+          verdict: verdict(r.beforeMode)
+        })
+      : tr('ai.sessionAccess.why.bypassGroup', { group: groupName, verdict: verdict(r.beforeMode) })
   }
-  if (r.protectedTarget && r.decision === 'ask') return 'Protected target — held at Ask first'
-  if (r.decision !== r.beforeMode) return `${sessionModeLabel(r.mode)} mode`
+  if (r.protectedTarget && r.decision === 'ask') return tr('ai.sessionAccess.why.protected')
+  if (r.decision !== r.beforeMode) return tr('ai.sessionAccess.why.mode', { mode: sessionModeLabel(r.mode) })
   if (r.decidedBy === 'scope') {
     return r.scopeGroupName
-      ? `Restricted: ${r.scopeWorkspaceName ?? 'this target'} is limited to ${r.scopeGroupName}`
-      : 'Target is set to No AI Access'
+      ? tr('ai.sessionAccess.why.restricted', {
+          target: r.scopeWorkspaceName ?? tr('ai.sessionAccess.why.thisTarget'),
+          group: r.scopeGroupName
+        })
+      : tr('ai.sessionAccess.why.noAccess')
   }
-  if (r.partlyAsks) return `${groupName} allows it; risky actions still ask`
-  return `${groupName}: ${VERDICT[r.decision]}`
+  if (r.partlyAsks) return tr('ai.sessionAccess.why.partly', { group: groupName })
+  return tr('ai.sessionAccess.why.group', { group: groupName, verdict: verdict(r.decision) })
 }
 
 // Answers the question the permission model actually raises — "what can this
@@ -136,6 +161,7 @@ export function SessionAccess({
   const [rows, setRows] = useState<CapabilityExplanation[] | null>(null)
   const [protectedCount, setProtectedCount] = useState(0)
   const [restrictions, setRestrictions] = useState<Restriction[]>([])
+  const t = useT()
   const mode: SessionMode = sessionModeOf(session)
   const groupName = session.groupName
   // What the "why" column names as the source: the group for Custom, else the
@@ -170,8 +196,8 @@ export function SessionAccess({
     const name = group?.name ?? 'No AI Access'
     const api = window.opsmaxx?.aiMcp
     if (typeof api?.setSessionGroup !== 'function') {
-      toast('This build of OpsMaxx cannot change what a running session is allowed to do.', 'error', {
-        label: 'Check for updates',
+      toast(t('ai.sessionAccess.cannotChange'), 'error', {
+        label: t('ai.connect.checkUpdates'),
         run: () => openSettings('general')
       })
       return
@@ -182,13 +208,15 @@ export function SessionAccess({
     if (!updated) {
       // The select has already moved to the new value, so silence here would
       // show a limit that is not actually in force.
-      toast(`${session.agentName} was not changed — it can still do what ${session.groupName} allows.`, 'error', {
-        label: 'Try again',
+      toast(t('ai.sessionAccess.groupNotChanged', { agent: session.agentName, group: session.groupName }), 'error', {
+        label: t('ai.security.tryAgain'),
         run: () => void changeGroup(groupId)
       })
       return
     }
-    if (!quiet) toast(`${session.agentName} now uses ${name}.`, 'ok')
+    if (!quiet) {
+      toast(t('ai.sessionAccess.nowUses', { agent: session.agentName, group: group?.name ?? t('ai.connect.noAccess') }), 'ok')
+    }
   }
 
   const changeMode = async (next: SessionMode): Promise<void> => {
@@ -202,8 +230,8 @@ export function SessionAccess({
     const updated = await window.opsmaxx?.aiMcp.setSessionMode?.(session.id, next).catch(() => null)
     if (!updated) {
       // The table keeps showing what is still in force.
-      toast(`${session.agentName} was not changed — it is still on ${sessionModeLabel(mode)}.`, 'error', {
-        label: 'Try again',
+      toast(t('ai.sessionAccess.modeNotChanged', { agent: session.agentName, profile: sessionModeLabel(mode) }), 'error', {
+        label: t('ai.security.tryAgain'),
         run: () => void changeMode(next)
       })
       return
@@ -211,21 +239,21 @@ export function SessionAccess({
     setRows(null)
     refetch()
     onChanged()
-    toast(`${session.agentName} is now on ${sessionModeLabel(next)}.`, 'ok')
+    toast(t('ai.sessionAccess.nowOn', { agent: session.agentName, profile: sessionModeLabel(next) }), 'ok')
   }
 
   const removeRestriction = async (r: Restriction): Promise<void> => {
     try {
       await window.opsmaxx?.aiPolicy.removeAssignment?.(r.id)
     } catch {
-      toast(`The restriction on ${r.where} was not removed.`, 'error')
+      toast(t('ai.sessionAccess.removeFailed', { target: whereOf(r) }), 'error')
       return
     }
     loadRestrictions()
     setRows(null)
     refetch()
     onChanged()
-    toast(`${r.where} is no longer restricted.`, 'ok')
+    toast(t('ai.sessionAccess.removed', { target: whereOf(r) }), 'ok')
   }
 
   // Restrictions that are actually holding this session lower right now. In
@@ -236,7 +264,7 @@ export function SessionAccess({
   return (
     <div style={{ width: '100%' }}>
       <div className="row" style={{ gap: 8, alignItems: 'center', marginTop: 6, flexWrap: 'wrap' }}>
-        <span className="s-desc">Profile</span>
+        <span className="s-desc">{t('ai.modePicker.sectionProfile')}</span>
         <ModePicker
           value={mode}
           onChange={changeMode}
@@ -247,7 +275,7 @@ export function SessionAccess({
           size="sm"
         />
         <button className="btn sm" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
-          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} Effective access
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {t('ai.sessionAccess.effectiveAccess')}
         </button>
       </div>
 
@@ -257,10 +285,13 @@ export function SessionAccess({
       {holding.length > 0 && (
         <div className="s-desc warn" style={{ marginTop: 6, lineHeight: 1.5 }} data-testid="restriction-note">
           {holding.length === 1
-            ? `${cap(holding[0].where)} is restricted to ${holding[0].groupName}, so this agent gets at most that there.`
-            : `${holding.length} targets are restricted, so this agent gets at most their group there.`}{' '}
+            ? t('ai.sessionAccess.restrictedOne', {
+                target: cap(whereOf(holding[0])),
+                group: holding[0].groupName ?? t('ai.connect.noAccess')
+              })
+            : t('ai.sessionAccess.restrictedMany', { count: holding.length })}{' '}
           <button className="linklike" onClick={() => setOpen(true)}>
-            Review
+            {t('ai.sessionAccess.review')}
           </button>
         </div>
       )}
@@ -272,15 +303,14 @@ export function SessionAccess({
             {shielded && (
               <>
                 {' '}
-                <span className="chip warn">Protected</span> {protectedCount} protected target
-                {protectedCount === 1 ? '' : 's'} in its workspaces {protectedCount === 1 ? 'holds' : 'hold'} it at
-                Ask first there.
+                <span className="chip warn">{t('ai.approval.protected')}</span>{' '}
+                {t('ai.sessionAccess.protectedHold', { count: protectedCount })}
               </>
             )}
           </div>
 
-          {rows === null && <div className="s-desc">Working it out…</div>}
-          {rows?.length === 0 && <div className="s-desc">This session is scoped to no workspace.</div>}
+          {rows === null && <div className="s-desc">{t('ai.sessionAccess.working')}</div>}
+          {rows?.length === 0 && <div className="s-desc">{t('ai.sessionAccess.noWorkspace')}</div>}
 
           {rows && rows.length > 0 && (
             <div style={{ display: 'grid', gap: 8 }}>
@@ -290,7 +320,7 @@ export function SessionAccess({
                 return (
                   <div key={b.key} data-testid={`bucket-${b.key}`}>
                     <div className="s-title" style={{ fontSize: 'var(--fs-sm)', marginBottom: 4 }}>
-                      {b.title} <span className="s-desc">({inBucket.length})</span>
+                      {t(b.titleKey)} <span className="s-desc">({inBucket.length})</span>
                     </div>
                     <div className="row" style={{ gap: 4, flexWrap: 'wrap' }}>
                       {inBucket.map((r) => (
@@ -308,34 +338,41 @@ export function SessionAccess({
           {restrictions.length > 0 && (
             <div data-testid="restrictions">
               <div className="s-title" style={{ fontSize: 'var(--fs-sm)', marginBottom: 4 }}>
-                Restrictions on targets
+                {t('ai.sessionAccess.restrictionsTitle')}
               </div>
               {restrictions.map((r) => {
                 const lifted = mode === 'bypass' && r.groupId !== null
                 return (
                   <div key={r.id} className="row" style={{ gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                     <span className="s-desc">
-                      {cap(r.where)} → <b>{r.groupName}</b>
-                      {lifted
-                        ? ' — lifted while this agent is in Bypass.'
-                        : r.groupId === null
-                          ? ' — no agent can reach it, in any mode.'
-                          : ' — agents there get at most this, whatever their own group.'}
+                      {/* Self-closing tags: the names are the user's, never parsed for markup. */}
+                      <Trans
+                        i18nKey={
+                          lifted
+                            ? 'ai.sessionAccess.restrictionLifted'
+                            : r.groupId === null
+                              ? 'ai.sessionAccess.restrictionNoAccess'
+                              : 'ai.sessionAccess.restrictionAtMost'
+                        }
+                        components={{
+                          target: <>{cap(whereOf(r))}</>,
+                          group: <b>{r.groupName ?? t('ai.connect.noAccess')}</b>
+                        }}
+                      />
                     </span>
                     {r.groupId && (
                       <button className="linklike" onClick={() => openAi('groups', r.groupId)}>
-                        Edit {r.groupName}
+                        {t('ai.sessionAccess.editGroup', { group: r.groupName ?? t('ai.connect.noAccess') })}
                       </button>
                     )}
                     <button className="btn sm" onClick={() => void removeRestriction(r)}>
-                      <X size={12} /> Remove restriction
+                      <X size={12} /> {t('ai.sessionAccess.removeRestriction')}
                     </button>
                   </div>
                 )
               })}
               <div className="s-desc" style={{ marginTop: 4 }}>
-                A restriction belongs to the workspace or server, not to this agent. Earlier versions of Connect an
-                agent added them on their own; removing one lets each agent’s own group decide there.
+                {t('ai.sessionAccess.restrictionsExplain')}
               </div>
             </div>
           )}
@@ -343,15 +380,15 @@ export function SessionAccess({
           {rows && rows.length > 0 && (
             <div>
               <button className="linklike" onClick={() => setDetail((v) => !v)} aria-expanded={detail}>
-                {detail ? 'Hide' : 'Show'} why, per capability
+                {detail ? t('ai.sessionAccess.hideWhy') : t('ai.sessionAccess.showWhy')}
               </button>
               {detail && (
                 <table className="mini-table" style={{ width: '100%', marginTop: 6 }}>
                   <thead>
                     <tr>
-                      <th>Capability</th>
-                      <th>Result</th>
-                      <th>Why</th>
+                      <th>{t('ai.sessionAccess.colCapability')}</th>
+                      <th>{t('ai.sessionAccess.colResult')}</th>
+                      <th>{t('ai.sessionAccess.colWhy')}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -359,7 +396,7 @@ export function SessionAccess({
                       <tr key={r.capability}>
                         <td>{r.label}</td>
                         <td className="mono strong">
-                          {VERDICT[r.decision]}
+                          {verdict(r.decision)}
                           {r.partlyAsks && '*'}
                         </td>
                         <td className="s-desc" title={r.reason}>
@@ -376,7 +413,7 @@ export function SessionAccess({
           {mode === 'custom' && (
             <div>
               <button className="btn sm" onClick={() => openAi('groups', session.groupId)}>
-                <ShieldCheck size={13} /> Edit {groupName}
+                <ShieldCheck size={13} /> {t('ai.sessionAccess.editGroup', { group: groupName })}
               </button>
             </div>
           )}

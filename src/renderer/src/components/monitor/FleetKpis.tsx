@@ -12,6 +12,7 @@ import type { EstatePoint } from '../../store/fleet'
 import type { FleetHealth } from '../../../../shared/hostHealth'
 import type { FleetTotals } from '../../store/fleet'
 import { bytes, clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 
 /**
  * The estate in one band, at the top of the overview.
@@ -69,6 +70,7 @@ function MeterTile({
   used: number
   total: number
 }): React.JSX.Element {
+  const t = useT()
   const p = pctOf(used, total)
   const tone = p >= 90 ? 'danger' : p >= 75 ? 'warn' : 'ok'
   return (
@@ -87,14 +89,14 @@ function MeterTile({
         aria-valuenow={p}
         aria-valuemin={0}
         aria-valuemax={100}
-        aria-label={`${label} used`}
+        aria-label={t('monitor.fleet.kpi.meterUsed', { label })}
       >
         <span className={clsx('kpi-meter-fill', tone)} style={{ width: `${p}%` }} />
       </div>
       {/* The absolutes stay, below the proportion rather than instead of it:
           the percentage is for deciding, the bytes are for reporting. */}
       <div className="kpi-sub">
-        {bytes(used)} of {bytes(total)}
+        {t('monitor.fleet.kpi.bytesOf', { used: bytes(used), total: bytes(total) })}
       </div>
     </div>
   )
@@ -106,18 +108,21 @@ export function FleetKpis({
   serverCount,
   trend
 }: FleetKpisProps): React.JSX.Element {
+  const t = useT()
   const unreachable = health.unreachable.length
   const reportingLabel =
-    totals.reporting === serverCount ? 'reporting' : `of ${serverCount} reporting`
+    totals.reporting === serverCount
+      ? t('monitor.fleet.kpi.reporting')
+      : t('monitor.fleet.kpi.reportingOf', { total: serverCount })
 
   return (
-    <section className="kpi-band" aria-label="Fleet summary">
+    <section className="kpi-band" aria-label={t('monitor.fleet.kpi.summary')}>
       <div className="kpi">
         <div className="kpi-top">
           <span className="kpi-icon">
             <ServerIcon size={13} />
           </span>
-          <span className="kpi-label">Servers</span>
+          <span className="kpi-label">{t('monitor.fleet.kpi.servers')}</span>
         </div>
         <div className="kpi-value">{totals.reporting}</div>
         <div className="kpi-sub">{reportingLabel}</div>
@@ -132,11 +137,11 @@ export function FleetKpis({
             <span className="kpi-icon">
               <CircleAlert size={13} />
             </span>
-            <span className="kpi-label">Failed services</span>
+            <span className="kpi-label">{t('monitor.fleet.kpi.failedServices')}</span>
           </div>
           <div className="kpi-value">{health.failedUnits}</div>
           <div className="kpi-sub">
-            on {health.failingHosts} {health.failingHosts === 1 ? 'server' : 'servers'}
+            {t('monitor.fleet.kpi.onServers', { count: health.failingHosts })}
           </div>
         </div>
       )}
@@ -147,11 +152,11 @@ export function FleetKpis({
             <span className="kpi-icon">
               <Unplug size={13} />
             </span>
-            <span className="kpi-label">Unreachable</span>
+            <span className="kpi-label">{t('monitor.fleet.kpi.unreachable')}</span>
           </div>
           <div className="kpi-value">{unreachable}</div>
           <div className="kpi-sub">
-            {unreachable === 1 ? 'server did not answer' : 'servers did not answer'}
+            {t('monitor.fleet.kpi.didNotAnswer', { count: unreachable })}
           </div>
         </div>
       )}
@@ -164,7 +169,7 @@ export function FleetKpis({
           <span className="kpi-label">vCPU</span>
         </div>
         <div className="kpi-value">{totals.cores}</div>
-        <div className="kpi-sub">across the estate</div>
+        <div className="kpi-sub">{t('monitor.fleet.kpi.acrossEstate')}</div>
       </div>
 
       {/**
@@ -197,19 +202,19 @@ export function FleetKpis({
           <div className="kpi-meter" aria-hidden />
         )}
         <div className="kpi-sub">
-          {trend.length > 1 ? 'mean, across the estate' : 'waiting for a second sweep'}
+          {trend.length > 1 ? t('monitor.fleet.kpi.cpuMean') : t('monitor.fleet.kpi.cpuWaiting')}
         </div>
       </div>
 
       <MeterTile
         icon={<MemoryStick size={13} />}
-        label="Memory"
+        label={t('monitor.fleet.kpi.memory')}
         used={totals.memUsed}
         total={totals.memTotal}
       />
       <MeterTile
         icon={<HardDrive size={13} />}
-        label="Disk"
+        label={t('monitor.common.disk')}
         used={totals.diskUsed}
         total={totals.diskTotal}
       />

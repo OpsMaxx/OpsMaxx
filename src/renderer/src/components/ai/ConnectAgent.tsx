@@ -8,6 +8,9 @@ import type { AccessGroup, SessionMode } from '../../../../shared/mcp'
 import { DEFAULT_SESSION_MODE, resolveDefaultSessionGroup, sessionModeLabel } from '../../../../shared/mcp'
 import { ModePicker } from './ModePicker'
 import { containsBearerToken, maskBearerTokens } from '../../../../shared/tokenDisplay'
+import type { MessageKey } from '../../../../shared/i18n'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 type Target = 'claude-code' | 'claude-desktop' | 'codex'
 
@@ -38,15 +41,15 @@ const FILE_CLIENTS: Record<'claude-desktop' | 'codex', string> = {
   codex: 'Codex'
 }
 
-const TARGETS: { id: Target; label: string; agentName: string; icon: React.JSX.Element }[] = [
-  { id: 'claude-code', label: 'Connect Claude Code', agentName: 'Claude Code', icon: <Terminal size={13} /> },
+const TARGETS: { id: Target; labelKey: MessageKey; agentName: string; icon: React.JSX.Element }[] = [
+  { id: 'claude-code', labelKey: 'ai.connect.claudeCode', agentName: 'Claude Code', icon: <Terminal size={13} /> },
   {
     id: 'claude-desktop',
-    label: 'Connect Claude Desktop',
+    labelKey: 'ai.connect.claudeDesktop',
     agentName: 'Claude Desktop',
     icon: <MonitorSmartphone size={13} />
   },
-  { id: 'codex', label: 'Connect Codex', agentName: 'Codex', icon: <SquareTerminal size={13} /> }
+  { id: 'codex', labelKey: 'ai.connect.codex', agentName: 'Codex', icon: <SquareTerminal size={13} /> }
 ]
 
 // Everything under "How it works" — enable the bridge, pick an access group
@@ -65,6 +68,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
   // Hidden until asked for, and re-hidden whenever a new command is issued —
   // revealing one token must not silently reveal the next one.
   const [revealed, setRevealed] = useState(false)
+  const t = useT()
 
   useEffect(() => {
     void Promise.all([window.opsmaxx?.aiPolicy.listGroups(), window.opsmaxx?.aiMcp.getConfig?.()]).then(
@@ -107,24 +111,24 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         const result = await api.aiMcp.setConfig({ enabled: true })
         if (result.error) {
           throw new StepError(
-            `OpsMaxx could not listen on port ${config.port}: ${result.error}. Another program is probably using it.`,
-            { label: 'Change the port', run: () => openAi('security') }
+            t('ai.security.bindFailed', { port: config.port, error: result.error }),
+            { label: t('ai.connect.changePort'), run: () => openAi('security') }
           )
         }
       }
 
       const status = await api.aiMcp.status()
       if (!status?.running || !status.port) {
-        throw new StepError('AI & MCP access did not start, so there is nothing for the agent to connect to.', {
-          label: 'Open AI settings',
+        throw new StepError(t('ai.connect.didNotStart'), {
+          label: t('ai.connect.openAiSettings'),
           run: () => openAi('security')
         })
       }
 
       const workspaces = (await api.aiPolicy.listWorkspaces()) ?? []
       if (workspaces.length === 0) {
-        throw new StepError('There are no workspaces yet, and an agent session has to be scoped to at least one.', {
-          label: 'Open Connections',
+        throw new StepError(t('ai.connect.noWorkspaces'), {
+          label: t('ai.connect.openConnections'),
           run: () => useApp.getState().setActivity('connections')
         })
       }
@@ -150,8 +154,8 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         mode: chosen
       })
       if (!created) {
-        throw new StepError('OpsMaxx could not issue a session for this agent.', {
-          label: 'Create one by hand',
+        throw new StepError(t('ai.connect.noSession'), {
+          label: t('ai.connect.createByHand'),
           run: () => openAi('agents')
         })
       }
@@ -160,13 +164,13 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         const command = await api.aiMcp.claudeCodeCommand(created.token, status.port)
         await navigator.clipboard.writeText(command)
         setReady({ target, command })
-        toast('Command copied — paste it in a terminal')
+        toast(t('ai.connect.commandCopiedPaste'))
       } else {
         const label = FILE_CLIENTS[target]
         const write = target === 'codex' ? api.aiMcp.writeCodexConfig : api.aiMcp.writeClaudeDesktopConfig
         if (typeof write !== 'function') {
-          throw new StepError(`This build of OpsMaxx cannot configure ${label} for you.`, {
-            label: 'Check for updates',
+          throw new StepError(t('ai.connect.cannotConfigure', { client: label }), {
+            label: t('ai.connect.checkUpdates'),
             run: () => openSettings('general')
           })
         }
@@ -174,9 +178,9 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         // Nothing in the app can fix a config file it is not allowed to write,
         // so this one says what happened and stops there rather than offering a
         // button that would do nothing.
-        if (!result.ok) throw new StepError(result.error ?? `The ${label} config file could not be written.`)
+        if (!result.ok) throw new StepError(result.error ?? t('ai.connect.writeFailed', { client: label }))
         setReady({ target, path: result.path, backedUpTo: result.backedUpTo })
-        toast(`${label} is configured. Quit it and open it again to pick OpsMaxx up.`, 'ok')
+        toast(t('ai.connect.configured', { client: label }), 'ok')
       }
       onConnected?.()
     } catch (err) {
@@ -191,17 +195,15 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
 
   return (
     <div style={{ marginTop: 24 }}>
-      <h3>Connect an agent</h3>
+      <h3>{t('ai.connect.title')}</h3>
       <div className="s-desc" style={{ marginBottom: 12 }}>
-        Turns on the bridge, creates a session across your workspaces and hands it to the client. The session does not expire — revoke it under Active Sessions.
+        {t('ai.connect.intro')}
       </div>
 
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Profile</div>
-          <div className="s-desc">
-            What the agent may do, and how much it asks first. Change it any time under Active Sessions.
-          </div>
+          <div className="s-title">{t('ai.modePicker.sectionProfile')}</div>
+          <div className="s-desc">{t('ai.connect.profileDesc')}</div>
         </div>
         <ModePicker value={chosen} onChange={setMode} />
       </div>
@@ -209,8 +211,8 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
       {chosen === 'custom' && (
       <div className="setting-row">
         <div className="s-info">
-          <div className="s-title">Access group</div>
-          <div className="s-desc">The Custom profile does exactly what this group says.</div>
+          <div className="s-title">{t('ai.connect.accessGroup')}</div>
+          <div className="s-desc">{t('ai.connect.accessGroupDesc')}</div>
         </div>
         <select
           className="input"
@@ -221,7 +223,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
           {/* A real resolved answer, so it is on the list: a <select> whose
               value matches no option renders blank, which reads as the first
               group rather than as no access. */}
-          <option value="">No AI Access</option>
+          <option value="">{t('ai.connect.noAccess')}</option>
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}
@@ -232,14 +234,14 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
       )}
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 4 }}>
-        {TARGETS.map((t) => (
+        {TARGETS.map((target) => (
           <button
-            key={t.id}
+            key={target.id}
             className="btn sm primary"
             disabled={busy !== null}
-            onClick={() => void connect(t.id, t.agentName)}
+            onClick={() => void connect(target.id, target.agentName)}
           >
-            {t.icon} {busy === t.id ? 'Connecting…' : t.label}
+            {target.icon} {busy === target.id ? t('ai.connect.connecting') : t(target.labelKey)}
           </button>
         ))}
       </div>
@@ -248,7 +250,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         <div className="setting-row" style={{ marginTop: 12, alignItems: 'flex-start' }}>
           <div className="s-info">
             <div className="s-title">
-              <TriangleAlert size={13} /> Could not connect
+              <TriangleAlert size={13} /> {t('ai.connect.couldNotConnect')}
             </div>
             <div className="s-desc">{error.text}</div>
           </div>
@@ -271,12 +273,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
               for their team should not need the reader to know which half of
               that sentence to believe, so the token is now actually hidden and
               the sentence says what is true. */}
-          <div className="s-desc">
-            Copied to your clipboard. Paste it into a terminal — it registers OpsMaxx with Claude
-            Code for every project. OpsMaxx keeps only a hash of the token, so this is the only
-            time it can show it to you; the copy on your clipboard is the whole command, token
-            included.
-          </div>
+          <div className="s-desc">{t('ai.connect.copiedExplain')}</div>
           <div className="setting-row">
             <div className="s-info">
               <div className="s-title mono" style={{ wordBreak: 'break-all' }}>
@@ -290,12 +287,12 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
                 onClick={() => setRevealed((r) => !r)}
                 title={
                   revealed
-                    ? 'Hide the token again'
-                    : 'Show the token — anyone who can see this screen can then read it'
+                    ? t('ai.connect.hideTokenTitle')
+                    : t('ai.connect.revealTokenTitle')
                 }
               >
                 {revealed ? <EyeOff size={13} /> : <Eye size={13} />}
-                {revealed ? 'Hide' : 'Reveal'}
+                {revealed ? t('common.hide') : t('ai.connect.reveal')}
               </button>
             )}
             {/* Copies the real command whatever the field is showing: the
@@ -305,10 +302,10 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
               className="btn sm"
               onClick={() => {
                 void navigator.clipboard.writeText(ready.command ?? '')
-                toast('Command copied')
+                toast(t('ai.connect.commandCopied'))
               }}
             >
-              <Copy size={13} /> Copy again
+              <Copy size={13} /> {t('ai.connect.copyAgain')}
             </button>
           </div>
         </div>
@@ -318,13 +315,14 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         <div className="settings-section" style={{ marginTop: 12 }}>
           <h3>{FILE_CLIENTS[ready.target]}</h3>
           <div className="s-desc">
-            Written to <code className="mono">{ready.path}</code>. That file is only read at
-            startup, so quit the app completely and reopen it — OpsMaxx then appears in its
-            tools.
+            <Trans i18nKey="ai.connect.written" components={{ path: <code className="mono">{ready.path}</code> }} />
             {ready.backedUpTo ? (
               <>
                 {' '}
-                The previous file was copied to <code className="mono">{ready.backedUpTo}</code>.
+                <Trans
+                  i18nKey="ai.connect.backedUp"
+                  components={{ path: <code className="mono">{ready.backedUpTo}</code> }}
+                />
               </>
             ) : null}
           </div>

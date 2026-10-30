@@ -15,6 +15,8 @@ import { ERROR_RATE_DEFAULT_THRESHOLD } from '../../../shared/errorRate'
 import { CERT_EXPIRY_DAYS, isCertificateExpiringSoon } from '../../../shared/posture'
 import { EVENT_ALERT_KINDS } from '../../../shared/webhook'
 import type { RunbookNote, RunbookView, RunbooksBridge } from '../../../shared/runbooks'
+import { englishT, type MessageKey, type Translate } from '../../../shared/i18n'
+import { t as tr } from '../lib/i18n'
 import type {
   AlertKind as WebhookAlertKind,
   EventAlertKind,
@@ -911,30 +913,40 @@ export function hydrateAlerts(): Promise<void> {
   return hydrating
 }
 
-/** Short, for the status-bar chip and the notification title. */
-export const LABEL: Record<AlertKind, string> = {
-  'vpn-down': 'VPN down',
-  'service-down': 'Service down',
-  'pod-crashloop': 'Pods restarting',
-  'vpn-degraded': 'VPN silent',
-  cpu: 'CPU',
-  ram: 'Memory',
-  disk: 'Disk',
-  inode: 'Inodes',
-  load: 'Load',
-  'host-unreachable': 'Unreachable',
-  'job-failed': 'Job failed',
-  'tunnel-down': 'Tunnel down',
-  'backup-failed': 'Backup',
-  'db-alarm': 'Database alarm',
-  'db-watch': 'Database watch',
-  'oom-kill': 'OOM kill',
-  'cert-expiry': 'Certificate',
-  'vpn-cert-expiry': 'VPN certificate',
-  'error-rate': 'Error rate'
+const LABEL_KEYS: Record<AlertKind, MessageKey> = {
+  'vpn-down': 'store.alerts.label.vpnDown',
+  'service-down': 'store.alerts.label.serviceDown',
+  'pod-crashloop': 'store.alerts.label.podCrashloop',
+  'vpn-degraded': 'store.alerts.label.vpnDegraded',
+  cpu: 'store.alerts.label.cpu',
+  ram: 'store.alerts.label.ram',
+  disk: 'store.alerts.label.disk',
+  inode: 'store.alerts.label.inode',
+  load: 'store.alerts.label.load',
+  'host-unreachable': 'store.alerts.label.hostUnreachable',
+  'job-failed': 'store.alerts.label.jobFailed',
+  'tunnel-down': 'store.alerts.label.tunnelDown',
+  'backup-failed': 'store.alerts.label.backupFailed',
+  'db-alarm': 'store.alerts.label.dbAlarm',
+  'db-watch': 'store.alerts.label.dbWatch',
+  'oom-kill': 'store.alerts.label.oomKill',
+  'cert-expiry': 'store.alerts.label.certExpiry',
+  'vpn-cert-expiry': 'store.alerts.label.vpnCertExpiry',
+  'error-rate': 'store.alerts.label.errorRate'
 }
 
-// What the number is measuring, for the sentences a person reads. Disk says
+/** Short, for the status-bar chip and the notification title. Each read
+ *  translates, so it is in whatever language is current when it is shown. */
+export const LABEL: Readonly<Record<AlertKind, string>> = Object.defineProperties(
+  {} as Record<AlertKind, string>,
+  Object.fromEntries(
+    Object.entries(LABEL_KEYS).map(([kind, k]) => [kind, { get: () => tr(k), enumerable: true }])
+  )
+)
+
+// What the number is measuring, for the webhook summary — English always, as
+// everything outbound is; RAISED_BODY says the same to the person at the desk
+// in their own language. Disk says
 // "root filesystem" and means it: metrics.ts probes `df -kP /` and nothing
 // else, so a host with a full /var and a roomy / raises nothing here, and an
 // alert that said "disk" would be claiming to have looked at more than it did.
@@ -957,22 +969,22 @@ const SUBJECT: Record<NumericAlertKind, string> = {
   'error-rate': 'Journal lines at error or worse'
 }
 
-// How each kind's line reads in a sentence, because the kinds do not compare
+// The desktop notification's body, per kind, because the kinds do not compare
 // alike. Disk raises STRICTLY above DISK_DANGER — "at or above 85%" was a
 // claim the code does not implement — and correspondingly clears at 85 itself.
-// CPU and memory raise at or above their line.
-const OVER_WORD: Record<NumericAlertKind, string> = {
-  cpu: 'at or above',
-  ram: 'at or above',
-  disk: 'above',
-  inode: 'above',
-  load: 'at or above',
-  // At or below, matching isCertificateExpiringSoon: a certificate ON thirty
-  // days is inside the window certbot would already have renewed in.
-  'cert-expiry': 'at or below',
-  'vpn-cert-expiry': 'at or below',
-  // Strictly above, matching errorRateReport's `perMinute > threshold`.
-  'error-rate': 'above'
+// CPU and memory raise at or above their line. Certificates are at or below,
+// matching isCertificateExpiringSoon: a certificate ON thirty days is inside the
+// window certbot would already have renewed in. The error rate is strictly
+// above, matching errorRateReport's `perMinute > threshold`.
+const RAISED_BODY: Record<NumericAlertKind, MessageKey> = {
+  cpu: 'store.alerts.notify.raisedBody.cpu',
+  ram: 'store.alerts.notify.raisedBody.ram',
+  disk: 'store.alerts.notify.raisedBody.disk',
+  inode: 'store.alerts.notify.raisedBody.inode',
+  load: 'store.alerts.notify.raisedBody.load',
+  'cert-expiry': 'store.alerts.notify.raisedBody.certExpiry',
+  'vpn-cert-expiry': 'store.alerts.notify.raisedBody.vpnCertExpiry',
+  'error-rate': 'store.alerts.notify.raisedBody.errorRate'
 }
 const backBelow: Record<NumericAlertKind, (threshold: number) => string> = {
   cpu: (t) => `back below ${t}%`,
@@ -1027,40 +1039,50 @@ const fmt = (v: number): number => Number(v.toFixed(1))
 // ---------------------------------------------------------------------------
 
 /** The value alone, for the status-bar chip. */
+const percentChip = (v: number): string => tr('store.alerts.chip.percent', { value: fmt(v) })
+const daysChip = (v: number): string =>
+  v < 0 ? tr('store.alerts.chip.overdue', { days: fmt(-v) }) : tr('store.alerts.chip.left', { days: fmt(v) })
 const VALUE_CHIP: Record<NumericAlertKind, (v: number) => string> = {
-  cpu: (v) => `${fmt(v)}%`,
-  ram: (v) => `${fmt(v)}%`,
-  disk: (v) => `${fmt(v)}%`,
-  inode: (v) => `${fmt(v)}%`,
-  load: (v) => `${fmt(v)} per core`,
-  'cert-expiry': (v) => (v < 0 ? `${fmt(-v)}d overdue` : `${fmt(v)}d left`),
-  'vpn-cert-expiry': (v) => (v < 0 ? `${fmt(-v)}d overdue` : `${fmt(v)}d left`),
-  'error-rate': (v) => `${fmt(v)}/min`
+  cpu: percentChip,
+  ram: percentChip,
+  disk: percentChip,
+  inode: percentChip,
+  load: (v) => tr('store.alerts.chip.load', { value: fmt(v) }),
+  'cert-expiry': daysChip,
+  'vpn-cert-expiry': daysChip,
+  'error-rate': (v) => tr('store.alerts.chip.errorRate', { value: fmt(v) })
 }
 
 /** The value in a sentence, preposition and all. The five percentages and the
- *  load average keep the "at" they have always had. */
-const VALUE_PHRASE: Record<NumericAlertKind, (v: number) => string> = {
-  cpu: (v) => `at ${fmt(v)}%`,
-  ram: (v) => `at ${fmt(v)}%`,
-  disk: (v) => `at ${fmt(v)}%`,
-  inode: (v) => `at ${fmt(v)}%`,
-  load: (v) => `at ${fmt(v)} per core`,
-  'cert-expiry': (v) =>
-    v < 0 ? `${fmt(-v)} days PAST expiry` : v === 0 ? 'expiring today' : `${fmt(v)} days from expiry`,
+ *  load average keep the "at" they have always had. Told which language to say
+ *  it in: the notification is the reader's, the webhook summary is English. */
+const percentPhrase = (say: Translate, v: number): string => say('store.alerts.valuePhrase.percent', { value: fmt(v) })
+const VALUE_PHRASE: Record<NumericAlertKind, (say: Translate, v: number) => string> = {
+  cpu: percentPhrase,
+  ram: percentPhrase,
+  disk: percentPhrase,
+  inode: percentPhrase,
+  load: (say, v) => say('store.alerts.valuePhrase.load', { value: fmt(v) }),
+  'cert-expiry': (say, v) =>
+    v < 0
+      ? say('store.alerts.valuePhrase.certPast', { count: fmt(-v) })
+      : v === 0
+        ? say('store.alerts.valuePhrase.certToday')
+        : say('store.alerts.valuePhrase.certLeft', { count: fmt(v) }),
   // Says what stops working, not just that a date passed. An expired client
   // certificate does not degrade the VPN -- the connect fails outright, and
   // openvpn's own log only says so afterwards, which is the gap this closes.
-  'vpn-cert-expiry': (v) =>
+  'vpn-cert-expiry': (say, v) =>
     v < 0
-      ? `${fmt(-v)} days PAST expiry — this profile can no longer connect`
+      ? say('store.alerts.valuePhrase.vpnCertPast', { count: fmt(-v) })
       : v === 0
-        ? 'expiring today'
-        : `${fmt(v)} days from expiry`,
+        ? say('store.alerts.valuePhrase.certToday')
+        : say('store.alerts.valuePhrase.certLeft', { count: fmt(v) }),
   // The count as well as the rate, because "at 6 a minute" hides how much
   // there is to read and the hour is what somebody will actually go and look
   // at. The window is fixed at sixty minutes by the sweep it rides.
-  'error-rate': (v) => `at ${fmt(v)} a minute — about ${Math.round(v * 60)} in the last hour`
+  'error-rate': (say, v) =>
+    say('store.alerts.valuePhrase.errorRate', { value: fmt(v), hour: Math.round(v * 60) })
 }
 
 // The wire name for each kind. A Record rather than a ternary, so adding a kind
@@ -1307,19 +1329,17 @@ function evaluate(
   record(kind, 'raised', { serverId, serverName, value, threshold, at: now })
 
   const mins = existing ? Math.round((now - existing.since) / 60000) : 0
-  const forHow = mins >= 1 ? ` for ${mins} min` : ''
+  const forHow = mins >= 1 ? tr('store.alerts.notify.forMinutes', { mins }) : ''
   // Damping is announced, never silent. A feature that quietly stops talking is
   // indistinguishable from one that has broken, and the person who needs to
   // know an alert is being damped is exactly the person about to mute it.
   const dampHours = Math.round(FLAP_DAMP_MS / 3_600_000)
   const quiet = tripped
-    ? ` This has crossed the line ${FLAP_CROSSINGS} times in ${dampHours} hours, so nothing further ` +
-      `will be said about it until it has gone ${dampHours} hours without crossing again. ` +
-      `The Alerts tab still lists every crossing.`
+    ? tr('store.alerts.notify.dampedCrossing', { crossings: FLAP_CROSSINGS, hours: dampHours })
     : ''
   void window.opsmaxx?.notify.show(
-    `${serverName}: ${LABEL[kind]} ${VALUE_PHRASE[kind](value)}`,
-    `${SUBJECT[kind]} has been ${OVER_WORD[kind]} ${threshold}${UNIT[kind]}${forHow}.${quiet}`
+    tr('store.alerts.notify.title', { server: serverName, label: LABEL[kind], value: VALUE_PHRASE[kind](tr, value) }),
+    tr(RAISED_BODY[kind], { threshold, forHow, quiet })
   )
   // Same repeat window as the desktop notification, so the endpoint sees the
   // same cadence a person does rather than one message per sample.
@@ -1330,7 +1350,7 @@ function evaluate(
     kind: WEBHOOK_KIND[kind],
     server: serverName,
     summary:
-      `${serverName}: ${SUBJECT[kind]} ${VALUE_PHRASE[kind](value)} ` +
+      `${serverName}: ${SUBJECT[kind]} ${VALUE_PHRASE[kind](englishT, value)} ` +
       `(threshold ${threshold}${UNIT[kind]})`,
     at: new Date(now).toISOString(),
     value: fmt(value),
@@ -1361,43 +1381,54 @@ function evaluate(
 // because remote text in an outbound field is easy to get wrong.
 // ---------------------------------------------------------------------------
 
+// `raised` is said twice — to the person, translated, and to the webhook, in
+// English — so it is told which. `resolved` only ever goes to the webhook.
 const STATE_WORDS: Record<
   StateAlertKind,
-  { raised: (name: string, detail: string) => string; resolved: (name: string) => string }
+  { raised: (say: Translate, name: string, detail: string) => string; resolved: (name: string) => string }
 > = {
   'host-unreachable': {
-    raised: (name) => `${name} did not answer the last check`,
+    raised: (say, name) => say('store.alerts.state.hostUnreachable', { name }),
     resolved: (name) => `${name} is answering again`
   },
   'backup-failed': {
     // Named for what is missing rather than for what errored: a schedule that
     // stopped and a run that failed both end here, and in both the operator
     // does not have the backup they think they have.
-    raised: (_name, detail) => detail || 'A backup is missing or failed',
+    raised: (say, _name, detail) => detail || say('store.alerts.state.backupFailed'),
     resolved: () => 'A backup has succeeded again'
   },
   'job-failed': {
-    raised: (name, detail) => `${name} failed a job step${detail ? ` (${detail})` : ''}`,
+    raised: (say, name, detail) =>
+      detail
+        ? say('store.alerts.state.jobFailedDetail', { name, detail })
+        : say('store.alerts.state.jobFailed', { name }),
     resolved: (name) => `${name} has completed a job step since`
   },
   'tunnel-down': {
-    raised: (name) => `Tunnel ${name} is in error`,
+    raised: (say, name) => say('store.alerts.state.tunnelDown', { name }),
     resolved: (name) => `Tunnel ${name} is carrying traffic again`
   },
   // `name` is the check's name and the detail is the transport's own words
   // about why it failed. Neither is the URL: see the note on the kind.
   'service-down': {
-    raised: (name, detail) => `${name} is not answering${detail ? ` (${detail})` : ''}`,
+    raised: (say, name, detail) =>
+      detail
+        ? say('store.alerts.state.serviceDownDetail', { name, detail })
+        : say('store.alerts.state.serviceDown', { name }),
     resolved: (name) => `${name} is answering again`
   },
   'vpn-down': {
-    raised: (name) => `VPN ${name} is in error`,
+    raised: (say, name) => say('store.alerts.state.vpnDown', { name }),
     resolved: (name) => `VPN ${name} is connected again`
   },
   // The name here is a cluster context, not a server -- see the note on the
   // kind. The detail carries which pod, already scrubbed.
   'pod-crashloop': {
-    raised: (name, detail) => `${name}: ${detail || 'a pod is restarting repeatedly'}`,
+    raised: (say, name, detail) =>
+      detail
+        ? say('store.alerts.state.podCrashloopDetail', { name, detail })
+        : say('store.alerts.state.podCrashloop', { name }),
     resolved: (name) => `${name}: no pod restarted since the last check`
   },
   // Says what is wrong rather than that something is, because the fix is a
@@ -1405,7 +1436,7 @@ const STATE_WORDS: Record<
   // investigated. Never an endpoint in the words -- see the note above this
   // table about what reaches an outbound field.
   'vpn-degraded': {
-    raised: (name) => `VPN ${name} is up but not passing traffic`,
+    raised: (say, name) => say('store.alerts.state.vpnDegraded', { name }),
     resolved: (name) => `VPN ${name} is passing traffic again`
   },
   // The resolve is a REAL observation and not an assumption, which is what
@@ -1414,15 +1445,17 @@ const STATE_WORDS: Record<
   // answers zero. The wording says the window rather than "is fine", because
   // the window is the whole of what was established.
   'oom-kill': {
-    raised: (name, detail) =>
-      `${name} has killed a process for memory${detail ? ` (${detail})` : ''}`,
+    raised: (say, name, detail) =>
+      detail
+        ? say('store.alerts.state.oomKillDetail', { name, detail })
+        : say('store.alerts.state.oomKill', { name }),
     resolved: (name) => `${name} has recorded no further OOM kill for a day`
   }
 }
 
-const EVENT_WORDS: Record<EventAlertKind, (name: string, detail: string) => string> = {
-  'db-alarm': (name, detail) => `${name}: ${detail} is in alarm`,
-  'db-watch': (name, detail) => `${name}: ${detail} is worth watching`
+const EVENT_WORDS: Record<EventAlertKind, MessageKey> = {
+  'db-alarm': 'store.alerts.event.dbAlarm',
+  'db-watch': 'store.alerts.event.dbWatch'
 }
 
 // The same character class systemd unit names get, and for the same reason: a
@@ -1536,12 +1569,13 @@ export function checkStateAlert(
 
   const dampHours = Math.round(FLAP_DAMP_MS / 3_600_000)
   const quiet = tripped
-    ? ` This has happened ${FLAP_CROSSINGS} times in ${dampHours} hours, so nothing further will ` +
-      `be said about it until it has gone ${dampHours} hours without happening again. ` +
-      `The Alerts tab still lists every one.`
+    ? tr('store.alerts.notify.dampedHappening', { crossings: FLAP_CROSSINGS, hours: dampHours })
     : ''
-  const summary = STATE_WORDS[kind].raised(who, what)
-  void window.opsmaxx?.notify.show(`${who}: ${LABEL[kind]}`, `${summary}.${quiet}`)
+  const summary = STATE_WORDS[kind].raised(englishT, who, what)
+  void window.opsmaxx?.notify.show(
+    tr('store.alerts.notify.stateTitle', { name: who, label: LABEL[kind] }),
+    tr('store.alerts.notify.body', { summary: STATE_WORDS[kind].raised(tr, who, what), quiet })
+  )
   void window.opsmaxx?.webhook?.notify({
     source: 'opsmaxx',
     version: APP_VERSION,
@@ -1612,16 +1646,14 @@ export function noteAlertEvent(
     return
   }
   const tripped = noteCrossing(k, at)
-  const summary = EVENT_WORDS[kind](who, what)
+  const summary = englishT(EVENT_WORDS[kind], { name: who, detail: what })
   const dampHours = Math.round(FLAP_DAMP_MS / 3_600_000)
   void window.opsmaxx?.notify.show(
-    `${who}: ${LABEL[kind]}`,
-    `${summary}.` +
-      (tripped
-        ? ` This has happened ${FLAP_CROSSINGS} times in ${dampHours} hours, so nothing further ` +
-          `will be said about it until it has gone ${dampHours} hours without happening again. ` +
-          `The Alerts tab still lists every one.`
-        : '')
+    tr('store.alerts.notify.stateTitle', { name: who, label: LABEL[kind] }),
+    tr('store.alerts.notify.body', {
+      summary: tr(EVENT_WORDS[kind], { name: who, detail: what }),
+      quiet: tripped ? tr('store.alerts.notify.dampedHappening', { crossings: FLAP_CROSSINGS, hours: dampHours }) : ''
+    })
   )
   void window.opsmaxx?.webhook?.notify({
     source: 'opsmaxx',
@@ -1643,10 +1675,10 @@ export function noteAlertEvent(
 /** The durations the inbox offers. An hour is "I am on it", eight hours is
  *  "not during this shift", a day is "not until tomorrow". Longer than a day is
  *  what acknowledging is for. */
-export const SNOOZE_CHOICES: readonly { label: string; ms: number }[] = [
-  { label: '1 hour', ms: 60 * 60 * 1000 },
-  { label: '8 hours', ms: 8 * 60 * 60 * 1000 },
-  { label: '24 hours', ms: 24 * 60 * 60 * 1000 }
+export const SNOOZE_CHOICES: readonly { readonly label: string; ms: number }[] = [
+  { get label() { return tr('store.alerts.snooze.oneHour') }, ms: 60 * 60 * 1000 },
+  { get label() { return tr('store.alerts.snooze.eightHours') }, ms: 8 * 60 * 60 * 1000 },
+  { get label() { return tr('store.alerts.snooze.oneDay') }, ms: 24 * 60 * 60 * 1000 }
 ]
 
 /**
@@ -1803,18 +1835,18 @@ export function checkUnitAlerts(serverId: string, serverName: string, units: str
   else failedUnits.set(serverId, current)
 
   if (fresh.length > 0) {
-    const what = fresh.length === 1 ? fresh[0] : `${fresh.length} units`
-    void window.opsmaxx?.notify.show(
-      `${serverName}: ${what} failed`,
-      fresh.join(', ')
-    )
+    const failed = (say: Translate): string =>
+      fresh.length === 1
+        ? say('store.alerts.notify.unitFailed', { server: serverName, unit: fresh[0] })
+        : say('store.alerts.notify.unitsFailed', { server: serverName, count: fresh.length })
+    void window.opsmaxx?.notify.show(failed(tr), fresh.join(', '))
     void window.opsmaxx?.webhook?.notify({
       source: 'opsmaxx',
       version: APP_VERSION,
       event: 'raised',
       kind: 'unit-failed',
       server: serverName,
-      summary: `${serverName}: ${what} failed`,
+      summary: failed(englishT),
       at: new Date(now).toISOString(),
       units: fresh
     })
@@ -2166,7 +2198,7 @@ export function checkErrorRateAlert(
 ): void {
   if (!useApp.getState().settings.resourceAlertsEnabled) return
   if (perMinute === null) return
-  // Strictly above, which is what OVER_WORD says out loud and what
+  // Strictly above, which is what RAISED_BODY says out loud and what
   // errorRateReport compares — the disk kind's lesson, where "at or above 85%"
   // was a claim the code did not implement.
   evaluate(serverId, serverName, 'error-rate', perMinute, threshold, Date.now(), perMinute > threshold)
@@ -2238,9 +2270,7 @@ export function resetAlertsForTests(): void {
  * process still holds the preload bundle it booted with, so this is a real
  * state and not a theoretical one.
  */
-export const RUNBOOK_BRIDGE_MISSING =
-  'This build cannot reach the runbook — the preload bridge has no runbooks channel. Nothing ' +
-  'was read, so this is not a claim that there is nothing to read. Restart the app.'
+export const RUNBOOK_BRIDGE_MISSING_KEY = 'store.alerts.runbookBridgeMissing'
 
 /**
  * The runbooks half of the preload bridge.

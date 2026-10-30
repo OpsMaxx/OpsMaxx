@@ -3,8 +3,9 @@ import { Check, X } from 'lucide-react'
 import type { ApprovalRequest, ApprovalScope } from '../../../../shared/mcp'
 import { approvalWhere, describeConsequence, formatRiskLabel, riskTone } from '../../../../shared/approvalRisk'
 import { bridgeOn } from '../../lib/bridge'
-import { LATER_WRITES_UNSEEN, WritePreview, capabilityLabel, sessionGrantLabel } from './ApprovalDialog'
+import { WritePreview, capabilityLabel, sessionGrantLabel } from './ApprovalDialog'
 import { useArming } from '../../hooks/useArming'
+import { useT } from '../../lib/i18n'
 
 export function AiApprovals(): React.JSX.Element {
   // `null` until the first read comes back, NOT `[]`.
@@ -26,6 +27,7 @@ export function AiApprovals(): React.JSX.Element {
   // moves a different request's Approve under the pointer, so any change to
   // what is waiting re-arms every yes on the page.
   const { armed, allow, noteKey } = useArming((approvals ?? []).map((a) => a.id).join(','))
+  const t = useT()
 
   const load = (): void => {
     void window.opsmaxx?.aiMcp
@@ -41,10 +43,10 @@ export function AiApprovals(): React.JSX.Element {
   useEffect(() => {
     load()
     const off = bridgeOn('aiMcp.onApprovalEvent', window.opsmaxx?.aiMcp?.onApprovalEvent, load)
-    const t = setInterval(load, 3000)
+    const timer = setInterval(load, 3000)
     return () => {
       off?.()
-      clearInterval(t)
+      clearInterval(timer)
     }
   }, [])
 
@@ -56,21 +58,15 @@ export function AiApprovals(): React.JSX.Element {
 
   return (
     <div className="settings-section">
-      <h2>Approvals</h2>
-      <div className="sub">
-        Actions an access group marked ASK wait here for your decision. An AI agent can never approve
-        its own request — only this UI can.
-      </div>
+      <h2>{t('nav.ai.approvals')}</h2>
+      <div className="sub">{t('ai.approvals.intro')}</div>
 
       {unreadable ? (
-        <div className="s-desc state-unknown">
-          The list of pending approvals could not be read, so this is not a statement that none are
-          waiting.
-        </div>
+        <div className="s-desc state-unknown">{t('ai.approvals.unreadable')}</div>
       ) : approvals === null ? (
-        <div className="s-desc state-unknown">Checking for anything waiting…</div>
+        <div className="s-desc state-unknown">{t('ai.approvals.checking')}</div>
       ) : approvals.length === 0 ? (
-        <div className="s-desc">Nothing waiting on you right now.</div>
+        <div className="s-desc">{t('ai.approvals.nothingWaiting')}</div>
       ) : null}
 
       {/* Same vocabulary as the modal, from the same module. This list used to
@@ -111,18 +107,18 @@ export function AiApprovals(): React.JSX.Element {
               {consequence.text}
             </div>
             <div className="r-sub mono">{a.action}</div>
-            <div className="r-sub">Permission: {capabilityLabel(a.capability)}</div>
-            {a.policyReason && <div className="r-sub">Rule: {a.policyReason}</div>}
+            <div className="r-sub">{t('ai.approvals.permission', { permission: capabilityLabel(a.capability) })}</div>
+            {a.policyReason && <div className="r-sub">{t('ai.approvals.rule', { rule: a.policyReason })}</div>}
             {a.contentPreview && <WritePreview agentName={a.agentName} preview={a.contentPreview} />}
             {a.contentPreview && grantLabel && (
               <div className="r-sub" style={{ color: 'var(--warn)' }}>
-                {LATER_WRITES_UNSEEN}
+                {t('ai.approval.laterWritesUnseen')}
               </div>
             )}
           </div>
           <div className="spacer" />
           <button className="btn sm danger" onClick={() => respond(a.id, 'denied')}>
-            <X size={13} /> Deny
+            <X size={13} /> {t('ai.approvals.deny')}
           </button>
           {grantLabel && (
             <button
@@ -144,7 +140,7 @@ export function AiApprovals(): React.JSX.Element {
               if (allow(e)) void respond(a.id, 'approved', 'once')
             }}
           >
-            <Check size={13} /> Approve once
+            <Check size={13} /> {t('ai.approvals.approveOnce')}
           </button>
         </div>
         )
@@ -157,10 +153,8 @@ export function AiApprovals(): React.JSX.Element {
           resolved and the agent has long since been answered. */}
       {recent.length > 0 && (
         <>
-          <h3 style={{ marginTop: 20 }}>Recently resolved</h3>
-          <div className="sub">
-            Kept until OpsMaxx restarts. The audit log is the permanent record.
-          </div>
+          <h3 style={{ marginTop: 20 }}>{t('ai.approvals.recentTitle')}</h3>
+          <div className="sub">{t('ai.approvals.recentSub')}</div>
           {recent.map((a) => (
             <div className="list-row" key={a.id} style={{ opacity: 0.75 }}>
               <div>
@@ -168,17 +162,21 @@ export function AiApprovals(): React.JSX.Element {
                   {a.agentName} ·{' '}
                   <span style={{ color: a.status === 'approved' ? 'var(--text-muted)' : 'var(--warn)' }}>
                     {a.status === 'timeout'
-                      ? 'Nobody answered — denied'
+                      ? t('ai.approvals.timedOut')
                       : a.status === 'disconnected'
-                        ? 'Agent disconnected — not run'
+                        ? t('ai.approvals.disconnected')
                         : a.grantedScope === 'session'
-                          ? 'approved for this session'
-                          : a.status}
+                          ? t('ai.approvals.approvedSession')
+                          : a.status === 'approved'
+                            ? t('ai.approvals.approved')
+                            : a.status === 'denied'
+                              ? t('ai.approvals.denied')
+                              : a.status}
                   </span>
                 </div>
                 <div className="r-sub">{approvalWhere(a)}</div>
                 <div className="r-sub mono">{a.action}</div>
-                {a.policyReason && <div className="r-sub">Rule: {a.policyReason}</div>}
+                {a.policyReason && <div className="r-sub">{t('ai.approvals.rule', { rule: a.policyReason })}</div>}
               </div>
             </div>
           ))}

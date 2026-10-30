@@ -5,6 +5,7 @@ import { KeyValueTable } from '../../common/KeyValueTable'
 import { VarField } from './AuthEditor'
 import { rowWarning } from './HeadersEditor'
 import { syncFromParams } from './requestModel'
+import { useT } from '../../../lib/i18n'
 
 export interface ParamsEditorProps {
   req: HttpRequest
@@ -18,6 +19,7 @@ export interface ParamsEditorProps {
 export function ParamsEditor({ req, onChange, chain, stripped = [], readOnly }: ParamsEditorProps): React.JSX.Element {
   const showDescription = useHttp((s) => s.prefs.kvDescriptions)
   const setPrefs = useHttp((s) => s.setPrefs)
+  const t = useT()
   return (
     <div className="hc-params">
       <KeyValueTable
@@ -28,14 +30,16 @@ export function ParamsEditor({ req, onChange, chain, stripped = [], readOnly }: 
         onShowDescription={(kvDescriptions) => setPrefs({ kvDescriptions })}
         readOnly={readOnly}
         valueCell={(row, onValue) => (
-          <VarField readOnly={readOnly} value={row.value} onChange={onValue} chain={chain} ariaLabel={`Value of ${row.key || 'parameter'}`} placeholder="Value" />
+          <VarField readOnly={readOnly} value={row.value} onChange={onValue} chain={chain}             ariaLabel={t('http.params.valueOf', { name: row.key || t('http.params.parameter') })}
+            placeholder={t('http.params.value')}
+          />
         )}
         warnFor={(row) => rowWarning(row, 'params', req.params.indexOf(row), stripped)}
       />
       {req.pathParams.length > 0 && (
         <>
-          <h4 className="hc-section ui-label">Path parameters</h4>
-          <table className="hc-path-table" aria-label="Path parameters">
+          <h4 className="hc-section ui-label">{t('http.params.pathParameters')}</h4>
+          <table className="hc-path-table" aria-label={t('http.params.pathParameters')}>
             <tbody>
               {req.pathParams.map((p) => (
                 <tr key={p.id}>
@@ -48,7 +52,7 @@ export function ParamsEditor({ req, onChange, chain, stripped = [], readOnly }: 
                         onChange({ ...req, pathParams: req.pathParams.map((x) => (x.id === p.id ? { ...x, value } : x)) })
                       }
                       chain={chain}
-                      ariaLabel={`Value of path parameter ${p.key}`}
+                      ariaLabel={t('http.params.pathValueOf', { name: p.key })}
                     />
                   </td>
                 </tr>

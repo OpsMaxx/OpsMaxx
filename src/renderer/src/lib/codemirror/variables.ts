@@ -14,6 +14,8 @@ import {
 import type { VariableScope, VariableScopeChain } from '../../../../shared/apiVariables'
 import { parseVaultReference } from '../../../../shared/apiSecrets'
 import { useVault } from '../../store/vault'
+import type { MessageKey } from '../../../../shared/i18n'
+import { t } from '../i18n'
 
 /** `{{name}}`, with optional inner spaces. The name is group 1. */
 export const VARIABLE_TOKEN = /\{\{\s*([^{}\s]+)\s*\}\}/g
@@ -81,10 +83,16 @@ export function variableDecorations(chain: VariableScopeChain): Extension {
   )
 }
 
-const SCOPE_TEXT: Record<VariableScope, string> = {
-  global: 'global',
-  collection: 'collection',
-  environment: 'environment'
+const FROM_TEXT: Record<VariableScope, MessageKey> = {
+  global: 'lib.variables.from.global',
+  collection: 'lib.variables.from.collection',
+  environment: 'lib.variables.from.environment'
+}
+
+const SCOPE_TEXT: Record<VariableScope, MessageKey> = {
+  global: 'lib.variables.scope.global',
+  collection: 'lib.variables.scope.collection',
+  environment: 'lib.variables.scope.environment'
 }
 
 /**
@@ -109,8 +117,8 @@ export function variableCardDom(chain: VariableScopeChain, name: string): HTMLEl
         'div',
         'hc-var-card-missing',
         env
-          ? `Not defined in ${env.name} (or its collection or globals)`
-          : 'Not defined in the collection or globals, and no environment is active'
+          ? t('lib.variables.notDefinedIn', { env: env.name })
+          : t('lib.variables.notDefinedNoEnv')
       )
     )
     return card
@@ -118,14 +126,26 @@ export function variableCardDom(chain: VariableScopeChain, name: string): HTMLEl
   const ref = parseVaultReference(hit.value)
   if (ref) {
     const entry = useVault.getState().entries.find((e) => e.id === ref.entryId)
-    const label = entry ? entry.name : useVault.getState().unlocked ? 'a vault entry that no longer exists' : 'a vault entry (vault locked)'
-    card.append(el('div', 'hc-var-card-value', `🔒 ${label}${ref.field === 'username' ? ' · username' : ''}`))
+    const label = entry
+      ? entry.name
+      : useVault.getState().unlocked
+        ? t('lib.variables.vaultEntryGone')
+        : t('lib.variables.vaultEntryLocked')
+    const shown = ref.field === 'username' ? t('lib.variables.vaultUsername', { label }) : label
+    card.append(el('div', 'hc-var-card-value', `🔒 ${shown}`))
   } else {
-    card.append(el('div', 'hc-var-card-value', hit.value === '' ? '(empty)' : hit.value))
+    card.append(el('div', 'hc-var-card-value', hit.value === '' ? t('lib.variables.empty') : hit.value))
   }
-  const from = `From ${SCOPE_TEXT[hit.scope]}${hit.scope === 'global' ? '' : ` ${hit.layer}`}`
-  const over = hit.overridden.length ? ` · overrides ${hit.overridden.map((s) => SCOPE_TEXT[s]).join(', ')}` : ''
-  card.append(el('div', 'hc-var-card-scope', from + over))
+  const from = t(FROM_TEXT[hit.scope], { layer: hit.layer })
+  card.append(
+    el(
+      'div',
+      'hc-var-card-scope',
+      hit.overridden.length
+        ? t('lib.variables.overrides', { from, scopes: hit.overridden.map((s) => t(SCOPE_TEXT[s])).join(', ') })
+        : from
+    )
+  )
   return card
 }
 

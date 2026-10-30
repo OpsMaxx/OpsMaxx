@@ -3,6 +3,7 @@ import type { MenuEntry } from '../../connections/ContextMenu'
 import { useHttp } from '../../../store/http'
 import { useApp } from '../../../store/app'
 import { keyLabel } from '../hotkeys'
+import { t } from '../../../lib/i18n'
 
 /**
  * The Layout menu (§2.5): the ⊞ button at the right of the tab strip and a
@@ -34,37 +35,42 @@ export function layoutMenuEntries(opts: { tabId: Id | null; kind: RequestKind | 
 
   const context: MenuEntry[] =
     opts.kind === 'http'
-      ? [pref('kvDescriptions', 'Description column'), pref('showAutoHeaders', 'Auto-generated headers')]
+      ? [
+          pref('kvDescriptions', t('http.layoutMenu.descriptionColumn')),
+          pref('showAutoHeaders', t('http.layoutMenu.autoHeaders'))
+        ]
       : opts.kind === 'ws'
-        ? [pref('kvDescriptions', 'Description column')]
+        ? [pref('kvDescriptions', t('http.layoutMenu.descriptionColumn'))]
         : opts.kind === 'graphql'
-          ? [pref('gqlVariablesOpen', 'Variables'), pref('gqlSchemaOpen', 'Schema explorer')]
+          ? [pref('gqlVariablesOpen', t('http.layoutMenu.variables')), pref('gqlSchemaOpen', t('http.layoutMenu.schemaExplorer'))]
           : []
-  if (context.length) context[0] = { ...context[0], section: 'This tab' }
+  if (context.length) context[0] = { ...context[0], section: t('http.layoutMenu.thisTab') }
 
   return [
-    orientation('auto', 'Auto', { section: 'Orientation' }),
+    orientation('auto', t('http.layoutMenu.auto'), { section: t('http.layoutMenu.orientation') }),
     orientation(
       'horizontal',
-      opts.forced && prefs.orientation === 'horizontal' ? 'Side by side (needs more width)' : 'Side by side'
+      opts.forced && prefs.orientation === 'horizontal'
+        ? t('http.layoutMenu.sideBySideForced')
+        : t('http.layoutMenu.sideBySide')
     ),
-    orientation('vertical', 'Stacked', { shortcut: keyLabel('http-toggle-layout') }),
+    orientation('vertical', t('http.layoutMenu.stacked'), { shortcut: keyLabel('http-toggle-layout') }),
     { label: '', separator: true },
     {
-      label: 'Sidebar',
+      label: t('http.layoutMenu.sidebar'),
       checked: !app.sidebarCollapsed,
       shortcut: keyLabel('toggle-sidebar'),
       onClick: () => app.toggleSidebar()
     },
     {
-      label: 'Response',
+      label: t('http.layoutMenu.response'),
       checked: split !== 'response-collapsed',
       disabled: !inStrip,
       shortcut: keyLabel('http-toggle-response'),
       onClick: () => toggleSplit('response-collapsed')
     },
     {
-      label: 'Request',
+      label: t('http.layoutMenu.request'),
       checked: split !== 'request-collapsed',
       disabled: !inStrip,
       shortcut: keyLabel('http-toggle-request'),
@@ -72,7 +78,7 @@ export function layoutMenuEntries(opts: { tabId: Id | null; kind: RequestKind | 
     },
     ...(context.length ? [{ label: '', separator: true }, ...context] : []),
     { label: '', separator: true },
-    { label: 'Cookies…', onClick: () => http.setOverlay('cookies') },
-    { label: 'Reset pane sizes', onClick: () => http.setPrefs({ ratios: DEFAULT_PREFS.ratios }) }
+    { label: t('http.layoutMenu.cookies'), onClick: () => http.setOverlay('cookies') },
+    { label: t('http.layoutMenu.resetSizes'), onClick: () => http.setPrefs({ ratios: DEFAULT_PREFS.ratios }) }
   ]
 }

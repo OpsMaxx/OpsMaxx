@@ -4,6 +4,7 @@ import { useApi } from '../../../store/api'
 import { useHttp } from '../../../store/http'
 import { useApp } from '../../../store/app'
 import { Modal } from '../../common/Modal'
+import { useT } from '../../../lib/i18n'
 import '../nav.css'
 
 export interface Destination {
@@ -44,6 +45,7 @@ export function MoveToDialog({
   // A folder cannot go into itself or its own subtree, so its subtree is left out.
   const options = useMemo(() => destinationsIn(ws, itemId), [ws, itemId])
   const [choice, setChoice] = useState(0)
+  const t = useT()
   const name = useApi((s) => {
     const find = (items: Item[]): Item | undefined => {
       for (const i of items) {
@@ -55,8 +57,8 @@ export function MoveToDialog({
       }
       return undefined
     }
-    return find(s.collections.find((c) => c.id === colId)?.items ?? [])?.name ?? 'item'
-  })
+    return find(s.collections.find((c) => c.id === colId)?.items ?? [])?.name
+  }) ?? t('http.moveTo.item')
   const move = (): void => {
     const d = options[choice]
     if (!d) return
@@ -68,8 +70,12 @@ export function MoveToDialog({
     onClose()
   }
   return (
-    <Modal title={`Move ${name} to…`} onClose={onClose} confirm={{ label: 'Move', onClick: move, disabled: !options.length }}>
-      <div role="radiogroup" aria-label="Destination" className="hc-dest-list">
+    <Modal
+      title={t('http.moveTo.title', { name })}
+      onClose={onClose}
+      confirm={{ label: t('http.moveTo.confirm'), onClick: move, disabled: !options.length }}
+    >
+      <div role="radiogroup" aria-label={t('http.moveTo.destination')} className="hc-dest-list">
         {options.map((d, i) => (
           <label key={`${d.collectionId}/${d.parentId}`} className="hc-dest">
             <input type="radio" name="hc-move-dest" checked={choice === i} onChange={() => setChoice(i)} /> {d.label}

@@ -2,9 +2,11 @@ import { useMemo } from 'react'
 import { Activity } from 'lucide-react'
 import { useApp, useWorkspaceServers } from '../../store/app'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import { disambiguateServerNames } from '../../../../shared/serverNames'
 
 export function MonitorSidebar(): React.JSX.Element {
+  const t = useT()
   const servers = useWorkspaceServers()
   const openServer = useApp((s) => s.openServer)
   // Two servers sharing a name render identically, and this list is one of the
@@ -15,7 +17,7 @@ export function MonitorSidebar(): React.JSX.Element {
   return (
     <div className="tree-section">
       <div className="tree-section-label">
-        <Activity size={11} /> Servers <span className="count">{servers.length}</span>
+        <Activity size={11} /> {t('monitor.sidebar.servers')} <span className="count">{servers.length}</span>
       </div>
       {servers.map((s) => (
         <div key={s.id} className="tree-row" onClick={() => openServer(s.id, 'monitor')}>

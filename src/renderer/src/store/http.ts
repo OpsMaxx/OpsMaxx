@@ -18,6 +18,7 @@ import { moveId, REOPEN_LIMIT, successorAfterClose } from '../lib/tabs'
 import { useApi } from './api'
 import { useApp } from './app'
 import { toast } from './toast'
+import { t as tr } from '../lib/i18n'
 
 // The HTTP workbench's session: open tabs, drafts, responses and layout prefs.
 // Responses live only here, in memory. The persisted slice is `getHttpSession`.
@@ -353,8 +354,8 @@ export const useHttp = create<HttpState>((set, get, api) => {
       const api = useApi.getState()
       const held = t.ref && api.collections.find((c) => c.id === t.ref!.collectionId && c.tlsReview)
       if (held) {
-        toast('Review this collection’s changes first.', 'info', {
-          label: 'Review',
+        toast(tr('store.http.reviewFirst'), 'info', {
+          label: tr('store.http.review'),
           run: () => get().openCollectionTab(held.id, 'connection')
         })
         return null

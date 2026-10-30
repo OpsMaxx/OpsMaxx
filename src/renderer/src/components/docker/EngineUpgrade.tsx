@@ -8,6 +8,7 @@ import {
 } from '../../../../shared/enginePrecheck'
 import type { PackageManager } from '../../../../shared/hostFacts'
 import type { JobSpec } from '../../../../shared/jobs'
+import { useT } from '../../lib/i18n'
 
 // Item 42's engine upgrade, on screen.
 //
@@ -39,6 +40,7 @@ export function EngineUpgradePanel({
    */
   onRun?: (spec: JobSpec) => void
 }): React.JSX.Element {
+  const t = useT()
   const [probe, setProbe] = useState<EnginePrecheckProbe | null>(null)
   const [loading, setLoading] = useState(false)
   const [confirmed, setConfirmed] = useState(false)
@@ -68,7 +70,7 @@ export function EngineUpgradePanel({
   return (
     <div style={{ marginTop: 8 }}>
       <button className="btn ghost sm" disabled={loading} onClick={() => void check()}>
-        <PackageCheck size={12} /> {probe === null ? 'Check the engine' : 'Check again'}
+        <PackageCheck size={12} /> {probe === null ? t('docker.engine.check') : t('docker.engine.checkAgain')}
       </button>
 
       {probe !== null && !probe.ok && (
@@ -81,16 +83,16 @@ export function EngineUpgradePanel({
         <>
           {/* Verbatim, because nothing here interprets it. */}
           <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: '6px 0' }}>
-            {current.packagesText === '' ? 'The package manager said nothing.' : current.packagesText}
+            {current.packagesText === '' ? t('docker.engine.packagesEmpty') : current.packagesText}
           </pre>
           <label className="row" style={{ gap: 6, alignItems: 'center' }}>
             <input
               type="checkbox"
-              aria-label="I have read the package list"
+              aria-label={t('docker.engine.confirmLabel')}
               checked={confirmed}
               onChange={(e) => setConfirmed(e.target.checked)}
             />
-            <span>I have read the above and docker-ce is installed on this server.</span>
+            <span>{t('docker.engine.confirm')}</span>
           </label>
         </>
       )}
@@ -112,7 +114,7 @@ export function EngineUpgradePanel({
               if (plan.spec !== null) onRun?.(plan.spec)
             }}
           >
-            Upgrade the engine
+            {t('docker.engine.upgrade')}
           </button>
         </>
       )}

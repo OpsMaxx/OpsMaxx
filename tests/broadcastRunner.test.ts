@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import en from '../src/shared/locales/en.json'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { BroadcastRunner } from '../src/main/services/broadcast'
@@ -305,7 +306,8 @@ describe('the panel that drives it', () => {
     expect(panel).not.toMatch(/sudo:\s*true|retryAsRoot|autoSudo/)
     // It does have to say that nothing was retried, though — silence there is
     // the same lie as a blank cron panel.
-    expect(panel).toMatch(/Nothing was retried as root/)
+    expect(panel).toContain("i18nKey=\"monitor.broadcast.refusedSudo\"")
+    expect(en['monitor.broadcast.refusedSudo']).toMatch(/Nothing was retried as root/)
   })
 
   it('has one opinion about what a result means', () => {

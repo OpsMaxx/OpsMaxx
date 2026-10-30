@@ -5,6 +5,7 @@ import { useHttp } from '../../../store/http'
 import { clsx } from '../../../lib/format'
 import { KeyValueTable } from '../../common/KeyValueTable'
 import { VarField, isLiteralSecret } from './AuthEditor'
+import { t as tr, useT } from '../../../lib/i18n'
 import './request.css'
 
 export interface HeadersEditorProps {
@@ -28,12 +29,12 @@ const STRIPPED_HEADERS = new Set(['authorization', 'proxy-authorization', 'cooki
  */
 export function rowWarning(row: Row, section: string, index: number, stripped: string[] = []): string | null {
   if (stripped.includes(`${section}.${index}.value`) && row.value === '') {
-    return 'Not kept from last session. Paste the value again, or read it from the vault.'
+    return tr('http.headers.notKept')
   }
   if (!row.enabled || !isSensitiveName(row.key) || !isLiteralSecret(row.value)) return null
   return section === 'headers' && STRIPPED_HEADERS.has(row.key.trim().toLowerCase())
-    ? 'Not saved — kept for this session only. Move it to the vault to keep it.'
-    : 'Looks like a credential. Saved and synced as plain text. Move it to the vault…'
+    ? tr('http.headers.notSaved')
+    : tr('http.headers.looksLikeCredential')
 }
 
 export function HeadersEditor({
@@ -48,6 +49,7 @@ export function HeadersEditor({
   const showAuto = useHttp((s) => s.prefs.showAutoHeaders)
   const showDescription = useHttp((s) => s.prefs.kvDescriptions)
   const setPrefs = useHttp((s) => s.setPrefs)
+  const t = useT()
 
   return (
     <div className="hc-headers">
@@ -58,10 +60,10 @@ export function HeadersEditor({
             aria-expanded={showAuto}
             onClick={() => setPrefs({ showAutoHeaders: !showAuto })}
           >
-            {showAuto ? 'Hide auto-generated headers' : `${auto.length} hidden`}
+            {showAuto ? t('http.headers.hideAuto') : t('http.headers.hiddenCount', { count: auto.length })}
           </button>
           {showAuto && (
-            <table className="hc-auto-table" aria-label="Headers OpsMaxx adds">
+            <table className="hc-auto-table" aria-label={t('http.headers.autoTable')}>
               <tbody>
                 {auto.map((h) => {
                   const replaced = isOverridden(h, rows)
@@ -69,7 +71,7 @@ export function HeadersEditor({
                     <tr key={h.name} className={clsx(replaced && 'hc-replaced')} title={h.reason}>
                       <th scope="row">{h.name}</th>
                       <td>{h.value}</td>
-                      <td className="hc-auto-why">{replaced ? 'Replaced by your header' : h.reason}</td>
+                      <td className="hc-auto-why">{replaced ? t('http.headers.replaced') : h.reason}</td>
                     </tr>
                   )
                 })}
@@ -86,12 +88,14 @@ export function HeadersEditor({
         onShowDescription={(kvDescriptions) => setPrefs({ kvDescriptions })}
         readOnly={readOnly}
         valueCell={(row, onValue) => (
-          <VarField readOnly={readOnly} value={row.value} onChange={onValue} chain={chain} ariaLabel={`Value of ${row.key || 'header'}`} placeholder="Value" />
+          <VarField readOnly={readOnly} value={row.value} onChange={onValue} chain={chain}             ariaLabel={t('http.params.valueOf', { name: row.key || t('http.headers.header') })}
+            placeholder={t('http.params.value')}
+          />
         )}
         warnFor={(row) => rowWarning(row, 'headers', rows.indexOf(row), stripped)}
         extraRowMenu={(row) =>
           onMoveToVault && isSensitiveName(row.key) && isLiteralSecret(row.value)
-            ? [{ label: 'Move to vault…', onClick: () => onMoveToVault(row.id, row.value) }]
+            ? [{ label: t('http.headers.moveToVault'), onClick: () => onMoveToVault(row.id, row.value) }]
             : []
         }
       />

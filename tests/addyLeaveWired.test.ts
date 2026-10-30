@@ -118,12 +118,17 @@ describe('leaving an account is wired end to end', () => {
     // Leaving now removes the device from the list when the relay is reachable
     // (the sidecar's `leave` op); the confirmation has to say what happens when
     // it is not, because that is the case a person discovers on another machine.
-    expect(body, 'the confirmation does not say an offline leave stays listed').toMatch(
-      /keep listing it until somebody there removes it/i
+    // The sentences are in the catalog; the row has to show them, and they
+    // have to say it.
+    const en = JSON.parse(read('src', 'shared', 'locales', 'en.json')) as Record<string, string>
+    expect(body, 'the confirmation does not say an offline leave stays listed').toContain(
+      "t('addy.leave.roster')"
     )
+    expect(en['addy.leave.roster']).toMatch(/keep listing it until somebody there removes it/i)
     expect(body, 'the last-device case is not called out, and it is the unrecoverable one').toMatch(
-      /only device/i
+      /alone \? <strong>\{t\('addy\.leave\.alone'\)\}/
     )
+    expect(en['addy.leave.alone']).toMatch(/only device/i)
   })
 
   it('the panel mounts it only when this device is on an account', () => {

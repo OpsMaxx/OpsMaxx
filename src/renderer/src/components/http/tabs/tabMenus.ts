@@ -6,6 +6,7 @@ import { useApp } from '../../../store/app'
 import { toast } from '../../../store/toast'
 import { keyLabel } from '../hotkeys'
 import { requestClose } from './closing'
+import { t } from '../../../lib/i18n'
 
 /** The last non-empty path segment of a URL template, for a scratch tab's title. */
 export function lastSegment(url: string): string {
@@ -16,11 +17,13 @@ export function lastSegment(url: string): string {
 
 /** What a tab is called in the strip (§2.9). The protocol badge is separate. */
 export function tabTitle(tab: HttpTabState, req: ApiRequest | null): string {
-  if (tab.kind === 'environments') return 'Environments'
+  if (tab.kind === 'environments') return t('http.tabs.environments')
   if (tab.kind === 'collection') {
-    return useApi.getState().collections.find((c) => c.id === tab.ref?.collectionId)?.name ?? 'Collection'
+    return (
+      useApi.getState().collections.find((c) => c.id === tab.ref?.collectionId)?.name ?? t('http.tabs.collection')
+    )
   }
-  if (!req) return 'Request'
+  if (!req) return t('http.tabs.request')
   if (tab.ref) return req.name
   // A scratch tab has no name of its own: its last path segment beside the
   // method badge ("GET" + "/users"), or its protocol's default name.
@@ -53,21 +56,21 @@ export function tabMenuEntries(tabId: Id, opts: { onRename: () => void }): MenuE
   const clean = strip.filter((t) => t.ref?.requestId && !http.isDirty(t.id)).map((t) => t.id)
 
   return [
-    { label: 'New request', shortcut: keyLabel('new-terminal'), onClick: () => http.openScratch('http') },
+    { label: t('http.tabs.newRequest'), shortcut: keyLabel('new-terminal'), onClick: () => http.openScratch('http') },
     {
-      label: 'Duplicate tab',
+      label: t('http.tabs.duplicateTab'),
       shortcut: keyLabel('duplicate-tab'),
       disabled: !isRequest,
       onClick: () => http.duplicateTab(tabId)
     },
-    { label: 'Rename…', disabled: !isRequest, onClick: opts.onRename },
+    { label: t('http.tabs.rename'), disabled: !isRequest, onClick: opts.onRename },
     {
-      label: 'Reveal in sidebar',
+      label: t('http.tabs.revealInSidebar'),
       disabled: !tab.ref,
       onClick: () => revealInSidebar(tab)
     },
     {
-      label: 'Save',
+      label: t('http.tabs.save'),
       shortcut: keyLabel('http-save'),
       disabled: !isRequest,
       onClick: () => {
@@ -76,16 +79,16 @@ export function tabMenuEntries(tabId: Id, opts: { onRename: () => void }): MenuE
       }
     },
     {
-      label: 'Revert changes',
+      label: t('http.tabs.revertChanges'),
       disabled: !saved || !dirty,
       onClick: () => revert(tabId)
     },
     { label: '', separator: true },
-    { label: 'Close', shortcut: keyLabel('close-tab'), onClick: () => requestClose([tabId]) },
-    { label: 'Close others', disabled: others.length === 0, onClick: () => requestClose(others) },
-    { label: 'Close to the right', disabled: right.length === 0, onClick: () => requestClose(right) },
-    { label: 'Close saved', disabled: clean.length === 0, onClick: () => requestClose(clean) },
-    { label: 'Close all', onClick: () => requestClose(strip.map((t) => t.id)) }
+    { label: t('http.tabs.close'), shortcut: keyLabel('close-tab'), onClick: () => requestClose([tabId]) },
+    { label: t('http.tabs.closeOthers'), disabled: others.length === 0, onClick: () => requestClose(others) },
+    { label: t('http.tabs.closeToRight'), disabled: right.length === 0, onClick: () => requestClose(right) },
+    { label: t('http.tabs.closeSaved'), disabled: clean.length === 0, onClick: () => requestClose(clean) },
+    { label: t('http.tabs.closeAll'), onClick: () => requestClose(strip.map((t) => t.id)) }
   ]
 }
 
@@ -96,7 +99,7 @@ function revert(tabId: Id): void {
   useHttp.setState((s) => ({
     tabs: s.tabs.map((t) => (t.id === tabId ? { ...t, draft: undefined, strippedFields: undefined } : t))
   }))
-  toast('Changes reverted', 'info', { label: 'Undo', run: () => useHttp.getState().updateDraft(tabId, draft) })
+  toast(t('http.tabs.changesReverted'), 'info', { label: t('http.tabs.undo'), run: () => useHttp.getState().updateDraft(tabId, draft) })
 }
 
 /** Expands the tree down to the tab's request, or its collection. */

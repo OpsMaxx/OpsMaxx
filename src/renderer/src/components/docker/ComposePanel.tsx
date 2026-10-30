@@ -1,6 +1,9 @@
 import { useState } from 'react'
 import { Download, FileText, Hammer, KeyRound, Layers, Pencil, Play, RefreshCw, RotateCw, TriangleAlert, Undo2 } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import {
   COMPOSE_ENV_DISCLOSURE,
@@ -70,13 +73,13 @@ const STATE_TONE: Record<ComposeServiceRunState, string> = {
   missing: 'danger'
 }
 
-const STATE_WORD: Record<ComposeServiceRunState, string> = {
-  running: 'running',
-  partial: 'partly up',
-  stopped: 'stopped',
+const STATE_WORD: Record<ComposeServiceRunState, MessageKey> = {
+  running: 'docker.compose.state.running',
+  partial: 'docker.compose.state.partial',
+  stopped: 'docker.compose.state.stopped',
   // The word this whole panel exists to be able to say. A stopped service has a
   // container in the list above; a missing one has nothing anywhere.
-  missing: 'never created'
+  missing: 'docker.compose.state.missing'
 }
 
 export function ComposePanel({
@@ -90,6 +93,7 @@ export function ComposePanel({
   containers: DockerContainer[]
   sudo: boolean
 }): React.JSX.Element | null {
+  const t = useT()
   const [list, setList] = useState<ComposeListProbe | null>(null)
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState<string | null>(null)
@@ -141,8 +145,7 @@ export function ComposePanel({
   // `cfg` is always present: the parent passes its resolved target.
   const serverBacked = server !== undefined
   /** Why pull/up/build are off when the target is not a saved server. */
-  const jobsNeedServer =
-    'Compose pull, start and build run as jobs, and a job records its confirmation against a saved server. On this machine, run docker compose in a terminal.'
+  const jobsNeedServer = t('docker.compose.jobsNeedServer')
 
 
   /**
@@ -171,14 +174,14 @@ export function ComposePanel({
           | undefined
       )?.docker?.act
       if (typeof act !== 'function') {
-        setRestartResult('This build cannot run container actions. Restart the app to rebuild it.')
+        setRestartResult(t('docker.compose.noActBridge'))
         return
       }
       const r = await act(cfg, 'restart', plan.targets, { sudo })
       setRestartResult(
         r?.ok === true
-          ? `Restarted ${plan.targets.join(', ')}.`
-          : (r?.detail ?? 'The restart did not report success.')
+          ? t('docker.compose.restarted', { targets: plan.targets.join(', ') })
+          : (r?.detail ?? t('docker.compose.restartNoSuccess'))
       )
     } catch (e) {
       setRestartResult(e instanceof Error ? e.message : String(e))
@@ -218,7 +221,7 @@ export function ComposePanel({
         r ?? {
           ok: false,
           reason: 'unknown',
-          detail: 'Finding compose files is not wired up in this build.'
+          detail: t('docker.compose.listNotWired')
         }
       )
     } catch (e) {
@@ -250,7 +253,7 @@ export function ComposePanel({
     if (env?.ok) {
       setEnvFiles(env.files)
       setEnvError(null)
-    } else setEnvError(env ? env.detail : 'the env files could not be read')
+    } else setEnvError(env ? env.detail : t('docker.compose.envUnreadable'))
   }
 
   const openProject = async (name: string): Promise<void> => {
@@ -285,7 +288,7 @@ export function ComposePanel({
       if (paths.length > 0) {
         const env = await bridge()?.envNames?.(cfg, paths, { sudo })
         if (env?.ok) setEnvFiles(env.files)
-        else setEnvError(env ? env.detail : 'the env files could not be read')
+        else setEnvError(env ? env.detail : t('docker.compose.envUnreadable'))
       }
     } finally {
       setConfigLoading(false)
@@ -342,7 +345,7 @@ export function ComposePanel({
       approval,
       targets: [{ serverId: server.id, serverName: server.name, cfg }]
     })
-    setLaunched(`${plan.spec.title} — running as a job. Watch it on the Jobs panel.`)
+    setLaunched(t('docker.compose.launched', { title: plan.spec.title }))
   }
 
   const view: ComposeProjectView | null =
@@ -375,7 +378,7 @@ export function ComposePanel({
     try {
       const r = await bridge()?.planRevert?.(cfg, { path, service }, { sudo })
       if (r === undefined) {
-        setEditError('this build cannot ask the server for a previous tag')
+        setEditError(t('docker.compose.noRevertBridge'))
         return
       }
       if (!r.ok) {
@@ -400,7 +403,7 @@ export function ComposePanel({
     setEditError(null)
     const read = await bridge()?.readFile?.(cfg, path, { sudo })
     if (!read?.ok || read.text === undefined) {
-      setEditError(read?.error ?? 'the compose file could not be read')
+      setEditError(read?.error ?? t('docker.compose.fileUnreadable'))
       return
     }
     const plan = planComposeImageEdit(read.text, editing.service, editing.to)
@@ -421,13 +424,18 @@ export function ComposePanel({
       { sudo }
     )
     if (!result?.ok) {
-      setEditError(result?.reason ?? 'the compose file was not written')
+      setEditError(result?.reason ?? t('docker.compose.fileNotWritten'))
       return
     }
     setEditing(null)
     setEditDone(
-      `${result.plan.service}: ${result.plan.from} → ${result.plan.to} on line ${result.plan.line}. ` +
-        `The file it replaced is at ${result.backup}. Nothing is running the new image until you pull and bring it up.`
+      t('docker.compose.editDone', {
+        service: result.plan.service,
+        from: result.plan.from,
+        to: result.plan.to,
+        line: result.plan.line,
+        backup: result.backup
+      })
     )
   }
 
@@ -435,14 +443,14 @@ export function ComposePanel({
     <div style={{ marginTop: 12 }}>
       <div className="row muted" style={{ fontSize: 11, alignItems: 'center' }}>
         <Layers size={12} />
-        <span className="grow">Compose projects</span>
+        <span className="grow">{t('docker.compose.heading')}</span>
         {/* A spinner, like every other read in this surface. This one searches
             a bounded set of roots with `find` and is budgeted at 60 seconds —
             the longest read in the panel and the only one that gave no sign it
             had started. */}
         <button className="btn ghost sm" disabled={loading} onClick={() => void load()}>
           <RefreshCw size={12} className={clsx(loading && 'spin')} />{' '}
-          {loading ? 'Searching…' : list === null ? 'Find compose files' : 'Refresh'}
+          {loading ? t('docker.compose.searching') : list === null ? t('docker.compose.find') : t('common.refresh')}
         </button>
       </div>
 
@@ -479,8 +487,8 @@ export function ComposePanel({
                     !serverBacked
                       ? jobsNeedServer
                       : open === p.name && picked.length > 0
-                      ? `docker compose pull for ${picked.join(', ')} in ${p.name}. Fetches those images; nothing running changes.`
-                      : `docker compose pull for ${p.name}. Fetches images; nothing running changes.`
+                      ? t('docker.compose.pullPicked', { services: picked.join(', '), project: p.name })
+                      : t('docker.compose.pull', { project: p.name })
                   }
                   onClick={() => runJob('pull', p.name)}
                 >
@@ -493,8 +501,8 @@ export function ComposePanel({
                     !serverBacked
                       ? jobsNeedServer
                       : open === p.name && picked.length > 0
-                      ? `docker compose up -d for ${picked.join(', ')} in ${p.name}. Starts those; removes nothing.`
-                      : `docker compose up -d for ${p.name}. Starts what is declared; removes nothing.`
+                      ? t('docker.compose.upPicked', { services: picked.join(', '), project: p.name })
+                      : t('docker.compose.up', { project: p.name })
                   }
                   onClick={() => runJob('up', p.name)}
                 >
@@ -512,8 +520,8 @@ export function ComposePanel({
                       !serverBacked
                         ? jobsNeedServer
                         : picked.length > 0
-                        ? `docker compose build --pull for ${picked.join(', ')} in ${p.name}. Runs their Dockerfiles; nothing running changes.`
-                        : `docker compose build --pull for ${p.name}. Runs its Dockerfiles; nothing running changes until you press start.`
+                        ? t('docker.compose.buildPicked', { services: picked.join(', '), project: p.name })
+                        : t('docker.compose.build', { project: p.name })
                     }
                     onClick={() => runJob('build', p.name)}
                   >
@@ -526,7 +534,7 @@ export function ComposePanel({
                   <div className="faint mono" style={{ fontSize: 11 }}>
                     {p.configFiles.join('  ')}
                   </div>
-                  {configLoading && <div className="faint">Reading the file…</div>}
+                  {configLoading && <div className="faint">{t('docker.compose.readingFile')}</div>}
                   {config && !config.ok && (
                     <div className="s-desc danger">
                       <TriangleAlert size={12} /> {COMPOSE_FAILURE_HELP[config.reason]}
@@ -562,15 +570,14 @@ export function ComposePanel({
                     ))}
                   {config?.ok && config.config.namesOnly && (
                     <div className="faint" style={{ fontSize: 11 }}>
-                      This engine would only give the service NAMES, so images, ports and
-                      environment are unknown here rather than absent.
+                      {t('docker.compose.namesOnly')}
                     </div>
                   )}
                   {view?.services.map((s) => (
                     <div key={s.declared.name} className="cron-row">
                       <input
                         type="checkbox"
-                        aria-label={`Include ${s.declared.name}`}
+                        aria-label={t('docker.compose.include', { name: s.declared.name })}
                         checked={picked.includes(s.declared.name)}
                         onChange={() =>
                           setPicked((cur) =>
@@ -581,16 +588,23 @@ export function ComposePanel({
                         }
                       />
                       <span className="mono cron-when">{s.declared.name}</span>
-                      <span className={clsx('chip', STATE_TONE[s.state])}>{STATE_WORD[s.state]}</span>
+                      <span className={clsx('chip', STATE_TONE[s.state])}>{t(STATE_WORD[s.state])}</span>
                       <span className="faint cron-desc mono">
-                        {s.declared.image ?? (s.declared.build ? 'built from source' : '—')}
+                        {s.declared.image ?? (s.declared.build ? t('docker.compose.builtFromSource') : '—')}
                       </span>
                       <span className="grow" />
                       {s.containers.length > 0 && (
                         <button
                           className="icon-btn sm"
                           disabled={restarting}
-                          title={`Restart ${s.declared.name}'s ${s.containers.length === 1 ? 'container' : `${s.containers.length} containers`}. Every connection they are serving is interrupted, and a change to the compose file is NOT applied by a restart.`}
+                          title={
+                            s.containers.length === 1
+                              ? t('docker.compose.restartOneTitle', { name: s.declared.name })
+                              : t('docker.compose.restartManyTitle', {
+                                  name: s.declared.name,
+                                  count: s.containers.length
+                                })
+                          }
                           onClick={() => {
                             setRestartResult(null)
                             setRestartPhrase('')
@@ -603,7 +617,7 @@ export function ComposePanel({
                       {s.declared.image !== null && (
                         <button
                           className="icon-btn sm"
-                          title={`Change ${s.declared.name}'s image tag in the compose file. Nothing is pulled or restarted.`}
+                          title={t('docker.compose.editTitle', { name: s.declared.name })}
                           onClick={() => startEdit(s.declared.name, s.declared.image!)}
                         >
                           <Pencil size={13} />
@@ -613,7 +627,7 @@ export function ComposePanel({
                         <button
                           className="icon-btn sm"
                           disabled={reverting}
-                          title={`Put ${s.declared.name} back to the tag it had before OpsMaxx last edited this file. Opens the same edit, pre-filled — nothing is written until you confirm.`}
+                          title={t('docker.compose.revertTitle', { name: s.declared.name })}
                           onClick={() => void startRevert(s.declared.name)}
                         >
                           <Undo2 size={13} />
@@ -656,7 +670,9 @@ export function ComposePanel({
                                   restart: {s.declared.restart ?? 'no (default)'}
                                 </span>
                                 {s.declared.dependsOn.length > 0 && (
-                                  <span className="chip">after {s.declared.dependsOn.join(', ')}</span>
+                                  <span className="chip">
+                                    {t('docker.compose.dependsOn', { services: s.declared.dependsOn.join(', ') })}
+                                  </span>
                                 )}
                                 {s.declared.ports.map((port) => (
                                   <span key={port} className="chip mono">
@@ -668,7 +684,7 @@ export function ComposePanel({
                                     {/* A service in a profile does NOT start
                                         with a plain `up`, which is the
                                         commonest reason one is "missing". */}
-                                    profile {s.declared.profiles.join(', ')} — not started by a plain up
+                                    {t('docker.compose.profile', { profiles: s.declared.profiles.join(', ') })}
                                   </span>
                                 )}
                               </td>
@@ -680,14 +696,12 @@ export function ComposePanel({
 
                   {view !== null && view.missing.length > 0 && (
                     <div className="faint" style={{ fontSize: 11 }}>
-                      Declared but never created: {view.missing.join(', ')}. These have no container
-                      at all, so they do not appear in the list above.
+                      {t('docker.compose.missing', { names: view.missing.join(', ') })}
                     </div>
                   )}
                   {view !== null && view.undeclared.length > 0 && (
                     <div className="faint" style={{ fontSize: 11 }}>
-                      Running under this project but not declared in the file:{' '}
-                      {view.undeclared.map((c) => c.name).join(', ')}.
+                      {t('docker.compose.undeclared', { names: view.undeclared.map((c) => c.name).join(', ') })}
                     </div>
                   )}
 
@@ -697,7 +711,7 @@ export function ComposePanel({
                       <div style={{ marginTop: 6 }}>
                         <div className="row muted" style={{ fontSize: 11 }}>
                           <KeyRound size={12} />
-                          <span>Environment</span>
+                          <span>{t('docker.compose.environment')}</span>
                         </div>
                         {config.config.services
                           .filter((s) => s.environment.length > 0)
@@ -708,7 +722,7 @@ export function ComposePanel({
                                 {s.environment
                                   .map(
                                     (v) =>
-                                      `${v.name}=${v.set ? '(set)' : v.origin === 'passthrough' ? '(from server)' : '(empty)'}`
+                                      `${v.name}=${v.set ? t('docker.compose.envSet') : v.origin === 'passthrough' ? t('docker.compose.envFromServer') : t('docker.compose.envEmpty')}`
                                   )
                                   .join('  ')}
                               </span>
@@ -726,9 +740,9 @@ export function ComposePanel({
                             <span className="mono cron-when">{f.path}</span>
                             <span className="faint cron-desc mono">
                               {!f.readable
-                                ? 'could not be read'
+                                ? t('docker.compose.envFileUnreadable')
                                 : f.names.length === 0
-                                  ? 'declares nothing'
+                                  ? t('docker.compose.envFileEmpty')
                                   : ''}
                             </span>
                           </div>
@@ -745,7 +759,7 @@ export function ComposePanel({
                                 style={{ gap: 8, paddingLeft: 20, flexWrap: 'wrap' }}
                               >
                                 <span className="mono faint" style={{ fontSize: 11 }}>
-                                  {n.name}={n.set ? '(set)' : '(empty)'}
+                                  {n.name}={n.set ? t('docker.compose.envSet') : t('docker.compose.envEmpty')}
                                 </span>
                                 {server !== undefined && (
                                   <EnvValueWrite
@@ -765,7 +779,7 @@ export function ComposePanel({
                   )}
                   {envError !== null && (
                     <div className="faint" style={{ fontSize: 11 }}>
-                      The env files could not be read: {envError}
+                      {t('docker.compose.envError', { error: envError })}
                     </div>
                   )}
                   {(envFiles !== null ||
@@ -790,7 +804,7 @@ export function ComposePanel({
             <div style={{ marginTop: 8 }}>
               <div className="row muted" style={{ fontSize: 11 }}>
                 <FileText size={12} />
-                <span>Compose files on disk</span>
+                <span>{t('docker.compose.filesOnDisk')}</span>
               </div>
               {list.search.files.map((f) => (
                 <div key={f.path} className="cron-row">
@@ -805,11 +819,12 @@ export function ComposePanel({
                might mean there is nothing, or it might mean nobody looked
                where the files are. */
             <div className="faint" style={{ fontSize: 11 }}>
-              Looked in {list.search.bound.roots.join(', ')}, {list.search.bound.maxDepth} levels
-              deep, on this filesystem only, stopping at {list.search.bound.maxResults} files.
-              Nothing outside those directories was read.
-              {list.search.truncated &&
-                ' That limit was reached, so this list is a prefix rather than an inventory.'}
+              {t('docker.compose.searchBound', {
+                roots: list.search.bound.roots.join(', '),
+                depth: list.search.bound.maxDepth,
+                max: list.search.bound.maxResults
+              })}
+              {list.search.truncated && ` ${t('docker.compose.searchTruncated')}`}
             </div>
           )}
         </>
@@ -818,8 +833,11 @@ export function ComposePanel({
       {editing !== null && (
         <div className="s-desc" style={{ marginTop: 8 }}>
           <div>
-            <b>{editing.service}</b> — change the image in the compose file. This writes one line and
-            nothing else: no image is pulled and no container is restarted.
+            <Trans
+              i18nKey="docker.compose.editIntro"
+              values={{ service: editing.service }}
+              components={{ b: <b /> }}
+            />
           </div>
           {revertNote !== null && (
             <div className="faint" style={{ fontSize: 11, marginTop: 4 }}>{revertNote}</div>
@@ -835,15 +853,15 @@ export function ComposePanel({
               disabled={editing.to === editing.from || !validateImageRef(editing.to)}
               onClick={() => void commitEdit()}
             >
-              Write the file
+              {t('docker.compose.writeFile')}
             </button>
             <button className="btn ghost sm" onClick={() => setEditing(null)}>
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
           {editing.to !== editing.from && !validateImageRef(editing.to) && (
             <div className="faint" style={{ fontSize: 11 }}>
-              That is not an image reference this will write into a file.
+              {t('docker.compose.badImageRef')}
             </div>
           )}
           {editError !== null && (
@@ -861,7 +879,7 @@ export function ComposePanel({
           <div className="r-sub">{pending.plan.detail}</div>
           {pending.reasons.length > 0 && (
             <div className="s-note warn">
-              This job {pending.reasons.join(', and ')}.
+              {t('docker.compose.jobReasons', { reasons: pending.reasons.join(', and ') })}
             </div>
           )}
           <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
@@ -870,8 +888,8 @@ export function ComposePanel({
           {pending.confirmation.kind === 'type-to-confirm' && (
             <input
               className="input mono"
-              aria-label={`Type ${pending.confirmation.phrase} to confirm`}
-              placeholder={`Type ${pending.confirmation.phrase} to confirm`}
+              aria-label={t('docker.common.typeToConfirm', { phrase: pending.confirmation.phrase })}
+              placeholder={t('docker.common.typeToConfirm', { phrase: pending.confirmation.phrase })}
               value={phrase}
               onChange={(e) => setPhrase(e.target.value)}
             />
@@ -891,23 +909,23 @@ export function ComposePanel({
                 )
               }
             >
-              Run
+              {t('docker.compose.run')}
             </button>
             <button className="btn" onClick={() => setPending(null)}>
-              Cancel
+              {t('common.cancel')}
             </button>
           </div>
         </div>
       )}
       {restart !== null && (
         <div className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
-          <div className="r-title">Restart {restart.service}</div>
+          <div className="r-title">{t('docker.compose.restartTitle', { service: restart.service })}</div>
           {restart.refusal !== null ? (
             <>
               <div className="s-note warn">{restart.refusal}</div>
               <div className="row-actions">
                 <button className="btn" onClick={() => setRestart(null)}>
-                  Close
+                  {t('common.close')}
                 </button>
               </div>
             </>
@@ -919,14 +937,16 @@ export function ComposePanel({
                   them go down. */}
               <div className="r-sub">
                 {restart.targets.length === 1
-                  ? 'This restarts one container:'
-                  : `This restarts ${restart.targets.length} containers, all of them:`}
+                  ? t('docker.compose.restartsOne')
+                  : t('docker.compose.restartsMany', { count: restart.targets.length })}
               </div>
               <pre className="mono" style={{ fontSize: 11, whiteSpace: 'pre-wrap', margin: 0 }}>
                 {restart.targets.join('\n')}
               </pre>
               {restart.plan !== null && restart.plan.reasons.length > 0 && (
-                <div className="s-note warn">This {restart.plan.reasons.join(', and ')}.</div>
+                <div className="s-note warn">
+                  {t('docker.compose.restartReasons', { reasons: restart.plan.reasons.join(', and ') })}
+                </div>
               )}
               {restart.caveats.map((c) => (
                 <div key={c} className="s-note state-unknown">
@@ -936,8 +956,8 @@ export function ComposePanel({
               {restart.plan?.confirmation.kind === 'type-to-confirm' && (
                 <input
                   className="input mono"
-                  aria-label={`Type ${restart.plan.confirmation.phrase} to confirm`}
-                  placeholder={`Type ${restart.plan.confirmation.phrase} to confirm`}
+                  aria-label={t('docker.common.typeToConfirm', { phrase: restart.plan.confirmation.phrase })}
+                  placeholder={t('docker.common.typeToConfirm', { phrase: restart.plan.confirmation.phrase })}
                   value={restartPhrase}
                   onChange={(e) => setRestartPhrase(e.target.value)}
                 />
@@ -952,10 +972,10 @@ export function ComposePanel({
                   }
                   onClick={() => void runRestart(restart)}
                 >
-                  Restart
+                  {t('docker.compose.restart')}
                 </button>
                 <button className="btn" onClick={() => setRestart(null)}>
-                  Cancel
+                  {t('common.cancel')}
                 </button>
               </div>
             </>

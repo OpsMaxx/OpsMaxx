@@ -5,6 +5,7 @@ import { parseVaultReference } from '../../../../../shared/apiSecrets'
 import { Popover } from '../../common/Popover'
 import { VaultPicker } from './VaultPicker'
 import { UnlockVaultButton } from '../../common/UnlockVaultButton'
+import { t as tr, useT } from '../../../lib/i18n'
 import '../../common/primitives.css'
 
 export interface VaultValueFieldProps {
@@ -21,11 +22,12 @@ export function vaultLabel(value: string): { name: string; missing: boolean } | 
   if (!ref) return null
   const { entries, unlocked } = useVault.getState()
   const entry = entries.find((e) => e.id === ref.entryId)
-  const suffix = ref.field === 'username' ? ' · username' : ''
-  if (entry) return { name: entry.name + suffix, missing: false }
+  const username = ref.field === 'username'
+  if (entry)
+    return { name: username ? tr('http.vaultField.withUsername', { name: entry.name }) : entry.name, missing: false }
   return unlocked
-    ? { name: 'That vault entry no longer exists', missing: true }
-    : { name: 'Vault entry (vault locked)' + suffix, missing: false }
+    ? { name: tr('http.vaultField.gone'), missing: true }
+    : { name: username ? tr('http.vaultField.lockedUsername') : tr('http.vaultField.locked'), missing: false }
 }
 
 /**
@@ -37,9 +39,10 @@ export function VaultValueField({ value, onChange, allowLiteral, ariaLabel }: Va
   useVault((s) => s.entries)
   const unlocked = useVault((s) => s.unlocked)
   const [picker, setPicker] = useState<DOMRect | null>(null)
+  const t = useT()
   const label = vaultLabel(value)
   const pick = (
-    <Popover anchor={picker} open={picker !== null} onClose={() => setPicker(null)} ariaLabel="Choose a vault entry">
+    <Popover anchor={picker} open={picker !== null} onClose={() => setPicker(null)} ariaLabel={t('http.vaultField.choose')}>
       <VaultPicker
         onPick={(ref) => {
           setPicker(null)
@@ -54,22 +57,26 @@ export function VaultValueField({ value, onChange, allowLiteral, ariaLabel }: Va
     return (
       <div className="hc-vault-value" role="group" aria-label={ariaLabel}>
         <Lock size={12} aria-hidden="true" />
-        <span className={label.missing ? 'hc-vault-name is-missing' : 'hc-vault-name'} title="Read from the vault when the request is sent">
+        <span className={label.missing ? 'hc-vault-name is-missing' : 'hc-vault-name'} title={t('http.vaultField.readOnSend')}>
           {label.name}
         </span>
         {unlocked ? (
           <button type="button" className="btn ghost sm" onClick={openPicker}>
-            Change…
+            {t('http.vaultField.change')}
           </button>
         ) : (
-          <UnlockVaultButton reason="Show which vault entry this value is read from." label="Unlock" className="btn ghost sm" />
+          <UnlockVaultButton
+            reason={t('http.vaultField.unlockReason')}
+            label={t('http.vaultField.unlock')}
+            className="btn ghost sm"
+          />
         )}
         {allowLiteral && (
           <button
             type="button"
             className="btn ghost sm"
-            aria-label="Stop reading this from the vault"
-            title="Stop reading this from the vault"
+            aria-label={t('http.vaultField.stopReading')}
+            title={t('http.vaultField.stopReading')}
             onClick={() => onChange('')}
           >
             <X size={12} aria-hidden="true" />
@@ -84,17 +91,17 @@ export function VaultValueField({ value, onChange, allowLiteral, ariaLabel }: Va
       {allowLiteral ? (
         <input className="hc-input hc-mono" aria-label={ariaLabel} value={value} onChange={(e) => onChange(e.target.value)} />
       ) : (
-        <span className="hc-vault-name is-empty">No vault entry chosen</span>
+        <span className="hc-vault-name is-empty">{t('http.vaultField.noEntry')}</span>
       )}
       <button
         type="button"
         className="btn ghost sm"
-        aria-label="Read from vault…"
-        title="Read from vault…"
+        aria-label={t('http.vaultField.readFromVault')}
+        title={t('http.vaultField.readFromVault')}
         onClick={openPicker}
       >
         <KeyRound size={12} aria-hidden="true" />
-        {!allowLiteral && <span>Choose…</span>}
+        {!allowLiteral && <span>{t('http.vaultField.chooseShort')}</span>}
       </button>
       {pick}
     </div>

@@ -10,10 +10,13 @@ import { toast } from '../../store/toast'
 import { colorVar } from '../layout/WorkspaceSwitcher'
 import type { WorkspaceColor } from '../../types'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 const COLORS: WorkspaceColor[] = ['green', 'purple', 'blue', 'orange', 'red', 'cyan', 'pink']
 
 export function WorkspaceManager(): React.JSX.Element {
+  const t = useT()
   const setModal = useApp((s) => s.setModal)
   const workspaces = useApp((s) => s.workspaces)
   const toggleHidden = useApp((s) => s.toggleWorkspaceHidden)
@@ -60,16 +63,19 @@ export function WorkspaceManager(): React.JSX.Element {
         // the job.
         clearForm()
         toast(
-          `"${wname}" was created, but without a password: ${r?.error ?? 'it could not be saved.'} Anyone using this app can open it.`,
+          t('workspace.manager.createdWithoutPassword', {
+            name: wname,
+            reason: r?.error ?? t('workspace.manager.passwordNotSaved')
+          }),
           'error',
-          { label: 'Set password', run: () => setEditing(id) }
+          { label: t('workspace.manager.setPassword'), run: () => setEditing(id) }
         )
         return
       }
       setWorkspaceProtected(id, true)
     }
     clearForm()
-    toast(`Workspace "${wname}" created`, 'ok')
+    toast(t('workspace.manager.created', { name: wname }), 'ok')
   }
 
   const Row = ({
@@ -94,8 +100,8 @@ export function WorkspaceManager(): React.JSX.Element {
             className="row"
             title={
               unlockedWorkspaces.includes(id)
-                ? 'Password protected — open until you lock it or quit'
-                : 'Password protected — asks for the password to open'
+                ? t('workspace.manager.protectedOpen')
+                : t('workspace.manager.protectedLocked')
             }
           >
             <Lock size={13} className="faint" />
@@ -106,10 +112,10 @@ export function WorkspaceManager(): React.JSX.Element {
           (unlockedWorkspaces.includes(id) ? (
             <button
               className="icon-btn sm"
-              title={`Lock ${wname} again now`}
+              title={t('workspace.manager.lockNow', { name: wname })}
               onClick={() => {
                 lockWorkspace(id)
-                toast(`${wname} locked`)
+                toast(t('workspace.manager.toastLocked', { name: wname }))
               }}
             >
               <LockOpen size={14} />
@@ -121,18 +127,18 @@ export function WorkspaceManager(): React.JSX.Element {
             // there is only one thing on screen asking for something.
             <button
               className="btn sm"
-              title={`Enter the password for ${wname} and open it`}
+              title={t('workspace.manager.unlockTitle', { name: wname })}
               onClick={() => {
                 setModal(null)
                 setWorkspace(id)
               }}
             >
-              <Lock size={13} /> Unlock
+              <Lock size={13} /> {t('workspace.unlock.unlock')}
             </button>
           ))}
         <button
           className="icon-btn sm"
-          title={hasPassword ? 'Change or remove password' : 'Set password'}
+          title={hasPassword ? t('workspace.manager.changePassword') : t('workspace.manager.setPassword')}
           onClick={() => setEditing(editing === id ? null : id)}
         >
           <Lock size={14} />
@@ -143,17 +149,21 @@ export function WorkspaceManager(): React.JSX.Element {
             export that exists. */}
         <button
           className="icon-btn sm"
-          title={isHidden ? 'Restore' : 'Hide'}
+          title={isHidden ? t('workspace.manager.restore') : t('common.hide')}
           onClick={() => {
             toggleHidden(id)
-            toast(isHidden ? `${wname} restored` : `${wname} hidden`)
+            toast(
+              isHidden
+                ? t('workspace.manager.toastRestored', { name: wname })
+                : t('workspace.manager.toastHidden', { name: wname })
+            )
           }}
         >
           {isHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </button>
         <button
           className="icon-btn sm"
-          title={workspaces.length <= 1 ? 'The last workspace cannot be deleted' : 'Delete'}
+          title={workspaces.length <= 1 ? t('workspace.manager.lastCannotDelete') : t('common.delete')}
           disabled={workspaces.length <= 1}
           onClick={() => setConfirming(id)}
         >
@@ -164,12 +174,11 @@ export function WorkspaceManager(): React.JSX.Element {
         <div className="vault-panel">
           <div className="row" style={{ gap: 8 }}>
             <span style={{ color: 'var(--danger)', fontSize: 12 }}>
-              Delete <b>{wname}</b> and everything in it — servers, databases, tunnels and folders?
-              This cannot be undone.
+              <Trans i18nKey="workspace.manager.deleteConfirm" values={{ name: wname }} components={{ b: <b /> }} />
             </span>
             <span className="spacer" />
             <button className="btn sm" onClick={() => setConfirming(null)}>
-              Cancel
+              {t('common.cancel')}
             </button>
             <button
               className="btn sm danger"
@@ -191,10 +200,10 @@ export function WorkspaceManager(): React.JSX.Element {
                 )
                 await window.opsmaxx?.workspaceLock.delete(id)
                 setConfirming(null)
-                toast(`${wname} deleted`)
+                toast(t('workspace.manager.toastDeleted', { name: wname }))
               }}
             >
-              Delete workspace
+              {t('workspace.manager.deleteWorkspace')}
             </button>
           </div>
         </div>
@@ -212,17 +221,17 @@ export function WorkspaceManager(): React.JSX.Element {
 
   return (
     <Modal
-      title="Manage Workspaces"
-      subtitle="Organize servers, credentials and settings into isolated spaces"
+      title={t('workspace.manager.title')}
+      subtitle={t('workspace.manager.subtitle')}
       onClose={() => setModal(null)}
       size="lg"
     >
       <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div className="sidebar-title">New workspace</div>
+        <div className="sidebar-title">{t('workspace.manager.newHeading')}</div>
         <div className="input-group">
           <input
             className="input grow"
-            placeholder="Workspace name"
+            placeholder={t('workspace.manager.namePlaceholder')}
             value={name}
             onChange={(e) => setName(e.target.value)}
           />
@@ -232,13 +241,13 @@ export function WorkspaceManager(): React.JSX.Element {
             disabled={!canCreate}
             title={
               canCreate
-                ? 'Create this workspace'
+                ? t('workspace.manager.createTitle')
                 : withPassword && name.trim()
-                  ? `Enter a password of at least ${WS_MIN_PASSWORD} characters first`
-                  : 'Give the workspace a name first'
+                  ? t('workspace.manager.needPasswordFirst', { min: WS_MIN_PASSWORD })
+                  : t('workspace.manager.needNameFirst')
             }
           >
-            <Plus size={14} /> Create
+            <Plus size={14} /> {t('workspace.manager.create')}
           </button>
         </div>
         <div className="row" style={{ gap: 8 }}>
@@ -261,7 +270,7 @@ export function WorkspaceManager(): React.JSX.Element {
           ))}
           <span className="spacer" />
           <label className="row" style={{ gap: 8 }}>
-            <span className="muted">Password protect</span>
+            <span className="muted">{t('workspace.manager.passwordProtect')}</span>
             <Switch checked={withPassword} onChange={setWithPassword} />
           </label>
         </div>
@@ -270,19 +279,18 @@ export function WorkspaceManager(): React.JSX.Element {
             <input
               className="input"
               type="password"
-              placeholder={`Workspace password (min ${WS_MIN_PASSWORD} characters)`}
+              placeholder={t('workspace.manager.passwordPlaceholder', { min: WS_MIN_PASSWORD })}
               value={newPassword}
               onChange={(e) => setNewPassword(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && void create()}
             />
             {passwordTooShort && (
               <div className="s-desc" style={{ color: 'var(--danger)' }}>
-                Use at least {WS_MIN_PASSWORD} characters.
+                {t('workspace.manager.tooShort', { min: WS_MIN_PASSWORD })}
               </div>
             )}
             <div className="faint" style={{ fontSize: 11 }}>
-              Hides this workspace behind a password inside OpsMaxx. It is not your vault master
-              password, and it does not encrypt anything on disk.
+              {t('workspace.manager.passwordNote')}
             </div>
           </>
         )}
@@ -290,7 +298,7 @@ export function WorkspaceManager(): React.JSX.Element {
 
       <div>
         <div className="sidebar-title" style={{ margin: '4px 0 8px' }}>
-          Active ({active.length})
+          {t('workspace.manager.activeHeading', { count: active.length })}
         </div>
         {active.map((w) => (
           <Row key={w.id} id={w.id} wname={w.name} wcolor={w.color} isHidden={false} hasPassword={w.hasPassword} />
@@ -300,7 +308,7 @@ export function WorkspaceManager(): React.JSX.Element {
       {hidden.length > 0 && (
         <div>
           <div className="sidebar-title" style={{ margin: '4px 0 8px' }}>
-            Hidden ({hidden.length})
+            {t('workspace.manager.hiddenHeading', { count: hidden.length })}
           </div>
           {hidden.map((w) => (
             <Row key={w.id} id={w.id} wname={w.name} wcolor={w.color} isHidden hasPassword={w.hasPassword} />
@@ -322,6 +330,7 @@ function PasswordForm({
   hasPassword: boolean
   onDone: () => void
 }): React.JSX.Element {
+  const t = useT()
   const setWorkspaceProtected = useApp((s) => s.setWorkspaceProtected)
   const [current, setCurrent] = useState('')
   const [next, setNext] = useState('')
@@ -349,11 +358,16 @@ function PasswordForm({
     const r = await window.opsmaxx?.workspaceLock.set(id, next, current)
     setBusy(false)
     if (!r?.ok) {
-      blame(r?.error ?? 'That password could not be saved. Try again.')
+      blame(r?.error ?? t('workspace.password.saveFailed'))
       return
     }
     setWorkspaceProtected(id, true)
-    toast(hasPassword ? `Password changed for ${wname}` : `${wname} is now password protected`, 'ok')
+    toast(
+      hasPassword
+        ? t('workspace.password.toastChanged', { name: wname })
+        : t('workspace.password.toastProtected', { name: wname }),
+      'ok'
+    )
     onDone()
   }
 
@@ -363,11 +377,11 @@ function PasswordForm({
     const r = await window.opsmaxx?.workspaceLock.remove(id, current)
     setBusy(false)
     if (!r?.ok) {
-      blame(r?.error ?? 'The password could not be removed. Try again.')
+      blame(r?.error ?? t('workspace.password.removeFailed'))
       return
     }
     setWorkspaceProtected(id, false)
-    toast(`${wname} no longer asks for a password`, 'ok')
+    toast(t('workspace.password.toastRemoved', { name: wname }), 'ok')
     onDone()
   }
 
@@ -380,7 +394,7 @@ function PasswordForm({
             ref={currentRef}
             type="password"
             autoFocus
-            placeholder="Current password"
+            placeholder={t('workspace.password.current')}
             value={current}
             onChange={(e) => {
               setError(null)
@@ -394,8 +408,8 @@ function PasswordForm({
           type="password"
           placeholder={
             hasPassword
-              ? `New password (min ${WS_MIN_PASSWORD})`
-              : `Password (min ${WS_MIN_PASSWORD})`
+              ? t('workspace.password.newPlaceholder', { min: WS_MIN_PASSWORD })
+              : t('workspace.password.placeholder', { min: WS_MIN_PASSWORD })
           }
           value={next}
           onChange={(e) => {
@@ -411,32 +425,34 @@ function PasswordForm({
             canSave
               ? undefined
               : hasPassword && !current
-                ? 'Enter the current password first'
-                : `New password must be at least ${WS_MIN_PASSWORD} characters`
+                ? t('workspace.password.currentFirst')
+                : t('workspace.password.newTooShort', { min: WS_MIN_PASSWORD })
           }
           onClick={() => void save()}
         >
-          {hasPassword ? 'Change' : 'Set'}
+          {hasPassword ? t('workspace.password.change') : t('workspace.password.set')}
         </button>
         {hasPassword && (
           <button
             className="btn sm danger"
             disabled={busy || !current}
-            title={current ? `Stop asking for a password on ${wname}` : 'Enter the current password first'}
+            title={
+              current
+                ? t('workspace.password.removeTitle', { name: wname })
+                : t('workspace.password.currentFirst')
+            }
             onClick={() => void clear()}
           >
-            Remove
+            {t('common.remove')}
           </button>
         )}
         <button className="btn sm" onClick={onDone}>
-          Cancel
+          {t('common.cancel')}
         </button>
       </div>
       {error && <div className="vault-error">{error}</div>}
       <div className="faint" style={{ fontSize: 11 }}>
-        This password hides the workspace inside OpsMaxx. It does not encrypt anything on disk,
-        and it is not your vault master password — for secrets that must be encrypted at rest, put
-        them in the Vault in the left sidebar.
+        {t('workspace.password.note')}
       </div>
     </div>
   )

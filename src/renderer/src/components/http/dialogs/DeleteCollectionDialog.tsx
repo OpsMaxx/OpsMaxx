@@ -1,6 +1,7 @@
 import type { ApiCollectionV2 } from '../../../../../shared/apiModel'
 import { Modal } from '../../common/Modal'
 import { countRequests } from '../sidebar/treeMenus'
+import { useT } from '../../../lib/i18n'
 
 /** The one tree deletion that asks first: a whole collection. An undo toast follows. */
 export function DeleteCollectionDialog({
@@ -12,13 +13,14 @@ export function DeleteCollectionDialog({
   onConfirm: () => void
   onClose: () => void
 }): React.JSX.Element {
+  const t = useT()
   const n = countRequests(collection.items)
   return (
     <Modal
-      title={`Delete ${collection.name}?`}
+      title={t('http.deleteCollection.title', { name: collection.name })}
       onClose={onClose}
       confirm={{
-        label: 'Delete collection',
+        label: t('http.deleteCollection.confirm'),
         destructive: true,
         onClick: () => {
           onConfirm()
@@ -27,10 +29,8 @@ export function DeleteCollectionDialog({
       }}
     >
       <p>
-        {n === 0
-          ? 'The collection is empty.'
-          : `Its ${n} ${n === 1 ? 'request' : 'requests'}, folders, variables and connection settings are deleted with it.`}{' '}
-        You can undo this from the notice that follows.
+        {n === 0 ? t('http.deleteCollection.empty') : t('http.deleteCollection.contents', { count: n })}{' '}
+        {t('http.deleteCollection.undoHint')}
       </p>
     </Modal>
   )

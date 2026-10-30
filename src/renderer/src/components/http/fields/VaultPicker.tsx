@@ -3,6 +3,7 @@ import { Lock } from 'lucide-react'
 import { useVault } from '../../../store/vault'
 import { vaultReference, type VaultField } from '../../../../../shared/apiSecrets'
 import { UnlockVaultButton } from '../../common/UnlockVaultButton'
+import { useT } from '../../../lib/i18n'
 
 /**
  * A list of vault entries to read a value from. It never shows a value: an
@@ -14,15 +15,16 @@ export function VaultPicker({ onPick }: { onPick: (reference: string) => void })
   const entries = useVault((s) => s.entries)
   const [query, setQuery] = useState('')
   const [field, setField] = useState<VaultField>('password')
+  const t = useT()
 
   if (exists === false) {
-    return <p className="hc-vault-note">There is no vault yet. Create one from Vault in the sidebar.</p>
+    return <p className="hc-vault-note">{t('http.vaultPicker.noVault')}</p>
   }
   if (!unlocked) {
     return (
       <div className="hc-vault-note">
-        <p>The vault is locked.</p>
-        <UnlockVaultButton reason="Choose a vault entry to read this value from." />
+        <p>{t('http.vaultPicker.locked')}</p>
+        <UnlockVaultButton reason={t('http.vaultPicker.unlockReason')} />
       </div>
     )
   }
@@ -32,21 +34,21 @@ export function VaultPicker({ onPick }: { onPick: (reference: string) => void })
     <div className="hc-vault-picker">
       <input
         className="hc-input"
-        aria-label="Filter vault entries"
-        placeholder="Filter entries"
+        aria-label={t('http.vaultPicker.filterLabel')}
+        placeholder={t('http.vaultPicker.filter')}
         value={query}
         autoFocus
         onChange={(e) => setQuery(e.target.value)}
       />
-      <div role="radiogroup" aria-label="Field to read" className="hc-vault-field">
+      <div role="radiogroup" aria-label={t('http.vaultPicker.fieldToRead')} className="hc-vault-field">
         {(['password', 'username'] as const).map((f) => (
           <label key={f}>
             <input type="radio" name="hc-vault-field" checked={field === f} onChange={() => setField(f)} />{' '}
-            {f === 'password' ? 'Password' : 'Username'}
+            {f === 'password' ? t('http.vaultPicker.password') : t('http.vaultPicker.username')}
           </label>
         ))}
       </div>
-      <ul className="hc-vault-list" aria-label="Vault entries">
+      <ul className="hc-vault-list" aria-label={t('http.vaultPicker.entries')}>
         {shown.map((e) => (
           <li key={e.id}>
             <button type="button" className="hc-vault-entry" onClick={() => onPick(vaultReference(e.id, field))}>
@@ -55,7 +57,7 @@ export function VaultPicker({ onPick }: { onPick: (reference: string) => void })
             </button>
           </li>
         ))}
-        {shown.length === 0 && <li className="hc-vault-note">No entries match.</li>}
+        {shown.length === 0 && <li className="hc-vault-note">{t('http.vaultPicker.noMatch')}</li>}
       </ul>
     </div>
   )

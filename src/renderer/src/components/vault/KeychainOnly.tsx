@@ -3,6 +3,7 @@ import { KeyRound, Loader2 } from 'lucide-react'
 import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
 import { toast } from '../../store/toast'
+import { useT } from '../../lib/i18n'
 
 /**
  * Connections whose credential is stored only on this computer.
@@ -21,6 +22,7 @@ import { toast } from '../../store/toast'
  * Rendered only inside the open vault, so there is no unlock to ask for.
  */
 export function KeychainOnly(): React.JSX.Element | null {
+  const t = useT()
   const servers = useApp((s) => s.servers)
   const databases = useApp((s) => s.databases)
   const linkVaultEntries = useApp((s) => s.linkVaultEntries)
@@ -42,7 +44,7 @@ export function KeychainOnly(): React.JSX.Element | null {
       const r = await window.opsmaxx?.secrets?.moveToVault?.(ids)
       if (!r) return
       if (!r.ok) {
-        toast(r.error ?? 'The vault would not take them, so nothing was moved.', 'error')
+        toast(r.error ?? t('vault.keychainOnly.moveFailed'), 'error')
         return
       }
       // The vault store holds its own copy of the entries while open and saves
@@ -52,12 +54,11 @@ export function KeychainOnly(): React.JSX.Element | null {
       linkVaultEntries(Object.fromEntries(r.moved.map((m) => [m.id, m.vaultEntryId])))
       const names = new Map([...servers, ...databases].map((x) => [x.id, x.name]))
       if (r.moved.length) {
-        toast(
-          `${r.moved.length} moved into the vault. Your other devices can use ${r.moved.length === 1 ? 'it' : 'them'} once you confirm there.`,
-          'ok'
-        )
+        toast(t('vault.keychainOnly.moved', { count: r.moved.length }), 'ok')
       }
-      for (const sk of r.skipped) toast(`${names.get(sk.id) ?? sk.id} was not moved: ${sk.reason}.`, 'error')
+      for (const sk of r.skipped) {
+        toast(t('vault.keychainOnly.notMoved', { name: names.get(sk.id) ?? sk.id, reason: sk.reason }), 'error')
+      }
       setIds(r.skipped.map((sk) => sk.id))
     } finally {
       setBusy(false)
@@ -70,17 +71,14 @@ export function KeychainOnly(): React.JSX.Element | null {
       <KeyRound size={18} style={{ color: 'var(--accent-ink)', flexShrink: 0 }} />
       <div style={{ flex: 1 }}>
         <div className="s-title">
-          {one ? 'One connection logs' : `${ids.length} connections log`} in with a password or key kept only on this
-          computer
+          {one ? t('vault.keychainOnly.titleOne') : t('vault.keychainOnly.titleMany', { count: ids.length })}
         </div>
         <div className="s-desc">
-          Moved into the vault, {one ? 'it travels' : 'they travel'} with your encrypted backups, and to your other
-          devices if you use Sync &amp; devices, where each one is confirmed before it is used. Key files stay where
-          they are.
+          {one ? t('vault.keychainOnly.descOne') : t('vault.keychainOnly.descMany')}
         </div>
       </div>
       <button className="btn sm primary" disabled={busy} onClick={() => void move()}>
-        {busy ? <Loader2 size={13} className="spin" /> : null} Move into the vault
+        {busy ? <Loader2 size={13} className="spin" /> : null} {t('vault.keychainOnly.move')}
       </button>
     </div>
   )

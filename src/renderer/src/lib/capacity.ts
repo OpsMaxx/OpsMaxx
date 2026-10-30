@@ -7,6 +7,8 @@ import {
   type Trend,
   type TrendSegment
 } from '../../../shared/capacity'
+import type { MessageKey } from '../../../shared/i18n'
+import { t } from './i18n'
 
 // Turning a capacity report into words and a shape — roadmap item 26.
 //
@@ -26,14 +28,31 @@ const MINUTE_MS = 60_000
 const HOUR_MS = 3_600_000
 const DAY_MS = 86_400_000
 
+// Getters, so each read is in the current language.
 export const METRIC_LABEL: Record<CapacityMetric, string> = {
-  cpu: 'CPU',
-  memPct: 'Memory',
-  diskPct: 'Disk',
+  get cpu() {
+    return t('lib.capacity.metric.cpu')
+  },
+  get memPct() {
+    return t('lib.capacity.metric.memPct')
+  },
+  get diskPct() {
+    return t('lib.capacity.metric.diskPct')
+  },
   // Not "Inodes": the word means nothing to most people and the panel is read
   // in a hurry. What runs out is the ability to create files.
-  inodePct: 'Files (inodes)'
+  get inodePct() {
+    return t('lib.capacity.metric.inodePct')
+  }
 }
+
+/** The same names mid-sentence, where a language may want them in another case. */
+const METRIC_INLINE = {
+  cpu: 'lib.capacity.metricInline.cpu',
+  memPct: 'lib.capacity.metricInline.memPct',
+  diskPct: 'lib.capacity.metricInline.diskPct',
+  inodePct: 'lib.capacity.metricInline.inodePct'
+} as const satisfies Record<CapacityMetric, MessageKey>
 
 /**
  * A span of time in the coarsest unit that does not lie about it.
@@ -46,14 +65,14 @@ export function span(ms: number): string {
   const abs = Math.abs(ms)
   if (abs < 90 * MINUTE_MS) {
     const m = Math.max(1, Math.round(abs / MINUTE_MS))
-    return `${m} minute${m === 1 ? '' : 's'}`
+    return t('lib.capacity.span.minutes', { count: m })
   }
   if (abs < 2 * DAY_MS) {
     const h = Math.round(abs / HOUR_MS)
-    return `${h} hour${h === 1 ? '' : 's'}`
+    return t('lib.capacity.span.hours', { count: h })
   }
   const rounded = dayCount(abs / DAY_MS)
-  return `${rounded} day${rounded === 1 ? '' : 's'}`
+  return t('lib.capacity.span.days', { count: rounded })
 }
 
 /**
@@ -104,9 +123,7 @@ export function shortDate(ts: number): string {
  * to do: a host sampled inside a single ten-hour stretch of a month has nothing
  * spread through the month to fit, and running for longer is what fixes it.
  */
-const WHY_SPARSE =
-  'Samples are collected while OpsMaxx is running with background checking on, so leaving it ' +
-  'running (Settings can start it at login, in the background) spreads them through the window.'
+const whySparse = (): string => t('lib.capacity.refusal.whySparse')
 
 export function refusalText(
   f: Forecast & { ok: false },
@@ -114,38 +131,45 @@ export function refusalText(
   threshold: number
 ): string {
   const held = f.points === 0 ? '' : span(f.to - f.from)
-  const label = METRIC_LABEL[metric].toLowerCase()
+  const label = t(METRIC_INLINE[metric])
   switch (f.reason) {
     case 'no-data':
-      return 'No samples in this window yet.'
+      return t('lib.capacity.refusal.noData')
     case 'stale':
-      return `No samples for ${span(Date.now() - f.to)}. Nothing to forecast from until this server reports again.`
+      return t('lib.capacity.refusal.stale', { span: span(Date.now() - f.to) })
     case 'too-few-points':
       // No longer "since the last break in the data": there is no last break
       // any more, the fit spans them. This host simply needs time.
-      return `Only ${f.points} sample${f.points === 1 ? '' : 's'} so far; ${FORECAST_MIN_POINTS} are needed over at least ${span(FORECAST_MIN_WINDOW_MS)}.`
+      return t('lib.capacity.refusal.tooFewPoints', {
+        count: f.points,
+        needed: FORECAST_MIN_POINTS,
+        window: span(FORECAST_MIN_WINDOW_MS)
+      })
     case 'window-too-short':
-      return `Only ${held} of data. A rate needs at least ${span(FORECAST_MIN_WINDOW_MS)}, so that one backup or one build is not the whole trend.`
+      return t('lib.capacity.refusal.windowTooShort', { held, window: span(FORECAST_MIN_WINDOW_MS) })
     case 'sparse': {
       const c = f.coverage
-      const where =
-        c === undefined
-          ? 'too few parts of this window'
-          : `only ${c.occupied} of ${c.parts} parts of this window (the longest silence is ${span(c.longestGapMs)})`
-      return `Samples cover ${where}. A line through them would describe those hours rather than the window. ${WHY_SPARSE}`
+      return c === undefined
+        ? t('lib.capacity.refusal.sparseUnknown', { advice: whySparse() })
+        : t('lib.capacity.refusal.sparse', {
+            occupied: c.occupied,
+            parts: c.parts,
+            gap: span(c.longestGapMs),
+            advice: whySparse()
+          })
     }
     case 'already-past':
-      return `Already at or over ${threshold}%. There is nothing left to predict.`
+      return t('lib.capacity.refusal.alreadyPast', { threshold })
     case 'flat':
-      return `Flat over ${held} — no measurable trend to project.`
+      return t('lib.capacity.refusal.flat', { held })
     case 'falling':
-      return `Falling over ${held}, not filling.`
+      return t('lib.capacity.refusal.falling', { held })
     case 'noisy':
-      return `This ${label} moves too much between samples for a trend line to mean anything.`
+      return t('lib.capacity.refusal.noisy', { label })
     case 'step-change':
-      return `The rise over ${held} is one step, not a trend — something was written once. A forecast from it would be about that event, not about the ${label}.`
+      return t('lib.capacity.refusal.stepChange', { held, label })
     case 'beyond-horizon':
-      return `More than ${FORECAST_HORIZON_DAYS} days out at this rate, which is further ahead than this will guess.`
+      return t('lib.capacity.refusal.beyondHorizon', { days: FORECAST_HORIZON_DAYS })
   }
 }
 
@@ -157,13 +181,22 @@ export function refusalText(
  */
 export function forecastText(f: Forecast, metric: CapacityMetric, threshold: number): string {
   if (!f.ok) return refusalText(f, metric, threshold)
-  const when = f.days < 1 ? 'within a day' : `in ${span(f.days * DAY_MS)}`
+  const vars = {
+    threshold: f.threshold,
+    span: span(f.days * DAY_MS),
+    date: shortDate(f.at),
+    held: span(f.to - f.from)
+  }
   // The coverage clause joins the window clause as the second half that cannot
   // be dropped: "from 21 days of data" reads as 21 days of watching, and on a
   // desktop app it never is.
-  const covered =
-    f.coverage === undefined ? '' : ` (${f.coverage.occupied}/${f.coverage.parts} parts sampled)`
-  return `Reaches ${f.threshold}% ${when} — ${shortDate(f.at)} — from ${span(f.to - f.from)} of data${covered}.`
+  if (f.coverage === undefined) {
+    return f.days < 1 ? t('lib.capacity.forecast.withinDay', vars) : t('lib.capacity.forecast.inSpan', vars)
+  }
+  const covered = { ...vars, occupied: f.coverage.occupied, parts: f.coverage.parts }
+  return f.days < 1
+    ? t('lib.capacity.forecast.withinDayCovered', covered)
+    : t('lib.capacity.forecast.inSpanCovered', covered)
 }
 
 /** The rate, spelled out, so the reader can sanity-check the projection
@@ -171,23 +204,33 @@ export function forecastText(f: Forecast, metric: CapacityMetric, threshold: num
 export function rateText(f: Forecast): string {
   if (!f.ok) return ''
   const perDay = Math.round(f.perDay * 100) / 100
-  return `${perDay > 0 ? '+' : ''}${perDay} points a day`
+  return t('lib.capacity.rate', { rate: `${perDay > 0 ? '+' : ''}${perDay}` })
 }
 
 /** What the confidence label is FOR. Shown as a title, so the word is never on
  *  screen without the thing it is a judgement about. */
 export const CONFIDENCE_HELP: Record<'low' | 'medium' | 'high', string> = {
-  high: 'The points sit close to the line and there are several days of them.',
-  medium: 'The line fits reasonably, over at least a day.',
-  low: 'A short run, or a loose fit. Treat the date as a hint, not a plan.'
+  get high() {
+    return t('lib.capacity.confidence.high')
+  },
+  get medium() {
+    return t('lib.capacity.confidence.medium')
+  },
+  get low() {
+    return t('lib.capacity.confidence.low')
+  }
 }
 
 /** How the two tiers of item A's store are described on screen. The store's
  *  own words for them are 'full' and 'hourly', which mean nothing to a reader
  *  looking at a line. */
 export const RES_LABEL: Record<'full' | 'hourly', string> = {
-  full: 'individual readings',
-  hourly: 'hourly means'
+  get full() {
+    return t('lib.capacity.res.full')
+  },
+  get hourly() {
+    return t('lib.capacity.res.hourly')
+  }
 }
 
 export interface Box {

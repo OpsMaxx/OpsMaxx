@@ -5,6 +5,7 @@ import { useApp } from '../../store/app'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { bridgeOn } from '../../lib/bridge'
+import { t as tr, useT } from '../../lib/i18n'
 import type { Server } from '../../types'
 import {
   defaultMountpoint,
@@ -36,6 +37,7 @@ export const FolderSharesSection = forwardRef<
   HTMLDivElement,
   { shares: LocalShare[]; onChange: (next: LocalShare[]) => void; username: string; unavailable?: string }
 >(function FolderSharesSection({ shares, onChange, username, unavailable }, ref) {
+  const t = useT()
   const pickFolder = async (): Promise<string | null> => (await window.opsmaxx?.mounts?.pickFolder()) ?? null
   const update = (id: string, patch: Partial<LocalShare>): void =>
     onChange(shares.map((s) => (s.id === id ? { ...s, ...patch } : s)))
@@ -49,15 +51,13 @@ export const FolderSharesSection = forwardRef<
   }
   const problem = sharesProblem(shares)
   const anyRw = shares.some((s) => !s.readOnly)
-  const who = username || 'this account'
+  const who = username || t('panel.shares.thisAccount')
 
   return (
     <div className="field" ref={ref} data-testid="folder-shares">
-      <label className="field-label">Folder shares</label>
+      <label className="field-label">{t('panel.shares.title')}</label>
       <span className="field-hint" style={{ marginBottom: 6 }}>
-        Folders on this computer, mounted on the server through this SSH connection while a terminal to it is
-        open. Saved on this computer only. The server needs sshfs and a usable
-        /dev/fuse; most containers have neither. Read-only is enforced by OpsMaxx, whatever the server does.
+        {t('panel.shares.sectionHint')}
       </span>
       {unavailable ? (
         <span className="field-hint">{unavailable}</span>
@@ -71,8 +71,8 @@ export const FolderSharesSection = forwardRef<
                 <button
                   className="btn sm mono"
                   style={{ maxWidth: 220, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                  aria-label={`Change the folder shared as ${name}, now ${s.localDir}`}
-                  title={`${s.localDir} — click to choose another folder`}
+                  aria-label={t('panel.shares.changeFolderLabel', { name, dir: s.localDir })}
+                  title={t('panel.shares.changeFolderTitle', { dir: s.localDir })}
                   onClick={async () => {
                     const dir = await pickFolder()
                     if (dir) update(s.id, { localDir: dir })
@@ -86,7 +86,7 @@ export const FolderSharesSection = forwardRef<
                 <input
                   className="input mono grow"
                   style={{ height: 28 }}
-                  aria-label={`Mount point on the server for ${name}`}
+                  aria-label={t('panel.shares.mountpointLabel', { name })}
                   aria-invalid={bad || undefined}
                   aria-describedby={bad ? 'folder-shares-problem' : undefined}
                   value={s.mountpoint}
@@ -95,12 +95,12 @@ export const FolderSharesSection = forwardRef<
                 <select
                   className="input"
                   style={{ height: 28, width: 'auto' }}
-                  aria-label={`Access for ${name}`}
+                  aria-label={t('panel.shares.accessLabel', { name })}
                   value={s.readOnly ? 'ro' : 'rw'}
                   onChange={(e) => update(s.id, { readOnly: e.target.value === 'ro' })}
                 >
-                  <option value="ro">Read-only</option>
-                  <option value="rw">Read-write</option>
+                  <option value="ro">{t('panel.shares.readOnly')}</option>
+                  <option value="rw">{t('panel.shares.readWrite')}</option>
                 </select>
                 <label
                   className="row faint"
@@ -108,15 +108,15 @@ export const FolderSharesSection = forwardRef<
                 >
                   <input
                     type="checkbox"
-                    aria-label={`Mount ${name} when a terminal connects`}
+                    aria-label={t('panel.shares.autoMountLabel', { name })}
                     checked={s.autoMount}
                     onChange={(e) => update(s.id, { autoMount: e.target.checked })}
                   />
-                  Mount on connect
+                  {t('panel.shares.mountOnConnect')}
                 </label>
                 <button
                   className="icon-btn"
-                  aria-label={`Remove the share of ${name}`}
+                  aria-label={t('panel.shares.removeLabel', { name })}
                   onClick={() => onChange(shares.filter((o) => o.id !== s.id))}
                 >
                   <X size={14} />
@@ -131,17 +131,17 @@ export const FolderSharesSection = forwardRef<
           )}
           {anyRw && (
             <span className="field-hint danger">
-              Anyone who can act as {who} or as root on the server can change and delete files in a read-write share.
+              {t('panel.shares.rwWarning', { who })}
             </span>
           )}
           {shares.length > 0 && !anyRw && (
             <span className="field-hint">
-              Anyone who can act as {who} or as root on the server can read every file in these folders.
+              {t('panel.shares.roWarning', { who })}
             </span>
           )}
           <div>
             <button className="btn sm" onClick={() => void add()}>
-              <Plus size={13} /> Add folder share
+              <Plus size={13} /> {t('panel.shares.add')}
             </button>
           </div>
         </>
@@ -159,6 +159,7 @@ const EMPTY: MountsView = { connected: false, shares: [], mounts: [] }
  * `mounts:changed` subscription so the count stays live while closed.
  */
 export function FolderSharesIndicator({ server }: { server: Server }): React.JSX.Element {
+  const t = useT()
   const [open, setOpen] = useState(false)
   const [view, setView] = useState<MountsView>(EMPTY)
 
@@ -185,17 +186,19 @@ export function FolderSharesIndicator({ server }: { server: Server }): React.JSX
   // Auto-mount fails without a toast, so a failure has to be readable here:
   // an icon alone went unnoticed by the first person it happened to.
   const warning = failedCount
-    ? `${failedCount === 1 ? 'Share' : `${failedCount} shares`} failed`
+    ? failedCount === 1
+      ? t('panel.shares.oneFailed')
+      : t('panel.shares.manyFailed', { count: failedCount })
     : stale
-      ? 'Shares paused'
+      ? t('panel.shares.paused')
       : null
   const title = failedCount
-    ? `Folder shares: ${warning} — open for the reason`
+    ? t('panel.shares.titleFailed', { warning: warning ?? '' })
     : stale
-      ? `Folder shares: ${warning} — this server's address changed`
+      ? t('panel.shares.titleStale', { warning: warning ?? '' })
       : mounted
-        ? `Folder shares: ${mounted} folder${mounted === 1 ? '' : 's'} from this computer mounted`
-        : 'Folder shares: folders from this computer, mounted on this server'
+        ? t('panel.shares.titleMounted', { count: mounted })
+        : t('panel.shares.titleIdle')
   const label = warning ?? (mounted > 0 ? String(mounted) : null)
   return (
     <>
@@ -225,15 +228,19 @@ export function FolderSharesIndicator({ server }: { server: Server }): React.JSX
 }
 
 function stateText(st: MountStatus | undefined, share: ShareView, connected: boolean): string {
-  if (share.stale) return "Paused: this server's address, port or account changed"
+  if (share.stale) return tr('panel.shares.state.paused')
   if (!st) {
-    if (!connected) return 'No terminal open'
-    return share.autoMount ? 'Not mounted' : 'Not mounted (mounts when asked)'
+    if (!connected) return tr('panel.shares.state.noTerminal')
+    return share.autoMount ? tr('panel.shares.state.notMounted') : tr('panel.shares.state.notMountedManual')
   }
-  if (st.state === 'mounting') return 'Mounting…'
-  if (st.state === 'mounted') return 'Mounted'
-  if (st.state === 'unmounting') return 'Unmounting…'
-  return 'Failed'
+  return mountStateText(st.state)
+}
+
+function mountStateText(state: MountStatus['state']): string {
+  if (state === 'mounting') return tr('panel.shares.state.mounting')
+  if (state === 'mounted') return tr('panel.shares.state.mounted')
+  if (state === 'unmounting') return tr('panel.shares.state.unmounting')
+  return tr('panel.shares.state.failed')
 }
 
 function FolderSharesDialog({
@@ -245,14 +252,15 @@ function FolderSharesDialog({
   view: MountsView
   onClose: () => void
 }): React.JSX.Element {
+  const t = useT()
   const openServerEditor = useApp((s) => s.openServerEditor)
   const [busy, setBusy] = useState<string | null>(null)
   const [refused, setRefused] = useState<{ shareId: string; error: string; fix?: string } | null>(null)
   const api = window.opsmaxx?.mounts
   const byShare = new Map(view.mounts.map((s) => [s.shareId, s]))
   const orphans = view.mounts.filter((s) => !view.shares.some((sh) => sh.id === s.shareId))
-  const noTerminal = 'No terminal to this server is open. Folder shares are mounted over a terminal connection.'
-  const working = 'Wait for the current step on this share to finish.'
+  const noTerminal = t('panel.shares.noTerminal')
+  const working = t('panel.shares.working')
 
   const mount = async (share: ShareView): Promise<void> => {
     if (!api) return
@@ -262,7 +270,7 @@ function FolderSharesDialog({
     // A failure main recorded is on the row already. A refusal before anything
     // started has no row state, so it is shown here.
     if (!reply.ok && !view.mounts.some((s) => s.shareId === share.id && s.state === 'failed'))
-      setRefused({ shareId: share.id, error: reply.error ?? 'Could not mount it.', fix: reply.fix })
+      setRefused({ shareId: share.id, error: reply.error ?? t('panel.shares.mountFailed'), fix: reply.fix })
     setBusy(null)
   }
   const unmount = async (mp: string, id: string): Promise<void> => {
@@ -273,17 +281,17 @@ function FolderSharesDialog({
 
   return (
     <Modal
-      title="Folder shares"
-      subtitle={`Folders from this computer, mounted on ${server.name}`}
+      title={t('panel.shares.title')}
+      subtitle={t('panel.shares.dialogSubtitle', { server: server.name })}
       size="lg"
       onClose={onClose}
-      cancelLabel="Close"
-      footerNote="Mounted while a terminal to this server is open."
+      cancelLabel={t('common.close')}
+      footerNote={t('panel.shares.footerNote')}
       footer={
         <>
           {view.shares.some((s) => s.stale) && (
             <button className="btn" onClick={() => void api?.reenable(server.id)}>
-              Re-enable for this address
+              {t('panel.shares.reenable')}
             </button>
           )}
           <button
@@ -293,31 +301,29 @@ function FolderSharesDialog({
               openServerEditor(server.id, 'shares')
             }}
           >
-            {view.shares.length ? 'Edit shares…' : 'Add a share…'}
+            {view.shares.length ? t('panel.shares.editShares') : t('panel.shares.addShare')}
           </button>
         </>
       }
     >
       {view.shares.length === 0 && orphans.length === 0 && (
         <p className="faint" style={{ marginTop: 0 }}>
-          No folders are shared with this server. Add one in the server&apos;s connection settings: it mounts every time
-          a terminal to the server connects.
+          {t('panel.shares.empty')}
         </p>
       )}
       {view.shares.some((s) => s.stale) && (
         <p className="field-hint danger" role="status">
-          This server&apos;s address, port or account changed after its shares were set up, so they do not mount. If
-          the change was yours, re-enable them for the server as it is now.
+          {t('panel.shares.staleNotice')}
         </p>
       )}
       {(view.shares.length > 0 || orphans.length > 0) && (
         <table className="table">
           <thead>
             <tr>
-              <th>Folder on this computer</th>
-              <th>On the server</th>
-              <th>Access</th>
-              <th>State</th>
+              <th>{t('panel.shares.col.local')}</th>
+              <th>{t('panel.shares.col.remote')}</th>
+              <th>{t('panel.shares.col.access')}</th>
+              <th>{t('panel.shares.col.state')}</th>
               <th />
             </tr>
           </thead>
@@ -328,7 +334,13 @@ function FolderSharesDialog({
               const stepping = busy === share.id || st?.state === 'mounting' || st?.state === 'unmounting'
               const err = st?.state === 'failed' ? st : refused?.shareId === share.id ? refused : null
               const blocked = !live && (!view.connected || share.stale)
-              const why = stepping ? working : !view.connected ? noTerminal : share.stale ? 'Re-enable the share first.' : ''
+              const why = stepping
+                ? working
+                : !view.connected
+                  ? noTerminal
+                  : share.stale
+                    ? t('panel.shares.reenableFirst')
+                    : ''
               return (
                 <tr key={share.id}>
                   <td className="mono selectable" style={{ wordBreak: 'break-all' }}>
@@ -337,7 +349,7 @@ function FolderSharesDialog({
                   <td className="mono selectable" style={{ wordBreak: 'break-all' }}>
                     {share.mountpoint}
                   </td>
-                  <td>{share.readOnly ? 'Read-only' : 'Read-write'}</td>
+                  <td>{share.readOnly ? t('panel.shares.readOnly') : t('panel.shares.readWrite')}</td>
                   <td>
                     {stepping && <Loader2 size={12} className="spin" />} {stateText(st, share, view.connected)}
                     {err && (
@@ -355,21 +367,25 @@ function FolderSharesDialog({
                         className="btn sm"
                         style={stepping ? { opacity: 0.45 } : undefined}
                         aria-disabled={stepping}
-                        aria-label={`Unmount ${folderName(share.localDir)}`}
+                        aria-label={t('panel.shares.unmountLabel', { name: folderName(share.localDir) })}
                         onClick={() => (stepping ? toast(working, 'info') : void unmount(share.mountpoint, share.id))}
                       >
-                        Unmount
+                        {t('panel.shares.unmount')}
                       </button>
                     ) : (
                       <button
                         className="btn sm"
                         style={blocked || stepping ? { opacity: 0.45 } : undefined}
                         aria-disabled={blocked || stepping}
-                        aria-label={`${st?.state === 'failed' ? 'Retry' : 'Mount'} ${folderName(share.localDir)}`}
+                        aria-label={
+                          st?.state === 'failed'
+                            ? t('panel.shares.retryLabel', { name: folderName(share.localDir) })
+                            : t('panel.shares.mountLabel', { name: folderName(share.localDir) })
+                        }
                         title={why || undefined}
                         onClick={() => (blocked || stepping ? toast(why, 'error') : void mount(share))}
                       >
-                        {st?.state === 'failed' ? 'Retry' : 'Mount'}
+                        {st?.state === 'failed' ? t('common.retry') : t('panel.shares.mount')}
                       </button>
                     )}
                   </td>
@@ -380,16 +396,9 @@ function FolderSharesDialog({
               <tr key={st.shareId}>
                 <td className="mono selectable">{st.localDir}</td>
                 <td className="mono selectable">{st.mountpoint}</td>
-                <td>{st.readOnly ? 'Read-only' : 'Read-write'}</td>
+                <td>{st.readOnly ? t('panel.shares.readOnly') : t('panel.shares.readWrite')}</td>
                 <td>
-                  {st.state === 'mounted'
-                    ? 'Mounted'
-                    : st.state === 'mounting'
-                      ? 'Mounting…'
-                      : st.state === 'unmounting'
-                        ? 'Unmounting…'
-                        : 'Failed'}{' '}
-                  (no longer saved)
+                  {t('panel.shares.orphanState', { state: mountStateText(st.state) })}
                   {st.error && (
                     <div className="field-hint danger selectable" role="alert">
                       {st.error}
@@ -399,7 +408,7 @@ function FolderSharesDialog({
                 </td>
                 <td>
                   <button className="btn sm" onClick={() => void unmount(st.mountpoint, st.shareId)}>
-                    Unmount
+                    {t('panel.shares.unmount')}
                   </button>
                 </td>
               </tr>

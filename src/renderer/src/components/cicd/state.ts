@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { useApp } from '../../store/app'
 import { bridgeHas } from '../../lib/bridge'
+import type { MessageKey } from '../../../../shared/i18n'
 import type {
   CicdBridge,
   CicdConnection,
@@ -200,13 +201,13 @@ export const BUCKET_ORDER: CicdBucket[] = [
   'other'
 ]
 
-export const BUCKET_LABEL: Record<CicdBucket, string> = {
-  failing: 'Failing now',
-  'newly-failed': 'Failed since you last looked',
-  running: 'Running',
-  queued: 'Queued',
-  succeeded: 'Succeeded recently',
-  other: 'Everything else'
+export const BUCKET_LABEL: Record<CicdBucket, MessageKey> = {
+  failing: 'cicd.bucket.failing',
+  'newly-failed': 'cicd.bucket.newlyFailed',
+  running: 'cicd.bucket.running',
+  queued: 'cicd.bucket.queued',
+  succeeded: 'cicd.bucket.succeeded',
+  other: 'cicd.bucket.other'
 }
 
 export interface CicdRow {

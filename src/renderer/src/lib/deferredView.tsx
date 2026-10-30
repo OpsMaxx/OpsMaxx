@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ComponentType } from 'react'
 import { forwardDebugError } from './debugForward'
+import { useT } from './i18n'
 
 /**
  * A view whose code is kept out of the startup bundle.
@@ -49,6 +50,7 @@ export function deferredView<P extends object>(
       }
     ))
   function View(props: P): React.JSX.Element | null {
+    const t = useT()
     const [, rerender] = useState(0)
     // Whether THIS view mounted empty, decided at render rather than read in
     // the effect. The chunk can land between a render that returned nothing
@@ -62,14 +64,12 @@ export function deferredView<P extends object>(
       return (
         <div className="panel-note is-alarm">
           <span className="grow">
-            This view failed to load: {failed instanceof Error ? failed.message : String(failed)}.
-            Reloading keeps your tabs, but every open session is disconnected and waits for you
-            to reconnect it.
+            {t('lib.deferredView.failed', { error: failed instanceof Error ? failed.message : String(failed) })}
           </span>
           {/* Restored tabs come back dormant — see useTerminalSession — so this
               is exactly what a reload does to them. */}
           <button className="btn" onClick={() => window.location.reload()}>
-            Reload window
+            {t('lib.deferredView.reload')}
           </button>
         </div>
       )

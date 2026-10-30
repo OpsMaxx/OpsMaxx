@@ -6,6 +6,8 @@ import { useVault } from '../../store/vault'
 import { toast } from '../../store/toast'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import type { NgrokSpec, NgrokTunnel, VpnProfile } from '../../types'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 /**
  * Creating an ngrok profile.
@@ -52,6 +54,7 @@ export function NgrokSetup({
   onClose: () => void
   onDone: (p: VpnProfile) => void
 }): React.JSX.Element {
+  const t = useT()
   const upsertVpnProfile = useApp((s) => s.upsertVpnProfile)
   const activeId = useApp((s) => s.activeId)
   const vaultUnlocked = useVault((s) => s.unlocked)
@@ -98,7 +101,7 @@ export function NgrokSetup({
         // createEntry returns null when the write failed; the vault store
         // surfaces the reason. Saying nothing and selecting nothing would
         // leave a Save button that stays disabled for no visible cause.
-        toast('The vault would not take that token.', 'error')
+        toast(t('vpn.ngrok.vaultRefused'), 'error')
         return
       }
       setEntryId(id)
@@ -110,21 +113,21 @@ export function NgrokSetup({
   }
 
   const patch = (i: number, next: Partial<NgrokTunnel>): void =>
-    setTunnels((ts) => ts.map((t, j) => (j === i ? { ...t, ...next } : t)))
+    setTunnels((ts) => ts.map((tn, j) => (j === i ? { ...tn, ...next } : tn)))
 
   const ready =
     name.trim() !== '' &&
     entryId !== '' &&
     tunnels.length > 0 &&
     tunnels.every(
-      (t) =>
-        /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(t.name) &&
-        Number.isInteger(t.localPort) &&
-        t.localPort > 0 &&
-        t.localPort < 65536 &&
-        t.acknowledgedExposure
+      (tn) =>
+        /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(tn.name) &&
+        Number.isInteger(tn.localPort) &&
+        tn.localPort > 0 &&
+        tn.localPort < 65536 &&
+        tn.acknowledgedExposure
     ) &&
-    new Set(tunnels.map((t) => t.name)).size === tunnels.length
+    new Set(tunnels.map((tn) => tn.name)).size === tunnels.length
 
   const save = (): void => {
     if (!ready) return
@@ -144,35 +147,35 @@ export function NgrokSetup({
       spec
     }
     upsertVpnProfile(profile)
-    toast(`${profile.name} saved`, 'ok')
+    toast(t('vpn.ngrok.saved', { name: profile.name }), 'ok')
     onDone(profile)
   }
 
   return (
     <Modal
-      title={existing ? 'Edit ngrok' : 'Add ngrok'}
-      subtitle="Publish a port on this machine to a public URL"
+      title={existing ? t('vpn.ngrok.titleEdit') : t('vpn.ngrok.titleAdd')}
+      subtitle={t('vpn.ngrok.subtitle')}
       size="lg"
       onClose={onClose}
       // `confirm` and the modal's own Cancel, rather than a hand-rolled pair
       // inside `footer` — which is for EXTRA controls and sits beside the
       // Cancel the modal already draws. This dialog shipped with two of them.
-      confirm={{ label: 'Save', onClick: save, disabled: !ready }}
+      confirm={{ label: t('common.save'), onClick: save, disabled: !ready }}
     >
       <div className="field">
-        <label className="field-label">Name</label>
+        <label className="field-label">{t('vpn.ngrok.name')}</label>
         <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
       </div>
 
       <div className="field">
-        <label className="field-label">Authtoken</label>
+        <label className="field-label">{t('vpn.ngrok.authtoken')}</label>
         {!vaultUnlocked ? (
           /* The vault is where the token belongs, so unlocking is the step —
              offered here rather than described, the same as everywhere else
              this app needs it. */
           <UnlockVaultButton
             className="btn sm"
-            reason="An ngrok authtoken is kept in the vault, so it has to be open to choose or add one."
+            reason={t('vpn.ngrok.unlockReason')}
           />
         ) : (
           <>
@@ -182,7 +185,7 @@ export function NgrokSetup({
                 value={entryId}
                 onChange={(e) => setEntryId(e.target.value)}
               >
-                <option value="">Choose a vault entry…</option>
+                <option value="">{t('vpn.ngrok.chooseEntry')}</option>
                 {usable.map((e) => (
                   <option key={e.id} value={e.id}>
                     {e.name}
@@ -211,14 +214,14 @@ export function NgrokSetup({
               <div className="col" style={{ gap: 6 }}>
                 <input
                   className="input"
-                  placeholder="Name it — e.g. ngrok (personal)"
+                  placeholder={t('vpn.ngrok.newNamePlaceholder')}
                   value={newName}
                   onChange={(e) => setNewName(e.target.value)}
                 />
                 <input
                   className="input mono"
                   type="password"
-                  placeholder="Paste the authtoken"
+                  placeholder={t('vpn.ngrok.tokenPlaceholder')}
                   value={newToken}
                   onChange={(e) => setNewToken(e.target.value)}
                 />
@@ -228,17 +231,17 @@ export function NgrokSetup({
                     disabled={newName.trim() === '' || newToken.trim() === '' || saving}
                     onClick={() => void addToken()}
                   >
-                    {saving ? 'Saving…' : 'Save to vault'}
+                    {saving ? t('common.saving') : t('vpn.ngrok.saveToVault')}
                   </button>
                   <button className="btn sm" onClick={() => setAdding(false)}>
-                    Cancel
+                    {t('common.cancel')}
                   </button>
                 </div>
               </div>
             ) : (
               <div className="row" style={{ gap: 6 }}>
                 <button className="btn sm" onClick={() => setAdding(true)}>
-                  <Plus size={13} /> Add an authtoken
+                  <Plus size={13} /> {t('vpn.ngrok.addAuthtoken')}
                 </button>
                 {/* Where the token comes from. A dialog that asks for a
                     credential and does not say where it is minted leaves the
@@ -249,35 +252,34 @@ export function NgrokSetup({
                     window.open(NGROK_TOKEN_URL, '_blank', 'noopener,noreferrer')
                   }
                 >
-                  <ExternalLink size={13} /> Get one from ngrok
+                  <ExternalLink size={13} /> {t('vpn.ngrok.getToken')}
                 </button>
               </div>
             )}
           </>
         )}
         <span className="field-hint">
-          Stored in the vault and handed to the agent through its environment — never written into a
-          config file and never on a command line.
+          {t('vpn.ngrok.tokenHint')}
         </span>
       </div>
 
       <div className="field">
-        <label className="field-label">Endpoints</label>
+        <label className="field-label">{t('vpn.ngrok.endpoints')}</label>
         <div className="col" style={{ gap: 10 }}>
-          {tunnels.map((t, i) => (
+          {tunnels.map((tn, i) => (
             <div key={i} className="col" style={{ gap: 6 }}>
               <div className="row" style={{ gap: 6 }}>
                 <input
                   className="input"
                   style={{ maxWidth: 140 }}
-                  placeholder="name"
-                  value={t.name}
+                  placeholder={t('vpn.ngrok.endpointNamePlaceholder')}
+                  value={tn.name}
                   onChange={(e) => patch(i, { name: e.target.value })}
                 />
                 <select
                   className="input"
                   style={{ maxWidth: 90 }}
-                  value={t.proto}
+                  value={tn.proto}
                   onChange={(e) => patch(i, { proto: e.target.value as NgrokTunnel['proto'] })}
                 >
                   <option value="http">http</option>
@@ -287,20 +289,24 @@ export function NgrokSetup({
                 <input
                   className="input"
                   style={{ maxWidth: 110 }}
-                  placeholder="local port"
-                  value={String(t.localPort)}
+                  placeholder={t('vpn.ngrok.localPortPlaceholder')}
+                  value={String(tn.localPort)}
                   onChange={(e) => patch(i, { localPort: Number(e.target.value) || 0 })}
                 />
                 <input
                   className="input"
-                  placeholder={t.proto === 'tcp' ? 'reserved address (optional)' : 'domain (optional)'}
-                  value={t.domain ?? ''}
+                  placeholder={
+                    tn.proto === 'tcp'
+                      ? t('vpn.ngrok.reservedAddressPlaceholder')
+                      : t('vpn.ngrok.domainPlaceholder')
+                  }
+                  value={tn.domain ?? ''}
                   onChange={(e) => patch(i, { domain: e.target.value.trim() || undefined })}
                 />
                 {tunnels.length > 1 && (
                   <button
                     className="btn sm"
-                    title="Remove"
+                    title={t('common.remove')}
                     onClick={() => setTunnels((ts) => ts.filter((_, j) => j !== i))}
                   >
                     <Trash2 size={13} />
@@ -315,13 +321,15 @@ export function NgrokSetup({
               <label className="row" style={{ gap: 6, alignItems: 'flex-start' }}>
                 <input
                   type="checkbox"
-                  checked={t.acknowledgedExposure}
+                  checked={tn.acknowledgedExposure}
                   onChange={(e) => patch(i, { acknowledgedExposure: e.target.checked })}
                 />
                 <span className="field-hint">
-                  I understand this makes <b>localhost:{t.localPort || '?'}</b> reachable from the
-                  public internet by anyone with the URL.
-                  {!t.domain && ' The URL changes every time this starts.'}
+                  <Trans
+                    i18nKey={tn.domain ? 'vpn.ngrok.ack' : 'vpn.ngrok.ackChangingUrl'}
+                    values={{ port: tn.localPort || '?' }}
+                    components={{ b: <b /> }}
+                  />
                 </span>
               </label>
             </div>
@@ -331,11 +339,10 @@ export function NgrokSetup({
             style={{ alignSelf: 'flex-start' }}
             onClick={() => setTunnels((ts) => [...ts, blankTunnel(ts.length)])}
           >
-            <Plus size={13} /> Add another endpoint
+            <Plus size={13} /> {t('vpn.ngrok.addEndpoint')}
           </button>
           <span className="field-hint">
-            Some ngrok plans allow only one endpoint per agent. If a second is refused, that is the
-            account rather than this profile.
+            {t('vpn.ngrok.planNote')}
           </span>
         </div>
       </div>

@@ -7,6 +7,7 @@ import { duration } from '../../lib/format'
 import type { Server } from '../../types'
 import { PanelShell } from './PanelShell'
 import { SweepEmpty } from './SweepEmpty'
+import { useT } from '../../lib/i18n'
 
 // Fleet-wide search over what the sampler already knows.
 //
@@ -23,18 +24,20 @@ const ICON = {
 // Hoisted out of the render so the element identity is stable across renders —
 // a popover whose children are a new tree every keystroke would remount while
 // somebody is reading it, and this panel re-renders on every character typed.
-const ABOUT = (
-  <p>
-    Searches what the fleet sampler already knows — unit names, listening ports, distributions
-    and server names — across every server in this workspace. Nothing is asked of a host: the
-    coverage line above the results says which servers the answer could be drawn from.
-  </p>
-)
+function About(): React.JSX.Element {
+  const t = useT()
+  return <p>{t('monitor.fleetSearch.about')}</p>
+}
 
 function Row({ m, onOpen }: { m: FleetMatch; onOpen: (serverId: string) => void }): React.JSX.Element {
+  const t = useT()
   const Icon = ICON[m.kind]
   return (
-    <button className="fleet-hit" onClick={() => onOpen(m.serverId)} title={`Open ${m.serverName}`}>
+    <button
+      className="fleet-hit"
+      onClick={() => onOpen(m.serverId)}
+      title={t('monitor.common.openServer', { name: m.serverName })}
+    >
       <Icon size={13} className="faint" />
       <b className="mono">{m.label}</b>
       <span className="faint grow">{m.detail}</span>
@@ -51,12 +54,11 @@ function Row({ m, onOpen }: { m: FleetMatch; onOpen: (serverId: string) => void 
             print — `at` is 0 there, and duration(0) draws a confident "56 years
             ago" under a name the app only knows from its own config. */}
         {m.unsampled ? (
-          'never sampled'
+          t('monitor.fleetSearch.neverSampled')
         ) : (
-          <>
-            {m.stale ? 'last seen ' : ''}
-            {duration(m.at)} ago
-          </>
+          t(m.stale ? 'monitor.fleetSearch.lastSeenAgo' : 'monitor.fleetSearch.ago', {
+            duration: duration(m.at)
+          })
         )}
       </span>
     </button>
@@ -70,6 +72,7 @@ export function FleetSearch({
   servers: Server[]
   onOpen: (serverId: string) => void
 }): React.JSX.Element {
+  const t = useT()
   const [query, setQuery] = useState('')
   const [sweeping, setSweeping] = useState(false)
   // The sweep is what fills this panel, so the empty state's button has to
@@ -113,17 +116,22 @@ export function FleetSearch({
     // the fifteen tabs you had landed in except the strip above. It gets the
     // same header as every other tab; the search field is the card's first
     // element, the way Run a command's composer is.
-    <PanelShell icon={<Search size={14} />} title="Fleet-wide search" about={ABOUT} className="fleet-search">
+    <PanelShell
+      icon={<Search size={14} />}
+      title={t('modules.fleetSearch.label')}
+      about={<About />}
+      className="fleet-search"
+    >
       <div className="input-group">
         <Search size={14} className="faint" />
         <input
           className="input"
-          placeholder="Search units, ports, distributions and servers across the workspace…"
+          placeholder={t('monitor.fleetSearch.placeholder')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
         {active && (
-          <button className="icon-btn sm" title="Clear" onClick={() => setQuery('')}>
+          <button className="icon-btn sm" title={t('monitor.common.clear')} onClick={() => setQuery('')}>
             <X size={13} />
           </button>
         )}
@@ -133,8 +141,9 @@ export function FleetSearch({
         <div className="fleet-results">
           <div className="row muted" style={{ justifyContent: 'space-between' }}>
             <span>
-              {result.matches.length} match{result.matches.length === 1 ? '' : 'es'}
-              {result.truncated > 0 && ` · ${result.truncated} more not shown`}
+              {t('monitor.fleetSearch.matches', { count: result.matches.length })}
+              {result.truncated > 0 &&
+                ` · ${t('monitor.fleetSearch.moreNotShown', { count: result.truncated })}`}
             </span>
           </div>
 
@@ -157,19 +166,18 @@ export function FleetSearch({
                 // and offers the one control that fixes that, which for a
                 // locked vault is the unlock prompt rather than a settings tab.
                 <SweepEmpty
-                  subject="Nothing has been sampled yet."
+                  subject={t('monitor.fleetSearch.nothingSampled')}
                   busy={sweeping}
                   onCheckNow={() => void sweepNow()}
-                  note="Servers are still matched by name above — everything else here comes from the sweep."
+                  note={t('monitor.fleetSearch.nothingSampledNote')}
                 />
               ) : (
                 <>
                   <p className="panel-empty-title">
-                    Nothing matched on the servers that could be searched.
+                    {t('monitor.fleetSearch.noMatchTitle')}
                   </p>
                   <p className="panel-empty-body">
-                    Try a shorter term — this searches unit names, listening ports, distributions
-                    and server names.
+                    {t('monitor.fleetSearch.noMatchBody')}
                   </p>
                 </>
               )}

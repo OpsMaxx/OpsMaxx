@@ -5,6 +5,7 @@ import { bridgeHas } from '../../lib/bridge'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { toast } from '../../store/toast'
 import type { DiscoveredVpnProfile } from '../../../../shared/vpn'
+import { t as tr, useT } from '../../lib/i18n'
 
 /**
  * OpenVPN profiles this machine already has, offered on the VPN screen.
@@ -68,8 +69,12 @@ const KIND_LABEL: Record<DiscoveredVpnProfile['kind'], string> = {
 function summary(found: DiscoveredVpnProfile[]): string {
   const counts = new Map<DiscoveredVpnProfile['kind'], number>()
   for (const p of found) counts.set(p.kind, (counts.get(p.kind) ?? 0) + 1)
-  const parts = [...counts].map(([kind, n]) => `${n} ${KIND_LABEL[kind]}`)
-  return `Left by ${parts.join(' and ')} on this machine.`
+  const parts = [...counts].map(([kind, n]) => tr('vpn.found.kindCount', { count: n, kind: KIND_LABEL[kind] }))
+  // Two kinds at most, so the sentence is spelled out for each count rather
+  // than joined with a translated "and".
+  return parts.length === 1
+    ? tr('vpn.found.leftByOne', { first: parts[0] })
+    : tr('vpn.found.leftByTwo', { first: parts[0], second: parts[1] })
 }
 
 export function FoundProfilesBanner({
@@ -80,6 +85,7 @@ export function FoundProfilesBanner({
    *  find at all. */
   onReview: (kind: DiscoveredVpnProfile['kind']) => void
 }): React.JSX.Element | null {
+  const t = useT()
   const workspaceId = useApp((s) => s.activeId())
   const profiles = useApp((s) => s.vpns)
   const upsertVpnProfile = useApp((s) => s.upsertVpnProfile)
@@ -146,7 +152,7 @@ export function FoundProfilesBanner({
         // Unlock is asked for ONCE, around the whole run: a prompt per profile
         // for a batch the user pressed one button for is how a person learns
         // to click through master-password dialogs.
-        const res = await withVaultUnlock('Import the VPN profiles found on this machine', () =>
+        const res = await withVaultUnlock(t('vpn.found.unlockReason'), () =>
           window.opsmaxx.vpn.commitImportFile(
             profile.name,
             workspaceId,
@@ -192,12 +198,12 @@ export function FoundProfilesBanner({
     // Said out loud either way. A batch that half worked and reported nothing
     // is indistinguishable from one that worked.
     if (added > 0) {
-      toast(`Imported ${added} VPN ${added === 1 ? 'profile' : 'profiles'}.`, 'ok')
+      toast(t('vpn.found.imported', { count: added }), 'ok')
     }
-    if (failed.length > 0) toast(`Could not import: ${failed.join(', ')}.`, 'error')
+    if (failed.length > 0) toast(t('vpn.found.failed', { names: failed.join(', ') }), 'error')
     if (toReview.length > 0) {
       toast(
-        `${toReview.length} ${toReview.length === 1 ? 'profile has' : 'profiles have'} directives OpsMaxx cannot carry over — read what was stripped before importing.`,
+        t('vpn.found.toReview', { count: toReview.length }),
         'ok'
       )
       onReview(toReview[0].kind)
@@ -212,12 +218,11 @@ export function FoundProfilesBanner({
           {/* "One OpenVPN profile" rather than "a/an OpenVPN profile": the
               article depends on the label, and the label is data. */}
           {offer.length === 1
-            ? `One ${KIND_LABEL[offer[0].kind]} profile is already on this machine`
-            : `${offer.length} VPN profiles are already on this machine`}
+            ? t('vpn.found.titleOne', { kind: KIND_LABEL[offer[0].kind] })
+            : t('vpn.found.titleMany', { count: offer.length })}
         </div>
         <div className="s-desc">
-          {summary(offer)} Importing copies the keys into the vault; the files on disk are not
-          moved or changed.
+          {t('vpn.found.desc', { summary: summary(offer) })}
         </div>
       </div>
       {kinds.map((kind) => (
@@ -227,13 +232,13 @@ export function FoundProfilesBanner({
           onClick={() => onReview(kind)}
           disabled={busy}
         >
-          {kinds.length === 1 ? 'Review' : `Review ${KIND_LABEL[kind]}`}
+          {kinds.length === 1 ? t('vpn.found.review') : t('vpn.found.reviewKind', { kind: KIND_LABEL[kind] })}
         </button>
       ))}
       <button className="btn primary size-28" onClick={() => void importAll()} disabled={busy}>
-        {busy ? 'Importing…' : 'Import all'}
+        {busy ? t('vpn.found.importing') : t('vpn.found.importAll')}
       </button>
-      <button className="btn ghost size-28" onClick={decline} title="Not now" disabled={busy}>
+      <button className="btn ghost size-28" onClick={decline} title={t('vpn.found.notNow')} disabled={busy}>
         <X size={14} />
       </button>
     </div>

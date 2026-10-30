@@ -22,6 +22,9 @@ import {
 // unreferenced ConfigMap and an unmounted claim.
 
 const DIR = fileURLToPath(new URL('./fixtures/k8s/review', import.meta.url))
+const EN = JSON.parse(
+  readFileSync(fileURLToPath(new URL('../src/shared/locales/en.json', import.meta.url)), 'utf8')
+) as Record<string, string>
 const read = (n: string): string => readFileSync(join(DIR, n), 'utf8')
 const NOW = Date.parse('2026-09-05T21:00:00Z')
 const result = (): ReturnType<typeof reviewFindings> => reviewFindings(splitReview(read('review.txt')), NOW)
@@ -241,7 +244,8 @@ describe('the panel passes the review on rather than flattening it', () => {
     // A short list of findings reads as a clean cluster. The denied read is the
     // difference, and it has to be on screen.
     expect(src()).toMatch(/r\.blind\.map\(/)
-    expect(src()).toContain('was not read, so nothing here says anything about it')
+    expect(src()).toContain('i18nKey="k8s.panel.reviewBlind"')
+    expect(EN['k8s.panel.reviewBlind']).toContain('was not read, so nothing here says anything about it')
   })
 
   it('renders the notes that make the unused list a candidate list', () => {
@@ -259,6 +263,7 @@ describe('the panel passes the review on rather than flattening it', () => {
 
   it('reports a review that could not run at all rather than an empty one', () => {
     expect(src()).toMatch(/!review\.ok && \(/)
-    expect(src()).toContain('Nothing was read:')
+    expect(src()).toContain("t('k8s.panel.reviewFailed'")
+    expect(EN['k8s.panel.reviewFailed']).toContain('Nothing was read:')
   })
 })

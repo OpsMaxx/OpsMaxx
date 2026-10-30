@@ -7,6 +7,8 @@ import { useHttp } from '../../../store/http'
 import { Field, Modal } from '../../common/Modal'
 import { destinationsIn } from './MoveToDialog'
 import { collectionRoute, routeLabel } from '../collection/RouteSelect'
+import { useT } from '../../../lib/i18n'
+import { Trans } from '../../../lib/Trans'
 import '../nav.css'
 
 const NEW = '__new'
@@ -54,12 +56,13 @@ function SaveForm({
   const [dest, setDest] = useState(options.length ? '0' : NEW)
   const [newName, setNewName] = useState('')
   const collections = useApi((s) => s.collections)
+  const t = useT()
 
   const chosen = dest === NEW ? null : options[Number(dest)]
   const target = chosen ? collections.find((c) => c.id === chosen.collectionId) : null
   const used = routeLabel(route)
-  const nameError = name.trim() ? null : 'A request needs a name.'
-  const newError = dest === NEW && !newName.trim() ? 'Name the new collection.' : null
+  const nameError = name.trim() ? null : t('http.save.nameRequired')
+  const newError = dest === NEW && !newName.trim() ? t('http.save.newNameRequired') : null
 
   const save = (): void => {
     const api = useApi.getState()
@@ -72,51 +75,49 @@ function SaveForm({
 
   return (
     <Modal
-      title="Save request"
+      title={t('http.save.title')}
       onClose={onClose}
-      confirm={{ label: 'Save', onClick: save, disabled: !!nameError || !!newError }}
+      confirm={{ label: t('common.save'), onClick: save, disabled: !!nameError || !!newError }}
     >
-      <Field label="Name" error={nameError}>
+      <Field label={t('http.save.name')} error={nameError}>
         <input className="input" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
       </Field>
-      <Field label="Save to">
+      <Field label={t('http.save.saveTo')}>
         <select className="input" value={dest} onChange={(e) => setDest(e.target.value)}>
           {options.map((d, i) => (
             <option key={`${d.collectionId}/${d.parentId}`} value={String(i)}>
               {d.label}
             </option>
           ))}
-          <option value={NEW}>New collection…</option>
+          <option value={NEW}>{t('http.save.newCollectionOption')}</option>
         </select>
       </Field>
       {dest === NEW && (
-        <Field label="New collection name" error={newError}>
+        <Field label={t('http.save.newCollectionName')} error={newError}>
           <input className="input" value={newName} onChange={(e) => setNewName(e.target.value)} />
         </Field>
       )}
       <p className="hc-effective" aria-live="polite">
         {target ? (
-          <>
-            Sends from <strong>{routeLabel(collectionRoute(target))}</strong> (collection setting)
-            {routeLabel(collectionRoute(target)) !== used && (
-              <>
-                {' '}
-                — this request used <strong>{used}</strong>
-              </>
-            )}
-          </>
+          <Trans
+            i18nKey={
+              routeLabel(collectionRoute(target)) !== used
+                ? 'http.save.sendsFromCollectionDiffers'
+                : 'http.save.sendsFromCollection'
+            }
+            values={{ route: routeLabel(collectionRoute(target)), used }}
+            components={{ strong: <strong /> }}
+          />
         ) : (
-          <>
-            Sends from <strong>{used}</strong>, which the new collection keeps
-          </>
+          <Trans i18nKey="http.save.sendsFromNew" values={{ route: used }} components={{ strong: <strong /> }} />
         )}
       </p>
       {target?.insecureTls && (
         <p className="hc-warn-line">
-          <TriangleAlert size={13} aria-hidden="true" /> This collection does not verify certificates
+          <TriangleAlert size={13} aria-hidden="true" /> {t('http.save.unverified')}
         </p>
       )}
-      {target?.caPem && <p className="hc-note-line">Uses a custom CA</p>}
+      {target?.caPem && <p className="hc-note-line">{t('http.save.customCa')}</p>}
     </Modal>
   )
 }

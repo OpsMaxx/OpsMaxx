@@ -1,4 +1,5 @@
 import type { WsFrame } from '../../../store/wsSessions'
+import { t } from '../../../lib/i18n'
 
 // Pure helpers for showing a frame. Every one returns text for a React text
 // node; nothing a server sent is ever parsed as markup.
@@ -6,7 +7,7 @@ import type { WsFrame } from '../../../store/wsSessions'
 export type LogFilter = 'all' | 'out' | 'in' | 'system'
 
 export const dirLabel = (f: WsFrame): string =>
-  f.dir === 'out' ? 'Sent' : f.dir === 'in' ? 'Received' : f.error ? 'Error' : 'System'
+  t(f.dir === 'out' ? 'http.ws.dirSent' : f.dir === 'in' ? 'http.ws.dirReceived' : f.error ? 'http.ws.dirError' : 'http.ws.dirSystem')
 
 const pad = (n: number, w = 2): string => String(n).padStart(w, '0')
 

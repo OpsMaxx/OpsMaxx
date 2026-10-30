@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowDown, ArrowUp, CaseSensitive, Regex, WholeWord, X } from 'lucide-react'
 import type { SearchAddon } from '@xterm/addon-search'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 
 // Search bar over the terminal scrollback. The SearchAddon was already loaded
 // but had no keybinding or UI, so searching did nothing.
@@ -23,6 +24,7 @@ export function TerminalSearch({
   /** The terminal's selection, which iTerm seeds the field with. */
   seed?: string
 }): React.JSX.Element {
+  const t = useT()
   const [term, setTerm] = useState(seed ?? '')
   const [caseSensitive, setCaseSensitive] = useState(false)
   const [wholeWord, setWholeWord] = useState(false)
@@ -87,7 +89,7 @@ export function TerminalSearch({
       <input
         ref={inputRef}
         className="input"
-        placeholder="Find in terminal…"
+        placeholder={t('terminal.search.placeholder')}
         value={term}
         onChange={(e) => setTerm(e.target.value)}
         onKeyDown={(e) => {
@@ -100,32 +102,33 @@ export function TerminalSearch({
       </span>
       <button
         className={clsx('icon-btn sm', caseSensitive && 'active')}
-        title="Match case"
+        title={t('terminal.search.matchCase')}
         onClick={() => setCaseSensitive((v) => !v)}
       >
         <CaseSensitive size={14} />
       </button>
       <button
         className={clsx('icon-btn sm', wholeWord && 'active')}
-        title="Whole word"
+        title={t('terminal.search.wholeWord')}
         onClick={() => setWholeWord((v) => !v)}
       >
         <WholeWord size={14} />
       </button>
       <button
         className={clsx('icon-btn sm', regex && 'active')}
-        title="Regular expression"
+        title={t('terminal.search.regex')}
         onClick={() => setRegex((v) => !v)}
       >
         <Regex size={14} />
       </button>
-      <button className="icon-btn sm" title="Previous (Shift+Enter)" onClick={() => find(-1)}>
+      <button className="icon-btn sm" title={t('terminal.search.previous')} onClick={() => find(-1)}>
         <ArrowUp size={14} />
       </button>
-      <button className="icon-btn sm" title="Next (Enter)" onClick={() => find(1)}>
+      <button className="icon-btn sm" title={t('terminal.search.next')} onClick={() => find(1)}>
         <ArrowDown size={14} />
       </button>
-      <button className="icon-btn sm" title="Close (Esc)" onClick={close}>
+      <button className="icon-btn sm" title={t('terminal.search.close')}
+ onClick={close}>
         <X size={14} />
       </button>
     </div>

@@ -41,6 +41,9 @@ import type { AuthMethod, Hop, UUID } from '../../types'
 import { Switch } from '../common/Switch'
 import { FolderSharesSection } from '../panel/LocalMounts'
 import { serverIdentity, sharesProblem, type LocalShare } from '../../../../shared/localMounts'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey, Translate } from '../../../../shared/i18n'
 
 // `unavailable` says why rather than hiding the option.
 //
@@ -51,16 +54,16 @@ import { serverIdentity, sharesProblem, type LocalShare } from '../../../../shar
 // certificate at dial time (ssh.ts, readCertificateFile).
 const AUTH: {
   id: AuthMethod
-  label: string
+  labelKey: MessageKey
   icon: React.ReactNode
   unavailable?: string
 }[] = [
-  { id: 'password', label: 'Password', icon: <Lock size={16} /> },
-  { id: 'key', label: 'Private Key', icon: <KeyRound size={16} /> },
-  { id: 'agent', label: 'SSH Agent', icon: <UserCheck size={16} /> },
+  { id: 'password', labelKey: 'connections.addServer.authPassword', icon: <Lock size={16} /> },
+  { id: 'key', labelKey: 'connections.addServer.authKey', icon: <KeyRound size={16} /> },
+  { id: 'agent', labelKey: 'connections.addServer.authAgent', icon: <UserCheck size={16} /> },
   {
     id: 'certificate',
-    label: 'Certificate',
+    labelKey: 'connections.addServer.authCertificate',
     icon: <FileBadge size={16} />
   }
 ]
@@ -99,7 +102,8 @@ const CONNECTION_TYPES: { id: 'ssh' | 'rdp' | CloudProvider; label: string; icon
  * Only ever reports the FIRST thing missing: a form that lights up six errors
  * at once is a form nobody reads.
  */
-function missingField(f: {
+function missingField(
+  f: {
   name: string
   host: string
   auth: AuthMethod
@@ -112,8 +116,10 @@ function missingField(f: {
   rdpOnly: boolean
   /** Cloud only: the provider supplies address and credential, so neither is asked for. */
   cloud: { provider: CloudProvider; target: CloudTarget | null } | null
-}): { field: string; why: string } | null {
-  if (!f.name.trim()) return { field: 'name', why: 'Give this connection a name.' }
+  },
+  t: Translate
+): { field: string; why: string } | null {
+  if (!f.name.trim()) return { field: 'name', why: t('connections.addServer.missingName') }
   /**
    * A cloud server is complete when its identifiers are.
    *
@@ -125,13 +131,13 @@ function missingField(f: {
    */
   if (f.cloud) {
     if (!f.cloud.target) {
-      return { field: 'cloud', why: 'Choose the project, location and instance.' }
+      return { field: 'cloud', why: t('connections.addServer.missingCloud') }
     }
     const problems = validateCloudTarget(f.cloud.target)
     if (problems.length > 0) return { field: problems[0].field, why: problems[0].why }
     return null
   }
-  if (!f.host.trim()) return { field: 'host', why: 'Enter the server address.' }
+  if (!f.host.trim()) return { field: 'host', why: t('connections.addServer.missingHost') }
   /**
    * An RDP-only machine has no SSH credential, so none is required.
    *
@@ -145,7 +151,7 @@ function missingField(f: {
   // A key from the vault is material, not a file, so there is nothing to find
   // a `-cert.pub` beside. Everywhere else the convention supplies the path.
   if (f.auth === 'certificate' && f.usingVault && !f.editing && !f.certificatePath.trim()) {
-    return { field: 'certificatePath', why: 'Select the certificate file for the key from the vault.' }
+    return { field: 'certificatePath', why: t('connections.addServer.missingCertificate') }
   }
   // The vault entry supplies the credential, so the field below is empty on
   // purpose and must not be reported as missing.
@@ -165,30 +171,35 @@ function missingField(f: {
    * used in any failure, so this is a fallback rather than a guess.
    */
   if (f.auth === 'password' && !f.password) {
-    return { field: 'password', why: 'Enter the password, or switch to a key or the agent.' }
+    return { field: 'password', why: t('connections.addServer.missingPassword') }
   }
   return null
 }
 
 /** What the private-key box says about a credential that already exists. */
-function credentialPlaceholder(editId: string | null | undefined, stored: CredentialShape | null): string {
-  const fresh = '~/.ssh/id_ed25519 — leave empty to use your default key'
+function credentialPlaceholder(
+  editId: string | null | undefined,
+  stored: CredentialShape | null,
+  t: Translate
+): string {
+  const fresh = t('connections.addServer.keyPlaceholderFresh')
   if (!editId || !stored) return fresh
   switch (stored.kind) {
     case 'key':
-      return stored.keyPath ? `Using ${stored.keyPath} — leave blank to keep it` : fresh
+      return stored.keyPath ? t('connections.addServer.usingPathKeep', { path: stored.keyPath }) : fresh
     case 'vault':
-      return 'Using the saved credential above — leave blank to keep it'
+      return t('connections.addServer.keyPlaceholderVault')
     case 'password':
-      return 'A password is saved for this connection — leave blank to keep it'
+      return t('connections.addServer.keyPlaceholderPassword')
     case 'agent':
-      return 'Your SSH agent holds the key — leave blank to keep using it'
+      return t('connections.addServer.keyPlaceholderAgent')
     default:
       return fresh
   }
 }
 
 export function AddServerModal(): React.JSX.Element {
+  const t = useT()
   const setModal = useApp((s) => s.setModal)
   const setActivity = useApp((s) => s.setActivity)
   const addServer = useApp((s) => s.addServer)
@@ -440,7 +451,7 @@ export function AddServerModal(): React.JSX.Element {
     editing: !!editId,
     rdpOnly: speaks === 'rdp',
     cloud: cloudProvider ? { provider: cloudProvider, target: cloudTarget } : null
-  })
+  }, t)
   const valid = missing === null && sharesIssue === null
 
   /**
@@ -476,7 +487,7 @@ export function AddServerModal(): React.JSX.Element {
   }
 
   const pickCertificate = async (): Promise<void> => {
-    const p = await window.opsmaxx?.dialog.openKey('Select SSH certificate (*-cert.pub)')
+    const p = await window.opsmaxx?.dialog.openKey(t('connections.addServer.pickCertificateTitle'))
     if (p) setCertificatePath(p)
   }
 
@@ -505,8 +516,8 @@ export function AddServerModal(): React.JSX.Element {
   const storeSecret = async (id: string, secret: Record<string, string | undefined>, label: string): Promise<void> => {
     const ok = await window.opsmaxx?.secrets.set(id, JSON.stringify(secret))
     if (ok !== false) return
-    toast(`${label} was saved, but this device would not store its credential.`, 'error', {
-      label: 'Try again',
+    toast(t('connections.addServer.storeFailed', { label }), 'error', {
+      label: t('connections.addServer.tryAgain'),
       run: () => void storeSecret(id, secret, label)
     })
   }
@@ -530,7 +541,7 @@ export function AddServerModal(): React.JSX.Element {
       if (!fn) {
         // Said, rather than a button that quietly does nothing. The same rule
         // the rest of the app applies to an unwired bridge.
-        setTestResult({ ok: false, text: 'This build cannot test a connection. Restart the app to rebuild it.' })
+        setTestResult({ ok: false, text: t('connections.addServer.testUnwired') })
         return
       }
       const r = await fn({
@@ -571,8 +582,8 @@ export function AddServerModal(): React.JSX.Element {
         setTestResult({
           ok: true,
           text: isCloud
-            ? 'Connected. The provider brokered the connection and the machine accepted it.'
-            : `Connected to ${host.trim()} as ${username.trim() || 'root'}.`
+            ? t('connections.addServer.testOkCloud')
+            : t('connections.addServer.testOk', { host: host.trim(), user: username.trim() || 'root' })
         })
         return
       }
@@ -598,7 +609,7 @@ export function AddServerModal(): React.JSX.Element {
         ok: false,
         text:
           fault === 'unknown' && raw
-            ? `${advice.cause} It said: ${raw.slice(0, 300)}`
+            ? t('connections.addServer.testFailRaw', { cause: advice.cause, raw: raw.slice(0, 300) })
             : advice.hint
               ? `${advice.cause} ${advice.hint}`
               : advice.cause
@@ -717,7 +728,7 @@ export function AddServerModal(): React.JSX.Element {
         if (!vaultUnlocked) {
           await useVaultPrompt
             .getState()
-            .request('Saving this credential into the vault needs your master password.')
+            .request(t('connections.addServer.vaultPromptCredential'))
         }
         const entryId = await createVaultEntry('login', {
           name: `${fields.name} (${fields.username})`,
@@ -729,8 +740,8 @@ export function AddServerModal(): React.JSX.Element {
         // just typed because the vault write failed.
         secret = entryId ? { vaultEntryId: entryId } : { password }
         if (!entryId)
-          toast('The vault would not take this credential, so it was kept on this device only.', 'error', {
-            label: 'Open vault',
+          toast(t('connections.addServer.vaultRefusedCredential'), 'error', {
+            label: t('connections.addServer.openVault'),
             run: () => setActivity('vault')
           })
       }
@@ -756,7 +767,7 @@ export function AddServerModal(): React.JSX.Element {
         if (!vaultUnlocked) {
           await useVaultPrompt
             .getState()
-            .request('Saving this key into the vault needs your master password.')
+            .request(t('connections.addServer.vaultPromptKey'))
         }
         const entryId = await createVaultEntry('sshkey', {
           name: `${fields.name} (${fields.username})`,
@@ -769,8 +780,8 @@ export function AddServerModal(): React.JSX.Element {
         })
         if (entryId) secret = { vaultEntryId: entryId }
         else
-          toast('The vault would not take this key, so the path was kept on this device only.', 'error', {
-            label: 'Open vault',
+          toast(t('connections.addServer.vaultRefusedKey'), 'error', {
+            label: t('connections.addServer.openVault'),
             run: () => setActivity('vault')
           })
       }
@@ -827,7 +838,10 @@ export function AddServerModal(): React.JSX.Element {
       await storeSecret(rdpSecretId(id), { password: rdpPassword }, `${fields.name} (RDP)`)
     }
 
-    toast(`${fields.name} ${editId ? 'updated' : 'added'}`, 'ok')
+    toast(
+      t(editId ? 'connections.addServer.savedUpdated' : 'connections.addServer.savedAdded', { name: fields.name }),
+      'ok'
+    )
     setModal(null)
     // 'terminal' for every kind, because openServer is what decides: an
     // RDP-only machine is routed to its desktop there, deliberately in one
@@ -839,14 +853,14 @@ export function AddServerModal(): React.JSX.Element {
 
   return (
     <Modal
-      title={editId ? 'Edit Server' : 'Add Server'}
+      title={editId ? t('connections.addServer.titleEdit') : t('connections.addServer.titleAdd')}
       subtitle={
         editId
-          ? 'Change this connection profile'
+          ? t('connections.addServer.subtitleEdit')
           : // Not "SSH connection profile". SSH and RDP are separate
             // connections, and naming only one of them in the dialog's own
             // subtitle is what made an RDP-only machine feel unsupported.
-            'Describe a machine and how to reach it'
+            t('connections.addServer.subtitleAdd')
       }
       onClose={() => setModal(null)}
       // The footer is Modal's, not this dialog's.
@@ -870,7 +884,7 @@ export function AddServerModal(): React.JSX.Element {
       footerNote={
         <>
           {missing && <span className="field-hint danger">{missing.why}</span>}
-          {!missing && sharesIssue && <span className="field-hint danger">Folder shares: {sharesIssue.message}</span>}
+          {!missing && sharesIssue && <span className="field-hint danger">{t('connections.addServer.sharesProblem', { message: sharesIssue.message })}</span>}
           {!missing && !sharesIssue && testResult && (
             <span className={clsx('field-hint', testResult.ok ? 'ok' : 'danger')}>{testResult.text}</span>
           )}
@@ -892,21 +906,21 @@ export function AddServerModal(): React.JSX.Element {
             disabled={!valid || testing}
             onClick={() => void testConnection()}
           >
-            {testing ? 'Testing…' : 'Test connection'}
+            {testing ? t('connections.addServer.testing') : t('connections.addServer.testConnection')}
           </button>
         )
       }
       confirm={{
-        label: editId ? 'Save Changes' : 'Add Server',
+        label: editId ? t('connections.addServer.saveChanges') : t('connections.addServer.addButton'),
         onClick: () => void save(),
         disabled: !valid
       }}
     >
       <div className="field">
-        <label className="field-label">Connection Name</label>
+        <label className="field-label">{t('connections.addServer.nameLabel')}</label>
         <input
           className="input"
-          placeholder="Production API"
+          placeholder={t('connections.addServer.namePlaceholder')}
           value={name}
           onChange={(e) => setName(e.target.value)}
           autoFocus
@@ -915,7 +929,7 @@ export function AddServerModal(): React.JSX.Element {
 
       <div className="field">
         <label className="field-label" htmlFor="server-tags">
-          Tags
+          {t('connections.addServer.tagsLabel')}
         </label>
         <input
           id="server-tags"
@@ -924,10 +938,7 @@ export function AddServerModal(): React.JSX.Element {
           value={tagsText}
           onChange={(e) => setTagsText(e.target.value)}
         />
-        <span className="field-hint">
-          Comma-separated, up to {MAX_TAGS}. Shown on the connection&apos;s row and matched by the
-          sidebar search.
-        </span>
+        <span className="field-hint">{t('connections.addServer.tagsHint', { max: MAX_TAGS })}</span>
       </div>
 
       {/**
@@ -953,35 +964,29 @@ export function AddServerModal(): React.JSX.Element {
           correction somebody has to be able to make — the alternative is
           deleting the connection and typing it in again. */}
       <div className="field">
-        <label className="field-label">Connection Type</label>
+        <label className="field-label">{t('connections.addServer.typeLabel')}</label>
         <div className="radio-cards">
-          {CONNECTION_TYPES.map((t) => {
-            const locked = !!editId && (existing?.cloud !== undefined || (t.id !== 'ssh' && t.id !== 'rdp'))
+          {CONNECTION_TYPES.map((ct) => {
+            const locked = !!editId && (existing?.cloud !== undefined || (ct.id !== 'ssh' && ct.id !== 'rdp'))
             return (
             <button
-              key={t.id}
-              className={clsx('radio-card', connectionType === t.id && 'active')}
+              key={ct.id}
+              className={clsx('radio-card', connectionType === ct.id && 'active')}
               disabled={locked}
-              title={locked ? 'A saved connection cannot be pointed at a different kind of target.' : undefined}
-              onClick={() => setConnectionType(t.id)}
+              title={locked ? t('connections.addServer.typeLocked') : undefined}
+              onClick={() => setConnectionType(ct.id)}
             >
-              {t.icon}
-              {t.label}
+              {ct.icon}
+              {ct.label}
             </button>
             )
           })}
         </div>
         {speaks === 'rdp' && (
-          <span className="field-hint">
-            The desktop, and only the desktop. No shell, no files and no monitoring — those all need
-            SSH, so a machine that serves both is two connections.
-          </span>
+          <span className="field-hint">{t('connections.addServer.rdpOnlyHint')}</span>
         )}
         {legacyBoth && speaks !== 'rdp' && (
-          <span className="field-hint">
-            Saved when one connection could be both. It keeps its desktop; new connections are one
-            protocol each. Choose RDP above to make this one the desktop only.
-          </span>
+          <span className="field-hint">{t('connections.addServer.legacyBothHint')}</span>
         )}
       </div>
 
@@ -996,7 +1001,7 @@ export function AddServerModal(): React.JSX.Element {
       {!isCloud && (
       <div className="field-row">
         <div className="field" style={{ gridColumn: 'span 1' }}>
-          <label className="field-label">Server / IP</label>
+          <label className="field-label">{t('connections.addServer.hostLabel')}</label>
           <input className="input" placeholder="10.20.0.10" value={host} onChange={(e) => setHost(e.target.value)} />
         </div>
         <div className="field-row" style={{ gridColumn: 'span 1' }}>
@@ -1005,7 +1010,7 @@ export function AddServerModal(): React.JSX.Element {
               fields called Port meaning different things. */}
           {speaks !== 'rdp' && (
             <div className="field">
-              <label className="field-label">Port</label>
+              <label className="field-label">{t('connections.addServer.portLabel')}</label>
               <input className="input" value={port} onChange={(e) => setPort(e.target.value)} />
             </div>
           )}
@@ -1017,7 +1022,7 @@ export function AddServerModal(): React.JSX.Element {
               root. One machine, one account field. */}
           {speaks !== 'rdp' && (
             <div className="field">
-              <label className="field-label">Username</label>
+              <label className="field-label">{t('connections.addServer.usernameLabel')}</label>
               <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
             </div>
           )}
@@ -1038,7 +1043,7 @@ export function AddServerModal(): React.JSX.Element {
       {speaks !== 'rdp' && !isCloud && (
         <>
       <div className="field">
-        <label className="field-label">Authentication</label>
+        <label className="field-label">{t('connections.addServer.authLabel')}</label>
         <div className="radio-cards">
           {AUTH.map((a) => (
             <button
@@ -1049,7 +1054,7 @@ export function AddServerModal(): React.JSX.Element {
               onClick={() => setAuth(a.id)}
             >
               {a.icon}
-              {a.label}
+              {t(a.labelKey)}
             </button>
           ))}
         </div>
@@ -1065,9 +1070,9 @@ export function AddServerModal(): React.JSX.Element {
 
       {auth !== 'agent' && usableEntries.length > 0 && (
         <div className="field">
-          <label className="field-label">Credential</label>
+          <label className="field-label">{t('connections.addServer.credentialLabel')}</label>
           <select className="input" value={vaultEntryId} onChange={(e) => setVaultEntryId(e.target.value)}>
-            <option value="">Enter a new one…</option>
+            <option value="">{t('connections.addServer.credentialNew')}</option>
             {usableEntries.map((e) => (
               <option key={e.id} value={e.id}>
                 {e.name}
@@ -1077,8 +1082,8 @@ export function AddServerModal(): React.JSX.Element {
           </select>
           <span className="field-hint">
             {usingVault
-              ? 'This server will reference the vault entry. Change the credential there and every server using it follows.'
-              : 'Reuse a credential you have already saved, or type a new one below.'}
+              ? t('connections.addServer.credentialHintVault')
+              : t('connections.addServer.credentialHintReuse')}
           </span>
         </div>
       )}
@@ -1086,8 +1091,7 @@ export function AddServerModal(): React.JSX.Element {
       {auth !== 'agent' && descriptors !== null && usableEntries.length === 0 && (
         <div className="field">
           <span className="field-hint">
-            No saved {usesKeyFile ? 'SSH key' : 'login'} in the vault yet — type one below and it
-            will be saved there.
+            {usesKeyFile ? t('connections.addServer.noSavedKey') : t('connections.addServer.noSavedLogin')}
           </span>
         </div>
       )}
@@ -1098,26 +1102,23 @@ export function AddServerModal(): React.JSX.Element {
           did not choose, and they never find out the choice existed. */}
       {auth !== 'agent' && descriptors === null && (
         <div className="field">
-          <label className="field-label">Credential</label>
+          <label className="field-label">{t('connections.addServer.credentialLabel')}</label>
           <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-            <span className="field-hint grow">
-              The vault is locked, so saved credentials cannot be listed. Unlock it to reuse one
-              instead of typing it again.
-            </span>
-            <UnlockVaultButton reason="Pick a credential you have already saved instead of typing it again." />
+            <span className="field-hint grow">{t('connections.addServer.vaultLocked')}</span>
+            <UnlockVaultButton reason={t('connections.addServer.unlockReason')} />
           </div>
         </div>
       )}
 
       {auth === 'agent' && (
         <div className="field">
-          <label className="field-label">Agent socket</label>
+          <label className="field-label">{t('connections.addServer.agentLabel')}</label>
           <input
             className="input"
             placeholder={
               editId
-                ? 'Leave blank to keep the stored agent'
-                : 'Optional — defaults to SSH_AUTH_SOCK'
+                ? t('connections.addServer.agentPlaceholderEdit')
+                : t('connections.addServer.agentPlaceholderNew')
             }
             value={agentSocket}
             onChange={(e) => setAgentSocket(e.target.value)}
@@ -1128,43 +1129,41 @@ export function AddServerModal(): React.JSX.Element {
               user whose keys live in Bitwarden, 1Password or KeePassXC has none
               of them available unless this names their agent. */}
           <span className="field-hint">
-            Where your agent listens, e.g. <code>~/.bitwarden-ssh-agent.sock</code>. Leave blank to
-            use the agent this app was started with, which is not always the one holding your keys.
+            <Trans i18nKey="connections.addServer.agentHint" components={{ code: <code /> }} />
           </span>
         </div>
       )}
 
       {auth === 'certificate' && (
         <div className="field">
-          <label className="field-label">Certificate</label>
+          <label className="field-label">{t('connections.addServer.certificateLabel')}</label>
           <div className="row" style={{ gap: 8 }}>
             <input
               className="input"
               placeholder={
                 stored?.certificatePath
-                  ? `Using ${stored.certificatePath} — leave blank to keep it`
+                  ? t('connections.addServer.usingPathKeep', { path: stored.certificatePath })
                   : keyPath.trim()
-                    ? `${keyPath.trim()}-cert.pub — leave empty to use this`
-                    : 'Leave empty to use the key path with -cert.pub, as ssh does'
+                    ? t('connections.addServer.certPlaceholderDerived', { path: `${keyPath.trim()}-cert.pub` })
+                    : t('connections.addServer.certPlaceholderDefault')
               }
               value={certificatePath}
               onChange={(e) => setCertificatePath(e.target.value)}
             />
             <button className="btn" onClick={() => void pickCertificate()}>
-              <FolderOpen size={14} /> Browse
+              <FolderOpen size={14} /> {t('connections.addServer.browse')}
             </button>
           </div>
           <span className="field-hint">
-            The OpenSSH certificate your CA signed for the key below. It is read from disk on
-            every connection, so re-signing it in place needs no edit here.
-            {editId && ' Changing only the certificate keeps the saved key; retype its passphrase if it has one.'}
+            {t('connections.addServer.certHint')}
+            {editId && ` ${t('connections.addServer.certHintEdit')}`}
           </span>
         </div>
       )}
 
       {usesKeyFile && !usingVault && (
         <div className="field">
-          <label className="field-label">Private key</label>
+          <label className="field-label">{t('connections.addServer.privateKeyLabel')}</label>
           <div className="input-group">
             {/**
              * The placeholder carries the STATE, because an empty box meant
@@ -1186,17 +1185,17 @@ export function AddServerModal(): React.JSX.Element {
                * "nothing is configured" and "something is, elsewhere", which
                * is what this placeholder exists to tell apart.
                */
-              placeholder={credentialPlaceholder(editId, stored)}
+              placeholder={credentialPlaceholder(editId, stored, t)}
               value={keyPath}
               onChange={(e) => setKeyPath(e.target.value)}
             />
             <button className="btn" onClick={pickKey}>
-              <FolderOpen size={14} /> Browse
+              <FolderOpen size={14} /> {t('connections.addServer.browse')}
             </button>
           </div>
           {foundKeys.length > 0 && (
             <div className="field-hint" style={{ marginTop: 6 }}>
-              <span>Found in ~/.ssh:</span>
+              <span>{t('connections.addServer.foundKeys')}</span>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
                 {foundKeys.map((k) => (
                   <button
@@ -1207,7 +1206,7 @@ export function AddServerModal(): React.JSX.Element {
                   >
                     <KeyRound size={12} /> {k.fileName}
                     {k.algorithm ? ` (${k.algorithm})` : ''}
-                    {k.encrypted ? ' \u00b7 passphrase' : ''}
+                    {k.encrypted ? ` \u00b7 ${t('connections.addServer.passphraseTag')}` : ''}
                   </button>
                 ))}
               </div>
@@ -1220,18 +1219,15 @@ export function AddServerModal(): React.JSX.Element {
                 checked={saveToVault}
                 onChange={(e) => setSaveToVault(e.target.checked)}
               />
-              Save the key itself to the vault, so it travels with a backup
+              {t('connections.addServer.saveKeyToVault')}
             </label>
           ) : (
-            <span className="field-hint">
-              {'Key path and passphrase are stored in OS secure storage, never in plaintext. ' +
-                'Leave the path empty to use your default key, the same one `ssh` would pick.'}
-            </span>
+            <span className="field-hint">{t('connections.addServer.keyStorageHint')}</span>
           )}
           <input
             className="input"
             type="password"
-            placeholder="Key passphrase (optional)"
+            placeholder={t('connections.addServer.passphrasePlaceholder')}
             value={passphrase}
             onChange={(e) => setPassphrase(e.target.value)}
             style={{ marginTop: 8 }}
@@ -1241,7 +1237,7 @@ export function AddServerModal(): React.JSX.Element {
 
       {auth === 'password' && !usingVault && (
         <div className="field">
-          <label className="field-label">Password</label>
+          <label className="field-label">{t('connections.addServer.passwordLabel')}</label>
           <input
             className="input"
             type="password"
@@ -1250,20 +1246,17 @@ export function AddServerModal(): React.JSX.Element {
             // unconditionally, so an edit gave the reader no way to know
             // whether a credential was stored — and leaving it blank on an
             // edit is exactly what keeps it.
-            placeholder={editId ? 'Unchanged — leave blank to keep the saved password' : ''}
+            placeholder={editId ? t('connections.addServer.passwordPlaceholderEdit') : ''}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
           />
           {vaultUnlocked ? (
             <label className="field-hint row" style={{ gap: 6, cursor: 'pointer', marginTop: 6 }}>
               <input type="checkbox" checked={saveToVault} onChange={(e) => setSaveToVault(e.target.checked)} />
-              Save this to the vault as a reusable credential
+              {t('connections.addServer.savePasswordToVault')}
             </label>
           ) : (
-            <span className="field-hint">
-              Encrypted with the OS keychain. Unlock the vault first to save it as a reusable
-              credential instead.
-            </span>
+            <span className="field-hint">{t('connections.addServer.passwordKeychainHint')}</span>
           )}
         </div>
       )}
@@ -1283,12 +1276,9 @@ export function AddServerModal(): React.JSX.Element {
        */}
       {stored?.savedAnswer && (
         <div className="col" style={{ gap: 'var(--sp-1)', marginBottom: 'var(--sp-3)' }}>
-          <span className="field-label">Second factor</span>
+          <span className="field-label">{t('connections.addServer.secondFactorLabel')}</span>
           <div className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
-            <span className="field-hint grow">
-              An answer to this server&rsquo;s second-factor challenge is remembered, so it is sent
-              without asking. Forget it if this server uses a code that changes each login.
-            </span>
+            <span className="field-hint grow">{t('connections.addServer.secondFactorHint')}</span>
             <button
               className="btn secondary size-28"
               disabled={forgetting || !editId}
@@ -1300,7 +1290,7 @@ export function AddServerModal(): React.JSX.Element {
                   .finally(() => setForgetting(false))
               }}
             >
-              {forgetting ? 'Forgetting…' : 'Forget saved answer'}
+              {forgetting ? t('connections.addServer.forgetting') : t('connections.addServer.forgetAnswer')}
             </button>
           </div>
         </div>
@@ -1319,11 +1309,12 @@ export function AddServerModal(): React.JSX.Element {
             style={{ marginTop: 3 }}
           />
           <span className="col" style={{ gap: 2 }}>
-            <span>Files only (no shell)</span>
+            <span>{t('connections.addServer.sftpOnlyLabel')}</span>
             <span className="field-hint">
-              For accounts restricted to SFTP — sshd forcing <span className="mono">internal-sftp</span>,
-              often chrooted. The server opens on Files, and Terminal and Monitor are not offered
-              because they need to run commands.
+              <Trans
+                i18nKey="connections.addServer.sftpOnlyHint"
+                components={{ mono: <span className="mono" /> }}
+              />
             </span>
           </span>
         </label>
@@ -1348,7 +1339,7 @@ export function AddServerModal(): React.JSX.Element {
           <div className="row" style={{ gap: 'var(--sp-2)' }}>
             <label className="col" style={{ gap: 2, flex: 1 }}>
               <span className="field-label">
-                {speaks === 'rdp' ? 'Sign in as' : 'RDP account (optional)'}
+                {speaks === 'rdp' ? t('connections.addServer.rdpSignInAs') : t('connections.addServer.rdpAccountOptional')}
               </span>
               <input
                 className="input"
@@ -1358,19 +1349,19 @@ export function AddServerModal(): React.JSX.Element {
               />
             </label>
             <label className="col" style={{ gap: 2, flex: 1 }}>
-              <span className="field-label">RDP password</span>
+              <span className="field-label">{t('connections.addServer.rdpPasswordLabel')}</span>
               <input
                 className="input"
                 type="password"
                 value={rdpPassword}
                 onChange={(e) => setRdpPassword(e.target.value)}
-                placeholder={editId ? 'Unchanged' : ''}
+                placeholder={editId ? t('connections.addServer.rdpPasswordUnchanged') : ''}
               />
             </label>
           </div>
           <div className="row" style={{ gap: 'var(--sp-2)' }}>
             <label className="col" style={{ gap: 2, width: 110 }}>
-              <span className="field-label">RDP port</span>
+              <span className="field-label">{t('connections.addServer.rdpPortLabel')}</span>
               <input
                 className="input"
                 value={rdpPort}
@@ -1380,7 +1371,7 @@ export function AddServerModal(): React.JSX.Element {
               />
             </label>
             <label className="col" style={{ gap: 2, flex: 1 }}>
-              <span className="field-label">Domain (optional)</span>
+              <span className="field-label">{t('connections.addServer.domainLabel')}</span>
               <input
                 className="input"
                 value={rdpDomain}
@@ -1397,11 +1388,12 @@ export function AddServerModal(): React.JSX.Element {
               style={{ marginTop: 3 }}
             />
             <span className="col" style={{ gap: 2 }}>
-              <span>Network Level Authentication</span>
+              <span>{t('connections.addServer.nlaLabel')}</span>
               <span className="field-hint">
-                Leave on for Windows, which normally requires it. Turn it off for
-                <span className="mono"> xrdp </span>
-                on Linux, which is not a CredSSP server and refuses the connection with it on.
+                <Trans
+                  i18nKey="connections.addServer.nlaHint"
+                  components={{ mono: <span className="mono" /> }}
+                />
               </span>
             </span>
           </label>
@@ -1420,7 +1412,7 @@ export function AddServerModal(): React.JSX.Element {
           <VpnTransportSelect
             value={vpnProfileId}
             onChange={setVpnProfileId}
-            hint="The VPN is the outer transport: any jump hosts below are dialled through it, and so is everything that rides this server — terminals, SFTP, metrics, remote desktops and its SSH tunnels."
+            hint={t('connections.addServer.vpnHint')}
           />
 
           <RouteHops hops={hops} onChange={setHops} excludeServerId={editId} />
@@ -1435,7 +1427,7 @@ export function AddServerModal(): React.JSX.Element {
           username={username.trim() || 'root'}
           unavailable={
             sftpOnly
-              ? 'Not available for a files-only account: mounting runs sshfs on the server, which needs a command, not just SFTP.'
+              ? t('connections.addServer.sharesUnavailable')
               : undefined
           }
         />
@@ -1444,30 +1436,30 @@ export function AddServerModal(): React.JSX.Element {
       <div className="disclosure">
         <button className="disclosure-head" onClick={() => setAdvanced((v) => !v)}>
           <ChevronRight size={14} className={clsx('chev', advanced && 'open')} style={{ transition: 'transform .12s', transform: advanced ? 'rotate(90deg)' : undefined }} />
-          Advanced options
+          {t('connections.addServer.advanced')}
         </button>
         {advanced && (
           <div className="disclosure-body">
             <div className="field-row">
               <div className="field">
-                <label className="field-label">Connection timeout (s)</label>
+                <label className="field-label">{t('connections.addServer.timeoutLabel')}</label>
                 <input className="input" value={timeout} onChange={(e) => setTimeoutV(e.target.value)} />
               </div>
               <div className="field">
-                <label className="field-label">Environment variables</label>
+                <label className="field-label">{t('connections.addServer.envLabel')}</label>
                 <input className="input" placeholder="TERM=xterm-256color" value={env} onChange={(e) => setEnv(e.target.value)} />
               </div>
             </div>
             <label className="row" style={{ justifyContent: 'space-between' }}>
-              <span className="s-title">Keep-alive</span>
+              <span className="s-title">{t('connections.addServer.keepAlive')}</span>
               <Switch checked={keepAlive} onChange={setKeepAlive} />
             </label>
             <label className="row" style={{ justifyContent: 'space-between' }}>
-              <span className="s-title">Compression</span>
+              <span className="s-title">{t('connections.addServer.compression')}</span>
               <Switch checked={compression} onChange={setCompression} />
             </label>
             <label className="row" style={{ justifyContent: 'space-between' }}>
-              <span className="s-title">Strict host key verification</span>
+              <span className="s-title">{t('connections.addServer.strictHostKey')}</span>
               <Switch checked={hostKeyCheck} onChange={setHostKeyCheck} />
             </label>
           </div>

@@ -9,15 +9,17 @@ import { VarField } from './AuthEditor'
 import { prettyText } from '../response/bodyWindow'
 import { rowWarning } from './HeadersEditor'
 import { bodyTooLargeToSave, invalidJson, vaultRefInFreeText } from './requestModel'
+import { useT } from '../../../lib/i18n'
+import type { MessageKey } from '../../../../../shared/i18n'
 
-export const BODY_MODES: { mode: Body['mode']; label: string }[] = [
-  { mode: 'none', label: 'None' },
-  { mode: 'json', label: 'JSON' },
-  { mode: 'text', label: 'Text' },
-  { mode: 'xml', label: 'XML' },
-  { mode: 'urlencoded', label: 'Form URL-encoded' },
-  { mode: 'multipart', label: 'Multipart' },
-  { mode: 'binary', label: 'Binary file' }
+export const BODY_MODES: { mode: Body['mode']; labelKey: MessageKey }[] = [
+  { mode: 'none', labelKey: 'http.body.modeNone' },
+  { mode: 'json', labelKey: 'http.body.modeJson' },
+  { mode: 'text', labelKey: 'http.body.modeText' },
+  { mode: 'xml', labelKey: 'http.body.modeXml' },
+  { mode: 'urlencoded', labelKey: 'http.body.modeUrlencoded' },
+  { mode: 'multipart', labelKey: 'http.body.modeMultipart' },
+  { mode: 'binary', labelKey: 'http.body.modeBinary' }
 ]
 
 /** Text survives a switch between text modes, rows between form modes. */
@@ -70,22 +72,30 @@ export function BodyEditor({
 }: BodyEditorProps): React.JSX.Element {
   const showDescription = useHttp((s) => s.prefs.kvDescriptions)
   const setPrefs = useHttp((s) => s.setPrefs)
+  const t = useT()
   const body = req.body
   const setBody = (next: Body): void => {
     if (!readOnly) onChange({ ...req, body: next })
   }
   const valueCell = (row: Row, onValue: (v: string) => void): React.JSX.Element => (
-    <VarField readOnly={readOnly} value={row.value} onChange={onValue} chain={chain} ariaLabel={`Value of ${row.key || 'field'}`} placeholder="Value" />
+    <VarField
+      readOnly={readOnly}
+      value={row.value}
+      onChange={onValue}
+      chain={chain}
+      ariaLabel={t('http.params.valueOf', { name: row.key || t('http.body.field') })}
+      placeholder={t('http.params.value')}
+    />
   )
 
   return (
     <div className="hc-bodyed">
       {!methodAllowsBody(req.method) && body.mode !== 'none' && (
         <p className="hc-note hc-warn" role="note">
-          {req.method} requests are sent without a body.
+          {t('http.body.noBodyForMethod', { method: req.method })}
         </p>
       )}
-      {body.mode === 'none' && <p className="hc-note hc-pad">This request has no body.</p>}
+      {body.mode === 'none' && <p className="hc-note hc-pad">{t('http.body.none')}</p>}
 
       {(body.mode === 'json' || body.mode === 'text' || body.mode === 'xml') && (
         <>
@@ -98,23 +108,22 @@ export function BodyEditor({
               variables={chain}
               onSubmit={onSubmit}
               foldable
-              ariaLabel="Request body"
+              ariaLabel={t('http.body.label')}
             />
           </div>
           {invalidJson(req) && (
             <p className="hc-note hc-danger" role="note">
-              Not valid JSON. It will be sent exactly as written.
+              {t('http.body.invalidJson')}
             </p>
           )}
           {vaultRefInFreeText(req) && (
             <p className="hc-note hc-warn" role="note">
-              A vault: reference in a JSON, XML or text body is sent as written, not resolved, because a server can echo
-              a body back. Put the secret in a header, the auth, or a form field instead.
+              {t('http.body.vaultRefInText')}
             </p>
           )}
           {bodyTooLargeToSave(req) && (
             <p className="hc-note" role="note">
-              Over 256 KiB: this body is sent, but not saved with the request.
+              {t('http.body.tooLargeToSave')}
             </p>
           )}
         </>
@@ -156,13 +165,13 @@ export function BodyEditor({
               <span className="hc-mp-cell">
                 <select
                   className="hc-select hc-mp-kind"
-                  aria-label={`Type of ${row.key || 'field'}`}
+                  aria-label={t('http.body.typeOf', { name: row.key || t('http.body.field') })}
                   value={mrow.kind}
                   disabled={readOnly}
                   onChange={(e) => setRow({ kind: e.target.value as 'text' | 'file', value: '', fileName: undefined })}
                 >
-                  <option value="text">Text</option>
-                  <option value="file">File</option>
+                  <option value="text">{t('http.body.kindText')}</option>
+                  <option value="file">{t('http.body.kindFile')}</option>
                 </select>
                 {mrow.kind === 'text' ? (
                   valueCell(row, onValue)
@@ -212,10 +221,11 @@ function FilePick({
   disabled?: boolean
   onPick: () => void
 }): React.JSX.Element {
+  const t = useT()
   return (
     <span className="hc-file">
       <button className="btn sm" disabled={disabled} onClick={onPick}>
-        <FileUp size={14} /> {name && !held ? 'Choose the file again' : 'Choose file…'}
+        <FileUp size={14} /> {name && !held ? t('http.body.chooseAgain') : t('http.body.chooseFile')}
       </button>
       {name && <span className={held ? 'hc-file-name' : 'hc-file-name hc-missing'}>{name}</span>}
     </span>

@@ -14,6 +14,7 @@ import {
 } from '../../../../shared/listeningPorts'
 import { LOCAL_ID, LOCAL_TARGET } from '../../../../shared/execTarget'
 import type { Server } from '../../types'
+import { t as tr, useT } from '../../lib/i18n'
 
 function level(v: number): string {
   return v > 85 ? 'danger' : v > 65 ? 'warn' : 'ok'
@@ -23,7 +24,7 @@ function uptimeLabel(sec: number): string {
   const d = Math.floor(sec / 86400)
   const h = Math.floor((sec % 86400) / 3600)
   const m = Math.floor((sec % 3600) / 60)
-  return `${d}d ${h}h ${m}m`
+  return tr('panel.monitor.uptime', { d, h, m })
 }
 
 /**
@@ -49,6 +50,7 @@ export function MonitorView({
   // it keeps sampling over the shell's SSH connection in the background.
   visible?: boolean
 }): React.JSX.Element {
+  const t = useT()
   // One host the user navigated to, so it may prompt. See the hook.
   const m = useServerMetrics(server, visible && server.status !== 'offline', true)
   const real = server.demo === false
@@ -122,24 +124,24 @@ export function MonitorView({
 
   const info: [string, string][] = m.host
     ? [
-        ['Hostname', m.host.hostname],
+        [t('panel.monitor.info.hostname'), m.host.hostname],
         // The DETECTED distribution, not the `os` field somebody typed when
         // they added the server. hostFacts has parsed /etc/os-release into
         // prettyName/distroId/distroVersion since it existed, and the
         // inventory panel already shows it — this panel was the one still
         // saying "Linux" at a person who wanted "Ubuntu 24.04".
-        ['OS', distro ?? server.os],
-        ['Kernel', m.host.kernel],
-        ['Uptime', uptimeLabel(m.host.uptime)],
-        ['CPU cores', `${m.host.cores} vCPU`],
-        ['Memory', bytes(m.host.memTotal)],
-        ['Disk', bytes(m.host.diskTotal)],
+        [t('panel.monitor.info.os'), distro ?? server.os],
+        [t('panel.monitor.info.kernel'), m.host.kernel],
+        [t('panel.monitor.info.uptime'), uptimeLabel(m.host.uptime)],
+        [t('panel.monitor.info.cores'), t('panel.monitor.vcpu', { count: m.host.cores })],
+        [t('panel.monitor.info.memory'), bytes(m.host.memTotal)],
+        [t('panel.monitor.info.disk'), bytes(m.host.diskTotal)],
         // "not measured" rather than a percentage nobody took. memUsed is
         // still printed: it is what /proc/meminfo gave, and it is zero for the
         // same honest reason the percentage is absent.
         [
           // `MemTotal - MemAvailable`, which is what modern `free` calls used.
-          'Used memory',
+          t('panel.monitor.info.usedMemory'),
           `${bytes(m.host.memUsed)}${m.host.memPct === null ? '' : ` (${m.host.memPct.toFixed(0)}%)`}`
         ],
         // The columns beside it, so the headline is attributable. htop's Mem
@@ -148,30 +150,30 @@ export function MonitorView({
         // account for unless the parts are on screen.
         ...(m.host.memAvailable === null
           ? []
-          : ([['Available memory', bytes(m.host.memAvailable)]] as [string, string][])),
+          : ([[t('panel.monitor.info.availableMemory'), bytes(m.host.memAvailable)]] as [string, string][])),
         ...(m.host.memCache === null
           ? []
-          : ([['Buffers / cache', bytes(m.host.memCache)]] as [string, string][])),
+          : ([[t('panel.monitor.info.cache'), bytes(m.host.memCache)]] as [string, string][])),
         [
           // Says WHICH filesystem. The headline has always been the root one —
           // every stored sample means that — and on a host whose data volume
           // is the full one, an unlabelled "57%" reads as the whole machine.
-          `Used disk (${m.host.diskRoot ?? '/'})`,
+          t('panel.monitor.info.usedDisk', { root: m.host.diskRoot ?? '/' }),
           `${bytes(m.host.diskUsed)}${m.host.diskPct === null ? '' : ` (${m.host.diskPct.toFixed(0)}%)`}`
         ],
-        ['Server / IP', server.host]
+        [t('panel.monitor.info.serverIp'), server.host]
       ]
     : [
-        ['Hostname', server.name.toLowerCase().replace(/\s+/g, '-')],
-        ['OS', server.os],
-        ['Kernel', '6.5.0-generic'],
-        ['Uptime', '—'],
-        ['CPU cores', '8 vCPU'],
-        ['Memory', '16 GB'],
-        ['Disk', '320 GB SSD'],
-        ['Public IP', server.host],
-        ['Private IP', '—'],
-        ['Latency', '—']
+        [t('panel.monitor.info.hostname'), server.name.toLowerCase().replace(/\s+/g, '-')],
+        [t('panel.monitor.info.os'), server.os],
+        [t('panel.monitor.info.kernel'), '6.5.0-generic'],
+        [t('panel.monitor.info.uptime'), '—'],
+        [t('panel.monitor.info.cores'), t('panel.monitor.vcpu', { count: 8 })],
+        [t('panel.monitor.info.memory'), '16 GB'],
+        [t('panel.monitor.info.disk'), '320 GB SSD'],
+        [t('panel.monitor.info.publicIp'), server.host],
+        [t('panel.monitor.info.privateIp'), '—'],
+        [t('panel.monitor.info.latency'), '—']
       ]
 
   const Metric = ({
@@ -238,10 +240,10 @@ export function MonitorView({
       {net !== null && 'error' in net && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="sidebar-title" style={{ marginBottom: 8 }}>
-            Network
+            {t('panel.monitor.network')}
           </div>
           <span className="faint" style={{ fontSize: 11 }}>
-            Could not be read: {net.error}
+            {t('panel.monitor.readFailed', { error: net.error })}
           </span>
         </div>
       )}
@@ -249,7 +251,7 @@ export function MonitorView({
       {net !== null && 'interfaces' in net && (net.interfaces.length > 0 || net.dns.length > 0) && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="sidebar-title" style={{ marginBottom: 12 }}>
-            Network
+            {t('panel.monitor.network')}
           </div>
           <div className="col" style={{ gap: 8 }}>
             {net.interfaces.map((iface) => (
@@ -283,8 +285,7 @@ export function MonitorView({
                       looking for a problem that is not there. */}
                   {isStubResolver(net) && (
                     <span className="faint" style={{ fontSize: 11 }}>
-                      systemd-resolved stub — the upstream resolvers are not in
-                      /etc/resolv.conf
+                      {t('panel.monitor.stubResolver')}
                     </span>
                   )}
                 </span>
@@ -303,10 +304,10 @@ export function MonitorView({
       {ports !== null && 'error' in ports && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="sidebar-title" style={{ marginBottom: 8 }}>
-            Listening ports
+            {t('panel.monitor.listeningPorts')}
           </div>
           <span className="faint" style={{ fontSize: 11 }}>
-            Could not be read: {ports.error}
+            {t('panel.monitor.readFailed', { error: ports.error })}
           </span>
         </div>
       )}
@@ -314,7 +315,7 @@ export function MonitorView({
       {ports !== null && 'ports' in ports && ports.ports.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="row" style={{ marginBottom: 12, alignItems: 'baseline', gap: 'var(--sp-3)' }}>
-            <span className="sidebar-title">Listening ports</span>
+            <span className="sidebar-title">{t('panel.monitor.listeningPorts')}</span>
             {/* Every count on screen, so the filter says what it is hiding
                 rather than implying there is nothing there. */}
             <div className="segment" style={{ marginLeft: 'auto' }}>
@@ -324,7 +325,7 @@ export function MonitorView({
                   className={clsx('seg-btn', proto === f && 'active')}
                   onClick={() => setProto(f)}
                 >
-                  {f === 'all' ? 'All' : f.toUpperCase()}{' '}
+                  {f === 'all' ? t('panel.monitor.protoAll') : f.toUpperCase()}{' '}
                   <span className="count">{protoCounts(ports.ports)[f]}</span>
                 </button>
               ))}
@@ -333,7 +334,9 @@ export function MonitorView({
           <div className="col" style={{ gap: 4 }}>
             {filterByProto(ports.ports, proto).length === 0 && (
               <span className="faint" style={{ fontSize: 11 }}>
-                Nothing is listening on {proto === 'all' ? 'this host' : proto.toUpperCase()}.
+                {proto === 'all'
+                  ? t('panel.monitor.nothingListening')
+                  : t('panel.monitor.nothingListeningProto', { proto: proto.toUpperCase() })}
               </span>
             )}
             {filterByProto(ports.ports, proto).map((p) => (
@@ -369,8 +372,7 @@ export function MonitorView({
                 short. That distinction is the whole point of saying this. */}
             {ports.partialOwners && (
               <span className="faint" style={{ fontSize: 11, marginTop: 4 }}>
-                Some owning processes are not visible without elevated privileges. Every listening
-                socket is listed.
+                {t('panel.monitor.partialOwners')}
               </span>
             )}
           </div>
@@ -384,7 +386,11 @@ export function MonitorView({
       <div className="content">
         <div className="empty" style={{ height: 260 }}>
           <Loader2 size={22} className="spin" />
-          <p>Collecting live metrics from {local ? 'this machine' : server.host}…</p>
+          <p>
+            {local
+              ? t('panel.monitor.collectingLocal')
+              : t('panel.monitor.collecting', { host: server.host })}
+          </p>
         </div>
       </div>
     )
@@ -397,7 +403,7 @@ export function MonitorView({
           <div className="empty-icon" style={{ color: 'var(--danger)' }}>
             <AlertTriangle size={22} />
           </div>
-          <h3>Metrics unavailable</h3>
+          <h3>{t('panel.monitor.unavailable')}</h3>
           <p className="mono">{m.error}</p>
         </div>
         {hostReads}
@@ -409,38 +415,43 @@ export function MonitorView({
     <div className="content">
       {real && (
         <div className="row" style={{ marginBottom: 12 }}>
-          <span className="chip ok">live</span>
+          <span className="chip ok">{t('panel.monitor.live')}</span>
           <span className="muted" style={{ fontSize: 12 }}>
             {/* This machine is not reached over SSH, and saying so would be a
                 small lie in the one place the panel explains itself. */}
-            {local ? 'polling every 2s on this machine' : 'polling every 2s over SSH'}
+            {local ? t('panel.monitor.pollingLocal') : t('panel.monitor.pollingSsh')}
           </span>
         </div>
       )}
       <div className="monitor" style={{ marginBottom: 16 }}>
         <Metric
-            label="CPU"
+            label={t('panel.monitorStrip.cpu')}
             icon={<Cpu size={13} />}
             value={m.cpu}
             history={m.cpuHistory}
             cores={m.host?.cpuCores ?? null}
           />
-        <Metric label="Memory" icon={<MemoryStick size={13} />} value={m.ram} history={m.ramHistory} />
-        <Metric label="Disk" icon={<HardDrive size={13} />} value={m.disk} history={m.diskHistory} />
+        <Metric
+          label={t('panel.monitorStrip.memory')}
+          icon={<MemoryStick size={13} />}
+          value={m.ram}
+          history={m.ramHistory}
+        />
+        <Metric label={t('panel.monitorStrip.disk')} icon={<HardDrive size={13} />} value={m.disk} history={m.diskHistory} />
         <div className="metric-card">
           <div className="m-head">
-            <span>Network</span>
+            <span>{t('panel.monitor.network')}</span>
           </div>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <div className="col" style={{ gap: 2 }}>
               <span className="muted" style={{ fontSize: 11 }}>
-                <ArrowDown size={11} /> Download
+                <ArrowDown size={11} /> {t('panel.monitor.download')}
               </span>
               <b className="mono">{rate(m.rx)}</b>
             </div>
             <div className="col" style={{ gap: 2 }}>
               <span className="muted" style={{ fontSize: 11 }}>
-                <ArrowUp size={11} /> Upload
+                <ArrowUp size={11} /> {t('panel.monitor.upload')}
               </span>
               <b className="mono">{rate(m.tx)}</b>
             </div>
@@ -457,7 +468,7 @@ export function MonitorView({
       {mounts.length > 0 && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="sidebar-title" style={{ marginBottom: 12 }}>
-            Filesystems
+            {t('panel.monitor.filesystems')}
           </div>
           <div className="col" style={{ gap: 6 }}>
             {mounts.map((mt) => (
@@ -466,7 +477,7 @@ export function MonitorView({
                   {mt.mount}
                 </span>
                 <span className="faint" style={{ fontSize: 11 }}>
-                  {bytes(mt.usedKb * 1024)} of {bytes(mt.totalKb * 1024)}
+                  {t('panel.monitor.usedOf', { used: bytes(mt.usedKb * 1024), total: bytes(mt.totalKb * 1024) })}
                 </span>
                 <span className={clsx('chip', mt.usedPercent >= 90 && 'danger', mt.usedPercent >= 75 && mt.usedPercent < 90 && 'warn')}>
                   {mt.usedPercent}%
@@ -481,7 +492,7 @@ export function MonitorView({
 
       <div className="card">
         <div className="sidebar-title" style={{ marginBottom: 12 }}>
-          System information
+          {t('panel.monitor.systemInfo')}
         </div>
         <div className="info-grid">
           {info.map(([k, v]) => (

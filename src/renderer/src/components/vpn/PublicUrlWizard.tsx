@@ -8,6 +8,8 @@ import { isVpnRunning } from '../../../../shared/vpn'
 import type { NgrokSpec, VpnProfile } from '../../../../shared/vpn'
 import { headline } from './useVpnProfiles'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 /**
  * "Get a public URL", asked as the question it actually is.
@@ -51,6 +53,7 @@ export function PublicUrlWizard({
   onAddNgrok,
   onClose
 }: PublicUrlWizardProps): React.JSX.Element {
+  const t = useT()
   const profiles = useApp((s) => s.vpns)
   const statuses = useApp((s) => s.vpnStatuses)
   const upsertVpnProfile = useApp((s) => s.upsertVpnProfile)
@@ -101,11 +104,11 @@ export function PublicUrlWizard({
       // reuses its entry rather than adding a second endpoint for the same
       // thing -- some ngrok plans allow only one endpoint per session, and two
       // for one port would spend that allowance on a duplicate.
-      const existing = ngrokProfile.spec.tunnels.find((t) => t.localPort === localPort)
+      const existing = ngrokProfile.spec.tunnels.find((tn) => tn.localPort === localPort)
       const name = existing?.name ?? `port-${localPort}`
       const tunnels = existing
-        ? ngrokProfile.spec.tunnels.map((t) =>
-            t.localPort === localPort ? { ...t, acknowledgedExposure: true } : t
+        ? ngrokProfile.spec.tunnels.map((tn) =>
+            tn.localPort === localPort ? { ...tn, acknowledgedExposure: true } : tn
           )
         : [
             ...ngrokProfile.spec.tunnels,
@@ -123,7 +126,7 @@ export function PublicUrlWizard({
 
       const st = statuses[ngrokProfile.id]
       const running = st ? isVpnRunning(st.state) : false
-      const result = await withVaultUnlock(`Publishing ${local}`, () =>
+      const result = await withVaultUnlock(t('vpn.publicUrl.unlockReason', { local }), () =>
         running
           ? window.opsmaxx!.vpn.reload(ngrokProfile.id)
           : window.opsmaxx!.vpn.start(ngrokProfile.id)
@@ -132,7 +135,7 @@ export function PublicUrlWizard({
         // The endpoint stays on the profile: it is valid and confirmed, and
         // what failed is the engine. The row's Start button is the shortest way
         // to try again, and it now shows the reason.
-        toast(headline(result.error ?? 'ngrok would not start.'), 'error')
+        toast(headline(result.error ?? t('vpn.publicUrl.ngrokFailed')), 'error')
         setBusy(false)
         onClose()
         return
@@ -141,7 +144,7 @@ export function PublicUrlWizard({
       // It is not read from `result` because a profile that was already running
       // returns from `reload` without one.
     } catch (e) {
-      toast(headline(e instanceof Error ? e.message : 'ngrok would not start.'), 'error')
+      toast(headline(e instanceof Error ? e.message : t('vpn.publicUrl.ngrokFailed')), 'error')
       setBusy(false)
     }
   }
@@ -149,18 +152,18 @@ export function PublicUrlWizard({
   const copy = (): void => {
     if (!url) return
     window.opsmaxx?.clipboard.write(url)
-    toast('Public URL copied', 'ok')
+    toast(t('vpn.publicUrl.copied'), 'ok')
   }
 
   // ---------------------------------------------------------------- the URL
   if (url) {
     return (
       <Modal
-        title="Your service is public"
+        title={t('vpn.publicUrl.doneTitle')}
         subtitle={local}
         onClose={onClose}
-        cancelLabel="Done"
-        confirm={{ label: 'Copy URL', onClick: copy }}
+        cancelLabel={t('common.done')}
+        confirm={{ label: t('vpn.publicUrl.copyUrl'), onClick: copy }}
       >
         <div className="col" style={{ gap: 10 }}>
           <div className="hop-card row" style={{ gap: 8, alignItems: 'center' }}>
@@ -169,17 +172,15 @@ export function PublicUrlWizard({
               {url}
             </span>
             <span className="grow" />
-            <button className="icon-btn sm" title={`Copy ${url}`} onClick={copy}>
+            <button className="icon-btn sm" title={t('vpn.publicUrl.copyTitle', { url })} onClick={copy}>
               <Copy size={14} />
             </button>
           </div>
           <p className="s-desc">
-            Anyone with this address reaches {local} on this machine, for as long as the profile
-            is running. Stopping it takes the address away.
+            {t('vpn.publicUrl.doneReach', { local })}
           </p>
           <p className="s-desc">
-            ngrok assigns a new address each run unless the account has a reserved domain, so this
-            one will not survive a restart.
+            {t('vpn.publicUrl.doneEphemeral')}
           </p>
         </div>
       </Modal>
@@ -189,10 +190,10 @@ export function PublicUrlWizard({
   // ------------------------------------------------------- waiting on ngrok
   if (busy) {
     return (
-      <Modal title="Publishing…" subtitle={local} onClose={onClose} cancelLabel={null}>
+      <Modal title={t('vpn.publicUrl.publishingTitle')} subtitle={local} onClose={onClose} cancelLabel={null}>
         <div className="row" style={{ gap: 10, alignItems: 'center', padding: '8px 0' }}>
           <Loader2 size={18} className="spin" />
-          <span>Asking ngrok for an address for {local}.</span>
+          <span>{t('vpn.publicUrl.asking', { local })}</span>
         </div>
       </Modal>
     )
@@ -202,11 +203,11 @@ export function PublicUrlWizard({
   if (provider === 'ngrok' && ngrokProfile) {
     return (
       <Modal
-        title="Publish through ngrok"
+        title={t('vpn.publicUrl.ngrokTitle')}
         subtitle={ngrokProfile.name}
         onClose={onClose}
         confirm={{
-          label: 'Get the URL',
+          label: t('vpn.publicUrl.getUrl'),
           disabled: !acknowledged,
           onClick: () => void publishNgrok()
         }}
@@ -216,21 +217,24 @@ export function PublicUrlWizard({
               one keystroke apart and one of them is a database. */}
           <div className="hop-card col" style={{ gap: 6 }}>
             <span style={{ fontSize: 'var(--fs-body)' }}>
-              This makes <b className="mono">{local}</b> reachable from the public internet.
+              <Trans
+                i18nKey="vpn.publicUrl.ngrokReach"
+                values={{ local }}
+                components={{ b: <b className="mono" /> }}
+              />
             </span>
             <span className="muted" style={{ fontSize: 'var(--fs-sm)' }}>
-              Anyone who has the address can reach it. There is no password in front of it unless
-              your own service has one.
+              {t('vpn.publicUrl.ngrokAudience')}
             </span>
             <span className="muted" style={{ fontSize: 'var(--fs-sm)' }}>
-              Traffic crosses ngrok's servers to get here.
+              {t('vpn.publicUrl.ngrokRoute')}
             </span>
           </div>
 
           <label className="row" style={{ gap: 8, alignItems: 'flex-start' }}>
             <Switch
               checked={acknowledged}
-              label={`Make ${local} reachable from the public internet`}
+              label={t('vpn.publicUrl.ngrokSwitch', { local })}
               style={{ marginTop: 1 }}
               onChange={setAcknowledged}
             />
@@ -240,7 +244,7 @@ export function PublicUrlWizard({
                 color: acknowledged ? 'var(--text-muted)' : 'var(--warn)'
               }}
             >
-              I want {local} reachable from the public internet.
+              {t('vpn.publicUrl.ngrokAck', { local })}
             </span>
           </label>
         </div>
@@ -250,11 +254,10 @@ export function PublicUrlWizard({
 
   // ------------------------------------------------------- the choice itself
   return (
-    <Modal title="Get a public URL" subtitle={local} onClose={onClose}>
+    <Modal title={t('vpn.publicUrl.chooseTitle')} subtitle={local} onClose={onClose}>
       <div className="col" style={{ gap: 10 }}>
         <p className="s-desc" style={{ marginTop: 0 }}>
-          Both of these put {local} on the internet. Which one is right depends on what you
-          already have.
+          {t('vpn.publicUrl.chooseIntro', { local })}
         </p>
 
         <button
@@ -268,12 +271,12 @@ export function PublicUrlWizard({
           <span className="setup-q-body">
             <span className="setup-q-title">ngrok</span>
             <span className="setup-q-detail">
-              ngrok gives you the address and runs the server. Nothing to host.
+              {t('vpn.publicUrl.ngrokDetail')}
             </span>
             <span className="setup-q-cost">
               {ngrokProfile
-                ? 'Ready — an authtoken is in the vault.'
-                : 'Needs a free ngrok account authtoken. Set one up now.'}
+                ? t('vpn.publicUrl.ngrokReady')
+                : t('vpn.publicUrl.ngrokNeeds')}
             </span>
           </span>
         </button>
@@ -287,12 +290,12 @@ export function PublicUrlWizard({
             <Share2 size={13} />
           </span>
           <span className="setup-q-body">
-            <span className="setup-q-title">Your own frp server</span>
+            <span className="setup-q-title">{t('vpn.publicUrl.frpTitle')}</span>
             <span className="setup-q-detail">
-              The address is on a domain you control, and the traffic crosses only your server.
+              {t('vpn.publicUrl.frpDetail')}
             </span>
             <span className="setup-q-cost">
-              {frpReady ? 'Ready — a tunnel server is configured.' : (frpGap ?? 'Needs a server you control.')}
+              {frpReady ? t('vpn.publicUrl.frpReady') : (frpGap ?? t('vpn.publicUrl.frpNeeds'))}
             </span>
           </span>
         </button>

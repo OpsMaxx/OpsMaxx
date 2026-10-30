@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import en from '../src/shared/locales/en.json'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { LogTailer } from '../src/main/services/logTail'
@@ -440,7 +441,8 @@ describe('the panel that drives it', () => {
   it('says what a filtered count is a count of', () => {
     // "12 lines" under a filter reads as a quiet host. The denominator is what
     // makes it a filter rather than a claim about the log.
-    expect(panel).toMatch(/of \$\{lines\.length\} lines match/)
+    expect(panel).toMatch(/t\('monitor\.logTail\.linesMatch', \{ shown: shown\.length, total: lines\.length \}\)/)
+    expect(en['monitor.logTail.linesMatch']).toBe('{{shown}} of {{total}} lines match')
   })
 
   it('draws the diagnosis and the root badge outside the scrolling stream', () => {
@@ -448,7 +450,10 @@ describe('the panel that drives it', () => {
     // privileged tail becomes indistinguishable from an ordinary one after a
     // second of traffic.
     const stream = panel.indexOf('className="bc-out log-stream"')
-    expect(panel.indexOf('reading as root')).toBeLessThan(stream)
+    expect(en['monitor.logTail.readingAsRoot']).toBe('reading as root')
+    const badge = panel.indexOf("t('monitor.logTail.readingAsRoot')")
+    expect(badge).toBeGreaterThan(-1)
+    expect(badge).toBeLessThan(stream)
     expect(panel.indexOf('LOG_ISSUE_HELP[d.issue]')).toBeLessThan(stream)
   })
 

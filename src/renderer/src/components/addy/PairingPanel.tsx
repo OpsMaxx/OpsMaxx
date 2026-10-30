@@ -6,6 +6,8 @@ import { useApp } from '../../store/app'
 import { useNav } from '../../store/nav'
 import { errorText } from '../../lib/connectionError'
 import type { AddyPairingConfirmation } from '../../../../shared/addy'
+import { t as tr, useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 /**
  * Adding a device to an account.
@@ -96,12 +98,9 @@ function useSecondsLeft(deadline: number | null): number | null {
  * code expired", which is the one reading that hides what happened. So those
  * two endings say where to look.
  */
-const CODE_TAKEN_HINT =
-  'If the other machine already showed emoji and someone pressed They match, another device may have used your code — check the device list there.'
-
 export function joinerFailure(text: string): string {
   if (!/did not answer in time|no longer open on the relay/.test(text)) return text
-  return `${text.replace(/\.?$/, '.')} ${CODE_TAKEN_HINT}`
+  return `${text.replace(/\.?$/, '.')} ${tr('addy.pairing.codeTakenHint')}`
 }
 
 /** The relay's host, for the joiner to see which account it is about to join.
@@ -137,6 +136,7 @@ function mss(s: number | null): string {
  * aside for them.
  */
 function JoinKeeps(): React.JSX.Element | null {
+  const t = useT()
   const servers = useApp((s) => s.servers.length)
   const [vault, setVault] = useState(false)
   useEffect(() => {
@@ -150,30 +150,17 @@ function JoinKeeps(): React.JSX.Element | null {
     }
   }, [])
   if (servers === 0 && !vault) return null
-  const what = [servers > 0 ? `${servers} server${servers === 1 ? '' : 's'}` : null, vault ? 'a vault' : null]
-    .filter(Boolean)
-    .join(' and ')
+  const has =
+    servers === 0
+      ? t('addy.pairing.keeps.vault')
+      : vault
+        ? t('addy.pairing.keeps.serversAndVault', { count: servers })
+        : t('addy.pairing.keeps.servers', { count: servers })
   return (
     <div className="setting-desc pair-keeps" role="note">
-      <p>
-        This machine already has {what}. Joining keeps them.
-      </p>
-      {servers > 0 && (
-        <p>
-          Your servers, workspaces, tunnels and other lists are added to the account&apos;s. One
-          that the account holds under the same identity with different details is kept both
-          ways, for you to choose between.
-        </p>
-      )}
-      {vault && (
-        <p>
-          Your vault cannot be merged automatically: it is encrypted with this machine&apos;s master
-          password. If the account already has a vault, that one takes its place here and yours is
-          set aside, not deleted. Sync &amp; devices then offers to add its entries to the
-          account&apos;s vault — you will need this machine&apos;s master password for that, and the
-          account&apos;s to unlock the vault afterwards.
-        </p>
-      )}
+      <p>{has}</p>
+      {servers > 0 && <p>{t('addy.pairing.keeps.serversMerge')}</p>}
+      {vault && <p>{t('addy.pairing.keeps.vaultAside')}</p>}
     </div>
   )
 }
@@ -198,6 +185,7 @@ export function PairingPanel({
    *  mounted until it settles. See AddySetup's `joinHeld`. */
   onHold?: (held: boolean) => void
 }): React.JSX.Element {
+  const t = useT()
   const [stage, setStage] = useState<Stage>('choose')
   const [code, setCode] = useState('')
   const [pairingId, setPairingId] = useState('')
@@ -324,8 +312,8 @@ export function PairingPanel({
     if (secondsLeft !== 0) return
     stopWith(
       stage === 'showing'
-        ? 'The code ran out before the other device used it. Start again for a new one.'
-        : joinerFailure('The other device did not answer in time. Start again with a new code.')
+        ? t('addy.pairing.codeRanOut')
+        : `${t('addy.pairing.joinTimedOut')} ${t('addy.pairing.codeTakenHint')}`
     )
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [secondsLeft])
@@ -341,7 +329,7 @@ export function PairingPanel({
     const left = wasOnScreen.current && !onScreen
     wasOnScreen.current = onScreen
     if (left && (stage === 'showing' || waiting)) {
-      stopWith('Pairing stopped because you left Sync & devices. Start again when both devices are ready.')
+      stopWith(t('addy.pairing.leftScreen'))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onScreen])
@@ -376,7 +364,7 @@ export function PairingPanel({
   const join = async (): Promise<void> => {
     const parts = splitTicket(typedTicket)
     if (parts === null) {
-      setError('That does not look like a pairing code. Copy the whole thing from the other device.')
+      setError(t('addy.pairing.badCode'))
       setStage('failed')
       return
     }
@@ -430,7 +418,7 @@ export function PairingPanel({
       active.current = false
       setDeadline(null)
       setStage('done')
-      toast(joining ? 'This device joined the account' : 'Device added to your account', 'ok')
+      toast(joining ? t('addy.pairing.joined') : t('addy.pairing.added'), 'ok')
     } catch (err) {
       // Said plainly and left on this screen. A failure here means the two
       // devices agreed and the account does not know it, which is exactly the
@@ -446,17 +434,14 @@ export function PairingPanel({
     // The same call as an ordinary completion: forgetting the session IS the
     // remedy, because the session is what holds the shared secret.
     void window.opsmaxx?.addy.cancelPairing()
-    setError(
-      'Pairing stopped. If the emoji did not match, something was between the two devices — try ' +
-        'again on a network you trust, and compare them in person if you can.'
-    )
+    setError(t('addy.pairing.rejected'))
     setStage('failed')
   }
 
   if (stage === 'compare' && confirmation) {
     return (
       <div className="pair-compare">
-        <h3>Do these match on both devices?</h3>
+        <h3>{t('addy.pairing.compare.title')}</h3>
         <div className="pair-emoji" aria-label={confirmation.sasWords}>
           {confirmation.sas.map((e, i) => (
             <span key={i}>{e}</span>
@@ -473,24 +458,21 @@ export function PairingPanel({
         {confirmation.self ? (
           <>
             <p className="fine">
-              This machine will join the account on <strong>{hostOf(baseURL)}</strong>. If you do not
-              know that relay, press <strong>They do not match</strong>.
+              <Trans
+                i18nKey="addy.pairing.compare.joinerHost"
+                values={{ host: hostOf(baseURL) }}
+                components={{ strong: <strong /> }}
+              />
             </p>
-            <p className="fine">
-              Compare the emoji with the other device before answering. If they differ, something is
-              between you.
-            </p>
+            <p className="fine">{t('addy.pairing.compare.joinerCheck')}</p>
           </>
         ) : (
           <>
             <p className="fine">
-              Pressing <strong>They match</strong> gives that machine everything this account syncs:
-              your servers, connections and vault. Press it only if the other screen shows these same
-              emoji.
+              <Trans i18nKey="addy.pairing.compare.showerGives" components={{ strong: <strong /> }} />
             </p>
             <p className="fine">
-              If the other screen is still waiting, or shows different emoji, someone else used the
-              code — press <strong>They do not match</strong>.
+              <Trans i18nKey="addy.pairing.compare.showerTaken" components={{ strong: <strong /> }} />
             </p>
           </>
         )}
@@ -506,13 +488,13 @@ export function PairingPanel({
             laptop. */}
         {!confirmation.self && (
           <label className="pair-field">
-            <span>What is the other machine called?</span>
+            <span>{t('addy.pairing.compare.nameLabel')}</span>
             <input
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
               spellCheck={false}
               maxLength={60}
-              placeholder="Work laptop"
+              placeholder={t('addy.pairing.compare.namePlaceholder')}
             />
           </label>
         )}
@@ -521,20 +503,29 @@ export function PairingPanel({
               pairing that is not the one you think it is, and it is not
               reversible. */}
           <button className="btn" autoFocus disabled={busy} onClick={reject}>
-            <X size={14} /> They do not match
+            <X size={14} /> {t('addy.pairing.compare.noMatch')}
           </button>
           <button className="btn" disabled={busy} onClick={() => void accept()}>
             {busy ? <Loader2 size={14} className="spin" /> : <Check size={14} />}
-            {busy ? (confirmation.self ? ' Joining…' : ' Adding the device…') : ' They match'}
+            {' '}
+            {busy
+              ? confirmation.self
+                ? t('addy.pairing.compare.joining')
+                : t('addy.pairing.compare.adding')
+              : t('addy.pairing.compare.match')}
           </button>
         </div>
         {busy && confirmation.self && deadline !== null && (
           <>
             <p className="fine">
-              Waiting for the other device to press <strong>They match</strong> ({timeLeft} left).
+              <Trans
+                i18nKey="addy.pairing.compare.waitingForMatch"
+                values={{ time: timeLeft }}
+                components={{ strong: <strong /> }}
+              />
             </p>
-            <button className="btn" onClick={() => stopWith('Joining stopped. Nothing was added.')}>
-              Cancel
+            <button className="btn" onClick={() => stopWith(t('addy.pairing.joinStopped'))}>
+              {t('common.cancel')}
             </button>
           </>
         )}
@@ -547,18 +538,16 @@ export function PairingPanel({
       {stage === 'choose' && (
         <>
           <div className="setting-desc">
-            {canShow
-              ? 'Adding a device needs both devices open at the same time. One shows a code, the other types it, and you compare seven emoji.'
-              : 'This machine has no account yet, so it is the one that TYPES the code. Start on the machine you already use: open Sync & devices there, choose Show a code on this device, and it will show you a pairing code.'}
+            {canShow ? t('addy.pairing.choose.canShow') : t('addy.pairing.choose.cannotShow')}
           </div>
           <div className="pair-actions">
             {canShow && (
               <button className="btn" onClick={() => void start()}>
-                <Smartphone size={14} /> Show a code on this device
+                <Smartphone size={14} /> {t('addy.pairing.choose.show')}
               </button>
             )}
             <button className={canShow ? 'btn' : 'btn primary'} onClick={() => setStage('joining')}>
-              Type a code from another device
+              {t('addy.pairing.choose.type')}
             </button>
           </div>
         </>
@@ -566,7 +555,7 @@ export function PairingPanel({
 
       {stage === 'showing' && (
         <>
-          <div className="setting-label">Type this on the other device</div>
+          <div className="setting-label">{t('addy.pairing.showing.label')}</div>
           {/* ONE THING TO CARRY, NOT TWO.
               The id addresses the mailbox and the code proves who may open it,
               so both have to cross — but that is the protocol's business, not
@@ -577,10 +566,10 @@ export function PairingPanel({
             <code>{ticket}</code>
             <button
               className="btn"
-              aria-label="Copy the pairing code"
+              aria-label={t('addy.pairing.showing.copyCode')}
               onClick={() => {
                 void navigator.clipboard.writeText(ticket)
-                toast('Pairing code copied')
+                toast(t('addy.pairing.showing.codeCopied'))
               }}
             >
               <Copy size={14} />
@@ -589,8 +578,7 @@ export function PairingPanel({
           {/* Said where the code is, because this is where somebody is asked
               for it: a message, a call, a "support" chat. */}
           <p className="fine">
-            <strong>Never give this code to anyone.</strong> Nobody, including whoever runs your
-            relay, will ever ask for it.
+            <Trans i18nKey="addy.pairing.showing.never" components={{ strong: <strong /> }} />
           </p>
           {/* THE LINK NOBODY WAS EMITTING. `opsmaxx://` was registered, parsed
               and tested, and the only thing that ever produced one was the
@@ -600,17 +588,15 @@ export function PairingPanel({
               It fills the form on arrival; it never joins by itself. */}
           {pairLink && (
             <>
-              <p className="fine">
-                Or send this link to your other machine, and only to it — it fills both in:
-              </p>
+              <p className="fine">{t('addy.pairing.showing.orLink')}</p>
               <div className="pair-code">
                 <code className="pair-link">{pairLink}</code>
                 <button
                   className="btn"
-                  aria-label="Copy the pairing link"
+                  aria-label={t('addy.pairing.showing.copyLink')}
                   onClick={() => {
                     void navigator.clipboard.writeText(pairLink)
-                    toast('Pairing link copied')
+                    toast(t('addy.pairing.showing.linkCopied'))
                   }}
                 >
                   <Copy size={14} />
@@ -622,11 +608,10 @@ export function PairingPanel({
               second. The stage changes are what a screen reader hears — the
               failure below is an alert. */}
           <p className="fine">
-            <Loader2 size={13} className="spin" /> Waiting for the other device. This code stops
-            working in {timeLeft}, or as soon as you leave Sync &amp; devices.
+            <Loader2 size={13} className="spin" /> {t('addy.pairing.showing.waiting', { time: timeLeft })}
           </p>
           <button className="btn" onClick={cancel}>
-            Cancel
+            {t('common.cancel')}
           </button>
         </>
       )}
@@ -634,14 +619,14 @@ export function PairingPanel({
       {stage === 'joining' && (
         <>
           <label className="pair-field">
-            <span>Pairing code from the other device</span>
+            <span>{t('addy.pairing.joining.label')}</span>
             <input
               value={typedTicket}
               onChange={(e) => setTypedTicket(e.target.value)}
               spellCheck={false}
               autoFocus
               disabled={waiting}
-              placeholder="Paste it here"
+              placeholder={t('addy.pairing.joining.placeholder')}
             />
           </label>
           {waiting ? (
@@ -650,19 +635,17 @@ export function PairingPanel({
                   device is the one that finds out, and this side waits out the
                   clock — so the clock is on screen, and so is the way out. */}
               <p className="fine">
-                <Loader2 size={13} className="spin" /> Waiting for the other device… ({timeLeft} left).
-                If the other device says the code was wrong, start a new code there, cancel here,
-                and type the new one.
+                <Loader2 size={13} className="spin" /> {t('addy.pairing.joining.waiting', { time: timeLeft })}
               </p>
               <button className="btn" onClick={cancel}>
-                Cancel
+                {t('common.cancel')}
               </button>
             </>
           ) : (
             <>
               <JoinKeeps />
               <button className="btn" disabled={splitTicket(typedTicket) === null} onClick={() => void join()}>
-                Join
+                {t('addy.pairing.joining.join')}
               </button>
             </>
           )}
@@ -672,16 +655,14 @@ export function PairingPanel({
       {stage === 'done' && (
         <>
           <div className="setting-desc">
-            {confirmation?.self
-              ? 'This device is now on the account.'
-              : 'The other device is now on the account.'}
+            {confirmation?.self ? t('addy.pairing.done.self') : t('addy.pairing.done.other')}
           </div>
           {/* A TERMINAL STATE WITH NO WAY BACK MEANT NO THIRD DEVICE. After a
               successful pairing the panel sat here, and the only route to
               another one was restarting the app — on the very screen whose job
               is adding machines. Pairing is not a thing you do once. */}
           <button className="btn" onClick={() => reset()}>
-            Pair another device
+            {t('addy.pairing.done.again')}
           </button>
         </>
       )}
@@ -692,7 +673,7 @@ export function PairingPanel({
           <div>
             <span>{error}</span>
             <button className="btn" onClick={() => reset()}>
-              Start again
+              {t('addy.pairing.startAgain')}
             </button>
           </div>
         </div>

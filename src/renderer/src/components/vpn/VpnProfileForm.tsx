@@ -23,6 +23,9 @@ import type {
 import { BindWarning } from './VpnStatusCard'
 import { FrpProxyEditor } from './FrpProxyEditor'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 
 /** A keypair that exists only in this form.
  *
@@ -45,18 +48,18 @@ const parseList = (s: string): string[] =>
 /** Onto the clipboard, with a receipt. A key the user cannot tell they copied
  *  gets copied again, and the second attempt is the one that grabs the wrong
  *  field. */
-function copyValue(label: string, value: string): void {
+function copyValue(receipt: string, value: string): void {
   if (!value) return
   window.opsmaxx?.clipboard.write(value)
-  toast(`${label} copied`, 'ok')
+  toast(receipt, 'ok')
 }
 
-const KIND_SUBTITLE: Record<VpnProfile['spec']['kind'], string> = {
-  wireguard: 'WireGuard',
-  openvpn: 'OpenVPN',
-  frp: 'frp reverse proxy',
-  tailscale: 'Tailscale — a node of its own on your tailnet',
-  ngrok: 'ngrok — public URL for a local port'
+const KIND_SUBTITLE: Record<VpnProfile['spec']['kind'], MessageKey> = {
+  wireguard: 'vpn.profileForm.kindWireguard',
+  openvpn: 'vpn.profileForm.kindOpenvpn',
+  frp: 'vpn.profileForm.kindFrp',
+  tailscale: 'vpn.profileForm.kindTailscale',
+  ngrok: 'vpn.profileForm.kindNgrok'
 }
 
 /** Which part of the form the caller wants the user standing in front of.
@@ -73,6 +76,7 @@ interface VpnProfileFormProps {
 }
 
 export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps): React.JSX.Element {
+  const t = useT()
   const upsertVpnProfile = useApp((s) => s.upsertVpnProfile)
   // "Edit New frp client" is what the title said for a profile being created.
   // The caller mints the profile before opening the form, so the honest test is
@@ -86,14 +90,14 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
   useEffect(() => {
     if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'validate')) return
     let live = true
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       void window.opsmaxx?.vpn.validate(draft.spec).then((v) => {
         if (live && v) setIssues(v.issues)
       })
     }, 200)
     return () => {
       live = false
-      clearTimeout(t)
+      clearTimeout(timer)
     }
   }, [draft.spec])
 
@@ -196,7 +200,7 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
       setSaving(true)
       try {
         const replaces = wg.privateKeyRef?.vaultEntryId
-        const stored = await withVaultUnlock(`Saving the key for ${name}`, () =>
+        const stored = await withVaultUnlock(t('vpn.profileForm.keyUnlockReason', { name }), () =>
           Promise.resolve(
             window.opsmaxx?.vpn.wireguardKeygen({
               profileName: name,
@@ -211,7 +215,7 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
         if (!stored?.ok || !stored.privateKeyRef) {
           // The form stays open with the key still held, so the user can fix
           // whatever went wrong and press Save again rather than losing it.
-          toast(stored?.error ?? 'The key could not be saved to the vault.', 'error')
+          toast(stored?.error ?? t('vpn.profileForm.keyNotSaved'), 'error')
           return
         }
         spec = { ...wg, privateKeyRef: stored.privateKeyRef }
@@ -230,14 +234,14 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
         deviceName.trim() || undefined
       )
       if (res && !res.ok) {
-        toast(res.error ?? 'That name could not be saved for this machine.', 'error')
+        toast(res.error ?? t('vpn.profileForm.deviceNameNotSaved'), 'error')
         return
       }
       storedDeviceName.current = deviceName.trim()
     }
 
     upsertVpnProfile({ ...draft, name, spec })
-    toast(`${name} saved`, 'ok')
+    toast(t('vpn.profileForm.saved', { name }), 'ok')
     onClose()
   }
 
@@ -245,8 +249,14 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
 
   return (
     <Modal
-      title={isNew ? `New ${KIND_SUBTITLE[draft.spec.kind]}` : `Edit ${draft.name || 'profile'}`}
-      subtitle={KIND_SUBTITLE[draft.spec.kind]}
+      title={
+        isNew
+          ? t('vpn.profileForm.titleNew', { kind: t(KIND_SUBTITLE[draft.spec.kind]) })
+          : draft.name
+            ? t('vpn.profileForm.titleEdit', { name: draft.name })
+            : t('vpn.profileForm.titleEditUnnamed')
+      }
+      subtitle={t(KIND_SUBTITLE[draft.spec.kind])}
       size="lg"
       onClose={onClose}
       footer={
@@ -258,21 +268,21 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
           />
           <span className="grow" />
           <button className="btn sm" onClick={onClose}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button
             className="btn primary sm"
             disabled={blocking.length > 0 || !draft.name.trim() || saving}
             onClick={() => void save()}
           >
-            {saving ? 'Saving…' : 'Save'}
+            {saving ? t('common.saving') : t('common.save')}
           </button>
         </>
       }
     >
       <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <label className="field">
-          <span className="field-label">Name</span>
+          <span className="field-label">{t('vpn.profileForm.name')}</span>
           <input
             className="input"
             value={draft.name}
@@ -283,7 +293,7 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
         <label className="row" style={{ gap: 8 }}>
           <Switch checked={draft.autoStart} onChange={(v) => setDraft((d) => ({ ...d, autoStart: v }))} />
           <span className="muted" style={{ fontSize: 12 }}>
-            Connect automatically when OpsMaxx starts
+            {t('vpn.profileForm.autoStart')}
           </span>
         </label>
 
@@ -338,8 +348,7 @@ export function VpnProfileForm({ profile, onClose, focus }: VpnProfileFormProps)
           <details className="disclosure">
             <summary className="disclosure-head">
               <ScrollText size={13} />
-              {stripped.length} {stripped.length === 1 ? 'directive was' : 'directives were'} removed
-              when this profile was imported
+              {t('vpn.profileForm.strippedSummary', { count: stripped.length })}
             </summary>
             <div className="disclosure-body">
               {stripped.map((d, i) => (
@@ -381,6 +390,7 @@ function UnrenderedIssues({
   shown: Set<string>
   nameMissing: boolean
 }): React.JSX.Element | null {
+  const t = useT()
   const orphans = blocking.filter((i) => !shown.has(i.path))
   if (orphans.length === 0 && !nameMissing) return null
   return (
@@ -390,7 +400,7 @@ function UnrenderedIssues({
     >
       <AlertTriangle size={12} style={{ flexShrink: 0, marginTop: 2 }} />
       <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-        {nameMissing && <span>Give this profile a name.</span>}
+        {nameMissing && <span>{t('vpn.profileForm.nameMissing')}</span>}
         {orphans.map((i) => (
           <span key={i.path + i.code}>{i.message}</span>
         ))}
@@ -426,9 +436,10 @@ function usePlatform(): NodeJS.Platform | null {
  *  a form that offers a mode the engine refuses is worse than one that never
  *  offered it. */
 function useSystemModeBlocked(): string | null {
+  const t = useT()
   const platform = usePlatform()
   if (platform !== 'darwin') return null
-  return 'System mode is not available on macOS: OpsMaxx has no signed privileged helper, so it cannot create a system network interface. Userspace mode gives the same tunnel through local listeners and needs no administrator rights.'
+  return t('vpn.profileForm.systemModeBlocked')
 }
 
 /** A checkbox that turns a blocking validation error into an accepted choice.
@@ -550,6 +561,7 @@ function WireGuardFields({
   pending,
   onPending
 }: WgProps): React.JSX.Element {
+  const t = useT()
   const systemModeBlocked = useSystemModeBlocked()
   const set = (patch: Partial<WireGuardSpec>): void => onChange({ ...spec, ...patch })
   const setPeer = (i: number, patch: Partial<WireGuardPeer>): void =>
@@ -558,7 +570,7 @@ function WireGuardFields({
   return (
     <>
       <div className="field">
-        <span className="field-label">Mode</span>
+        <span className="field-label">{t('vpn.profileForm.mode')}</span>
         <div className="row" style={{ gap: 6 }}>
           {(['userspace', 'system'] as const).map((m) => (
             <button
@@ -571,7 +583,7 @@ function WireGuardFields({
               disabled={m === 'system' && systemModeBlocked !== null}
               onClick={() => set({ mode: m })}
             >
-              {m === 'userspace' ? 'Userspace (no admin)' : 'System interface'}
+              {m === 'userspace' ? t('vpn.profileForm.modeUserspace') : t('vpn.profileForm.modeSystem')}
             </button>
           ))}
         </div>
@@ -584,8 +596,8 @@ function WireGuardFields({
         )}
         <span className="field-hint">
           {spec.mode === 'userspace'
-            ? 'The tunnel is exposed as local listeners only. No TUN device, no route changes, no elevation prompt.'
-            : 'Creates a real network interface and changes routes and DNS. Asks for elevation every time it starts. A full tunnel (0.0.0.0/0) is not supported in this mode.'}
+            ? t('vpn.profileForm.modeUserspaceHint')
+            : t('vpn.profileForm.modeSystemHint')}
         </span>
       </div>
 
@@ -598,7 +610,7 @@ function WireGuardFields({
       />
 
       <label className="field">
-        <span className="field-label">Addresses</span>
+        <span className="field-label">{t('vpn.profileForm.addresses')}</span>
         <input
           className="input"
           placeholder="10.0.0.2/32, fd00::2/128"
@@ -609,13 +621,13 @@ function WireGuardFields({
         <Hint
           when={spec.addresses.length > 0}
           ok={spec.addresses.every(isCidr)}
-          text="Each address needs a prefix length, e.g. 10.0.0.2/32."
+          text={t('vpn.profileForm.addressHint')}
         />
       </label>
 
       <div className="field-row">
         <label className="field">
-          <span className="field-label">DNS</span>
+          <span className="field-label">{t('vpn.profileForm.dns')}</span>
           <input
             className="input"
             placeholder="1.1.1.1"
@@ -625,7 +637,7 @@ function WireGuardFields({
           <Issue at="dns" map={issue} shown={shown} />
         </label>
         <label className="field">
-          <span className="field-label">MTU</span>
+          <span className="field-label">{t('vpn.profileForm.mtu')}</span>
           <input
             className="input"
             type="number"
@@ -639,7 +651,7 @@ function WireGuardFields({
 
       <div className="field">
         <div className="row" style={{ gap: 8 }}>
-          <span className="field-label">Peers</span>
+          <span className="field-label">{t('vpn.profileForm.peers')}</span>
           <span className="grow" />
           <button
             className="btn sm"
@@ -647,7 +659,7 @@ function WireGuardFields({
               set({ peers: [...spec.peers, { publicKey: '', endpoint: '', allowedIps: ['0.0.0.0/0'] }] })
             }
           >
-            <Plus size={13} /> Add peer
+            <Plus size={13} /> {t('vpn.profileForm.addPeer')}
           </button>
         </div>
         {spec.peers.map((p, i) => (
@@ -656,13 +668,13 @@ function WireGuardFields({
               <input
                 className="input"
                 style={{ flex: 1 }}
-                placeholder="Peer public key"
+                placeholder={t('vpn.profileForm.peerKeyPlaceholder')}
                 value={p.publicKey}
                 onChange={(e) => setPeer(i, { publicKey: e.target.value })}
               />
               <button
                 className="icon-btn sm"
-                title="Remove peer"
+                title={t('vpn.profileForm.removePeer')}
                 onClick={() => set({ peers: spec.peers.filter((_, n) => n !== i) })}
               >
                 <Trash2 size={14} />
@@ -672,7 +684,7 @@ function WireGuardFields({
             <Hint
               when={!!p.publicKey}
               ok={isWireGuardKey(p.publicKey)}
-              text="A WireGuard key is 44 base64 characters ending in '='."
+              text={t('vpn.profileForm.keyShapeHint')}
             />
 
             <div className="input-group">
@@ -686,7 +698,7 @@ function WireGuardFields({
                 className="input"
                 type="number"
                 style={{ maxWidth: 130 }}
-                placeholder="Keepalive (s)"
+                placeholder={t('vpn.profileForm.keepalivePlaceholder')}
                 value={p.persistentKeepalive ?? ''}
                 onChange={(e) =>
                   setPeer(i, {
@@ -699,12 +711,12 @@ function WireGuardFields({
             <Hint
               when={!!p.endpoint}
               ok={parseVpnEndpoint(p.endpoint) !== null}
-              text="Endpoints are host:port, or [v6-address]:port."
+              text={t('vpn.profileForm.endpointHint')}
             />
 
             <input
               className="input"
-              placeholder="Allowed IPs — 0.0.0.0/0, ::/0"
+              placeholder={t('vpn.profileForm.allowedIpsPlaceholder')}
               value={listStr(p.allowedIps)}
               onChange={(e) => setPeer(i, { allowedIps: parseList(e.target.value) })}
             />
@@ -778,6 +790,7 @@ function InterfaceKeyField({
   pending,
   onPending
 }: KeyFieldProps): React.JSX.Element {
+  const t = useT()
   const [privateKey, setPrivateKey] = useState(pending?.privateKey ?? '')
   const [reveal, setReveal] = useState(false)
   const [publicKey, setPublicKey] = useState(pending?.publicKey ?? '')
@@ -802,7 +815,7 @@ function InterfaceKeyField({
       return
     }
     let live = true
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       void window.opsmaxx?.vpn.wireguardPublicKey(privateKey).then((r) => {
         if (!live) return
         setPublicKey(r?.ok && r.publicKey ? r.publicKey : '')
@@ -810,7 +823,7 @@ function InterfaceKeyField({
     }, PUBKEY_DEBOUNCE_MS)
     return () => {
       live = false
-      clearTimeout(t)
+      clearTimeout(timer)
     }
   }, [privateKey, shaped, canDerive])
 
@@ -822,7 +835,7 @@ function InterfaceKeyField({
     try {
       const res = await window.opsmaxx?.vpn.wireguardMint()
       if (!res?.ok || !res.privateKey || !res.publicKey) {
-        setError(res?.error ?? 'The key could not be generated.')
+        setError(res?.error ?? t('vpn.profileForm.keyNotGenerated'))
         return
       }
       setPrivateKey(res.privateKey)
@@ -847,10 +860,10 @@ function InterfaceKeyField({
   return (
     <div className="field">
       <div className="row" style={{ gap: 8 }}>
-        <span className="field-label">Interface key</span>
+        <span className="field-label">{t('vpn.profileForm.interfaceKey')}</span>
         <span className="grow" />
         <button className="btn sm" disabled={!canMint || busy} onClick={() => void mint()}>
-          <KeyRound size={13} /> Generate keypair
+          <KeyRound size={13} /> {t('vpn.profileForm.generateKeypair')}
         </button>
       </div>
 
@@ -861,7 +874,11 @@ function InterfaceKeyField({
           type={reveal ? 'text' : 'password'}
           spellCheck={false}
           autoComplete="off"
-          placeholder={inVault ? 'Paste a private key to replace the stored one' : 'Paste a private key, or generate one'}
+          placeholder={
+            inVault
+              ? t('vpn.profileForm.replaceKeyPlaceholder')
+              : t('vpn.profileForm.pasteKeyPlaceholder')
+          }
           value={privateKey}
           onChange={(e) => {
             const next = e.target.value.trim()
@@ -879,16 +896,16 @@ function InterfaceKeyField({
         />
         <button
           className="icon-btn sm"
-          title={reveal ? 'Hide private key' : 'Show private key'}
+          title={reveal ? t('vpn.profileForm.hidePrivateKey') : t('vpn.profileForm.showPrivateKey')}
           onClick={() => setReveal((v) => !v)}
         >
           {reveal ? <EyeOff size={14} /> : <Eye size={14} />}
         </button>
         <button
           className="icon-btn sm"
-          title="Copy private key"
+          title={t('vpn.profileForm.copyPrivateKey')}
           disabled={!privateKey}
-          onClick={() => copyValue('Private key', privateKey)}
+          onClick={() => copyValue(t('vpn.profileForm.privateKeyCopied'), privateKey)}
         >
           <Copy size={14} />
         </button>
@@ -897,17 +914,18 @@ function InterfaceKeyField({
       <Hint
         when={privateKey !== ''}
         ok={shaped}
-        text="A WireGuard key is 44 base64 characters ending in '='."
+        text={t('vpn.profileForm.keyShapeHint')}
       />
 
       {dirty && (
         <div className="row" style={{ gap: 6 }}>
           <button className="btn primary sm" disabled={busy} onClick={adopt}>
-            {inVault ? 'Replace the stored key' : 'Use this key'}
+            {inVault ? t('vpn.profileForm.replaceStoredKey') : t('vpn.profileForm.useThisKey')}
           </button>
           <span className="field-hint">
-            Until you do, this profile still uses{' '}
-            {inVault ? 'the key already in the vault' : 'no key at all'}.
+            {inVault
+              ? t('vpn.profileForm.stillUsesVaultKey')
+              : t('vpn.profileForm.stillUsesNoKey')}
           </span>
         </div>
       )}
@@ -919,8 +937,8 @@ function InterfaceKeyField({
         // whether they have one.
         <span className="field-hint">
           {inVault
-            ? 'This key replaces the stored one when you press Save.'
-            : 'This key is saved to the vault when you press Save.'}
+            ? t('vpn.profileForm.pendingReplaces')
+            : t('vpn.profileForm.pendingSaves')}
         </span>
       )}
 
@@ -930,22 +948,21 @@ function InterfaceKeyField({
         // provider's form. A public key you cannot get out is a keypair you
         // cannot use.
         <div className="hop-card" style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <span className="field-label">Public key</span>
+          <span className="field-label">{t('vpn.profileForm.publicKey')}</span>
           <div className="row" style={{ gap: 6 }}>
             <code className="mono" style={{ flex: 1, fontSize: 12, wordBreak: 'break-all' }}>
               {publicKey}
             </code>
             <button
               className="icon-btn sm"
-              title="Copy public key"
-              onClick={() => copyValue('Public key', publicKey)}
+              title={t('vpn.profileForm.copyPublicKey')}
+              onClick={() => copyValue(t('vpn.profileForm.publicKeyCopied'), publicKey)}
             >
               <Copy size={14} />
             </button>
           </div>
           <span className="field-hint">
-            Give this to your VPN provider, or add it to your server’s [Peer] section. It is not a
-            secret — the private key above is.
+            {t('vpn.profileForm.publicKeyHint')}
           </span>
         </div>
       )}
@@ -958,19 +975,19 @@ function InterfaceKeyField({
 
       <span className="field-hint">
         {!canMint
-          ? 'This build cannot generate keys. Import a .conf that already carries one.'
+          ? t('vpn.profileForm.keyHintCannotMint')
           : dirty
             ? // The row above already says what to do about it; repeating
               // "stored in the vault" here would be a straight contradiction.
-              'Nothing is written to the vault until you say so.'
+              t('vpn.profileForm.keyHintDirty')
             : pending !== null
               ? // Deliberately not "held in the vault", which is what this said
                 // when the write happened on the button press. It is held here,
                 // in an unsaved form, and Cancel throws it away.
-                'The private key goes to the vault on Save, and never onto this profile, a config file, or a log line.'
+                t('vpn.profileForm.keyHintPending')
               : inVault
-                ? 'Private key, held in the vault. OpsMaxx cannot read it back to show you its public key — paste the key here to see it, or generate a new pair and authorise that one instead.'
-                : 'No private key yet. Generate a pair, or paste one you already have; either way it goes to the vault on Save and the profile keeps only a pointer to it.'}
+                ? t('vpn.profileForm.keyHintInVault')
+                : t('vpn.profileForm.keyHintNone')}
       </span>
     </div>
   )
@@ -986,13 +1003,14 @@ interface ListenerProps {
 }
 
 function ListenerFields({ listeners, issue, onChange, shown }: ListenerProps): React.JSX.Element {
+  const t = useT()
   const replace = (i: number, next: VpnListener): void =>
     onChange(listeners.map((l, n) => (n === i ? next : l)))
 
   return (
     <div className="field">
       <div className="row" style={{ gap: 8 }}>
-        <span className="field-label">Local listeners</span>
+        <span className="field-label">{t('vpn.profileForm.localListeners')}</span>
         <span className="grow" />
         <button
           className="btn sm"
@@ -1000,12 +1018,11 @@ function ListenerFields({ listeners, issue, onChange, shown }: ListenerProps): R
             onChange([...listeners, { kind: 'socks5', bindHost: '127.0.0.1', bindPort: 1080 }])
           }
         >
-          <Plus size={13} /> Add listener
+          <Plus size={13} /> {t('vpn.profileForm.addListener')}
         </button>
       </div>
       <span className="field-hint">
-        In userspace mode these are the only way traffic reaches the tunnel — nothing is routed
-        system-wide.
+        {t('vpn.profileForm.listenersHint')}
       </span>
       {listeners.map((l, i) => (
         <div key={i} className="hop-card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -1025,8 +1042,8 @@ function ListenerFields({ listeners, issue, onChange, shown }: ListenerProps): R
               }}
             >
               <option value="socks5">SOCKS5</option>
-              <option value="http">HTTP proxy</option>
-              <option value="forward">Forward</option>
+              <option value="http">{t('vpn.profileForm.listenerHttp')}</option>
+              <option value="forward">{t('vpn.profileForm.listenerForward')}</option>
             </select>
             <input
               className="input"
@@ -1038,13 +1055,13 @@ function ListenerFields({ listeners, issue, onChange, shown }: ListenerProps): R
               className="input"
               type="number"
               style={{ maxWidth: 110 }}
-              placeholder="Port"
+              placeholder={t('vpn.profileForm.portPlaceholder')}
               value={l.bindPort || ''}
               onChange={(e) => replace(i, { ...l, bindPort: Number(e.target.value) })}
             />
             <button
               className="icon-btn sm"
-              title="Remove listener"
+              title={t('vpn.profileForm.removeListener')}
               onClick={() => onChange(listeners.filter((_, n) => n !== i))}
             >
               <Trash2 size={14} />
@@ -1054,7 +1071,7 @@ function ListenerFields({ listeners, issue, onChange, shown }: ListenerProps): R
             <div className="input-group">
               <input
                 className="input"
-                placeholder="Target server inside the tunnel"
+                placeholder={t('vpn.profileForm.targetHostPlaceholder')}
                 value={l.targetHost}
                 onChange={(e) => replace(i, { ...l, targetHost: e.target.value })}
               />
@@ -1062,7 +1079,7 @@ function ListenerFields({ listeners, issue, onChange, shown }: ListenerProps): R
                 className="input"
                 type="number"
                 style={{ maxWidth: 110 }}
-                placeholder="Target port"
+                placeholder={t('vpn.profileForm.targetPortPlaceholder')}
                 value={l.targetPort || ''}
                 onChange={(e) => replace(i, { ...l, targetPort: Number(e.target.value) })}
               />
@@ -1075,7 +1092,7 @@ function ListenerFields({ listeners, issue, onChange, shown }: ListenerProps): R
               they were the ones with no field to appear against. */}
           <Issue at={`listeners[${i}].targetHost`} map={issue} shown={shown} />
           <Issue at={`listeners[${i}].targetPort`} map={issue} shown={shown} />
-          <BindWarning host={l.bindHost} what="this listener" />
+          <BindWarning host={l.bindHost} what="listener" />
         </div>
       ))}
     </div>
@@ -1092,10 +1109,10 @@ interface OvpnProps {
   focus?: VpnFormFocus
 }
 
-const AUTH_LABEL: Record<OpenVpnAuthMode, string> = {
-  none: 'Certificate only',
-  userpass: 'Username and password',
-  'userpass-otp': 'Username, password and a one-time code'
+const AUTH_LABEL: Record<OpenVpnAuthMode, MessageKey> = {
+  none: 'vpn.profileForm.authNone',
+  userpass: 'vpn.profileForm.authUserpass',
+  'userpass-otp': 'vpn.profileForm.authUserpassOtp'
 }
 
 /**
@@ -1127,6 +1144,7 @@ function TailscaleFields({
   deviceName,
   onDeviceName
 }: TailscaleProps): React.JSX.Element {
+  const t = useT()
   const set = (patch: Partial<TailscaleSpec>): void => onChange({ ...spec, ...patch })
   // The same function the driver calls, so what this says is what `ts.up` gets.
   // Two fields where one wins is exactly the place a second implementation of
@@ -1137,14 +1155,12 @@ function TailscaleFields({
     <>
       <div className="field">
         <span className="field-hint">
-          OpsMaxx joins your tailnet itself — there is nothing to install. This profile
-          is its own device, with its own key, so it neither uses nor disturbs a
-          Tailscale app you may also be running on this machine.
+          {t('vpn.profileForm.tailscaleIntro')}
         </span>
       </div>
 
       <label className="field">
-        <span className="field-label">Device name, on every computer</span>
+        <span className="field-label">{t('vpn.profileForm.deviceNameShared')}</span>
         <input
           className="input"
           placeholder="opsmaxx"
@@ -1153,16 +1169,12 @@ function TailscaleFields({
         />
         <Issue at="hostname" map={issue} shown={shown} />
         <span className="field-hint">
-          How this appears in your tailnet&apos;s device list. Letters, digits and dashes.
-          This one is part of the profile, so it travels to every computer you have
-          paired — and a tailnet name identifies a single device, so if two of them
-          run this profile Tailscale keeps them apart by adding <code>-1</code>,{' '}
-          <code>-2</code>. Give the second computer a name of its own below.
+          <Trans i18nKey="vpn.profileForm.deviceNameSharedHint" components={{ code: <code /> }} />
         </span>
       </label>
 
       <label className="field">
-        <span className="field-label">Name on this computer only</span>
+        <span className="field-label">{t('vpn.profileForm.deviceNameLocal')}</span>
         <input
           className="input"
           placeholder={spec.hostname ?? 'opsmaxx'}
@@ -1170,10 +1182,7 @@ function TailscaleFields({
           onChange={(e) => onDeviceName(e.target.value)}
         />
         <span className="field-hint">
-          Overrides the name above, here and nowhere else. It is stored with this
-          node&apos;s key on this machine and never syncs, so setting it does not
-          rename anybody else&apos;s device. Leave it empty to use the profile&apos;s
-          name.
+          {t('vpn.profileForm.deviceNameLocalHint')}
         </span>
       </label>
 
@@ -1183,12 +1192,13 @@ function TailscaleFields({
             starting the tunnel and looking at the admin console. */}
         <span className="field-hint">
           {effective ? (
-            <>
-              This computer will appear as <code>{effective}</code>
-              {overridden ? ' — the name above is unchanged elsewhere.' : '.'}
-            </>
+            <Trans
+              i18nKey={overridden ? 'vpn.profileForm.appearsAsOverridden' : 'vpn.profileForm.appearsAs'}
+              values={{ name: effective }}
+              components={{ code: <code /> }}
+            />
           ) : (
-            'No name set, so Tailscale will choose one for this computer.'
+            t('vpn.profileForm.noDeviceName')
           )}
         </span>
       </div>
@@ -1200,9 +1210,7 @@ function TailscaleFields({
           onChange={(e) => set({ showPeers: e.target.checked })}
         />
         <span className="field-hint">
-          List the devices on this tailnet. Read-only — it changes what OpsMaxx shows,
-          never the tailnet itself. Off by default, because a device list is
-          information about a network you may not want mirrored here.
+          {t('vpn.profileForm.showPeersHint')}
         </span>
       </label>
     </>
@@ -1210,13 +1218,14 @@ function TailscaleFields({
 }
 
 function OpenVpnFields({ spec, issue, onChange, shown, focus }: OvpnProps): React.JSX.Element {
+  const t = useT()
   const set = (patch: Partial<OpenVpnSpec>): void => onChange({ ...spec, ...patch })
   const platform = usePlatform()
 
   return (
     <>
       <label className="field">
-        <span className="field-label">Authentication</span>
+        <span className="field-label">{t('vpn.profileForm.authentication')}</span>
         <select
           className="input"
           value={spec.authMode}
@@ -1224,20 +1233,19 @@ function OpenVpnFields({ spec, issue, onChange, shown, focus }: OvpnProps): Reac
         >
           {(Object.keys(AUTH_LABEL) as OpenVpnAuthMode[]).map((m) => (
             <option key={m} value={m}>
-              {AUTH_LABEL[m]}
+              {t(AUTH_LABEL[m])}
             </option>
           ))}
         </select>
         <Issue at="authMode" map={issue} shown={shown} />
         <span className="field-hint">
-          Credentials live in the vault and are handed to OpenVPN over its management socket — never
-          written to a file, never passed on the command line.
+          {t('vpn.profileForm.openvpnCredentialsHint')}
         </span>
       </label>
 
       {spec.remotes && spec.remotes.length > 0 && (
         <div className="field">
-          <span className="field-label">Remotes</span>
+          <span className="field-label">{t('vpn.profileForm.remotes')}</span>
           <div className="col" style={{ gap: 2 }}>
             {spec.remotes.map((r, i) => (
               <span key={i} className="mono" style={{ fontSize: 12 }}>
@@ -1247,7 +1255,7 @@ function OpenVpnFields({ spec, issue, onChange, shown, focus }: OvpnProps): Reac
           </div>
           {/* Read-only: they come out of the sanitised config body in the vault,
               and editing them here would desynchronise the two. */}
-          <span className="field-hint">Taken from the imported profile.</span>
+          <span className="field-hint">{t('vpn.profileForm.remotesHint')}</span>
         </div>
       )}
 
@@ -1258,14 +1266,13 @@ function OpenVpnFields({ spec, issue, onChange, shown, focus }: OvpnProps): Reac
           onChange={(v) => set({ redirectGateway: v })}
         />
         <span style={{ fontSize: 12, color: spec.redirectGateway ? 'var(--warn)' : 'var(--text-muted)' }}>
-          Send all traffic through this VPN. Off by default: a downloaded profile asking for your
-          default route is not a good enough reason to give it.
+          {t('vpn.profileForm.redirectGateway')}
         </span>
       </label>
 
       {spec.staticChallenge && (
         <div className="field">
-          <span className="field-label">Static challenge</span>
+          <span className="field-label">{t('vpn.profileForm.staticChallenge')}</span>
           <span className="muted" style={{ fontSize: 12 }}>
             {spec.staticChallenge.text}
           </span>
@@ -1273,10 +1280,10 @@ function OpenVpnFields({ spec, issue, onChange, shown, focus }: OvpnProps): Reac
       )}
 
       <label className="field">
-        <span className="field-label">OpenVPN binary</span>
+        <span className="field-label">{t('vpn.profileForm.openvpnBinary')}</span>
         <input
           className="input"
-          placeholder="Detected automatically"
+          placeholder={t('vpn.profileForm.detectedAutomatically')}
           // Opened from a "could not find OpenVPN" failure, this is the field
           // that answers it — so the caret is already in it, and the browser
           // scrolls it into view for free.
@@ -1291,10 +1298,10 @@ function OpenVpnFields({ spec, issue, onChange, shown, focus }: OvpnProps): Reac
             list, naming the platform here would be the thing that goes stale. */}
         <span className="field-hint">
           {userSuppliesEngine('openvpn', platform)
-            ? 'OpsMaxx does not ship OpenVPN on this platform. Leave this empty to use an allowlisted system install.'
+            ? t('vpn.profileForm.binaryHintUserSupplied')
             : platform
-              ? 'OpsMaxx ships an OpenVPN and uses it by default. Set a path only to run a copy you installed yourself.'
-              : 'Leave this empty to use the OpenVPN OpsMaxx finds by itself.'}
+              ? t('vpn.profileForm.binaryHintBundled')
+              : t('vpn.profileForm.binaryHintUnknown')}
         </span>
       </label>
     </>
@@ -1312,6 +1319,7 @@ interface FrpProps {
 }
 
 function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX.Element {
+  const t = useT()
   const set = (patch: Partial<FrpSpec>): void => onChange({ ...spec, ...patch })
 
   // The proxy list is below the server and transport fields, so a form opened
@@ -1352,7 +1360,7 @@ function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX
     <>
       <div className="field-row">
         <label className="field">
-          <span className="field-label">Server address</span>
+          <span className="field-label">{t('vpn.profileForm.serverAddress')}</span>
           <input
             className="input"
             placeholder="frp.example.com"
@@ -1362,7 +1370,7 @@ function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX
           <Issue at="serverAddr" map={issue} shown={shown} />
         </label>
         <label className="field">
-          <span className="field-label">Server port</span>
+          <span className="field-label">{t('vpn.profileForm.serverPort')}</span>
           <input
             className="input"
             type="number"
@@ -1376,7 +1384,7 @@ function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX
 
       <div className="field-row">
         <label className="field">
-          <span className="field-label">Transport</span>
+          <span className="field-label">{t('vpn.profileForm.transport')}</span>
           <select
             className="input"
             value={spec.transport.protocol}
@@ -1397,7 +1405,7 @@ function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX
           </select>
         </label>
         <label className="field">
-          <span className="field-label">Corporate proxy</span>
+          <span className="field-label">{t('vpn.profileForm.corporateProxy')}</span>
           <input
             className="input"
             placeholder="http://proxy:8080"
@@ -1416,7 +1424,7 @@ function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX
           onChange={(v) => set({ transport: { ...spec.transport, tlsEnable: v } })}
         />
         <span className="muted" style={{ fontSize: 12 }}>
-          Encrypt the control connection with TLS
+          {t('vpn.profileForm.tlsEnable')}
         </span>
       </label>
 
@@ -1431,18 +1439,20 @@ function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX
           onChange={(v) =>
             set({ confirmations: { ...spec.confirmations, allowPlaintextTransport: v } })
           }
-          label="Send the control connection unencrypted. Anyone on the path can read the token and the traffic."
+          label={t('vpn.profileForm.plaintextConfirm')}
         />
       )}
 
       <div className="field">
-        <span className="field-label">Authentication</span>
+        <span className="field-label">{t('vpn.profileForm.authentication')}</span>
         <span className="muted" style={{ fontSize: 12 }}>
           {spec.auth.method === 'oidc'
-            ? `OIDC — ${spec.auth.oidc?.clientId ?? 'client not set'}`
+            ? t('vpn.profileForm.authOidc', {
+                client: spec.auth.oidc?.clientId ?? t('vpn.profileForm.clientNotSet')
+              })
             : spec.auth.tokenRef
-              ? 'Token, held in the vault'
-              : 'Token — add one to this profile’s vault entry before starting'}
+              ? t('vpn.profileForm.tokenInVault')
+              : t('vpn.profileForm.tokenMissing')}
         </span>
         <Issue at="auth" map={issue} shown={shown} />
       </div>
@@ -1451,14 +1461,14 @@ function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX
 
       <div className="field" ref={proxiesRef}>
         <div className="row" style={{ gap: 8 }}>
-          <span className="field-label">Proxies</span>
+          <span className="field-label">{t('vpn.profileForm.proxies')}</span>
           <span className="grow" />
           <button className="btn sm" onClick={addProxy}>
-            <Plus size={13} /> Add proxy
+            <Plus size={13} /> {t('vpn.profileForm.addProxy')}
           </button>
         </div>
         {spec.proxies.length === 0 && (
-          <span className="field-hint">An frp client with no proxies connects and exposes nothing.</span>
+          <span className="field-hint">{t('vpn.profileForm.noProxies')}</span>
         )}
         {spec.proxies.map((p, i) => (
           <FrpProxyEditor
@@ -1474,13 +1484,18 @@ function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX
 
       {spec.visitors.length > 0 && (
         <div className="field">
-          <span className="field-label">Visitors</span>
+          <span className="field-label">{t('vpn.profileForm.visitors')}</span>
           {spec.visitors.map((v, i) => (
             <div key={i} className="col" style={{ gap: 4 }}>
               <span className="mono" style={{ fontSize: 12 }}>
-                {v.name} ({v.type}) → {v.serverName} on {v.bindAddr}:{v.bindPort}
+                {t('vpn.profileForm.visitorLine', {
+                  name: v.name,
+                  type: v.type,
+                  server: v.serverName,
+                  address: `${v.bindAddr}:${v.bindPort}`
+                })}
               </span>
-              <BindWarning host={v.bindAddr} what="this visitor" />
+              <BindWarning host={v.bindAddr} what="visitor" />
             </div>
           ))}
         </div>

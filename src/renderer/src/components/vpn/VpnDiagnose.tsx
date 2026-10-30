@@ -8,6 +8,8 @@ import type {
   VpnDiagnoseResult
 } from '../../../../shared/vpn'
 import { bridgeHas } from '../../lib/bridge'
+import { useT } from '../../lib/i18n'
+import type { MessageKey, Translate } from '../../../../shared/i18n'
 
 // The connectivity checklist on the VPN card.
 //
@@ -24,20 +26,20 @@ import { bridgeHas } from '../../lib/bridge'
 // telling somebody a question was answered when it was not asked, which is
 // worse than having no checklist.
 
-const ROW_LABEL: Record<VpnDiagnoseCheck['name'], string> = {
-  handshake: 'Handshake',
-  dns: 'DNS through the tunnel',
-  tcp: 'TCP reach',
-  ipv6: 'IPv6 outside the tunnel',
-  server: 'Reaching the VPN server'
+const ROW_LABEL: Record<VpnDiagnoseCheck['name'], MessageKey> = {
+  handshake: 'vpn.diagnose.rowHandshake',
+  dns: 'vpn.diagnose.rowDns',
+  tcp: 'vpn.diagnose.rowTcp',
+  ipv6: 'vpn.diagnose.rowIpv6',
+  server: 'vpn.diagnose.rowServer'
 }
 
 /** Milliseconds for the probes, seconds for the handshake's age -- the units
  *  are what each check measured, so the label says which. */
-function elapsedLabel(c: VpnDiagnoseCheck): string | null {
+function elapsedLabel(c: VpnDiagnoseCheck, t: Translate): string | null {
   if (c.elapsed === undefined) return null
-  if (c.name === 'handshake') return `${c.elapsed}s ago`
-  return `${c.elapsed} ms`
+  if (c.name === 'handshake') return t('vpn.diagnose.secondsAgo', { seconds: c.elapsed })
+  return t('vpn.diagnose.millis', { ms: c.elapsed })
 }
 
 function StatusIcon({ status }: { status: VpnCheckStatus }): React.JSX.Element {
@@ -62,6 +64,7 @@ export function VpnDiagnose({
   id: string
   showTarget?: boolean
 }): React.JSX.Element | null {
+  const t = useT()
   const [host, setHost] = useState('')
   const [port, setPort] = useState('')
   const [busy, setBusy] = useState(false)
@@ -84,9 +87,9 @@ export function VpnDiagnose({
         host: host.trim() || undefined,
         port: Number.isFinite(n) && n > 0 ? n : undefined
       })
-      setRes(r ?? { id, unsupported: 'The probe returned nothing.' })
+      setRes(r ?? { id, unsupported: t('vpn.diagnose.probeEmpty') })
     } catch {
-      setRes({ id, unsupported: 'The probe could not be run.' })
+      setRes({ id, unsupported: t('vpn.diagnose.probeFailed') })
     } finally {
       setBusy(false)
     }
@@ -94,13 +97,13 @@ export function VpnDiagnose({
 
   return (
     <div className="col" style={{ gap: 6 }}>
-      <span className="field-label">Diagnose</span>
+      <span className="field-label">{t('vpn.diagnose.label')}</span>
       <div className="row" style={{ gap: 6 }}>
         {showTarget && (
           <input
             className="input"
             style={{ flex: 1, minWidth: 0 }}
-            placeholder="Host or address on the far side"
+            placeholder={t('vpn.diagnose.hostPlaceholder')}
             value={host}
             onChange={(e) => setHost(e.target.value)}
             disabled={busy}
@@ -110,7 +113,7 @@ export function VpnDiagnose({
           <input
             className="input"
             style={{ width: 76 }}
-            placeholder="Port"
+            placeholder={t('vpn.diagnose.portPlaceholder')}
             inputMode="numeric"
             value={port}
             onChange={(e) => setPort(e.target.value)}
@@ -119,13 +122,13 @@ export function VpnDiagnose({
         )}
         <button className="btn" onClick={() => void run()} disabled={busy}>
           {busy ? <Loader2 size={13} className="spin" /> : null}
-          {busy ? 'Probing' : 'Run'}
+          {busy ? t('vpn.diagnose.probing') : t('vpn.diagnose.run')}
         </button>
       </div>
       <span className="faint" style={{ fontSize: 11 }}>
         {showTarget
-          ? 'Everything is sent through the tunnel from inside this app: the name is resolved by the tunnel’s own DNS server, never the host resolver. Leave both empty to check only the handshake.'
-          : 'This checks whether this machine can reach the server addresses already stored on this profile. It will not connect anywhere else, and it does not validate the server’s certificate.'}
+          ? t('vpn.diagnose.targetNote')
+          : t('vpn.diagnose.serverNote')}
       </span>
 
       {res !== null && isRefusal(res) && (
@@ -142,10 +145,10 @@ export function VpnDiagnose({
               <StatusIcon status={c.status} />
               <div className="col" style={{ gap: 1, minWidth: 0 }}>
                 <div className="row" style={{ gap: 6 }}>
-                  <span style={{ fontSize: 12 }}>{ROW_LABEL[c.name]}</span>
-                  {elapsedLabel(c) !== null && (
+                  <span style={{ fontSize: 12 }}>{t(ROW_LABEL[c.name])}</span>
+                  {elapsedLabel(c, t) !== null && (
                     <span className="faint mono" style={{ fontSize: 11 }}>
-                      {elapsedLabel(c)}
+                      {elapsedLabel(c, t)}
                     </span>
                   )}
                 </div>
@@ -163,7 +166,7 @@ export function VpnDiagnose({
               {/* Named for what was measured. It includes the peer's forwarding
                   and the far service's accept, so calling it a round trip would
                   be a stronger claim than the number supports. */}
-              TCP connect took {res.latencyMs} ms through the tunnel.
+              {t('vpn.diagnose.latency', { ms: res.latencyMs })}
             </span>
           )}
         </div>

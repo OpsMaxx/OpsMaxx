@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import type { FleetSamplerStatus } from '../../../shared/fleet'
+import type { MessageKey } from '../../../shared/i18n'
+import { t } from '../lib/i18n'
 
 // The sampler's real state, app-wide.
 //
@@ -35,38 +37,34 @@ export interface SamplerWarning {
   detail: string
 }
 
-const WARNINGS: Record<SamplerWarningKind, Omit<SamplerWarning, 'kind'>> = {
+const WARNINGS: Record<SamplerWarningKind, { label: MessageKey; detail: MessageKey }> = {
   'vault-locked': {
-    label: 'Checks paused',
-    detail:
-      'Every server being checked authenticates with a credential in the vault, and the vault ' +
-      'is locked — so nothing is being checked and no alerts can be raised.' +
-      '\n\nClick to unlock.'
+    label: 'store.fleetStatus.warning.vaultLocked.label',
+    detail: 'store.fleetStatus.warning.vaultLocked.detail'
   },
   // The partial case, which used to be reported as the total one. A vault with
   // one credential in it made the chip say every check had stopped, when in
   // fact one server had. Saying "paused" about an estate that is still being
   // watched is the same class of wrong as silence about one that is not.
   'vault-partial': {
-    label: 'Some checks paused',
-    detail:
-      'Some servers are not being checked: their credential is in the vault, and the vault is ' +
-      'locked. Everything else is still being checked and can still raise an alert.' +
-      '\n\nClick to unlock.'
+    label: 'store.fleetStatus.warning.vaultPartial.label',
+    detail: 'store.fleetStatus.warning.vaultPartial.detail'
   },
   'no-targets': {
-    label: 'Nothing checked',
-    detail:
-      'Background checking is on, but this workspace has no servers that can be sampled, ' +
-      'so no alerts can be raised.\n\nClick to open Monitoring settings.'
+    label: 'store.fleetStatus.warning.noTargets.label',
+    detail: 'store.fleetStatus.warning.noTargets.detail'
   },
   stalled: {
-    label: 'Checks stopped',
-    detail:
-      'Background checking is switched on but nothing is scheduled, so no alerts can be raised. ' +
-      'Turn it off and on again to restart it.\n\nClick to open Monitoring settings.'
+    label: 'store.fleetStatus.warning.stalled.label',
+    detail: 'store.fleetStatus.warning.stalled.detail'
   }
 }
+
+const warning = (kind: SamplerWarningKind): SamplerWarning => ({
+  kind,
+  label: t(WARNINGS[kind].label),
+  detail: t(WARNINGS[kind].detail)
+})
 
 /**
  * Whether the status bar should be warning, and about what.
@@ -85,13 +83,13 @@ export function samplerWarning(
 ): SamplerWarning | null {
   if (!enabled || !status) return null
   if (status.idleReason === 'disabled') return null
-  if (status.idleReason === 'vault-locked') return { kind: 'vault-locked', ...WARNINGS['vault-locked'] }
+  if (status.idleReason === 'vault-locked') return warning('vault-locked')
   // Deliberately NOT gated on `!status.running`: a sweep that is running and
   // skipping four hosts is precisely the case this exists for.
-  if (status.vaultBlockedCount > 0) return { kind: 'vault-partial', ...WARNINGS['vault-partial'] }
-  if (status.idleReason === 'no-targets') return { kind: 'no-targets', ...WARNINGS['no-targets'] }
+  if (status.vaultBlockedCount > 0) return warning('vault-partial')
+  if (status.idleReason === 'no-targets') return warning('no-targets')
   // Enabled, targets present, vault open, and still not looping.
-  if (!status.running) return { kind: 'stalled', ...WARNINGS.stalled }
+  if (!status.running) return warning('stalled')
   return null
 }
 
@@ -148,8 +146,8 @@ export function sweepBlock(status: FleetSamplerStatus | null, enabled: boolean):
   if (!enabled) {
     return {
       kind: 'checks-off',
-      reason: 'Background checking is off, so nothing is being collected.',
-      fix: 'Turn it on in Monitoring settings.',
+      reason: t('store.fleetStatus.sweep.checksOff.reason'),
+      fix: t('store.fleetStatus.sweep.checksOff.fix'),
       action: 'open-settings'
     }
   }
@@ -158,42 +156,42 @@ export function sweepBlock(status: FleetSamplerStatus | null, enabled: boolean):
   if (!status) {
     return {
       kind: 'not-yet',
-      reason: 'Nothing has been collected for these hosts yet.',
-      fix: 'Sweep now, or wait for the next hourly pass.',
+      reason: t('store.fleetStatus.sweep.notYet.reason'),
+      fix: t('store.fleetStatus.sweep.notYet.fix'),
       action: 'check-now'
     }
   }
   if (status.idleReason === 'vault-locked') {
     return {
       kind: 'vault-locked',
-      reason: 'The vault is locked, so background checking is paused.',
+      reason: t('store.fleetStatus.sweep.vaultLocked.reason'),
       // Said plainly because the alternative wastes the press: Check now calls
       // the same sweep that is breaking on the lock.
-      fix: 'Unlock the vault. Checking resumes on its own — Check now cannot help until then.',
+      fix: t('store.fleetStatus.sweep.vaultLocked.fix'),
       action: 'unlock-vault'
     }
   }
   if (status.idleReason === 'disabled') {
     return {
       kind: 'checks-off',
-      reason: 'Background checking is off, so nothing is being collected.',
-      fix: 'Turn it on in Monitoring settings.',
+      reason: t('store.fleetStatus.sweep.checksOff.reason'),
+      fix: t('store.fleetStatus.sweep.checksOff.fix'),
       action: 'open-settings'
     }
   }
   if (status.idleReason === 'no-targets') {
     return {
       kind: 'no-targets',
-      reason: 'No server in this workspace can be sampled.',
-      fix: 'Add a server, or check which ones this workspace includes.',
+      reason: t('store.fleetStatus.sweep.noTargets.reason'),
+      fix: t('store.fleetStatus.sweep.noTargets.fix'),
       action: 'open-settings'
     }
   }
   if (!status.running) {
     return {
       kind: 'stalled',
-      reason: 'Background checking is on, but nothing is scheduled.',
-      fix: 'Turn it off and on again in Monitoring settings to restart it.',
+      reason: t('store.fleetStatus.sweep.stalled.reason'),
+      fix: t('store.fleetStatus.sweep.stalled.fix'),
       action: 'open-settings'
     }
   }
@@ -208,15 +206,15 @@ export function sweepBlock(status: FleetSamplerStatus | null, enabled: boolean):
      */
     return {
       kind: 'vault-partial',
-      reason: 'Some servers are not being checked: their credential is in the vault, and it is locked.',
-      fix: 'Unlock the vault. The rest of the estate is still being checked.',
+      reason: t('store.fleetStatus.sweep.vaultPartial.reason'),
+      fix: t('store.fleetStatus.sweep.vaultPartial.fix'),
       action: 'unlock-vault'
     }
   }
   return {
     kind: 'not-yet',
-    reason: 'Nothing has been collected for these hosts yet.',
-    fix: 'Sweep now, or wait for the next hourly pass.',
+    reason: t('store.fleetStatus.sweep.notYet.reason'),
+    fix: t('store.fleetStatus.sweep.notYet.fix'),
     action: 'check-now'
   }
 }

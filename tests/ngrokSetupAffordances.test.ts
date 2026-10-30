@@ -22,22 +22,27 @@ const SRC = readFileSync(
   join(__dirname, '..', 'src/renderer/src/components/vpn/NgrokSetup.tsx'),
   'utf8'
 )
+const EN: Record<string, string> = JSON.parse(
+  readFileSync(join(__dirname, '..', 'src/shared/locales/en.json'), 'utf8')
+)
 
 describe('the footer', () => {
   it('uses the modal’s own commit and cancel', () => {
-    expect(SRC).toMatch(/confirm=\{\{\s*label: 'Save'/)
+    expect(SRC).toMatch(/confirm=\{\{\s*label: t\('common\.save'\)/)
+    expect(EN['common.save']).toBe('Save')
   })
 
   it('does not hand-roll a second Cancel', () => {
     // One Cancel remains — the inline add's own — and it is inside the token
     // form rather than the footer, so this counts footers, not the word.
-    expect(SRC).not.toMatch(/footer=\{[\s\S]*?Cancel[\s\S]*?\}\s*\n\s*>/)
+    expect(SRC).not.toMatch(/footer=\{[\s\S]*?(Cancel|common\.cancel)[\s\S]*?\}\s*\n\s*>/)
   })
 })
 
 describe('the authtoken field', () => {
   it('offers to add one rather than describing the task', () => {
-    expect(SRC).toContain('Add an authtoken')
+    expect(SRC).toContain("t('vpn.ngrok.addAuthtoken')")
+    expect(EN['vpn.ngrok.addAuthtoken']).toBe('Add an authtoken')
     expect(SRC).toMatch(/createEntry\('login'/)
   })
 

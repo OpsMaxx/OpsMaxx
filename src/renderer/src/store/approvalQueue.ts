@@ -5,6 +5,7 @@ import { approvalTarget, resolveFuseDeadline, formatFuse } from '../../../shared
 import { bridgeOn, bridgeHas } from '../lib/bridge'
 import { toast } from './toast'
 import { openAi } from './nav'
+import { t } from '../lib/i18n'
 
 // The pending-approval queue, held here rather than inside ApprovalWatcher.
 //
@@ -50,17 +51,17 @@ export const useApprovalQueue = create<ApprovalQueueState>(() => ({
 }))
 
 function announce(request: ApprovalRequest): void {
-  const where = `${request.action} on ${approvalTarget(request)}`
-  const audit = { label: 'View in audit log', run: () => openAi('audit') }
+  const where = t('store.approvals.where', { action: request.action, target: approvalTarget(request) })
+  const audit = { label: t('store.approvals.viewAudit'), run: () => openAi('audit') }
 
   if (request.status === 'approved') {
     // Said out loud when the yes reached further than this one action: that is
     // the half of the answer the operator will not see prompted again.
     const further =
       request.grantedScope === 'session'
-        ? ` Later requests like it on ${approvalTarget(request)} will not ask again this session.`
+        ? t('store.approvals.sessionScope', { target: approvalTarget(request) })
         : ''
-    toast(`Approved “${where}”. ${request.agentName} was allowed to run it.${further}`, 'info', audit)
+    toast(t('store.approvals.approved', { where, agent: request.agentName, further }), 'info', audit)
     return
   }
   if (request.status === 'disconnected') {
@@ -68,7 +69,7 @@ function announce(request: ApprovalRequest): void {
     // the call) while the question was on screen. Said as that, because "told
     // no by the clock" about an agent nobody was left to tell was false twice.
     toast(
-      `The agent disconnected before you answered: “${where}” did not run. Nothing was decided.`,
+      t('store.approvals.disconnected', { where }),
       'info',
       audit
     )
@@ -81,13 +82,13 @@ function announce(request: ApprovalRequest): void {
     // they do is wonder why they do not remember doing so. The clock denied it;
     // the sentence says the clock did.
     toast(
-      `No answer in time: “${where}” was auto-denied. ${request.agentName} was told no by the clock, not by you.`,
+      t('store.approvals.timeout', { where, agent: request.agentName }),
       'error',
       audit
     )
     return
   }
-  toast(`Denied “${where}”. ${request.agentName} was told no.`, 'info', audit)
+  toast(t('store.approvals.denied', { where, agent: request.agentName }), 'info', audit)
 }
 
 /**
@@ -188,7 +189,7 @@ export async function respondToApproval(
  * dialog's own footer: the dialog stays up when it fails, and a failure only a
  * toast reports is one an operator mid-panic can miss.
  */
-export const KILL_SWITCH_FAILED = 'AI access was not stopped — every session is still live'
+export const KILL_SWITCH_FAILED_KEY = 'store.approvals.killSwitchFailed'
 
 /**
  * The kill switch, reached from the modal rather than only from AI & MCP >
@@ -200,16 +201,16 @@ export const KILL_SWITCH_FAILED = 'AI access was not stopped — every session i
 export async function denyAndStopAllAi(): Promise<boolean> {
   const result = await window.opsmaxx?.aiMcp?.killAllSessions?.()
   if (!result) {
-    toast(`${KILL_SWITCH_FAILED}.`, 'error', {
-      label: 'Open AI security',
+    toast(t('store.approvals.killSwitchFailedToast', { failure: t(KILL_SWITCH_FAILED_KEY) }), 'error', {
+      label: t('ai.agents.openSecurity'),
       run: () => openAi('security')
     })
     return false
   }
   toast(
-    `Stopped every agent: ${result.revoked} session(s) revoked, ${result.denied} waiting request(s) denied.`,
+    t('store.approvals.stoppedAll', { revoked: result.revoked, denied: result.denied }),
     'ok',
-    { label: 'View in audit log', run: () => openAi('audit') },
+    { label: t('store.approvals.viewAudit'), run: () => openAi('audit') },
     // The one acknowledgement that outranks the nine-second window. Every other
     // agent in the workspace was just cut off; the operator who pressed the
     // button needs to read the counts, and anyone who pressed it and looked

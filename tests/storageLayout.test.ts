@@ -347,9 +347,13 @@ describe('the wiring', () => {
 
   // The trend above it is the ROOT filesystem only, which is the gap this read
   // closes. Saying so is the point of putting them together.
+  // The sentences live in en.json now; the panel names them by key.
+  const en = JSON.parse(code('../src/shared/locales/en.json')) as Record<string, string>
+
   it('says on screen that the trend beside it is root only', () => {
     const panel = code('../src/renderer/src/components/monitor/CapacityPanel.tsx')
-    expect(panel).toContain('the root filesystem')
+    expect(en['monitor.capacity.storage.rootOnly']).toContain('the root filesystem')
+    expect(panel).toContain("t('monitor.capacity.storage.rootOnly')")
     expect(panel).toContain('storageHeadline(storage)')
   })
 
@@ -372,6 +376,7 @@ describe('the wiring', () => {
   it('renders a failed read as an alarm rather than an empty table', () => {
     const panel = code('../src/renderer/src/components/monitor/CapacityPanel.tsx')
     expect(panel).toContain("'error' in storage")
-    expect(panel).toContain('The filesystems could not be read')
+    expect(en['monitor.capacity.storage.failed']).toContain('The filesystems could not be read')
+    expect(panel).toContain("t('monitor.capacity.storage.failed'")
   })
 })

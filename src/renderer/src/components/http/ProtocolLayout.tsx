@@ -17,6 +17,7 @@ import { clsx } from '../../lib/format'
 import { keyLabel, withKey } from './hotkeys'
 import { focusUrl } from './focus'
 import { layoutMenuEntries } from './tabs/layoutMenu'
+import { useT } from '../../lib/i18n'
 import './http.css'
 
 // One grid for every protocol (§2.2): URL row, then the request and response
@@ -200,6 +201,7 @@ export function ProtocolLayout(props: ProtocolLayoutProps): React.JSX.Element {
   const [rootRef, width] = useWidth<HTMLDivElement>()
   const { orientation, forced } = orientationFor(width, prefs.orientation)
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
+  const t = useT()
   const restore = (): void => setSplit(tabId, 'normal')
 
   return (
@@ -217,33 +219,33 @@ export function ProtocolLayout(props: ProtocolLayoutProps): React.JSX.Element {
           min={orientation === 'horizontal' ? [SIDE_MIN, SIDE_MIN] : [STACKED_MIN, STACKED_MIN]}
           collapsed={collapsedSide(split)}
           onCollapse={(side) => setSplit(tabId, splitFor(side))}
-          label="Resize request and response"
+          label={t('http.layout.resize')}
           // Double-click restores §2.2's default; right-click, Shift+F10 or the ContextMenu key opens the Layout menu (§2.5).
           defaultRatio={DEFAULT_PREFS.ratios[kind][orientation === 'horizontal' ? 'h' : 'v']}
           onMenu={setMenuAt}
           collapsedA={
             // A click anywhere restores; a summary label's own click also opens its tab.
             <div className="hc-collapsed-bar" onClick={restore}>
-              <span className="hc-collapsed-title">Request</span>
+              <span className="hc-collapsed-title">{t('http.layout.request')}</span>
               <span className="hc-collapsed-summary">{props.requestSummary}</span>
-              <RestoreButton label={withKey('Show request', 'http-toggle-request')} onClick={restore} down />
+              <RestoreButton label={withKey(t('http.layout.showRequest'), 'http-toggle-request')} onClick={restore} down />
             </div>
           }
           collapsedB={
             <div className="hc-collapsed-bar" onClick={restore}>
               <span className="hc-collapsed-summary">{props.responseSummary}</span>
-              <RestoreButton label={withKey('Show response', 'http-toggle-response')} onClick={restore} />
+              <RestoreButton label={withKey(t('http.layout.showResponse'), 'http-toggle-response')} onClick={restore} />
             </div>
           }
         >
-          <section className="hc-request" aria-label="Request">
+          <section className="hc-request" aria-label={t('http.layout.request')}>
             <div className="hc-tabrow" data-hc-region="request-tabs">
               {props.requestTabs}
             </div>
             {props.requestToolbar && <div className="hc-toolbar">{props.requestToolbar}</div>}
             <div className="hc-pane-body">{props.request}</div>
           </section>
-          <section className="hc-response" aria-label="Response" data-hc-region="response">
+          <section className="hc-response" aria-label={t('http.layout.response')} data-hc-region="response">
             {props.response}
           </section>
         </SplitPane>
@@ -291,9 +293,16 @@ function RestoreButton({
 export function SplitToggles({ tabId }: { tabId: Id }): React.JSX.Element {
   const split = useHttp((s) => s.tabs.find((t) => t.id === tabId)?.split ?? 'normal')
   const setSplit = useHttp((s) => s.setSplit)
+  const t = useT()
   const toggle = (to: SplitState): void => setSplit(tabId, split === to ? 'normal' : to)
-  const response = withKey(`${split === 'response-collapsed' ? 'Show' : 'Collapse'} response`, 'http-toggle-response')
-  const request = withKey(`${split === 'request-collapsed' ? 'Show' : 'Collapse'} request`, 'http-toggle-request')
+  const response = withKey(
+    split === 'response-collapsed' ? t('http.layout.showResponse') : t('http.layout.collapseResponse'),
+    'http-toggle-response'
+  )
+  const request = withKey(
+    split === 'request-collapsed' ? t('http.layout.showRequest') : t('http.layout.collapseRequest'),
+    'http-toggle-request'
+  )
   return (
     <span className="hc-split-toggles">
       <button
@@ -320,6 +329,7 @@ export function SplitToggles({ tabId }: { tabId: Id }): React.JSX.Element {
 
 /** Below the ghost's live URL row: what to do first, and the other ways in (§2.3). */
 function EmptyWorkbench(): React.JSX.Element {
+  const t = useT()
   const open = (kind: RequestKind): void => {
     useHttp.getState().openScratch(kind)
     focusUrl()
@@ -328,20 +338,22 @@ function EmptyWorkbench(): React.JSX.Element {
   const region = keyLabel('http-focus-region')
   return (
     <div className="hc-empty-body">
-      <div className="hc-empty-title">Send a request</div>
-      <div>Requests leave from this machine or through any server’s SSH connection.</div>
+      <div className="hc-empty-title">{t('http.layout.emptyTitle')}</div>
+      <div>{t('http.layout.emptyBody')}</div>
       <div className="hc-empty-actions">
         <button className="btn" onClick={() => open('ws')}>
-          New WebSocket
+          {t('http.layout.newWebSocket')}
         </button>
         <button className="btn" onClick={() => open('graphql')}>
-          New GraphQL
+          {t('http.layout.newGraphQl')}
         </button>
         <button className="btn" onClick={() => useHttp.getState().openImport()}>
-          Import…
+          {t('http.layout.import')}
         </button>
         <span className="faint">
-          {[newTab && `${newTab} new tab`, region && `${region} move focus`].filter(Boolean).join(' · ')}
+          {[newTab && t('http.layout.newTabHint', { key: newTab }), region && t('http.layout.moveFocusHint', { key: region })]
+            .filter(Boolean)
+            .join(' · ')}
         </span>
       </div>
     </div>

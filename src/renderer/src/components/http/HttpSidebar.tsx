@@ -8,6 +8,7 @@ import { Tabs } from '../common/Tabs'
 import { CollectionTree } from './sidebar/CollectionTree'
 import { HistoryList } from './sidebar/HistoryList'
 import { recoverOldData } from './paletteCommands'
+import { useT } from '../../lib/i18n'
 import './nav.css'
 
 /**
@@ -30,25 +31,26 @@ export function HttpSidebar(): React.JSX.Element {
   const [more, setMore] = useState<DOMRect | null>(null)
   const hasLegacy = useApi((s) => s.hasLegacy())
   const undo = useRef<(() => void)[]>([])
+  const t = useT()
 
   const newCollection = (): void => {
-    const id = useApi.getState().createCollection('New collection')
+    const id = useApi.getState().createCollection(t('http.sidebar.newCollectionName'))
     useHttp.getState().setExpanded(id, true)
     useHttp.getState().setSidebarTab('collections')
     setRenaming(id)
   }
   const entries: MenuEntry[] = [
-    { label: 'New collection', onClick: newCollection },
+    { label: t('http.sidebar.newCollection'), onClick: newCollection },
     { separator: true, label: '' },
-    { label: 'New HTTP request', onClick: () => useHttp.getState().openScratch('http') },
-    { label: 'New WebSocket', onClick: () => useHttp.getState().openScratch('ws') },
-    { label: 'New GraphQL request', onClick: () => useHttp.getState().openScratch('graphql') }
+    { label: t('http.sidebar.newHttpRequest'), onClick: () => useHttp.getState().openScratch('http') },
+    { label: t('http.sidebar.newWebSocket'), onClick: () => useHttp.getState().openScratch('ws') },
+    { label: t('http.sidebar.newGraphQlRequest'), onClick: () => useHttp.getState().openScratch('graphql') }
   ]
 
   return (
     <div className="hc-sidebar">
       <div className="hc-sidebar-head">
-        <h2 className="hc-sidebar-title">Collections (formerly APIs)</h2>
+        <h2 className="hc-sidebar-title">{t('http.sidebar.title')}</h2>
         <div className="hc-sidebar-actions">
           <button
             type="button"
@@ -57,18 +59,18 @@ export function HttpSidebar(): React.JSX.Element {
             aria-expanded={menu !== null}
             onClick={(e) => setMenu(e.currentTarget.getBoundingClientRect())}
           >
-            <Plus size={13} aria-hidden="true" /> New <ChevronDown size={12} aria-hidden="true" />
+            <Plus size={13} aria-hidden="true" /> {t('http.sidebar.new')} <ChevronDown size={12} aria-hidden="true" />
           </button>
-          <button type="button" className="btn sm" aria-label="Import" title="Import (cURL, OpenAPI)" onClick={() => requestImport()}>
+          <button type="button" className="btn sm" aria-label={t('http.sidebar.import')} title={t('http.sidebar.importTitle')} onClick={() => requestImport()}>
             <Import size={13} aria-hidden="true" />
-            <span className="hc-import-text">Import</span>
+            <span className="hc-import-text">{t('http.sidebar.import')}</span>
           </button>
           {hasLegacy && (
             <button
               type="button"
               className="hc-icon-btn"
-              aria-label="More"
-              title="More"
+              aria-label={t('http.sidebar.more')}
+              title={t('http.sidebar.more')}
               aria-haspopup="menu"
               onClick={(e) => setMore(e.currentTarget.getBoundingClientRect())}
             >
@@ -78,11 +80,11 @@ export function HttpSidebar(): React.JSX.Element {
         </div>
       </div>
       <Tabs
-        ariaLabel="Sidebar view"
+        ariaLabel={t('http.sidebar.viewLabel')}
         idPrefix="hc-sidebar"
         tabs={[
-          { id: 'collections', label: 'Collections' },
-          { id: 'history', label: 'History' }
+          { id: 'collections', label: t('http.sidebar.collections') },
+          { id: 'history', label: t('http.sidebar.history') }
         ]}
         active={sidebarTab}
         onChange={(id) => useHttp.getState().setSidebarTab(id as 'collections' | 'history')}
@@ -90,8 +92,8 @@ export function HttpSidebar(): React.JSX.Element {
       <input
         className="hc-input hc-sidebar-filter"
         type="search"
-        aria-label={sidebarTab === 'history' ? 'Filter history' : 'Filter collections'}
-        placeholder="Filter"
+        aria-label={sidebarTab === 'history' ? t('http.sidebar.filterHistory') : t('http.sidebar.filterCollections')}
+        placeholder={t('http.sidebar.filter')}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
       />
@@ -114,7 +116,7 @@ export function HttpSidebar(): React.JSX.Element {
           x={more.left}
           y={more.bottom}
           anchor={more}
-          entries={[{ label: 'Recover old data…', onClick: recoverOldData }]}
+          entries={[{ label: t('http.sidebar.recoverOldData'), onClick: recoverOldData }]}
           onClose={() => setMore(null)}
         />
       )}

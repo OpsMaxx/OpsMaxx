@@ -123,7 +123,10 @@ describe('the way out is reachable', () => {
   it('is offered in the connection editor when there is one', () => {
     const modal = read('src/renderer/src/components/connections/AddServerModal.tsx')
     expect(modal).toContain('stored?.savedAnswer')
-    expect(modal).toContain('Forget saved answer')
+    expect(modal).toContain("t('connections.addServer.forgetAnswer')")
+    expect(JSON.parse(read('src/shared/locales/en.json'))['connections.addServer.forgetAnswer']).toBe(
+      'Forget saved answer'
+    )
   })
 
   // The value itself never crosses the bridge. Same rule as the rest of the

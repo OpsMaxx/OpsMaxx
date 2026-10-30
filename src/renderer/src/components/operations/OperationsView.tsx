@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Wrench } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 import {
   moduleEnabled,
   modulesOnSurface,
@@ -52,11 +54,11 @@ import type { Server } from '../../types'
 // never the problem — where they were mounted was.
 
 /** What each operate tab will do, said in the tab itself. */
-const CONSEQUENCE: Record<OperateModuleId, string> = {
-  broadcast: 'Runs a shell command on every server you select.',
-  patch: 'Installs packages in waves, and restarts hosts that ask for it.',
-  jobs: 'Makes servers run things: once as a job, on a schedule, or as a service that survives you.',
-  keyRevoke: 'Removes one SSH key from every account across the estate that trusts it.',
+const CONSEQUENCE: Record<OperateModuleId, MessageKey> = {
+  broadcast: 'operations.consequence.broadcast',
+  patch: 'operations.consequence.patch',
+  jobs: 'operations.consequence.jobs',
+  keyRevoke: 'operations.consequence.keyRevoke',
   // Listed because TypeScript enforces this map against `OperateModuleId`, and
   // stated in the same consequence-first voice as its neighbours -- but this one
   // has no tab HERE. Its controls render inside the CI/CD panel on the
@@ -64,8 +66,7 @@ const CONSEQUENCE: Record<OperateModuleId, string> = {
   // from the pipeline you are looking at rather than from a separate screen that
   // makes you find it again. The module is still its own grant; only the
   // location is shared.
-  cicdTrigger:
-    'Starts, cancels and disables builds on a CI server OpsMaxx does not administer, and cannot stop one once it runs.'
+  cicdTrigger: 'operations.consequence.cicdTrigger'
 }
 
 /**
@@ -96,21 +97,21 @@ const CONSEQUENCE: Record<OperateModuleId, string> = {
  */
 type JobsSubTab = 'compose' | 'schedule' | 'install'
 
-const JOBS_SUBTABS: { id: JobsSubTab; label: string; consequence: string }[] = [
+const JOBS_SUBTABS: { id: JobsSubTab; labelKey: MessageKey; consequenceKey: MessageKey }[] = [
   {
     id: 'compose',
-    label: 'Run a job',
-    consequence: 'Runs multi-step work across servers in waves, with a rollback you press yourself.'
+    labelKey: 'operations.jobs.compose.label',
+    consequenceKey: 'operations.jobs.compose.consequence'
   },
   {
     id: 'schedule',
-    label: 'Change a schedule',
-    consequence: "Replaces one server's crontab, after keeping a copy of it on that server."
+    labelKey: 'operations.jobs.schedule.label',
+    consequenceKey: 'operations.jobs.schedule.consequence'
   },
   {
     id: 'install',
-    label: 'Install a service',
-    consequence: 'Writes a systemd --user unit onto one server and enables it.'
+    labelKey: 'operations.jobs.install.label',
+    consequenceKey: 'operations.jobs.install.consequence'
   }
 ]
 
@@ -174,6 +175,16 @@ export function OperationsView({
   // the "pointer that opens the wrong place" this codebase refuses. Naming it
   // costs one line and turns a wrong landing into an answered question.
   const asked = tab === activeTab ? null : off.find((m) => m.id === tab)
+  const offLabels = off.map((m) => t(m.labelKey))
+  const offList =
+    offLabels.length < 2
+      ? (offLabels[0] ?? '')
+      : offLabels.length === 2
+        ? t('operations.list.two', { a: offLabels[0], b: offLabels[1] })
+        : t('operations.list.many', {
+            rest: offLabels.slice(0, -1).join(', '),
+            last: offLabels[offLabels.length - 1]
+          })
   const show = (id: OperateModuleId): React.CSSProperties | undefined =>
     activeTab === id ? undefined : { display: 'none' }
 
@@ -186,10 +197,8 @@ export function OperationsView({
         <div className="ops-banner">
           <Wrench size={16} />
           <div>
-            <div className="ops-banner-title">Operations</div>
-            <div className="ops-banner-sub">
-              Everything here changes servers. Nothing here is a refresh.
-            </div>
+            <div className="ops-banner-title">{t('layout.activity.operations')}</div>
+            <div className="ops-banner-sub">{t('operations.banner.sub')}</div>
           </div>
         </div>
 
@@ -204,7 +213,7 @@ export function OperationsView({
                   onClick={() => setTab(id)}
                 >
                   <span className="ops-rail-label">{t(m.labelKey)}</span>
-                  <span className="ops-rail-consequence">{CONSEQUENCE[id]}</span>
+                  <span className="ops-rail-consequence">{t(CONSEQUENCE[id])}</span>
                 </button>
               )
             })}
@@ -214,9 +223,13 @@ export function OperationsView({
 
       {asked !== undefined && asked !== null && (
         <div className="panel-note is-unknown" data-testid="ops-tab-off">
-          <b>{t(asked.labelKey)}</b> is switched off, so this is not it. {t(asked.detailKey)}{' '}
+          <Trans
+            i18nKey="operations.tabOff"
+            values={{ name: t(asked.labelKey), detail: t(asked.detailKey) }}
+            components={{ b: <b /> }}
+          />{' '}
           <button className="btn ghost sm" onClick={() => openSettings('modules')}>
-            Choose modules
+            {t('operations.chooseModules')}
           </button>
         </div>
       )}
@@ -227,7 +240,7 @@ export function OperationsView({
         // not consent), so for most installs this IS the Operations page, and
         // it has to be able to explain itself without a trip to Settings.
         <div className="ops-empty">
-          <div className="s-title">Nothing here can change a server yet.</div>
+          <div className="s-title">{t('operations.empty.title')}</div>
           {off.map((m) => (
             <div key={m.id} className="s-desc" style={{ marginTop: 8 }}>
               <b>{t(m.labelKey)}</b> — {t(m.detailKey)}
@@ -235,7 +248,7 @@ export function OperationsView({
           ))}
           <div style={{ marginTop: 12 }}>
             <button className="btn sm primary" onClick={() => openSettings('modules')}>
-              Choose modules
+              {t('operations.chooseModules')}
             </button>
           </div>
         </div>
@@ -273,8 +286,8 @@ export function OperationsView({
                 data-testid={`jobs-sub-${s.id}`}
                 onClick={() => setJobsSub(s.id)}
               >
-                <span className="ops-subrail-label">{s.label}</span>
-                <span className="ops-subrail-consequence">{s.consequence}</span>
+                <span className="ops-subrail-label">{t(s.labelKey)}</span>
+                <span className="ops-subrail-consequence">{t(s.consequenceKey)}</span>
               </button>
             ))}
           </div>
@@ -312,14 +325,9 @@ export function OperationsView({
           {/* Not `join(' and ')`. With four operate modules that produced "Patch
               and Jobs and Revoke a key", which reads as a machine listing rather
               than a sentence somebody wrote. */}
-          {off
-            .map((m) => t(m.labelKey))
-            .reduce((acc, label, i) =>
-              i === off.length - 1 ? `${acc} and ${label}` : `${acc}, ${label}`
-            )}{' '}
-          {off.length === 1 ? 'is' : 'are'} available and switched off.{' '}
+          {t('operations.offList', { count: off.length, list: offList })}{' '}
           <button className="btn ghost sm" onClick={() => openSettings('modules')}>
-            Choose modules
+            {t('operations.chooseModules')}
           </button>
         </div>
       )}

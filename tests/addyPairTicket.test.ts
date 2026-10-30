@@ -44,6 +44,10 @@ describe('a pairing ticket', () => {
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+const en = JSON.parse(
+  readFileSync(join(__dirname, '..', 'src', 'shared', 'locales', 'en.json'), 'utf8')
+) as Record<string, string>
+
 describe('the pairing panel is not a dead end and the link is consumed', () => {
   const panel = readFileSync(
     join(__dirname, '..', 'src', 'renderer', 'src', 'components', 'addy', 'PairingPanel.tsx'),
@@ -56,9 +60,10 @@ describe('the pairing panel is not a dead end and the link is consumed', () => {
     // A terminal state with no way back meant no third device: the only route
     // to another pairing was restarting the app, on the screen whose whole job
     // is adding machines.
-    expect(done.slice(0, 700), 'the done state has no way back to pairing').toMatch(
-      /Pair another device/
+    expect(done.slice(0, 700), 'the done state has no way back to pairing').toContain(
+      "t('addy.pairing.done.again')"
     )
+    expect(en['addy.pairing.done.again']).toBe('Pair another device')
   })
 
   it('listens for a link from the OS', () => {
@@ -113,7 +118,8 @@ describe('a paired device gets a name that is actually its own', () => {
     // one and has nothing to name.
     const field = panel.slice(panel.indexOf('{!confirmation.self && ('))
     expect(field.slice(0, 400), 'the joiner is asked for a name it cannot use').toContain(
-      'What is the other machine called?'
+      "t('addy.pairing.compare.nameLabel')"
     )
+    expect(en['addy.pairing.compare.nameLabel']).toBe('What is the other machine called?')
   })
 })

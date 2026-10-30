@@ -35,6 +35,8 @@ import { NoteWhy, PanelShell } from './PanelShell'
 import { isVaultLocked, withoutVaultMarker } from '../../lib/withVaultUnlock'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import type { OnDemandTarget } from '../../../../shared/ssh'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 // Patch and update management — roadmap item 17, renderer half.
 //
@@ -66,6 +68,7 @@ import type { OnDemandTarget } from '../../../../shared/ssh'
 // where main can call the same function.
 
 function Count({ count }: { count: PatchCount }): React.JSX.Element {
+  const t = useT()
   if (count.gap === null) {
     return (
       <>
@@ -74,7 +77,7 @@ function Count({ count }: { count: PatchCount }): React.JSX.Element {
         </span>
         {count.staleMetadata && (
           <span className="chip warn inv-stale" title={count.help}>
-            stale cache
+            {t('monitor.patch.staleCache')}
           </span>
         )}
       </>
@@ -101,6 +104,7 @@ function Count({ count }: { count: PatchCount }): React.JSX.Element {
 }
 
 export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Element {
+  const t = useT()
   const facts = useFleet((s) => s.facts)
   const reportFacts = useFleet((s) => s.reportFacts)
   const reportFactsError = useFleet((s) => s.reportFactsError)
@@ -164,7 +168,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
       if (typeof call !== 'function') {
         setKernel({
           serverName: server.name,
-          error: 'This build cannot read kernels. Restart the app to rebuild it.'
+          error: t('monitor.patch.error.noKernel')
         })
         return
       }
@@ -214,7 +218,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               // a raw Server carries `route`, main reads `hops`, and the chain
               // vanishes silently on a bastion-only host.
               await call(sshTargetFor(server), scope)
-            : { ok: false, detail: 'This build cannot list security updates. Restart the app to rebuild it.' }
+            : { ok: false, detail: t('monitor.patch.error.noSecurityList') }
       })
     } catch (e) {
       setSecList({
@@ -440,13 +444,10 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
   return (
     <PanelShell
       icon={<Wrench size={14} />}
-      title="Patch and updates"
+      title={t('monitor.patch.title')}
       about={
         <>
-          <p>
-            Choose the servers to update, review the plan, then run it in waves. Nothing installs
-            until you confirm, and there is no unattended mode.
-          </p>
+          <p>{t('monitor.patch.about')}</p>
           {/* The refusal, still on the screen and still reachable in the place
               somebody goes looking for "patch everything nightly" — which is
               this panel — but no longer a second grey paragraph standing
@@ -467,9 +468,9 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           disabled={running || needy.length === 0}
           data-testid="patch-select-needy"
           onClick={() => setSelected(new Set(needy.map((r) => r.serverId)))}
-          title="Selects the servers that report something to install or a reboot they are owed. A server whose counts could not be read is NOT selected here: it is unknown, not known to need something, and picking it would be this screen deciding something for you. The button beside this one offers those servers separately."
+          title={t('monitor.patch.selectNeedyTitle')}
         >
-          Select what needs something
+          {t('monitor.patch.selectNeedy')}
         </button>
         {/* The hosts nobody can vouch for, OFFERED rather than omitted. They
             are not selected by the button above — "unknown" is not "needs
@@ -485,9 +486,10 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             onClick={() =>
               setSelected((prev) => new Set([...prev, ...unanswerable.map((r) => r.serverId)]))
             }
-            title="Adds the servers where at least one question had no answer — a count that could not be read, a security channel that does not exist, a reboot flag nothing could check. They are unknown, not known to be clean, and nothing here can tell you which. Adding them to the selection is a decision for you to make deliberately."
+            title={t('monitor.patch.addUnknownTitle')}
           >
-            <ShieldQuestion size={13} /> Add {unanswerable.length} that could not answer
+            <ShieldQuestion size={13} />{' '}
+            {t('monitor.patch.addUnknown', { count: unanswerable.length })}
           </button>
         )}
         {/* Ghost, not solid. The solid accent on this panel belongs to the one
@@ -498,19 +500,19 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           className="btn ghost sm"
           disabled={busy || servers.length === 0}
           onClick={() => void check()}
-          title="Sweeps the estate now and re-reads what has already been collected. Nothing is installed and no package cache is refreshed by this."
+          title={t('monitor.patch.checkNowTitle')}
         >
-          <RefreshCw size={13} className={clsx(busy && 'spin')} /> Check now
+          <RefreshCw size={13} className={clsx(busy && 'spin')} /> {t('monitor.patch.checkNow')}
         </button>
         </>
       }
     >
       {summary.withFacts === 0 ? (
         <SweepEmpty
-          subject="No server facts have been collected yet."
+          subject={t('monitor.patch.empty.subject')}
           busy={busy}
           onCheckNow={() => void check()}
-          note="Update counts come from the same hourly sweep the inventory reads. Nothing is installed and no package cache is refreshed."
+          note={t('monitor.patch.empty.note')}
         />
       ) : (
         <>
@@ -526,20 +528,19 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 that is the whole reason the field exists rather than the panel
                 comparing totals to zero. An estate is not clear because the
                 hosts that could answer had nothing to say. */}
-            {summary.allClear ? <b>All clear. </b> : null}
+            {summary.allClear ? <b>{t('monitor.patch.allClear')} </b> : null}
             {summary.allClearNote}
           </div>
 
           {summary.securityUnanswerable > 0 && (
             <div className="panel-note is-unknown" data-testid="patch-unanswerable">
-              <ShieldQuestion size={12} /> {summary.securityUnanswerable} server
-              {summary.securityUnanswerable === 1 ? '' : 's'} can never report a security update
-              count, so {summary.securityUnanswerable === 1 ? 'it is' : 'they are'} not in the{' '}
-              {summary.securityTotal} above. Treat{' '}
-              {summary.securityUnanswerable === 1 ? 'it' : 'them'} as unknown, never as zero.
-              <NoteWhy summary="Why they cannot answer">
-                Arch and Alpine have no security channel at all, and dnf cannot answer where the
-                repositories publish no updateinfo.
+              <ShieldQuestion size={12} />{' '}
+              {t('monitor.patch.unanswerable', {
+                count: summary.securityUnanswerable,
+                total: summary.securityTotal
+              })}
+              <NoteWhy summary={t('monitor.patch.unanswerableWhy')}>
+                {t('monitor.patch.unanswerableWhyBody')}
               </NoteWhy>
             </div>
           )}
@@ -549,12 +550,12 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               <thead>
                 <tr>
                   <th />
-                  <th>Host</th>
-                  <th>Packages</th>
-                  <th className="num">Updates</th>
-                  <th className="num">Security</th>
-                  <th>Kernel</th>
-                  <th>Reboot</th>
+                  <th>{t('monitor.patch.col.host')}</th>
+                  <th>{t('monitor.patch.col.packages')}</th>
+                  <th className="num">{t('monitor.patch.col.updates')}</th>
+                  <th className="num">{t('monitor.patch.col.security')}</th>
+                  <th>{t('monitor.patch.col.kernel')}</th>
+                  <th>{t('monitor.patch.col.reboot')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -563,7 +564,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                     <td>
                       <input
                         type="checkbox"
-                        aria-label={`Select ${r.serverName}`}
+                        aria-label={t('monitor.patch.row.selectLabel', { name: r.serverName })}
                         checked={selected.has(r.serverId)}
                         onChange={() => toggle(r.serverId)}
                         disabled={running}
@@ -572,7 +573,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                     <td data-col="host">{r.serverName}</td>
                     <td data-col="pkg">
                       {r.packageManager ?? (
-                        <span className="faint">not identified</span>
+                        <span className="faint">{t('monitor.patch.row.notIdentified')}</span>
                       )}
                     </td>
                     <td data-col="pending" className="num">
@@ -588,11 +589,11 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                       {r.pending.value !== null && r.pending.value > 0 && (
                         <button
                           className="btn quiet size-24"
-                          aria-label={`Which updates on ${r.serverName}`}
+                          aria-label={t('monitor.patch.row.whichUpdatesLabel', { name: r.serverName })}
                           disabled={secLoading === r.serverId}
                           onClick={() => void loadSecurityList(r.serverId, 'all')}
                         >
-                          which
+                          {t('monitor.patch.row.which')}
                         </button>
                       )}
                     </td>
@@ -608,11 +609,11 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                       {r.security.value !== null && r.security.value > 0 && (
                         <button
                           className="btn quiet size-24"
-                          aria-label={`Which packages on ${r.serverName}`}
+                          aria-label={t('monitor.patch.row.whichPackagesLabel', { name: r.serverName })}
                           disabled={secLoading === r.serverId}
                           onClick={() => void loadSecurityList(r.serverId)}
                         >
-                          which
+                          {t('monitor.patch.row.which')}
                         </button>
                       )}
                     </td>
@@ -624,7 +625,9 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                         disabled={kernelLoading === r.serverId}
                         onClick={() => void loadKernel(r.serverId, r.rebootRequired ?? null)}
                       >
-                        {kernelLoading === r.serverId ? 'reading' : 'kernel'}
+                        {kernelLoading === r.serverId
+                          ? t('monitor.patch.row.kernelReading')
+                          : t('monitor.patch.row.kernel')}
                       </button>
                     </td>
                     <td data-col="reboot">
@@ -632,10 +635,10 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                         <span className="faint">{PATCH_GAP_LABEL[r.rebootGap]}</span>
                       ) : r.rebootRequired ? (
                         <span className="state-watch" title={r.rebootReason ?? undefined}>
-                          owed
+                          {t('monitor.patch.row.rebootOwed')}
                         </span>
                       ) : (
-                        'no'
+                        t('monitor.patch.row.rebootNo')
                       )}
                     </td>
                   </tr>
@@ -644,7 +647,9 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             </table>
             {kernel !== null && (
               <div className="bc-controls" style={{ marginTop: 8 }}>
-                <div className="s-title">Kernel on {kernel.serverName}</div>
+                <div className="s-title">
+                  {t('monitor.patch.kernelOn', { name: kernel.serverName })}
+                </div>
                 {kernel.error !== undefined ? (
                   // NOT "up to date". A read that could not happen and a host
                   // whose kernel is current are different answers.
@@ -663,8 +668,9 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             {secList !== null && (
               <div className="bc-controls" style={{ marginTop: 8 }}>
                 <div className="s-title">
-                  {secScope === 'all' ? 'Pending updates' : 'Security updates'} on{' '}
-                  {secList.serverName}
+                  {secScope === 'all'
+                    ? t('monitor.patch.pendingOn', { name: secList.serverName })
+                    : t('monitor.patch.securityOn', { name: secList.serverName })}
                 </div>
                 {!secList.probe.ok ? (
                   // NOT an empty list. A read that could not happen and a host
@@ -715,22 +721,22 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
         <div className="bc-controls" style={{ marginTop: 10 }}>
           <div className="row wrap" style={{ gap: 10, alignItems: 'center' }}>
             <label>
-              Install{' '}
+              {t('monitor.patch.plan.install')}{' '}
               <select
-                aria-label="What to install"
+                aria-label={t('monitor.patch.plan.whatLabel')}
                 value={scope}
                 onChange={(e) => setScope(e.target.value as PatchScope)}
                 disabled={running}
               >
-                <option value="security">security updates only</option>
-                <option value="all">all pending updates</option>
+                <option value="security">{t('monitor.patch.plan.securityOnly')}</option>
+                <option value="all">{t('monitor.patch.plan.allPending')}</option>
               </select>
             </label>
             <label>
-              in waves of{' '}
+              {t('monitor.patch.plan.inWavesOf')}{' '}
               <input
                 type="number"
-                aria-label="Servers per wave"
+                aria-label={t('monitor.patch.plan.perWaveLabel')}
                 min={1}
                 max={Math.max(1, chosen.length)}
                 value={waveSize}
@@ -746,7 +752,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 onChange={(e) => setHealthGate(e.target.checked)}
                 disabled={running || !gateUsable}
               />{' '}
-              hold between waves until the estate looks healthy
+              {t('monitor.patch.plan.healthGate')}
             </label>
             <label>
               <input
@@ -755,7 +761,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 onChange={(e) => setReboot(e.target.checked)}
                 disabled={running}
               />{' '}
-              restart the servers that say they need it
+              {t('monitor.patch.plan.reboot')}
             </label>
           </div>
 
@@ -765,9 +771,8 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
           {!gateUsable && (
             <>
               <div className="panel-note is-unknown" data-testid="patch-gate-unavailable">
-                <AlertTriangle size={12} /> The wave gate is unavailable. {GATE_SAMPLER_NOTE} Until
-                it is on, the waves below roll on one after another with nothing checking the estate
-                in between — run them in small waves and watch, or turn the sampler on first.
+                <AlertTriangle size={12} />{' '}
+                {t('monitor.patch.plan.gateUnavailable', { note: GATE_SAMPLER_NOTE })}
               </div>
               {/* "turn the sampler on first" is advice the reader then has to
                   act on by hand, in a screen they are mid-way through
@@ -778,14 +783,18 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 data-testid="patch-gate-open-settings"
                 onClick={() => openSettings('monitoring')}
               >
-                <Settings2 size={13} /> Open Monitoring settings
+                <Settings2 size={13} /> {t('monitor.patch.plan.openMonitoring')}
               </button>
             </>
           )}
 
           <div className="panel-stats">
-            {waves.length} wave{waves.length === 1 ? '' : 's'}:{' '}
-            {waves.map((w) => `${w.name} (${w.hosts.map((h) => h.serverName).join(', ')})`).join(' → ')}
+            {t('monitor.patch.plan.waves', {
+              count: waves.length,
+              waves: waves
+                .map((w) => `${w.name} (${w.hosts.map((h) => h.serverName).join(', ')})`)
+                .join(' → ')
+            })}
           </div>
 
           {/* THE TOPOLOGY HOLE, surfaced rather than papered over. A hop with no
@@ -800,7 +809,11 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
 
           {plan.excluded.map((x) => (
             <div key={x.serverId} className="panel-note" data-testid="patch-excluded">
-              <b>{x.serverName}</b> is not in this run: {x.reason}
+              <Trans
+                i18nKey="monitor.patch.plan.excluded"
+                values={{ name: x.serverName, reason: x.reason }}
+                components={{ b: <b /> }}
+              />
             </div>
           ))}
 
@@ -834,8 +847,9 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               top-right slot the read-only panels use for "Check now". */}
           <div className="op-actionbar">
             <span className="op-actionbar-what">
-              {waves.length} wave{waves.length === 1 ? '' : 's'}
-              {reboot ? ', restarting the hosts that say they need it' : ', no restarts'}
+              {reboot
+                ? t('monitor.patch.bar.restarting', { count: waves.length })
+                : t('monitor.patch.bar.noRestarts', { count: waves.length })}
             </span>
             <span className="grow" />
             <button
@@ -845,32 +859,38 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               title={blocked ? (blockSummary(plan) ?? undefined) : undefined}
               onClick={() => (strongest === 'none' ? void start() : setConfirming(true))}
             >
-              {scope === 'security' ? 'Install security updates' : 'Install updates'} on{' '}
-              {plan.hosts.filter((h) => h.excluded === null).length} server
-              {plan.hosts.filter((h) => h.excluded === null).length === 1 ? '' : 's'}
+              {t(
+                scope === 'security'
+                  ? 'monitor.patch.bar.installSecurity'
+                  : 'monitor.patch.bar.installAll',
+                { count: plan.hosts.filter((h) => h.excluded === null).length }
+              )}
             </button>
           </div>
 
           {confirming && (
             <div className="bc-confirm">
               <div>
-                This will run on{' '}
-                {plan.hosts.filter((h) => h.excluded === null).map((h) => h.serverName).join(', ')} in{' '}
-                {waves.length} wave{waves.length === 1 ? '' : 's'}
-                {reboot ? ', restarting the servers that say they need it' : ''}.
+                {t(reboot ? 'monitor.patch.confirm.runRestart' : 'monitor.patch.confirm.run', {
+                  count: waves.length,
+                  hosts: plan.hosts
+                    .filter((h) => h.excluded === null)
+                    .map((h) => h.serverName)
+                    .join(', ')
+                })}
               </div>
               {strongest === 'type-to-confirm' && (
                 <input
                   className="input"
-                  aria-label="Type RUN to confirm"
-                  placeholder="Type RUN to run"
+                  aria-label={t('monitor.patch.confirm.phraseLabel', { phrase: 'RUN' })}
+                  placeholder={t('monitor.patch.confirm.phrasePlaceholder', { phrase: 'RUN' })}
                   value={phrase}
                   onChange={(e) => setPhrase(e.target.value)}
                 />
               )}
               <div className="row" style={{ gap: 8 }}>
                 <button className="btn" onClick={() => setConfirming(false)}>
-                  Cancel
+                  {t('common.cancel')}
                 </button>
                 <button
                   className="btn primary"
@@ -878,7 +898,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                   data-testid="patch-confirm"
                   onClick={() => void start()}
                 >
-                  Run
+                  {t('monitor.patch.confirm.run')}
                 </button>
               </div>
             </div>
@@ -905,7 +925,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                     <span className="row" style={{ gap: 'var(--sp-2)', alignItems: 'center' }}>
                       <span className="grow">{withoutVaultMarker(r.error ?? '')}</span>
                       <UnlockVaultButton
-                        reason={`Polling ${r.serverName} needs the credential in your vault.`}
+                        reason={t('monitor.patch.vaultReason', { name: r.serverName })}
                       />
                     </span>
                   ) : (

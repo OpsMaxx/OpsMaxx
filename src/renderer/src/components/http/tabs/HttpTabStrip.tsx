@@ -12,6 +12,7 @@ import { layoutMenuEntries } from './layoutMenu'
 import { requestClose } from './closing'
 import { badgeFor, tabMenuEntries, tabTitle } from './tabMenus'
 import { focusUrl } from '../focus'
+import { useT } from '../../../lib/i18n'
 
 interface Menu {
   x: number
@@ -50,6 +51,7 @@ export function HttpTabStrip({ envPicker, forced }: HttpTabStripProps): React.JS
   const [renaming, setRenaming] = useState<Id | null>(null)
   const [dropAt, setDropAt] = useState<number | null>(null)
   const dragId = useRef<Id | null>(null)
+  const t = useT()
   const tabs = allTabs.filter((t) => t.workspaceId === ws)
   const active = tabs.find((t) => t.id === activeId)
 
@@ -88,14 +90,15 @@ export function HttpTabStrip({ envPicker, forced }: HttpTabStripProps): React.JS
       .filter((c) => c.tab.workspaceId === ws)
       .slice(-10)
       .reverse()
-    const title = (t: HttpTabState): string => tabTitle(t, useHttp.getState().requestFor(t.id) ?? t.draft ?? null)
+    const title = (tab: HttpTabState): string =>
+      tabTitle(tab, useHttp.getState().requestFor(tab.id) ?? tab.draft ?? null)
     return [
-      ...tabs.map((t, i) => ({
-        label: title(t),
+      ...tabs.map((tab, i) => ({
+        label: title(tab),
         radio: 'open-tab',
-        checked: t.id === activeId,
-        onClick: () => focusTab(t.id),
-        ...(i === 0 ? { section: 'Open tabs' } : {})
+        checked: tab.id === activeId,
+        onClick: () => focusTab(tab.id),
+        ...(i === 0 ? { section: t('http.tabs.openTabs') } : {})
       })),
       ...recent.map((c, i) => ({
         label: tabTitle(c.tab, c.tab.draft ?? null),
@@ -104,11 +107,11 @@ export function HttpTabStrip({ envPicker, forced }: HttpTabStripProps): React.JS
           useHttp.setState((s) => ({ closedStack: [...s.closedStack.filter((x) => x !== c), c] }))
           useHttp.getState().reopenClosed()
         },
-        ...(i === 0 ? { section: 'Recently closed' } : {})
+        ...(i === 0 ? { section: t('http.tabs.recentlyClosed') } : {})
       })),
       { label: '', separator: true },
       {
-        label: 'Reopen closed tab',
+        label: t('http.tabs.reopenClosedTab'),
         shortcut: keyLabel('reopen-tab'),
         disabled: recent.length === 0,
         onClick: () => useHttp.getState().reopenClosed()
@@ -118,7 +121,7 @@ export function HttpTabStrip({ envPicker, forced }: HttpTabStripProps): React.JS
 
   const drop = (index: number): void => {
     if (dragId.current) {
-      const from = tabs.findIndex((t) => t.id === dragId.current)
+      const from = tabs.findIndex((tab) => tab.id === dragId.current)
       // `reorder` takes the slot the tab ends up in; dropping right of itself shifts by one.
       useHttp.getState().reorder(dragId.current, from < index ? index - 1 : index)
     }
@@ -133,7 +136,7 @@ export function HttpTabStrip({ envPicker, forced }: HttpTabStripProps): React.JS
         onDragOver={(e) => dragId.current && e.preventDefault()}
         onDrop={() => drop(dropAt ?? tabs.length)}
       >
-        <div className="hc-tablist" role="tablist" aria-label="Request tabs">
+        <div className="hc-tablist" role="tablist" aria-label={t('http.tabs.requestTabs')}>
           {tabs.map((tab, index) => (
             <Tab
               key={tab.id}
@@ -162,22 +165,22 @@ export function HttpTabStrip({ envPicker, forced }: HttpTabStripProps): React.JS
         <span className="hc-strip-tools">
           <button
             className="icon-btn sm"
-            aria-label={withKey('New HTTP request', 'new-terminal')}
-            title={withKey('New HTTP request', 'new-terminal')}
+            aria-label={withKey(t('http.tabs.newHttpRequest'), 'new-terminal')}
+            title={withKey(t('http.tabs.newHttpRequest'), 'new-terminal')}
             onClick={() => newRequest('http')}
           >
             <Plus size={14} />
           </button>
           <button
             className="icon-btn xs"
-            aria-label="New WebSocket or GraphQL request"
-            title="New WebSocket or GraphQL request"
+            aria-label={t('http.tabs.newWsOrGql')}
+            title={t('http.tabs.newWsOrGql')}
             aria-haspopup="menu"
             onClick={(e) =>
               openMenu(anchorOf(e.currentTarget), [
-                { label: 'HTTP request', onClick: () => newRequest('http') },
-                { label: 'WebSocket', onClick: () => newRequest('ws') },
-                { label: 'GraphQL request', onClick: () => newRequest('graphql') }
+                { label: t('http.tabs.menuHttpRequest'), onClick: () => newRequest('http') },
+                { label: t('http.tabs.menuWebSocket'), onClick: () => newRequest('ws') },
+                { label: t('http.tabs.menuGraphQlRequest'), onClick: () => newRequest('graphql') }
               ])
             }
           >
@@ -189,8 +192,8 @@ export function HttpTabStrip({ envPicker, forced }: HttpTabStripProps): React.JS
       <span className="hc-strip-tools">
         <button
           className="icon-btn sm"
-          aria-label="Open tabs and recently closed"
-          title="Open tabs and recently closed"
+          aria-label={t('http.tabs.openAndRecent')}
+          title={t('http.tabs.openAndRecent')}
           aria-haspopup="menu"
           onClick={(e) => openMenu(anchorOf(e.currentTarget), listEntries())}
         >
@@ -199,8 +202,8 @@ export function HttpTabStrip({ envPicker, forced }: HttpTabStripProps): React.JS
         {envPicker}
         <button
           className="icon-btn sm"
-          aria-label="Layout (panels and splits)"
-          title="Layout (panels and splits)"
+          aria-label={t('http.tabs.layout')}
+          title={t('http.tabs.layout')}
           aria-haspopup="menu"
           onClick={(e) => {
             const tabId = active?.id ?? ghostId
@@ -236,13 +239,19 @@ function Tab(p: TabProps): React.JSX.Element {
   const dirty = useHttp((s) => s.isDirty(tab.id))
   const sending = useHttp((s) => s.responses[tab.id]?.status === 'sending')
   const connected = useWsSessions((s) => s.sessions[tab.id]?.state === 'open')
+  const t = useT()
   const title = tabTitle(tab, req)
   const badge = tab.kind === 'request' ? badgeFor(req) : null
   const close = (e: React.MouseEvent): void => {
     e.stopPropagation()
     requestClose([tab.id])
   }
-  const state = [dirty && 'unsaved changes', sending && 'sending', connected && 'connected', tab.preview && 'preview']
+  const state = [
+    dirty && t('http.tabs.stateUnsaved'),
+    sending && t('http.tabs.stateSending'),
+    connected && t('http.tabs.stateConnected'),
+    tab.preview && t('http.tabs.statePreview')
+  ]
     .filter(Boolean)
     .join(', ')
 
@@ -251,7 +260,9 @@ function Tab(p: TabProps): React.JSX.Element {
       role="tab"
       data-hc-tab={tab.id}
       aria-selected={p.active}
-      aria-label={state ? `${badge ? `${badge.text} ` : ''}${title} (${state})` : undefined}
+      aria-label={
+        state ? t('http.tabs.tabWithState', { title: `${badge ? `${badge.text} ` : ''}${title}`, state }) : undefined
+      }
       tabIndex={p.active ? 0 : -1}
       className={clsx('hc-tab', tab.preview && 'hc-preview', p.dropBefore && 'hc-drop-before')}
       title={title}
@@ -286,18 +297,18 @@ function Tab(p: TabProps): React.JSX.Element {
       )}
       <span className="hc-tab-glyph">
         {sending ? (
-          <Loader2 size={12} className="spin" aria-label="Sending" />
+          <Loader2 size={12} className="spin" aria-label={t('http.tabs.sending')} />
         ) : connected ? (
-          <span className="hc-live-dot" role="img" aria-label="Connected" />
+          <span className="hc-live-dot" role="img" aria-label={t('http.tabs.connected')} />
         ) : dirty ? (
-          <span className="hc-dirty" role="img" aria-label="Unsaved changes" />
+          <span className="hc-dirty" role="img" aria-label={t('http.tabs.unsavedChanges')} />
         ) : null}
         {!sending && (
           <button
             className={clsx('icon-btn xs hc-close', !dirty && !connected && 'hc-clean')}
             tabIndex={-1}
-            aria-label={withKey(`Close ${title}`, 'close-tab')}
-            title={withKey('Close', 'close-tab')}
+            aria-label={withKey(t('http.tabs.closeNamed', { title }), 'close-tab')}
+            title={withKey(t('http.tabs.close'), 'close-tab')}
             onClick={close}
           >
             <X size={12} />
@@ -318,6 +329,7 @@ function RenameInput({
   onDone: () => void
 }): React.JSX.Element {
   const [value, setValue] = useState(initial)
+  const t = useT()
   const commit = (): void => {
     const name = value.trim()
     const http = useHttp.getState()
@@ -332,7 +344,7 @@ function RenameInput({
   return (
     <input
       className="input hc-tab-rename"
-      aria-label="Tab name"
+      aria-label={t('http.tabs.tabName')}
       autoFocus
       value={value}
       onChange={(e) => setValue(e.target.value)}

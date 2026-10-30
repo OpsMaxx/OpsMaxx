@@ -4,6 +4,9 @@ import { useWorkspaceServers, useWorkspaceVpns, useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
 import { maskToken } from '../../../../shared/tokenDisplay'
 import { withoutVaultMarker } from '../../lib/withVaultUnlock'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
+import type { MessageKey } from '../../../../shared/i18n'
 import type { CicdBridge, CicdConnection, CicdProvider, CicdRoute } from '../../../../shared/cicd'
 
 /**
@@ -35,7 +38,7 @@ import type { CicdBridge, CicdConnection, CicdProvider, CicdRoute } from '../../
 
 interface Scope {
   name: string
-  why: string
+  whyKey: MessageKey
 }
 
 interface ProviderDef {
@@ -54,18 +57,18 @@ interface ProviderDef {
    */
   defaultUrl: string | null
   /** What the URL field means for this provider — all three differ. */
-  urlHint: string
+  urlHintKey: MessageKey
   /** Jenkins authenticates as a user; the other two carry identity in the token. */
   needsUsername: boolean
   /** `null` where the provider HAS no scopes. Not an empty checklist. */
   scopes: Scope[] | null
   /** Where the token is made. `base` is whatever the user has typed so far. */
   tokenUrl: (base: string) => string
-  tokenLinkLabel: string
+  tokenLinkLabelKey: MessageKey
   /** The honest caveat about what that link does and does not do. */
-  linkNote: string
+  linkNoteKey: MessageKey
   /** What the Verify button actually asks for. */
-  verifyNote: string
+  verifyNoteKey: MessageKey
   /** Scope that only reads. Absent where the concept does not apply. */
   readScope?: string
   /** Scope that can start a run. */
@@ -78,19 +81,17 @@ const PROVIDERS: ProviderDef[] = [
     label: 'GitHub Actions',
     placeholder: 'https://github.com',
     defaultUrl: 'https://github.com',
-    urlHint:
-      'The web URL you use, not an API root. github.com and GitHub Enterprise have different API hosts and OpsMaxx derives the right one.',
+    urlHintKey: 'cicd.connect.github.urlHint',
     needsUsername: false,
     scopes: [
-      { name: 'repo', why: 'Read runs, jobs and logs in private repositories.' },
-      { name: 'workflow', why: 'Start a run. Leave it off for a read-only connection.' }
+      { name: 'repo', whyKey: 'cicd.connect.github.scopeRepo' },
+      { name: 'workflow', whyKey: 'cicd.connect.github.scopeWorkflow' }
     ],
     tokenUrl: (base) =>
       `${trimSlash(base) || 'https://github.com'}/settings/tokens/new?scopes=repo,workflow&description=OpsMaxx`,
-    tokenLinkLabel: 'Create a classic token',
-    linkNote:
-      'That link pre-ticks both boxes, but only for a CLASSIC token. A fine-grained token takes no scope parameters at all — the link cannot do the work, so set Actions to Read (and Read and write, if you want to start runs) by hand.',
-    verifyNote: 'Verify asks GitHub who the token belongs to and reads the scopes it granted.',
+    tokenLinkLabelKey: 'cicd.connect.github.tokenLink',
+    linkNoteKey: 'cicd.connect.github.linkNote',
+    verifyNoteKey: 'cicd.connect.github.verifyNote',
     readScope: 'repo',
     writeScope: 'workflow'
   },
@@ -99,19 +100,17 @@ const PROVIDERS: ProviderDef[] = [
     label: 'GitLab CI',
     placeholder: 'https://gitlab.com',
     defaultUrl: 'https://gitlab.com',
-    urlHint: 'The instance URL. OpsMaxx appends /api/v4 itself.',
+    urlHintKey: 'cicd.connect.gitlab.urlHint',
     needsUsername: false,
     scopes: [
-      { name: 'read_api', why: 'Read pipelines, jobs and job traces.' },
-      { name: 'api', why: 'Start a pipeline. Leave it off for a read-only connection.' }
+      { name: 'read_api', whyKey: 'cicd.connect.gitlab.scopeReadApi' },
+      { name: 'api', whyKey: 'cicd.connect.gitlab.scopeApi' }
     ],
     tokenUrl: (base) =>
       `${trimSlash(base) || 'https://gitlab.com'}/-/user_settings/personal_access_tokens?name=OpsMaxx&scopes=read_api`,
-    tokenLinkLabel: 'Create a personal access token',
-    linkNote:
-      'That link pre-fills the name and ticks read_api. Add api yourself if this connection should be able to start pipelines.',
-    verifyNote:
-      'Verify reads the token back from GitLab, which reports its own scopes and expiry.',
+    tokenLinkLabelKey: 'cicd.connect.gitlab.tokenLink',
+    linkNoteKey: 'cicd.connect.gitlab.linkNote',
+    verifyNoteKey: 'cicd.connect.gitlab.verifyNote',
     readScope: 'read_api',
     writeScope: 'api'
   },
@@ -121,17 +120,14 @@ const PROVIDERS: ProviderDef[] = [
     placeholder: 'https://jenkins.example.internal',
     // No default, deliberately. See `defaultUrl`.
     defaultUrl: null,
-    urlHint:
-      'Including the context path if the admin chose one — Jenkins sits wherever it was installed, and OpsMaxx does not guess.',
+    urlHintKey: 'cicd.connect.jenkins.urlHint',
     needsUsername: true,
     // Deliberately null, and the UI says so instead of drawing an empty list.
     scopes: null,
     tokenUrl: (base) => `${trimSlash(base)}/me/security`,
-    tokenLinkLabel: 'Open your Jenkins token page',
-    linkNote:
-      'Jenkins API tokens have no scopes at all. The token carries your whole account — every permission your user has, including starting builds — so there is no read-only version of it. Create it on an account that has only what you want OpsMaxx to do.',
-    verifyNote:
-      'Jenkins reports neither scopes nor an expiry, so Verify performs one read and tells you what it managed to see.'
+    tokenLinkLabelKey: 'cicd.connect.jenkins.tokenLink',
+    linkNoteKey: 'cicd.connect.jenkins.linkNote',
+    verifyNoteKey: 'cicd.connect.jenkins.verifyNote'
   }
 ]
 
@@ -182,6 +178,7 @@ export function CicdConnectModal({
   existingNames?: readonly string[]
   bridge?: CicdBridge
 }): React.JSX.Element {
+  const t = useT()
   const servers = useWorkspaceServers()
   const vpns = useWorkspaceVpns()
   const workspaceId = useApp((s) => s.activeWorkspaceId)
@@ -228,19 +225,19 @@ export function CicdConnectModal({
   // once is a form nobody reads. Same rule as `missingField` in AddServerModal.
   const missing =
     name.trim() === ''
-      ? 'Give the account a name — it is what an AI agent and the tree will call it.'
+      ? t('cicd.connect.missing.name')
       : existingNames?.some((n) => n.toLowerCase() === name.trim().toLowerCase())
-        ? 'Another connected account is already called that. An agent addresses an account by name, so two sharing one make both unreachable — give this one a name of its own.'
+        ? t('cicd.connect.missing.duplicateName')
         : baseUrl.trim() === ''
-          ? 'A URL is needed before anything can be dialled.'
+          ? t('cicd.connect.missing.url')
           : def.needsUsername && username.trim() === ''
-            ? 'Jenkins authenticates as a user, so it needs the username the token belongs to.'
+            ? t('cicd.connect.missing.username')
             : token.trim() === ''
-              ? 'Paste the token. It is sent to the provider and never stored by this panel.'
+              ? t('cicd.connect.missing.token')
               : routeKind === 'server' && !serverId
-                ? 'Choose which saved server the requests should leave from.'
+                ? t('cicd.connect.missing.server')
                 : routeKind === 'vpn' && !vpnProfileId
-                  ? 'Choose which VPN profile the requests should go through.'
+                  ? t('cicd.connect.missing.vpn')
                   : null
 
   const draft = (): CicdConnection => ({
@@ -276,8 +273,8 @@ export function CicdConnectModal({
 
   return (
     <Modal
-      title={editing ? `Edit ${editing.name}` : 'Connect a CI account'}
-      subtitle="Requests are sent by OpsMaxx, so an internal certificate authority, a bastion or a VPN profile all work."
+      title={editing ? t('cicd.connect.editTitle', { name: editing.name }) : t('cicd.connect.title')}
+      subtitle={t('cicd.connect.subtitle')}
       size="lg"
       onClose={onClose}
       footerNote={
@@ -300,16 +297,16 @@ export function CicdConnectModal({
           // explanation is a form the user has to guess at.
           title={
             !bridge
-              ? 'This build cannot dial a CI server. Restart the app to rebuild the bridge.'
-              : def.verifyNote
+              ? t('cicd.connect.noBridge')
+              : t(def.verifyNoteKey)
           }
           onClick={() => void runVerify()}
         >
-          {verify.kind === 'dialling' ? 'Verifying…' : 'Verify'}
+          {verify.kind === 'dialling' ? t('cicd.connect.verifying') : t('cicd.connect.verify')}
         </button>
       }
       confirm={{
-        label: saving ? 'Saving…' : editing ? 'Save' : 'Connect',
+        label: saving ? t('common.saving') : editing ? t('common.save') : t('cicd.connect.connect'),
         // `onSave` is optional only so a test can render this without a store.
         // The panel always supplies one; a build where it does not is a build
         // where nothing could be saved, and that is worth failing loudly in a
@@ -354,19 +351,21 @@ export function CicdConnectModal({
           </button>
         ))}
       </div>
-      <div className="field-hint cicd-seg-hint">{def.urlHint}</div>
+      <div className="field-hint cicd-seg-hint">{t(def.urlHintKey)}</div>
 
-      <Field label="Name" required>
+      <Field label={t('cicd.connect.nameLabel')} required>
         <input
           className="input"
           value={name}
           autoFocus
-          placeholder={provider === 'jenkins' ? 'Build controller' : 'Platform'}
+          placeholder={
+            provider === 'jenkins' ? t('cicd.connect.namePlaceholderJenkins') : t('cicd.connect.namePlaceholder')
+          }
           onChange={(e) => setName(e.target.value)}
         />
       </Field>
 
-      <Field label="URL" required hint="As you would type it into a browser.">
+      <Field label={t('cicd.connect.urlLabel')} required hint={t('cicd.connect.urlHint')}>
         <input
           className="input"
           value={baseUrl}
@@ -379,18 +378,18 @@ export function CicdConnectModal({
       </Field>
 
       {def.needsUsername && (
-        <Field label="Username" required hint="The Jenkins user the API token belongs to.">
+        <Field label={t('cicd.connect.usernameLabel')} required hint={t('cicd.connect.usernameHint')}>
           <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
         </Field>
       )}
 
       <Field
-        label="Token"
+        label={t('cicd.connect.tokenLabel')}
         required
         hint={
           token.trim()
-            ? `Sent to the provider and not kept by this panel. It will be stored as ${maskToken(token)}.`
-            : 'Sent to the provider when you press Verify. It is never written into opsmaxx-data.json.'
+            ? t('cicd.connect.tokenHintTyped', { masked: maskToken(token) })
+            : t('cicd.connect.tokenHint')
         }
       >
         <input
@@ -414,13 +413,13 @@ export function CicdConnectModal({
        * tunnel the user opened themselves, which is just 127.0.0.1.
        */}
       <Field
-        label="Send from"
+        label={t('cicd.connect.routeLabel')}
         hint={
           routeKind === 'server'
-            ? 'Hostnames resolve on that server, so a private DNS name or its own loopback works.'
+            ? t('cicd.connect.routeHintServer')
             : routeKind === 'vpn'
-              ? 'A userspace VPN changes no route table, so a request has to be sent through the profile deliberately. This is the case with no server in front of it.'
-              : 'Requests leave from this machine. That covers SaaS, and anything already reachable.'
+              ? t('cicd.connect.routeHintVpn')
+              : t('cicd.connect.routeHintDirect')
         }
       >
         <select
@@ -428,16 +427,16 @@ export function CicdConnectModal({
           value={routeKind}
           onChange={(e) => setRouteKind(e.target.value as CicdRoute['kind'])}
         >
-          <option value="direct">This machine</option>
-          <option value="server">A saved server</option>
-          <option value="vpn">A VPN profile</option>
+          <option value="direct">{t('cicd.connect.routeDirect')}</option>
+          <option value="server">{t('cicd.connect.routeServer')}</option>
+          <option value="vpn">{t('cicd.connect.routeVpn')}</option>
         </select>
       </Field>
 
       {routeKind === 'server' && (
-        <Field label="Server" required>
+        <Field label={t('cicd.connect.serverLabel')} required>
           <select className="input" value={serverId} onChange={(e) => setServerId(e.target.value)}>
-            <option value="">Choose a server…</option>
+            <option value="">{t('cicd.connect.chooseServer')}</option>
             {servers.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
@@ -448,13 +447,13 @@ export function CicdConnectModal({
       )}
 
       {routeKind === 'vpn' && (
-        <Field label="VPN profile" required>
+        <Field label={t('cicd.connect.vpnLabel')} required>
           <select
             className="input"
             value={vpnProfileId}
             onChange={(e) => setVpnProfileId(e.target.value)}
           >
-            <option value="">Choose a profile…</option>
+            <option value="">{t('cicd.connect.chooseVpn')}</option>
             {vpns.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.name}
@@ -470,14 +469,10 @@ export function CicdConnectModal({
           checked={insecureTls}
           onChange={(e) => setInsecureTls(e.target.checked)}
         />
-        <span className="grow">Skip certificate checking</span>
+        <span className="grow">{t('cicd.connect.skipTls')}</span>
       </label>
       {insecureTls && (
-        <div className="panel-note is-alarm">
-          Every request to this account will accept any certificate, including one an
-          attacker on the path presents. An internal certificate authority is the fix;
-          this is the fallback.
-        </div>
+        <div className="panel-note is-alarm">{t('cicd.connect.skipTlsWarning')}</div>
       )}
     </Modal>
   )
@@ -491,22 +486,23 @@ export function CicdConnectModal({
  * token carries the whole account.
  */
 function ScopeHelp({ def, baseUrl }: { def: ProviderDef; baseUrl: string }): React.JSX.Element {
+  const t = useT()
   const href = def.tokenUrl(baseUrl)
   return (
     <div className="cicd-scopes">
-      <div className="ui-label">What the token needs</div>
+      <div className="ui-label">{t('cicd.connect.tokenNeeds')}</div>
       {def.scopes === null ? (
-        <div className="panel-note is-watch">{def.linkNote}</div>
+        <div className="panel-note is-watch">{t(def.linkNoteKey)}</div>
       ) : (
         <>
           <ul className="cicd-scope-list">
             {def.scopes.map((s) => (
               <li key={s.name}>
-                <span className="mono">{s.name}</span> — {s.why}
+                <span className="mono">{s.name}</span> — {t(s.whyKey)}
               </li>
             ))}
           </ul>
-          <div className="ui-note">{def.linkNote}</div>
+          <div className="ui-note">{t(def.linkNoteKey)}</div>
         </>
       )}
       <div className="ui-note">
@@ -514,7 +510,7 @@ function ScopeHelp({ def, baseUrl }: { def: ProviderDef; baseUrl: string }): Rea
             plain link the shell opens, and the URL is shown so somebody can
             paste it themselves. */}
         <a href={href} target="_blank" rel="noreferrer">
-          {def.tokenLinkLabel}
+          {t(def.tokenLinkLabelKey)}
         </a>{' '}
         <span className="mono ellipsis">{href}</span>
       </div>
@@ -531,24 +527,25 @@ function ScopeHelp({ def, baseUrl }: { def: ProviderDef; baseUrl: string }): Rea
  * is a form arguing for more access than the user chose to give.
  */
 function VerifyNote({ state, def }: { state: VerifyState; def: ProviderDef }): React.JSX.Element | null {
-  if (state.kind === 'idle') return <span className="field-hint">{def.verifyNote}</span>
-  if (state.kind === 'dialling') return <span className="field-hint">Dialling {def.label}…</span>
+  const t = useT()
+  if (state.kind === 'idle') return <span className="field-hint">{t(def.verifyNoteKey)}</span>
+  if (state.kind === 'dialling') {
+    return <span className="field-hint">{t('cicd.connect.dialling', { provider: def.label })}</span>
+  }
   if (state.kind === 'failed') return <span className="field-hint danger">{state.error}</span>
 
   const scopes = state.scopes
   const expiry =
     state.expiresAt !== undefined
-      ? ` Expires ${new Date(state.expiresAt).toLocaleDateString()}.`
+      ? ` ${t('cicd.connect.expires', { date: new Date(state.expiresAt).toLocaleDateString() })}`
       : ''
 
   // Jenkins reports no scopes at all, so absence is not "no permissions".
   if (!scopes || scopes.length === 0) {
     return (
       <span className="field-hint state-ok">
-        Reached {def.label} as {state.identity}.
-        {def.scopes === null
-          ? ' Jenkins reports no scopes, so what this token can do is whatever that account can do.'
-          : ' The provider reported no scope list.'}
+        {t('cicd.connect.reached', { provider: def.label, identity: state.identity })}{' '}
+        {def.scopes === null ? t('cicd.connect.jenkinsNoScopes') : t('cicd.connect.noScopeList')}
         {expiry}
       </span>
     )
@@ -560,18 +557,22 @@ function VerifyNote({ state, def }: { state: VerifyState; def: ProviderDef }): R
   if (!canRead) {
     return (
       <span className="field-hint state-watch">
-        Reached {def.label} as {state.identity}, but the token is missing{' '}
-        <span className="mono">{def.readScope}</span> and cannot read runs.{expiry}
+        <Trans
+          i18nKey="cicd.connect.cannotRead"
+          values={{ provider: def.label, identity: state.identity, scope: def.readScope ?? '' }}
+          components={{ mono: <span className="mono" /> }}
+        />
+        {expiry}
       </span>
     )
   }
 
   return (
     <span className={clsx('field-hint', canTrigger ? 'state-ok' : 'state-watch')}>
-      Reached {def.label} as {state.identity}.{' '}
+      {t('cicd.connect.reached', { provider: def.label, identity: state.identity })}{' '}
       {canTrigger
-        ? 'This token can read runs and start them.'
-        : `Read-only: without ${def.writeScope} this connection can watch pipelines but not start one. That is a fine way to use it.`}
+        ? t('cicd.connect.canTrigger')
+        : t('cicd.connect.readOnly', { scope: def.writeScope ?? '' })}
       {expiry}
     </span>
   )

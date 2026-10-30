@@ -5,6 +5,8 @@ import { approvalShowing } from '../../hooks/useClickOutside'
 import { deferConflict, pruneDeferred, useAddyUi } from '../../store/addy'
 import { errorText } from '../../lib/connectionError'
 import { collectionName as nameOf } from './collectionNames'
+import { t as tr, useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 /**
  * Two versions of the same thing, and a person deciding.
@@ -42,20 +44,21 @@ import { collectionName as nameOf } from './collectionNames'
 function madeBy(hex: string, devices: AddyStatusDevice[] | undefined): string | null {
   if (hex === '') return null
   const short = hex.slice(0, 8)
-  if (devices === undefined) return `made by the device ${short}`
+  if (devices === undefined) return tr('addy.conflict.madeByUnknown', { short })
   const found = devices.find((d) => d.id === hex)
   if (found === undefined) {
     // On the account once, not now. Worth saying: it is the strongest reason
     // there is to look at this copy before deleting it.
-    return `made by a device that is no longer on this account (${short})`
+    return tr('addy.conflict.madeByGone', { short })
   }
-  if (found.self) return 'made by this machine'
-  return `made by ${found.label} (${short})`
+  if (found.self) return tr('addy.conflict.madeBySelf')
+  return tr('addy.conflict.madeBy', { label: found.label, short })
 }
 
 export function ConflictChooser(): React.JSX.Element | null {
   const [conflicts, setConflicts] = useState<ConflictCopy[]>([])
   const [busy, setBusy] = useState(false)
+  const t = useT()
   /**
    * Conflicts the user has chosen to leave for now.
    *
@@ -211,33 +214,21 @@ export function ConflictChooser(): React.JSX.Element | null {
     >
       <div className="conflict" ref={dialog}>
         <GitMerge size={26} aria-hidden className="conflict-icon" />
-        <h2 id="conflict-title">Two versions of {nameOf(current.collection)}</h2>
+        <h2 id="conflict-title">{t('addy.conflict.title', { what: nameOf(current.collection) })}</h2>
         {/* WHAT HAPPENED, FOR SOMEBODY WHO HAS NEVER HEARD THE WORD CONFLICT.
             The old opening sentence was "Both copies are here now", which
             assumes the reader already knows there are two and why. */}
         {current.reason === 'bulk-removal' ? (
           <p className="fine">
-            Another of your machines removed most of this list. OpsMaxx is already using that
-            version, marked <strong>In use now</strong>, and kept this machine&apos;s copy from
-            before in case the removal was not meant. If it was, keep the version in use; if it
-            was not, replace it with the other copy.
+            <Trans i18nKey="addy.conflict.bulkRemoval" components={{ strong: <strong /> }} />
           </p>
         ) : (
           <p className="fine">
-            Two of your machines changed this before they had synced with each other, so OpsMaxx
-            kept both rather than picking one and telling nobody. It is already using the version
-            marked <strong>In use now</strong>; the other has been set aside, waiting for this.
+            <Trans i18nKey="addy.conflict.both" components={{ strong: <strong /> }} />
           </p>
         )}
         <p className="fine">
-          Nothing is lost yet and nothing is written until you press one of the buttons below.{' '}
-          <strong>
-            Whichever version you keep, the other is deleted from the relay and cannot be brought
-            back.
-          </strong>{' '}
-          If you are not sure, <strong>Decide later</strong> leaves both exactly where they are.
-          It comes back the next time OpsMaxx opens, or sooner from <strong>Review now</strong> on
-          Sync &amp; devices.
+          <Trans i18nKey="addy.conflict.nothingLost" components={{ strong: <strong /> }} />
         </p>
 
         {current.problem && (
@@ -248,39 +239,37 @@ export function ConflictChooser(): React.JSX.Element | null {
                 on the relay costing quota.
                 It also says what the greyed-out button means. A disabled
                 control with no reason beside it reads as a broken dialog. */}
-            <span>
-              The copy that was set aside cannot be opened on this device: {current.problem}. That
-              is why it cannot be chosen here — either it is sealed in a way this machine cannot
-              read, or it is older than a version this machine has already used, which is how a
-              copy replayed by the relay looks. Keeping the version in use deletes it.
-            </span>
+            <span>{t('addy.conflict.unreadable', { problem: current.problem })}</span>
           </div>
         )}
 
         <div className="conflict-pair">
           <section>
             <h3>
-              <span>In use now</span>
+              <span>{t('addy.conflict.inUse')}</span>
               {/* Not "what is on the relay": a person is being asked about
                   their own data, and the relay is an implementation detail
                   they have no way to check. This copy is the one already
                   written to disk here -- `sync.ts` writes the winner before it
                   publishes the loser -- and the one every other device
                   converges on, so keeping it changes nothing anywhere. */}
-              <span className="conflict-when">on every device</span>
+              <span className="conflict-when">{t('addy.conflict.everyDevice')}</span>
             </h3>
             <pre>{preview(current.winning, current.collection)}</pre>
           </section>
           <section>
             <h3>
-              <span>Set aside{from !== null ? `, ${from}` : ''}</span>
+              <span>
+                {from !== null ? t('addy.conflict.setAsideFrom', { from }) : t('addy.conflict.setAside')}
+              </span>
               {/* Marked when it is only the relay's word: a copy kept by an
                   older OpsMaxx carries no sealed record of who made it, and
                   the relay can say anything. For the vault this line is the
                   whole basis of the choice, so it must not look checked. */}
               <span className="conflict-when">
-                {when(current.createdAt)}
-                {current.reportedByRelay ? ' (as reported by the relay, not checked)' : ''}
+                {current.reportedByRelay
+                  ? t('addy.conflict.whenReported', { when: when(current.createdAt) })
+                  : when(current.createdAt)}
               </span>
             </h3>
             <pre>{preview(current.losing, current.collection, current.reportedByRelay)}</pre>
@@ -293,7 +282,7 @@ export function ConflictChooser(): React.JSX.Element | null {
             disabled={busy}
             onClick={() => act(() => window.opsmaxx!.addy.discardConflict(current.id))}
           >
-            Keep the version in use (delete the other copy)
+            {t('addy.conflict.keepInUse')}
           </button>
           <button
             className="btn"
@@ -304,7 +293,7 @@ export function ConflictChooser(): React.JSX.Element | null {
               )
             }
           >
-            Replace it with the other copy
+            {t('addy.conflict.replace')}
           </button>
           {/* Only where both sides are lists. Offering "keep both" for two
               objects would mean inventing a merge, and a merge invented in a
@@ -326,7 +315,7 @@ export function ConflictChooser(): React.JSX.Element | null {
                   produces duplicates, and a person who expected a merge should
                   see the size of what they are about to get before they press
                   it rather than after. */}
-              Keep both ({combined} entries, duplicates and all)
+              {t('addy.conflict.keepBoth', { count: combined })}
             </button>
           )}
           {/* The vault cannot be shown or concatenated — it is ciphertext under
@@ -347,10 +336,7 @@ export function ConflictChooser(): React.JSX.Element | null {
               }}
             >
               <label className="fine" htmlFor="conflict-vault-password">
-                Or add the set-aside copy&apos;s entries to the vault in use. Enter the master
-                password that copy was made with (if both machines used the same one, it is that
-                one). Nothing in use is replaced: identical entries are skipped, and one that
-                differs is added as &ldquo;(other copy)&rdquo;. The vault in use must be unlocked.
+                {t('addy.conflict.vaultMerge')}
               </label>
               <input
                 id="conflict-vault-password"
@@ -361,7 +347,7 @@ export function ConflictChooser(): React.JSX.Element | null {
                 disabled={busy}
               />
               <button className="btn" type="submit" disabled={busy || otherPassword === ''}>
-                Add its entries to this vault
+                {t('addy.conflict.vaultMergeRun')}
               </button>
             </form>
           )}
@@ -373,20 +359,20 @@ export function ConflictChooser(): React.JSX.Element | null {
             disabled={busy}
             onClick={() => deferConflict(current.id)}
           >
-            Decide later
+            {t('addy.conflict.later')}
           </button>
         </div>
         {actError !== null && (
           <div className="conflict-problem" role="alert">
             <AlertTriangle size={15} aria-hidden />
-            <span>That did not finish: {actError}</span>
+            <span>{t('addy.conflict.failed', { error: actError })}</span>
           </div>
         )}
 
         {/* What is still waiting, not how many there ever were. Counting the
             ones already deferred told somebody who had put two off that there
             were still two to come after this. */}
-        {left > 0 && <p className="fine">{left} more to decide after this one.</p>}
+        {left > 0 && <p className="fine">{t('addy.conflict.more', { count: left })}</p>}
       </div>
     </div>
   )
@@ -396,7 +382,7 @@ export function ConflictChooser(): React.JSX.Element | null {
  *  comparing two things and a truncated one they cannot scroll is worse than
  *  no preview, but a megabyte of vault is not a comparison either. */
 function preview(value: unknown, collection?: string, reportedByRelay?: boolean): string {
-  if (value === undefined) return 'Could not be read on this device.'
+  if (value === undefined) return tr('addy.conflict.unreadableCopy')
   // THE VAULT TRAVELS AS CIPHERTEXT, by design — nothing in the sync path
   // opens it. Pretty-printing it offered the user two walls of base64 and
   // asked which one they preferred, which is not a question anybody can
@@ -405,14 +391,14 @@ function preview(value: unknown, collection?: string, reportedByRelay?: boolean)
   if (collection === 'vault') {
     const basis =
       reportedByRelay === undefined
-        ? 'It is the copy every device is using.'
+        ? tr('addy.conflict.vaultInUse')
         : reportedByRelay
-          ? 'The time and machine above are only what the relay reports: this copy was kept by an older OpsMaxx and they could not be checked.'
-          : 'The time and machine above were sealed into this copy by a device on this account.'
-    return 'Your vault is encrypted with your master password and cannot be shown here.\n' + basis
+          ? tr('addy.conflict.vaultRelayOnly')
+          : tr('addy.conflict.vaultSealed')
+    return tr('addy.conflict.vaultHidden', { basis })
   }
   const text = JSON.stringify(value, null, 2)
-  return text.length > 8000 ? text.slice(0, 8000) + '\n… (truncated)' : text
+  return text.length > 8000 ? text.slice(0, 8000) + '\n' + tr('addy.conflict.truncated') : text
 }
 
 function when(iso: string): string {

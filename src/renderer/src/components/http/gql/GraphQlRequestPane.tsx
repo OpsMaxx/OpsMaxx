@@ -28,6 +28,9 @@ import { TlsChip } from '../TlsChip'
 import { errorsStrip, gqlExtensions, literalSecretsIn, operationsIn, prettify } from './graphqlLanguage'
 import { gqlRequestOf, loadGqlSchema, prettifyGql, runGql, schemaKeyFor, updateGql } from './gqlActions'
 import { SchemaExplorer, explorerMode } from './SchemaExplorer'
+import { useT } from '../../../lib/i18n'
+import { Trans } from '../../../lib/Trans'
+import type { Translate } from '../../../../../shared/i18n'
 import './gql.css'
 
 type Section = 'query' | 'auth' | 'headers' | 'settings'
@@ -35,16 +38,20 @@ type Section = 'query' | 'auth' | 'headers' | 'settings'
 const EMPTY_CHAIN: VariableScopeChain = { layers: [] }
 const enabledCount = (rows: Row[]): number => rows.filter((r) => r.enabled && r.key !== '').length
 
-function responseLine(res: ResponseState | undefined): string {
+function responseLine(t: Translate, res: ResponseState | undefined): string {
   switch (res?.status) {
     case 'sending':
-      return 'Waiting for response…'
+      return t('http.gql.waiting')
     case 'done':
-      return `${res.response.status} ${res.response.statusText} · ${res.response.durationMs} ms`
+      return t('http.gql.responseLine', {
+        status: res.response.status,
+        statusText: res.response.statusText,
+        ms: res.response.durationMs
+      })
     case 'error':
       return res.message
     default:
-      return 'Run the query to see the response'
+      return t('http.gql.runToSee')
   }
 }
 
@@ -68,6 +75,7 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
   const view = useRef<EditorView | null>(null)
   const responseRef = useRef<HTMLDivElement>(null)
   const language = useMemo(() => gqlExtensions(), [])
+  const t = useT()
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const req = useMemo(() => gqlRequestOf(tab), [tab, collections])
@@ -82,7 +90,8 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
   const schema = schemaOf(entry)
   const ops = useMemo(() => operationsIn(req?.query ?? ''), [req?.query])
   const secrets = useMemo(() => literalSecretsIn(req?.variables ?? ''), [req?.variables])
-  const strip = useMemo(() => errorsStrip(res), [res])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `t`: the strip follows a language change
+  const strip = useMemo(() => errorsStrip(res), [res, t])
 
   // The editor stays mounted while the schema changes, and remounts when the
   // Query tab comes back; either way it gets the current schema.
@@ -140,7 +149,7 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
       onPin={(p) => setPrefs({ gqlSchemaPinned: p })}
       onClose={() => setPrefs({ gqlSchemaOpen: false })}
       onLoad={() => void loadGqlSchema(tabId)}
-      target={req.url || 'this endpoint'}
+      target={req.url || t('http.gql.thisEndpoint')}
     />
   ) : null
 
@@ -150,7 +159,7 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
 
   const bar = (
     <div className="hc-gql-bar" ref={barRef} data-step={step}>
-      <span className="hc-gql-badge" aria-label="GraphQL">
+      <span className="hc-gql-badge" aria-label={t('http.gql.badge')}>
         GQL
       </span>
       <div className="hc-gql-url">
@@ -159,7 +168,7 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
           onChange={(url) => updateGql(tabId, { url })}
           chain={chain}
           placeholder="https://host/graphql"
-          ariaLabel="GraphQL endpoint"
+          ariaLabel={t('http.gql.endpoint')}
           onSubmit={() => run()}
         />
       </div>
@@ -167,9 +176,9 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
       <TlsChip tabId={tabId} compact={step >= 3} />
       <div className="hc-gql-run">
         <SplitButton
-          label="Run"
+          label={t('http.gql.run')}
           icon={<Play size={14} aria-hidden />}
-          ariaLabel={`Run (${isMac() ? '⌘↵' : 'Ctrl+Enter'})`}
+          ariaLabel={t('http.gql.runKey', { key: isMac() ? '⌘↵' : 'Ctrl+Enter' })}
           variant="primary"
           iconOnly={step >= 2}
           busy={running}
@@ -177,7 +186,9 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
           entries={
             ops.length > 1
               ? ops.map((o, i) => ({
-                  label: `Run ${o.name ?? `anonymous ${o.type} ${i + 1}`}`,
+                  label: o.name
+                    ? t('http.gql.runNamed', { name: o.name })
+                    : t('http.gql.runAnonymous', { type: o.type, n: i + 1 }),
                   shortcut: o.type,
                   disabled: !o.name,
                   onClick: () => run(o.name)
@@ -191,15 +202,19 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
 
   const requestTabs = (
     <Tabs
-      ariaLabel="Request"
+      ariaLabel={t('http.layout.request')}
       idPrefix={`${tabId}-gql`}
       active={section}
       onChange={(id) => setSection(id as Section)}
       tabs={[
-        { id: 'query', label: 'Query' },
-        { id: 'auth', label: 'Auth', dot: req.auth.type === 'none' || req.auth.type === 'inherit' ? undefined : 'set' },
-        { id: 'headers', label: 'Headers', count: enabledCount(req.headers) },
-        { id: 'settings', label: 'Settings' }
+        { id: 'query', label: t('http.gql.tabQuery') },
+        {
+          id: 'auth',
+          label: t('http.request.auth'),
+          dot: req.auth.type === 'none' || req.auth.type === 'inherit' ? undefined : 'set'
+        },
+        { id: 'headers', label: t('http.request.headers'), count: enabledCount(req.headers) },
+        { id: 'settings', label: t('http.request.settings') }
       ]}
     />
   )
@@ -211,11 +226,11 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
         <button
           type="button"
           className="btn ghost sm"
-          title={`Prettify (${isMac() ? '⌥⌘B' : 'Ctrl+Alt+B'})`}
+          title={t('http.gql.prettifyTitle', { key: isMac() ? '⌥⌘B' : 'Ctrl+Alt+B' })}
           disabled={prettify(req.query) === null}
           onClick={() => prettifyGql(tabId)}
         >
-          Prettify
+          {t('http.gql.prettify')}
         </button>
         <button
           type="button"
@@ -223,17 +238,15 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
           aria-pressed={prefs.gqlSchemaOpen}
           onClick={() => setPrefs({ gqlSchemaOpen: !prefs.gqlSchemaOpen })}
         >
-          Schema <PanelRight size={13} aria-hidden />
+          {t('http.gql.schema')} <PanelRight size={13} aria-hidden />
         </button>
         {entry?.status === 'loading' ? (
-          <span className="hc-gql-meta">Loading schema…</span>
+          <span className="hc-gql-meta">{t('http.schema.loading')}</span>
         ) : schema && entry?.status === 'ready' ? (
-          <span className="hc-gql-meta">
-            · {types} types · {duration(entry.at)} ago
-          </span>
+          <span className="hc-gql-meta">{t('http.gql.schemaMeta', { count: types, age: duration(entry.at) })}</span>
         ) : (
           <button type="button" className="btn ghost sm" onClick={() => void loadGqlSchema(tabId)}>
-            Load schema
+            {t('http.schema.load')}
           </button>
         )}
       </div>
@@ -248,7 +261,7 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
           language={language}
           onSubmit={() => run()}
           placeholder="query { … }"
-          ariaLabel="GraphQL query"
+          ariaLabel={t('http.gql.query')}
           editorRef={view}
         />
       </div>
@@ -260,7 +273,7 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
           onClick={() => setPrefs({ gqlVariablesOpen: !prefs.gqlVariablesOpen })}
         >
           {prefs.gqlVariablesOpen ? <ChevronDown size={13} aria-hidden /> : <ChevronRight size={13} aria-hidden />}
-          <span className="ui-label">Variables</span>
+          <span className="ui-label">{t('http.gql.variables')}</span>
         </button>
         {prefs.gqlVariablesOpen && (
           <div className="hc-gql-vars-editor">
@@ -271,30 +284,37 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
               variables={chain}
               onSubmit={() => run()}
               placeholder='{ "id": 1 }'
-              ariaLabel="GraphQL variables"
+              ariaLabel={t('http.gql.variablesLabel')}
             />
           </div>
         )}
         {secrets.length > 0 && (
           // Variables are saved with the request and synced (§3.5 keeps them, with this warning).
           <p className="hc-gql-warn" role="note">
-            {secrets.map((s) => s.key).join(', ')} {secrets.length === 1 ? 'looks' : 'look'} like a credential: saved and
-            synced as plain text.{' '}
-            <button
-              type="button"
-              className="btn ghost sm"
-              onClick={(e) =>
-                e.currentTarget.dispatchEvent(
-                  new CustomEvent<SetVariableDetail>(HTTP_SET_VARIABLE_EVENT, {
-                    bubbles: true,
-                    detail: { tabId, name: secrets[0].key, value: secrets[0].value }
-                  })
+            <Trans
+              i18nKey="http.gql.secretNote"
+              values={{
+                count: secrets.length,
+                keys: secrets.map((s) => s.key).join(', '),
+                example: `"{{${secrets[0].key}}}"`
+              }}
+              components={{
+                button: (
+                  <button
+                    type="button"
+                    className="btn ghost sm"
+                    onClick={(e) =>
+                      e.currentTarget.dispatchEvent(
+                        new CustomEvent<SetVariableDetail>(HTTP_SET_VARIABLE_EVENT, {
+                          bubbles: true,
+                          detail: { tabId, name: secrets[0].key, value: secrets[0].value }
+                        })
+                      )
+                    }
+                  />
                 )
-              }
-            >
-              Set as variable…
-            </button>{' '}
-            then write {`"{{${secrets[0].key}}}"`} in its place, and the vault can hold it.
+              }}
+            />
           </p>
         )}
       </div>
@@ -326,13 +346,13 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
       ) : (
         <div className="hc-gql-settings">
           <label className="hc-gql-field">
-            <span className="ui-label">Timeout (ms)</span>
+            <span className="ui-label">{t('http.gql.timeout')}</span>
             <input
               className="input mono"
               type="number"
               min={0}
-              aria-label="Timeout in milliseconds"
-              placeholder="Collection default"
+              aria-label={t('http.gql.timeoutLabel')}
+              placeholder={t('http.gql.collectionDefault')}
               value={req.settings.timeoutMs ?? ''}
               onChange={(e) =>
                 updateGql(tabId, {
@@ -355,15 +375,16 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
 
   const requestSummary = (
     <span className="hc-gql-summary">
-      Request ·{' '}
+      {t('http.layout.request')} ·{' '}
       <button type="button" className="btn ghost sm" onClick={() => openSection('query')}>
-        Query
+        {t('http.gql.tabQuery')}
       </button>
       <button type="button" className="btn ghost sm" onClick={() => openSection('auth')}>
-        Auth{req.auth.type !== 'none' && req.auth.type !== 'inherit' ? ' •' : ''}
+        {t('http.request.auth')}
+        {req.auth.type !== 'none' && req.auth.type !== 'inherit' ? ' •' : ''}
       </button>
       <button type="button" className="btn ghost sm" onClick={() => openSection('headers')}>
-        Headers {enabledCount(req.headers)}
+        {t('http.request.headers')} {enabledCount(req.headers)}
       </button>
     </span>
   )
@@ -378,7 +399,7 @@ export function GraphQlRequestPane({ tabId, requestWidth }: GraphQlRequestPanePr
       request={request}
       response={response}
       requestSummary={requestSummary}
-      responseSummary={<span className="hc-gql-summary">{strip ?? responseLine(res)}</span>}
+      responseSummary={<span className="hc-gql-summary">{strip ?? responseLine(t, res)}</span>}
     />
   )
 }

@@ -10,6 +10,7 @@ import {
 import { classifyTransportError, type ClassifiedError } from '../../../shared/httpErrors'
 import { MAX_SOCKETS, type WsEvent, type WsFrame as WireFrame, type WsOpenSpec } from '../../../shared/httpSocket'
 import { bridgeHas } from '../lib/bridge'
+import { t } from '../lib/i18n'
 import { useHttp } from './http'
 
 // Live WebSocket sessions, one per tab. Frames are kept in a module-level ring
@@ -269,7 +270,11 @@ function onEvent(tabId: Id, event: WsEvent): void {
   if (event.type === 'open') return
   live.get(tabId)?.release()
   const reason = event.reason ? ` · ${event.reason}` : ''
-  system(tabId, `${event.wasClean ? 'Disconnected' : 'Closed'} (${event.code})${reason}`, !event.wasClean)
+  system(
+    tabId,
+    t(event.wasClean ? 'store.wsSessions.disconnected' : 'store.wsSessions.closed', { code: event.code, reason }),
+    !event.wasClean
+  )
   patch(tabId, {
     state: 'closed',
     socketId: undefined,
@@ -283,8 +288,8 @@ function classify(message: string, code?: string): ClassifiedError {
   if (message.includes(`${MAX_SOCKETS} open sockets`)) {
     return {
       class: 'socket-cap',
-      message: `${MAX_SOCKETS} WebSockets are open, the most OpsMaxx allows`,
-      fix: { label: 'Disconnect idle sockets…', action: 'disconnect-idle' }
+      message: t('store.wsSessions.socketCap', { max: MAX_SOCKETS }),
+      fix: { label: t('store.wsSessions.disconnectIdle'), action: 'disconnect-idle' }
     }
   }
   return classifyTransportError(message, code)
@@ -312,8 +317,8 @@ export const useWsSessions = create<WsSessionsState>((set, get) => ({
     if (!bridgeHas(bridge, 'open') || !bridgeHas(bridge, 'onEvent')) {
       return failWith(tabId, {
         class: 'bridge-stale',
-        message: 'Restart OpsMaxx to open a socket: this window is newer than the process behind it.',
-        fix: { label: 'Restart OpsMaxx…', action: 'restart' }
+        message: t('store.wsSessions.bridgeStale'),
+        fix: { label: t('store.wsSessions.restart'), action: 'restart' }
       })
     }
 
@@ -328,7 +333,7 @@ export const useWsSessions = create<WsSessionsState>((set, get) => ({
 
     patch(tabId, { state: 'connecting', failure: undefined, close: undefined, sent, protocol: undefined })
     // Deliberately no URL: a resolved URL can carry a vault value in its query.
-    system(tabId, 'Connecting…')
+    system(tabId, t('store.wsSessions.connecting'))
     const result = await window.opsmaxx.httpSocket.open(spec)
     // The tab closed while the handshake was in flight (forgetTab released it).
     if (live.get(tabId) !== entry) {
@@ -342,13 +347,18 @@ export const useWsSessions = create<WsSessionsState>((set, get) => ({
     entry.socketId = result.id
     stopEvents = window.opsmaxx.httpSocket.onEvent(result.id, (event) => onEvent(tabId, event))
     patch(tabId, { state: 'open', socketId: result.id, openedAt: Date.now(), protocol: result.protocol })
-    system(tabId, result.protocol ? `Connected · subprotocol ${shownProtocol(result.protocol)}` : 'Connected')
+    system(
+      tabId,
+      result.protocol
+        ? t('store.wsSessions.connectedProtocol', { protocol: shownProtocol(result.protocol) })
+        : t('store.wsSessions.connected')
+    )
   },
 
   send: async (tabId, message) => {
     const socketId = live.get(tabId)?.socketId
     if (!socketId || get().sessions[tabId]?.state !== 'open') {
-      return system(tabId, 'Not connected: that message was not sent.', true)
+      return system(tabId, t('store.wsSessions.notSent'), true)
     }
     // Main echoes the frame back as an outgoing event, so the log shows it in
     // the order main put it on the wire rather than the order we asked.
@@ -367,7 +377,7 @@ export const useWsSessions = create<WsSessionsState>((set, get) => ({
     // Declining the production confirm is the user's choice, not a transport
     // error: the tab stays idle, nothing turns red and the response stays as it was.
     if (errorClass === 'prod-declined') {
-      return patch(tabId, { state: 'idle', failure: { class: errorClass, message: 'Not connected — production confirm declined' } })
+      return patch(tabId, { state: 'idle', failure: { class: errorClass, message: t('store.wsSessions.prodDeclined') } })
     }
     failWith(tabId, { class: errorClass, message, unresolved })
   },

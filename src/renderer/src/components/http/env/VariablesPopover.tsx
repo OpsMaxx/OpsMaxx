@@ -9,6 +9,8 @@ import { useHttp } from '../../../store/http'
 import { Popover } from '../../common/Popover'
 import { setVariable } from '../dialogs/SetVariableDialog'
 import { vaultLabel } from '../fields/VaultValueField'
+import { useT } from '../../../lib/i18n'
+import type { MessageKey } from '../../../../../shared/i18n'
 
 /** Every `{{name}}` a request refers to, in order of first use. */
 export function referencedVariables(value: unknown): string[] {
@@ -17,7 +19,11 @@ export function referencedVariables(value: unknown): string[] {
   return [...seen]
 }
 
-const SCOPE: Record<VariableScope, string> = { environment: 'environment', collection: 'collection', global: 'global' }
+const SCOPE: Record<VariableScope, MessageKey> = {
+  environment: 'http.variables.scopeEnvironment',
+  collection: 'http.variables.scopeCollection',
+  global: 'http.variables.scopeGlobal'
+}
 
 /**
  * "Variables in this request…": each variable the tab uses, what it resolves
@@ -36,6 +42,7 @@ export function VariablesPopover({
   const tab = useHttp((s) => s.tabs.find((t) => t.id === tabId) ?? Object.values(s.ghost).find((g) => g.id === tabId))
   const collections = useApi((s) => s.collections)
   const workspace = useApi((s) => s.workspace)
+  const t = useT()
   const request = tab?.draft ?? (tab?.ref?.requestId ? useApi.getState().findRequest(tab.ref.collectionId, tab.ref.requestId) : null)
   // Recomputed when anything it reads from changes.
   const chain = useMemo(
@@ -48,10 +55,10 @@ export function VariablesPopover({
   const where = { workspaceId: tab.workspaceId, collectionId: tab.ref?.collectionId }
   const hasEnv = chain.layers.some((l) => l.scope === 'environment')
   return (
-    <Popover anchor={anchor} open={anchor !== null} onClose={onClose} ariaLabel="Variables in this request">
+    <Popover anchor={anchor} open={anchor !== null} onClose={onClose} ariaLabel={t('http.variables.popoverLabel')}>
       <div className="hc-vars-pop">
-        <h3 className="ui-label">Variables in this request</h3>
-        {names.length === 0 && <p className="hc-note-line">This request uses no variables.</p>}
+        <h3 className="ui-label">{t('http.variables.popoverLabel')}</h3>
+        {names.length === 0 && <p className="hc-note-line">{t('http.variables.none')}</p>}
         <ul>
           {names.map((name) => {
             const hit = lookupVariable(chain, name)
@@ -60,19 +67,19 @@ export function VariablesPopover({
                 <span className="hc-mono hc-vars-name">{`{{${name}}}`}</span>
                 {!hit ? (
                   <span className="hc-vars-add">
-                    <span className="hc-vars-missing">Not defined. Add to:</span>
+                    <span className="hc-vars-missing">{t('http.variables.notDefined')}</span>
                     {hasEnv && (
                       <button type="button" className="btn ghost sm" onClick={() => setVariable('environment', name, '', where)}>
-                        environment
+                        {t(SCOPE.environment)}
                       </button>
                     )}
                     {tab.ref && (
                       <button type="button" className="btn ghost sm" onClick={() => setVariable('collection', name, '', where)}>
-                        collection
+                        {t(SCOPE.collection)}
                       </button>
                     )}
                     <button type="button" className="btn ghost sm" onClick={() => setVariable('global', name, '', where)}>
-                      global
+                      {t(SCOPE.global)}
                     </button>
                   </span>
                 ) : isVaultReference(hit.value) ? (
@@ -82,12 +89,12 @@ export function VariablesPopover({
                 ) : (
                   <input
                     className="hc-input hc-mono hc-vars-value"
-                    aria-label={`Value of ${name}, from ${SCOPE[hit.scope]}`}
+                    aria-label={t('http.variables.valueFrom', { name, scope: t(SCOPE[hit.scope]) })}
                     value={hit.value}
                     onChange={(e) => setVariable(hit.scope, name, e.target.value, where)}
                   />
                 )}
-                {hit && <span className="hc-vars-scope">{SCOPE[hit.scope]}</span>}
+                {hit && <span className="hc-vars-scope">{t(SCOPE[hit.scope])}</span>}
               </li>
             )
           })}

@@ -1,5 +1,6 @@
 import { factSource, type HostFacts } from '../../../shared/hostFacts'
 import type { HostMetrics } from '../../../shared/ssh'
+import { t } from './i18n'
 
 // Search across everything the fleet sampler already knows.
 //
@@ -338,8 +339,8 @@ export function searchFleet(input: FleetSearchInput, rawQuery: string): FleetSea
           at: input.facts[server.id]?.at ?? 0,
           kind: 'host',
           label: server.name,
-          detail: early?.prettyName ?? 'Configured, but nothing has been sampled from it yet',
-          badge: 'not sampled',
+          detail: early?.prettyName ?? t('lib.fleetSearch.notSampledDetail'),
+          badge: t('lib.fleetSearch.badge.notSampled'),
           unsampled: true,
           score: bestRank(earlyTerms, q)
         })
@@ -409,7 +410,7 @@ export function searchFleet(input: FleetSearchInput, rawQuery: string): FleetSea
         kind: 'host',
         label: server.name,
         detail,
-        badge: stale ? 'unreachable' : undefined,
+        badge: stale ? t('lib.fleetSearch.badge.unreachable') : undefined,
         // Ranked on whichever term the query hit, so a host found by an exact
         // distro id or hostname sorts above a unit that merely contains the
         // query. Ranking on the label alone put every one of these last.
@@ -472,7 +473,7 @@ export function searchFleet(input: FleetSearchInput, rawQuery: string): FleetSea
           // rather than leaving a blank that reads as "nothing owns this".
           detail: l.process
             ? `${l.process}${l.pid ? ` (pid ${l.pid})` : ''}`
-            : 'owner not visible at this privilege',
+            : t('lib.fleetSearch.ownerHidden'),
           badge: l.address,
           score
         })
@@ -509,27 +510,33 @@ export function searchFleet(input: FleetSearchInput, rawQuery: string): FleetSea
  */
 export function coverageSentence(c: FleetCoverage): string | null {
   const parts: string[] = []
-  const list = (names: string[]): string =>
-    names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`
+  const list = (names: string[]): { names: string } => ({
+    names:
+      names.length <= 3
+        ? names.join(', ')
+        : t('lib.fleetSearch.coverage.andMore', { names: names.slice(0, 3).join(', '), count: names.length - 3 })
+  })
 
-  if (c.notChecked.length) parts.push(`${list(c.notChecked)} have not been checked yet`)
-  if (c.unreachable.length) parts.push(`${list(c.unreachable)} stopped answering since the last sample`)
-  if (c.noProbes.length) parts.push(`neither systemd nor a port probe on ${list(c.noProbes)}`)
-  if (c.noServiceView.length) parts.push(`no systemd on ${list(c.noServiceView)}`)
-  if (c.noPortView.length) parts.push(`no port probe on ${list(c.noPortView)}`)
+  if (c.notChecked.length) parts.push(t('lib.fleetSearch.coverage.notChecked', list(c.notChecked)))
+  if (c.unreachable.length) parts.push(t('lib.fleetSearch.coverage.unreachable', list(c.unreachable)))
+  if (c.noProbes.length) parts.push(t('lib.fleetSearch.coverage.noProbes', list(c.noProbes)))
+  if (c.noServiceView.length) parts.push(t('lib.fleetSearch.coverage.noServiceView', list(c.noServiceView)))
+  if (c.noPortView.length) parts.push(t('lib.fleetSearch.coverage.noPortView', list(c.noPortView)))
   // Facts last, and each in its own words. "No facts yet" is a schedule, "no
   // package manager" is a property of the host, and "can never report security
   // updates" is a property of the DISTRIBUTION that no amount of waiting or
   // privilege will change — three different things a reader does three
   // different things about.
-  if (c.noFacts.length) parts.push(`no server facts collected yet for ${list(c.noFacts)}`)
-  if (c.noPackageManager.length) parts.push(`no package manager on ${list(c.noPackageManager)}`)
+  if (c.noFacts.length) parts.push(t('lib.fleetSearch.coverage.noFacts', list(c.noFacts)))
+  if (c.noPackageManager.length) parts.push(t('lib.fleetSearch.coverage.noPackageManager', list(c.noPackageManager)))
   if (c.securityUnsupported.length) {
-    parts.push(`${list(c.securityUnsupported)} can never report security updates`)
+    parts.push(t('lib.fleetSearch.coverage.securityUnsupported', list(c.securityUnsupported)))
   }
   if (parts.length === 0) return null
 
-  const n = c.searched.length
-  const f = c.factsSearched.length
-  return `Units and ports searched on ${n} server${n === 1 ? '' : 's'}, server facts on ${f} — ${parts.join('; ')}.`
+  return t('lib.fleetSearch.coverage.sentence', {
+    count: c.searched.length,
+    facts: c.factsSearched.length,
+    parts: parts.join(t('lib.fleetSearch.coverage.separator'))
+  })
 }

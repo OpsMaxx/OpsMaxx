@@ -20,6 +20,7 @@ import { HTTP_SET_VARIABLE_EVENT, tabById, type SetVariableDetail } from '../res
 import { suggestedFileName, headerValue } from '../response/bodyWindow'
 import { METHODS, METHOD_ABBR, methodToken, syncFromUrl, withResolvedScheme } from './requestModel'
 import { urlRowLayout, useWidth } from '../ProtocolLayout'
+import { useT } from '../../../lib/i18n'
 import './request.css'
 
 export interface UrlBarProps {
@@ -94,6 +95,7 @@ export function UrlBar({ tabId, ghost }: UrlBarProps): React.JSX.Element | null 
   // Unmeasured (0) is not narrow: lay out in full until the row reports a width.
   const layout = urlRowLayout(width || Number.POSITIVE_INFINITY, { tls })
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null)
+  const t = useT()
 
   useEffect(() => {
     // F6 and new-tab focus land on [data-hc-url] (http/focus.ts).
@@ -120,7 +122,7 @@ export function UrlBar({ tabId, ghost }: UrlBarProps): React.JSX.Element | null 
     if (r?.status !== 'done') return
     const name = suggestedFileName(r.sentAs.url, headerValue(r.response.headers, 'content-type'))
     const path = await window.opsmaxx.http.saveResponse(name, r.response.body)
-    if (path) push(`Saved to ${path}`, 'ok')
+    if (path) push(t('http.urlBar.savedTo', { path }), 'ok')
   }
 
   /** A pasted `curl …` becomes a request: this one when scratch, a new tab when saved (UX-M12). */
@@ -128,18 +130,21 @@ export function UrlBar({ tabId, ghost }: UrlBarProps): React.JSX.Element | null 
     if (!/^\s*curl\s/.test(text)) return false
     const parsed = parseCurl(text)
     if (!parsed.ok) {
-      push(`Not imported: ${parsed.error}`, 'error')
+      push(t('http.urlBar.notImported', { error: parsed.error }), 'error')
       return true
     }
-    const notes = parsed.notes.length ? ` · ${parsed.notes.join(' ')}` : ''
+    const notes = parsed.notes.join(' ')
     if (!tab.ref) {
       const before = req
       update({ ...parsed.request, id: req.id, name: req.name })
-      push(`Imported from cURL${notes}`, 'ok', { label: 'Undo', run: () => updateDraft(tabId, before) })
+      push(notes ? t('http.urlBar.importedFromCurlNotes', { notes }) : t('http.urlBar.importedFromCurl'), 'ok', {
+        label: t('http.urlBar.undo'),
+        run: () => updateDraft(tabId, before)
+      })
     } else {
       const newTab = useHttp.getState().openScratch('http', parsed.request)
-      push(`Imported into a new tab${notes}`, 'ok', {
-        label: 'Replace this request instead',
+      push(notes ? t('http.urlBar.importedNewTabNotes', { notes }) : t('http.urlBar.importedNewTab'), 'ok', {
+        label: t('http.urlBar.replaceInstead'),
         run: () => {
           updateDraft(tabId, { ...parsed.request, id: req.id, name: req.name })
           useHttp.getState().closeTab(newTab)
@@ -161,33 +166,37 @@ export function UrlBar({ tabId, ghost }: UrlBarProps): React.JSX.Element | null 
     const sel = selection()
     const v = view()
     return [
-      { label: 'Undo', shortcut: `${mod()}Z`, disabled: !v, onClick: () => v && undo(v) },
-      { label: 'Redo', shortcut: isMac() ? '⇧⌘Z' : 'Ctrl+Shift+Z', disabled: !v, onClick: () => v && redo(v) },
+      { label: t('http.urlBar.undo'), shortcut: `${mod()}Z`, disabled: !v, onClick: () => v && undo(v) },
+      { label: t('http.urlBar.redo'), shortcut: isMac() ? '⇧⌘Z' : 'Ctrl+Shift+Z', disabled: !v, onClick: () => v && redo(v) },
       { label: '', separator: true },
       {
-        label: 'Cut',
+        label: t('http.urlBar.cut'),
         disabled: !sel,
         onClick: () => {
           window.opsmaxx.clipboard.write(sel)
           v?.dispatch(v.state.replaceSelection(''))
         }
       },
-      { label: 'Copy', disabled: !sel, onClick: () => window.opsmaxx.clipboard.write(sel) },
+      { label: t('common.copy'), disabled: !sel, onClick: () => window.opsmaxx.clipboard.write(sel) },
       {
-        label: 'Paste',
+        label: t('http.urlBar.paste'),
         disabled: !v,
         onClick: () =>
           void window.opsmaxx.clipboard.read().then((text) => {
             if (!onPaste(text) && v) v.dispatch(v.state.replaceSelection(text.replace(/\s*\n\s*/g, '')))
           })
       },
-      { label: 'Select all', disabled: !v, onClick: () => v?.dispatch({ selection: { anchor: 0, head: v.state.doc.length } }) },
-      { label: 'Paste cURL…', onClick: () => useHttp.getState().setOverlay('import') },
+      {
+        label: t('http.urlBar.selectAll'),
+        disabled: !v,
+        onClick: () => v?.dispatch({ selection: { anchor: 0, head: v.state.doc.length } })
+      },
+      { label: t('http.urlBar.pasteCurl'), onClick: () => useHttp.getState().setOverlay('import') },
       ...(sel
         ? [
             { label: '', separator: true },
             {
-              label: 'Set as variable…',
+              label: t('http.urlBar.setAsVariable'),
               onClick: () =>
                 rowRef.current?.dispatchEvent(
                   new CustomEvent<SetVariableDetail>(HTTP_SET_VARIABLE_EVENT, {
@@ -200,7 +209,7 @@ export function UrlBar({ tabId, ghost }: UrlBarProps): React.JSX.Element | null 
         : []),
       { label: '', separator: true },
       {
-        label: 'Copy resolved URL',
+        label: t('http.urlBar.copyResolvedUrl'),
         // Variables resolved; vault values and sensitive query values masked.
         onClick: () => window.opsmaxx.clipboard.write(maskUrl(resolveTemplate(req.url, chain).text))
       }
@@ -208,7 +217,7 @@ export function UrlBar({ tabId, ghost }: UrlBarProps): React.JSX.Element | null 
   }
 
   const methodLabel = (m: string): string => (layout.methodAbbrev ? (METHOD_ABBR[m] ?? m) : m)
-  const sendLabel = `Send (${mod()}↵)`
+  const sendLabel = t('http.urlBar.sendLabel', { key: `${mod()}↵` })
 
   return (
     <div
@@ -230,7 +239,7 @@ export function UrlBar({ tabId, ghost }: UrlBarProps): React.JSX.Element | null 
     >
       <select
         className="hc-method"
-        aria-label="Method"
+        aria-label={t('http.urlBar.method')}
         value={req.method}
         style={{ color: `var(${methodToken(req.method)})` }}
         onChange={(e) => update({ ...req, method: e.target.value })}
@@ -246,8 +255,8 @@ export function UrlBar({ tabId, ghost }: UrlBarProps): React.JSX.Element | null 
           value={req.url}
           onChange={(url) => update(syncFromUrl(req, url))}
           chain={chain}
-          ariaLabel="URL"
-          placeholder={isGhost ? 'Paste a URL or a curl command' : 'https://api.example.com/path'}
+          ariaLabel={t('http.urlBar.url')}
+          placeholder={isGhost ? t('http.urlBar.ghostPlaceholder') : 'https://api.example.com/path'}
           onSubmit={() => void doSend()}
           onPaste={onPaste}
         />
@@ -256,17 +265,21 @@ export function UrlBar({ tabId, ghost }: UrlBarProps): React.JSX.Element | null 
       <TlsChip tabId={tabId} compact={layout.tlsIcon} />
       <div className="hc-send">
         <SplitButton
-          label={sending ? 'Cancel' : 'Send'}
+          label={sending ? t('http.urlBar.cancel') : t('http.urlBar.send')}
           icon={sending ? undefined : <Play size={14} />}
           variant={sending ? 'danger' : 'primary'}
           busy={sending}
           iconOnly={layout.sendIcon}
-          ariaLabel={sending ? 'Cancel (Esc)' : sendLabel}
+          ariaLabel={sending ? t('http.urlBar.cancelEsc') : sendLabel}
           onClick={() => (sending ? cancel(tabId) : void doSend())}
           entries={[
-            { label: 'Send and download…', disabled: sending, onClick: () => void sendAndDownload() },
-            { label: 'Copy as cURL', shortcut: isMac() ? '⇧⌘C' : 'Ctrl+Shift+C', onClick: () => command('copy-curl') },
-            { label: 'Copy as cURL (with secrets)…', onClick: () => command('copy-curl-secrets') }
+            { label: t('http.urlBar.sendAndDownload'), disabled: sending, onClick: () => void sendAndDownload() },
+            {
+              label: t('http.urlBar.copyAsCurl'),
+              shortcut: isMac() ? '⇧⌘C' : 'Ctrl+Shift+C',
+              onClick: () => command('copy-curl')
+            },
+            { label: t('http.urlBar.copyAsCurlSecrets'), onClick: () => command('copy-curl-secrets') }
           ]}
         />
       </div>

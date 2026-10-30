@@ -23,6 +23,7 @@ import {
   type MongoTopRate
 } from '../../../../shared/dbOps'
 import type { DbConnectConfig } from '../../../../shared/db'
+import { t as translate, useT } from '../../lib/i18n'
 
 /**
  * Live server activity, the way Compass's performance tab reads it.
@@ -81,14 +82,14 @@ function refusal(error: string, command: string): { note: string; detail: string
   const f = classifyMongoFailure(null, null, error)
   if (f.status === 'denied') {
     return {
-      note: `This server will not tell us. The account OpsMaxx connected as may not run ${command}, so this panel stays empty — nothing here is a measurement of zero.`,
+      note: translate('databases.monitor.refusedDenied', { command }),
       detail: f.detail
     }
   }
   if (f.status === 'unsupported') {
-    return { note: `This server cannot answer ${command} at all. Treat this panel as unknown, not as zero.`, detail: f.detail }
+    return { note: translate('databases.monitor.refusedUnsupported', { command }), detail: f.detail }
   }
-  return { note: `${command} did not answer.`, detail: f.detail }
+  return { note: translate('databases.monitor.refusedOther', { command }), detail: f.detail }
 }
 
 /** A per-second figure. Never "0.0" for a rate that was not measured — that is
@@ -187,6 +188,7 @@ export function MongoMonitor({
    * by its own setState — a sampling loop with no interval in it at all, three
    * admin commands per render against somebody's primary.
    */
+  const t = useT()
   const cfgRef = useRef(cfg)
   cfgRef.current = cfg
   const adminCfg = useCallback((): DbConnectConfig => ({ ...cfgRef.current, database: 'admin' }), [])
@@ -231,8 +233,8 @@ export function MongoMonitor({
     async (db: DbConnectConfig, cmd: Record<string, unknown>): Promise<Reply> => {
       try {
         const r = await window.opsmaxx?.db.query(db, JSON.stringify(cmd))
-        if (!r) return { ok: false, error: 'The preload bridge does not expose database queries. Restart the app.' }
-        if (!r.ok) return { ok: false, error: r.error ?? 'The command failed.' }
+        if (!r) return { ok: false, error: translate('databases.monitor.noBridge') }
+        if (!r.ok) return { ok: false, error: r.error ?? translate('databases.monitor.commandFailed') }
         return { ok: true, json: r.json }
       } catch (err) {
         return { ok: false, error: err instanceof Error ? err.message : String(err) }
@@ -344,29 +346,29 @@ export function MongoMonitor({
     <div className="db-mon">
       <div className="db-mon-bar">
         <button className="btn sm" onClick={() => setPaused((p) => !p)}>
-          {paused ? <Play size={13} /> : <Pause size={13} />} {paused ? 'Resume' : 'Pause'}
+          {paused ? <Play size={13} /> : <Pause size={13} />} {paused ? t('databases.monitor.resume') : t('databases.monitor.pause')}
         </button>
         <span className="faint">
           {!visible || !awake
-            ? 'Sampling is stopped while this tab is not on screen.'
+            ? t('databases.monitor.stopped')
             : paused
-              ? 'Sampling is paused.'
+              ? t('databases.monitor.paused')
               : latest
-                ? `Rates over the last ${latest.windowSeconds.toFixed(1)}s. Every figure is a difference between samples, not a total since the server started.`
-                : 'Taking the first sample. A rate needs two, so the first one shows nothing.'}
+                ? t('databases.monitor.ratesOver', { seconds: latest.windowSeconds.toFixed(1) })
+                : t('databases.monitor.firstSample')}
         </span>
         <span className="spacer" />
         {running && !latest && !statusError && <Loader2 size={13} className="spin" />}
         {now?.uptimeSeconds !== null && now?.uptimeSeconds !== undefined && (
           <span className="faint">
-            up {formatSeconds(now.uptimeSeconds)}
+            {t('databases.monitor.uptime', { time: formatSeconds(now.uptimeSeconds) })}
           </span>
         )}
       </div>
 
       <div className="db-mon-grid">
         <Panel
-          title="Operations"
+          title={t('databases.monitor.operations')}
           note={statusError ? refusal(statusError, 'serverStatus').note : null}
           detail={statusError ? refusal(statusError, 'serverStatus').detail : null}
         >
@@ -384,16 +386,17 @@ export function MongoMonitor({
               not in opcounters at all. Shown only when the set reports them. */}
           {latest && MONGO_OPCOUNTERS.some((k) => (latest.replOpsPerSec[k] ?? 0) > 0) && (
             <div className="faint db-mon-foot">
-              Replicated:{' '}
-              {MONGO_OPCOUNTERS.filter((k) => (latest.replOpsPerSec[k] ?? 0) > 0)
-                .map((k) => `${k} ${perSec(latest.replOpsPerSec[k])}/s`)
-                .join(' · ')}
+              {t('databases.monitor.replicated', {
+                list: MONGO_OPCOUNTERS.filter((k) => (latest.replOpsPerSec[k] ?? 0) > 0)
+                  .map((k) => `${k} ${perSec(latest.replOpsPerSec[k])}/s`)
+                  .join(' · ')
+              })}
             </div>
           )}
         </Panel>
 
         <Panel
-          title="Read & write"
+          title={t('databases.monitor.readWrite')}
           note={statusError ? refusal(statusError, 'serverStatus').note : null}
           detail={statusError ? refusal(statusError, 'serverStatus').detail : null}
         >
@@ -401,28 +404,27 @@ export function MongoMonitor({
               right now, so they are shown as they were read and never
               differenced. */}
           <div className="db-mon-stats">
-            <Stat label="active reads" value={gauge(now?.activeReads)} history={gaugeSeries((s) => s.activeReads)} color="var(--ok)" />
-            <Stat label="active writes" value={gauge(now?.activeWrites)} history={gaugeSeries((s) => s.activeWrites)} color="var(--ok)" />
-            <Stat label="queued reads" value={gauge(now?.queuedReads)} history={gaugeSeries((s) => s.queuedReads)} color="var(--warn)" />
-            <Stat label="queued writes" value={gauge(now?.queuedWrites)} history={gaugeSeries((s) => s.queuedWrites)} color="var(--warn)" />
+            <Stat label={t('databases.monitor.activeReads')} value={gauge(now?.activeReads)} history={gaugeSeries((s) => s.activeReads)} color="var(--ok)" />
+            <Stat label={t('databases.monitor.activeWrites')} value={gauge(now?.activeWrites)} history={gaugeSeries((s) => s.activeWrites)} color="var(--ok)" />
+            <Stat label={t('databases.monitor.queuedReads')} value={gauge(now?.queuedReads)} history={gaugeSeries((s) => s.queuedReads)} color="var(--warn)" />
+            <Stat label={t('databases.monitor.queuedWrites')} value={gauge(now?.queuedWrites)} history={gaugeSeries((s) => s.queuedWrites)} color="var(--warn)" />
           </div>
           <div className="faint db-mon-foot">
-            Queued is the one to watch: a client in the queue is waiting for the lock rather than
-            working.
+            {t('databases.monitor.queuedNote')}
           </div>
         </Panel>
 
         <Panel
-          title="Network"
+          title={t('databases.monitor.network')}
           note={statusError ? refusal(statusError, 'serverStatus').note : null}
           detail={statusError ? refusal(statusError, 'serverStatus').detail : null}
         >
           <div className="db-mon-stats">
-            <Stat label="bytes in" value={bytesPerSec(latest?.bytesInPerSec)} history={series((r) => r.bytesInPerSec)} />
-            <Stat label="bytes out" value={bytesPerSec(latest?.bytesOutPerSec)} history={series((r) => r.bytesOutPerSec)} />
-            <Stat label="requests" value={`${perSec(latest?.requestsPerSec)}/s`} history={series((r) => r.requestsPerSec)} />
+            <Stat label={t('databases.monitor.bytesIn')} value={bytesPerSec(latest?.bytesInPerSec)} history={series((r) => r.bytesInPerSec)} />
+            <Stat label={t('databases.monitor.bytesOut')} value={bytesPerSec(latest?.bytesOutPerSec)} history={series((r) => r.bytesOutPerSec)} />
+            <Stat label={t('databases.monitor.requests')} value={`${perSec(latest?.requestsPerSec)}/s`} history={series((r) => r.requestsPerSec)} />
             <Stat
-              label="connections"
+              label={t('databases.monitor.connections')}
               value={
                 now?.connectionsCurrent === null || now?.connectionsCurrent === undefined
                   ? '—'
@@ -434,18 +436,18 @@ export function MongoMonitor({
         </Panel>
 
         <Panel
-          title="Memory"
+          title={t('databases.monitor.memory')}
           note={statusError ? refusal(statusError, 'serverStatus').note : null}
           detail={statusError ? refusal(statusError, 'serverStatus').detail : null}
         >
           <div className="db-mon-stats">
-            <Stat label="resident" value={now?.memResidentBytes === null || now?.memResidentBytes === undefined ? '—' : formatBytes(now.memResidentBytes)} history={gaugeSeries((s) => s.memResidentBytes)} />
-            <Stat label="virtual" value={now?.memVirtualBytes === null || now?.memVirtualBytes === undefined ? '—' : formatBytes(now.memVirtualBytes)} history={gaugeSeries((s) => s.memVirtualBytes)} />
+            <Stat label={t('databases.monitor.resident')} value={now?.memResidentBytes === null || now?.memResidentBytes === undefined ? '—' : formatBytes(now.memResidentBytes)} history={gaugeSeries((s) => s.memResidentBytes)} />
+            <Stat label={t('databases.monitor.virtual')} value={now?.memVirtualBytes === null || now?.memVirtualBytes === undefined ? '—' : formatBytes(now.memVirtualBytes)} history={gaugeSeries((s) => s.memVirtualBytes)} />
           </div>
         </Panel>
 
         <Panel
-          title="Hottest collections"
+          title={t('databases.monitor.hottest')}
           note={topError ? refusal(topError, 'top').note : null}
           detail={topError ? refusal(topError, 'top').detail : null}
         >
@@ -453,11 +455,11 @@ export function MongoMonitor({
             <table className="table db-mon-table">
               <thead>
                 <tr>
-                  <th>namespace</th>
-                  <th>ops/s</th>
-                  <th>reads/s</th>
-                  <th>writes/s</th>
-                  <th>mean</th>
+                  <th>{t('databases.monitor.colNamespace')}</th>
+                  <th>{t('databases.monitor.colOps')}</th>
+                  <th>{t('databases.monitor.colReads')}</th>
+                  <th>{t('databases.monitor.colWrites')}</th>
+                  <th>{t('databases.monitor.colMean')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -475,18 +477,14 @@ export function MongoMonitor({
           ) : (
             <EmptyState
               compact
-              title={top ? 'Nothing has run' : 'Waiting for a second sample'}
-              message={
-                top
-                  ? 'No collection was touched in the last window. These are rates, so a quiet server has an empty list rather than a list of zeroes.'
-                  : 'top reports totals since the server started, so the first sample cannot be a rate.'
-              }
+              title={top ? t('databases.monitor.nothingRanTitle') : t('databases.monitor.waitingTitle')}
+              message={top ? t('databases.monitor.nothingRan') : t('databases.monitor.waiting')}
             />
           )}
         </Panel>
 
         <Panel
-          title="Slowest operations"
+          title={t('databases.monitor.slowest')}
           note={opsError ? refusal(opsError, '$currentOp').note : null}
           detail={opsError ? refusal(opsError, '$currentOp').detail : null}
         >
@@ -495,11 +493,11 @@ export function MongoMonitor({
               <table className="table db-mon-table">
                 <thead>
                   <tr>
-                    <th>op</th>
-                    <th>namespace</th>
-                    <th>running</th>
-                    <th>plan</th>
-                    <th>lock</th>
+                    <th>{t('databases.monitor.colOp')}</th>
+                    <th>{t('databases.monitor.colNamespace')}</th>
+                    <th>{t('databases.monitor.colRunning')}</th>
+                    <th>{t('databases.monitor.colPlan')}</th>
+                    <th>{t('databases.monitor.colLock')}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -509,26 +507,27 @@ export function MongoMonitor({
                       <td className="mono">{o.ns ?? '—'}</td>
                       <td className="mono">{formatSeconds(o.secondsRunning)}</td>
                       <td className="mono">{o.planSummary ?? '—'}</td>
-                      <td className="mono">{o.waitingForLock === null ? '—' : o.waitingForLock ? 'waiting' : 'no'}</td>
+                      <td className="mono">{o.waitingForLock === null ? '—' : o.waitingForLock ? t('databases.monitor.lockWaiting') : t('databases.monitor.lockNo')}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               {ops?.ownOpsOnly && (
                 <div className="db-mon-foot warn">
-                  <AlertTriangle size={11} /> Only this connection&rsquo;s own operations. $currentOp
-                  was refused for all users, so this list is not the server&rsquo;s.
+                  <AlertTriangle size={11} /> {t('databases.monitor.ownOpsOnly')}
                 </div>
               )}
             </>
           ) : (
             <EmptyState
               compact
-              title={ops ? 'Nothing is running' : 'Not read yet'}
+              title={ops ? t('databases.monitor.nothingRunningTitle') : t('databases.monitor.notReadTitle')}
               message={
                 ops
-                  ? `No client operation was in flight when the server was last asked.${ops.ownOpsOnly ? ' $currentOp was refused for all users, so only this connection was visible.' : ''}`
-                  : 'In-flight operations are read with every sample.'
+                  ? ops.ownOpsOnly
+                    ? t('databases.monitor.nothingRunningOwn')
+                    : t('databases.monitor.nothingRunning')
+                  : t('databases.monitor.notRead')
               }
             />
           )}

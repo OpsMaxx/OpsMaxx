@@ -25,16 +25,18 @@ import { ParamsEditor } from './ParamsEditor'
 import { RequestSettings } from './RequestSettings'
 import { UrlBar, sendTab, useHttpRequest, useScopeChain } from './UrlBar'
 import { enabledCount, invalidJson, syncFromUrl } from './requestModel'
+import { useT } from '../../../lib/i18n'
+import type { MessageKey } from '../../../../../shared/i18n'
 import './request.css'
 
 export type RequestTab = 'params' | 'auth' | 'headers' | 'body' | 'settings'
 
-const AUTH_NAMES: Record<Auth['type'], string> = {
-  inherit: 'Inherit',
-  none: 'No auth',
-  bearer: 'Bearer token',
-  basic: 'Basic',
-  apikey: 'API key'
+const AUTH_NAMES: Record<Auth['type'], MessageKey> = {
+  inherit: 'http.request.authInherit',
+  none: 'http.auth.typeNone',
+  bearer: 'http.auth.typeBearer',
+  basic: 'http.auth.typeBasic',
+  apikey: 'http.auth.typeApikey'
 }
 
 function unresolved(texts: string[], chain: VariableScopeChain): boolean {
@@ -91,6 +93,7 @@ export function HttpRequestPane({ tabId }: HttpRequestPaneProps): React.JSX.Elem
   const rootRef = useRef<HTMLDivElement>(null)
   const files = useHttpRuntime((s) => s.files[tabId])
   const push = useToasts((s) => s.push)
+  const t = useT()
 
   const reqRef = useRef(req)
   reqRef.current = req
@@ -145,16 +148,20 @@ export function HttpRequestPane({ tabId }: HttpRequestPaneProps): React.JSX.Elem
   const sentAs = codeOpen ? (maskedSentFor(tabId) ?? lastSentAs) : null
   const stripped = tab.strippedFields ?? []
   const authSet = req.auth.type !== 'none' && req.auth.type !== 'inherit'
-  const dot = (t: RequestTab, set = false): TabItem['dot'] => (problems.has(t) ? 'problem' : set ? 'set' : undefined)
+  const dot = (id: RequestTab, set = false): TabItem['dot'] => (problems.has(id) ? 'problem' : set ? 'set' : undefined)
   const tabs: TabItem[] = [
-    { id: 'params', label: 'Params', count: enabledCount(req.params), dot: dot('params') },
-    { id: 'auth', label: 'Auth', dot: dot('auth', authSet) },
-    { id: 'headers', label: 'Headers', count: enabledCount(req.headers), dot: dot('headers') },
-    { id: 'body', label: 'Body', dot: dot('body') },
-    { id: 'settings', label: 'Settings' }
+    { id: 'params', label: t('http.request.params'), count: enabledCount(req.params), dot: dot('params') },
+    { id: 'auth', label: t('http.request.auth'), dot: dot('auth', authSet) },
+    { id: 'headers', label: t('http.request.headers'), count: enabledCount(req.headers), dot: dot('headers') },
+    { id: 'body', label: t('http.request.body'), dot: dot('body') },
+    { id: 'settings', label: t('http.request.settings') }
   ]
-  const open = (t: RequestTab): void => {
-    setActive(t)
+  const bodyModeLabel = (): string => {
+    const m = BODY_MODES.find((x) => x.mode === req.body.mode)
+    return m ? t(m.labelKey) : ''
+  }
+  const open = (id: RequestTab): void => {
+    setActive(id)
     setSplit(tabId, 'normal')
   }
 
@@ -163,29 +170,35 @@ export function HttpRequestPane({ tabId }: HttpRequestPaneProps): React.JSX.Elem
       <span className="hc-reqbar">
         <select
           className="hc-select"
-          aria-label="Body type"
+          aria-label={t('http.request.bodyType')}
           value={req.body.mode}
           onChange={(e) => onChange({ ...req, body: switchBodyMode(req.body, e.target.value as HttpRequest['body']['mode']) })}
         >
           {BODY_MODES.map((m) => (
             <option key={m.mode} value={m.mode}>
-              {m.label}
+              {t(m.labelKey)}
             </option>
           ))}
         </select>
         {req.body.mode === 'json' && (
           <button
             className="btn quiet sm"
-            title={`Beautify (${isMac() ? '⌥⌘B' : 'Ctrl+Alt+B'})`}
+            title={t('http.request.beautifyTitle', { key: isMac() ? '⌥⌘B' : 'Ctrl+Alt+B' })}
             onClick={() => onChange(beautify(req))}
           >
-            Beautify
+            {t('http.request.beautify')}
           </button>
         )}
       </span>
     ) : (
       <span className="hc-reqbar ui-label">
-        {active === 'params' ? 'Query parameters' : active === 'auth' ? AUTH_NAMES[req.auth.type] : active === 'headers' ? 'Request headers' : 'Request settings'}
+        {active === 'params'
+          ? t('http.request.queryParameters')
+          : active === 'auth'
+            ? t(AUTH_NAMES[req.auth.type])
+            : active === 'headers'
+              ? t('http.request.requestHeaders')
+              : t('http.request.requestSettings')}
       </span>
     )
   const toolbar = (
@@ -194,8 +207,8 @@ export function HttpRequestPane({ tabId }: HttpRequestPaneProps): React.JSX.Elem
       <span className="hc-grow" />
       <button
         className="btn ghost sm"
-        aria-label="Generate code"
-        title="Generate code"
+        aria-label={t('http.snippet.label')}
+        title={t('http.snippet.label')}
         aria-pressed={codeOpen}
         onClick={() => setPrefs({ codeOpen: !codeOpen })}
       >
@@ -206,13 +219,13 @@ export function HttpRequestPane({ tabId }: HttpRequestPaneProps): React.JSX.Elem
 
   const summary = (
     <span className="hc-reqsum">
-      <span>Request</span>
-      {tabs.map((t) => (
-        <button key={t.id} className="btn quiet sm" onClick={() => open(t.id as RequestTab)}>
-          {t.label}
-          {t.count ? ` ${t.count}` : ''}
-          {t.id === 'auth' && authSet ? ' •' : ''}
-          {t.id === 'body' && req.body.mode !== 'none' ? ` ${BODY_MODES.find((m) => m.mode === req.body.mode)?.label}` : ''}
+      <span>{t('http.layout.request')}</span>
+      {tabs.map((x) => (
+        <button key={x.id} className="btn quiet sm" onClick={() => open(x.id as RequestTab)}>
+          {x.label}
+          {x.count ? ` ${x.count}` : ''}
+          {x.id === 'auth' && authSet ? ' •' : ''}
+          {x.id === 'body' && req.body.mode !== 'none' ? ` ${bodyModeLabel()}` : ''}
         </button>
       ))}
     </span>
@@ -229,7 +242,7 @@ export function HttpRequestPane({ tabId }: HttpRequestPaneProps): React.JSX.Elem
             onChange={(auth) => onChange({ ...req, auth })}
             chain={chain}
             collectionName={collection?.name}
-            inheritFrom={collection ? AUTH_NAMES[collection.auth.type] : undefined}
+            inheritFrom={collection ? t(AUTH_NAMES[collection.auth.type]) : undefined}
             stripped={stripped}
             onMoveToVault={(field, value) =>
               setMoving({
@@ -253,7 +266,7 @@ export function HttpRequestPane({ tabId }: HttpRequestPaneProps): React.JSX.Elem
             stripped={stripped}
             onMoveToVault={(rowId, value) =>
               setMoving({
-                name: `${collection?.name ?? req.name} · ${req.headers.find((h) => h.id === rowId)?.key ?? 'header'}`,
+                name: `${collection?.name ?? req.name} · ${req.headers.find((h) => h.id === rowId)?.key ?? t('http.headers.header')}`,
                 value,
                 apply: (ref) =>
                   onChange({ ...req, headers: req.headers.map((h) => (h.id === rowId ? { ...h, value: ref } : h)) })
@@ -295,7 +308,7 @@ export function HttpRequestPane({ tabId }: HttpRequestPaneProps): React.JSX.Elem
         bar={<UrlBar tabId={tabId} />}
         requestTabs={
           <Tabs
-            ariaLabel="Request"
+            ariaLabel={t('http.layout.request')}
             idPrefix={`${tabId}-req`}
             tabs={tabs}
             active={active}
@@ -321,7 +334,7 @@ export function HttpRequestPane({ tabId }: HttpRequestPaneProps): React.JSX.Elem
                     onClose={() => setPrefs({ codeOpen: false })}
                   />
                 ) : (
-                  <p className="hc-note hc-pad">Nothing to generate yet: this request cannot be built.</p>
+                  <p className="hc-note hc-pad">{t('http.request.cannotBuild')}</p>
                 )}
               </div>
             )}

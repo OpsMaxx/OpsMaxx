@@ -31,6 +31,7 @@ import type { Server } from '../../types'
 import type { SftpEntry, SftpProgress, SftpResult, SftpUploadSummary, SshAuth } from '../../../../shared/ssh'
 import { bridgeOn } from '../../lib/bridge'
 import { EmptyState } from '../common/EmptyState'
+import { t as tr, useT } from '../../lib/i18n'
 
 const asAuth = (a: string): SshAuth => (a === 'password' || a === 'agent' ? a : 'key')
 
@@ -73,10 +74,14 @@ const MISSING = /no such file|ENOENT/i
 // there" is the part that decides what they do next — so that is what this
 // says. An error nothing recognises keeps the server's own words: an unhelpful
 // string still beats discarding the only evidence there is.
-function fileFailure(verb: string, what: string, dir: string, error: string | undefined): string {
-  if (classifyConnectionError(error) === 'permission') return `${dir} does not allow you to ${verb} ${what}.`
-  if (error && MISSING.test(error)) return `${what} is no longer in ${dir}.`
-  return error ? `Could not ${verb} ${what} — ${error}` : `Could not ${verb} ${what}.`
+type FileVerb = 'open' | 'read' | 'save' | 'create' | 'rename' | 'delete' | 'upload' | 'download'
+
+function fileFailure(verb: FileVerb, what: string, dir: string, error: string | undefined): string {
+  if (classifyConnectionError(error) === 'permission') return tr(`panel.files.fail.denied.${verb}`, { dir, what })
+  if (error && MISSING.test(error)) return tr('panel.files.fail.missing', { what, dir })
+  return error
+    ? tr(`panel.files.fail.failedDetail.${verb}`, { what, error })
+    : tr(`panel.files.fail.failed.${verb}`, { what })
 }
 
 // Why the SSH chain behind the Files tab would not come up, and the one screen
@@ -87,34 +92,48 @@ function connectFailure(
   editServer: (id: string) => void,
   retry: Fix
 ): SftpFailure {
-  const fixServer: Fix = { label: `Edit ${server.name}`, run: () => editServer(server.id) }
+  const fixServer: Fix = { label: tr('panel.files.connect.editServer', { name: server.name }), run: () => editServer(server.id) }
   const of = (message: string, fix?: Fix): SftpFailure => ({ message, detail: error, fix, retry })
 
   switch (classifyConnectionError(error)) {
     case 'host-key':
-      return of(`${server.name} presented a different host key, so the connection was refused.`, {
-        label: 'Review saved keys',
+      return of(tr('panel.files.connect.hostKey', { name: server.name }), {
+        label: tr('panel.files.connect.reviewKeys'),
         run: () => openSettings('security')
       })
     case 'key-missing':
-      return of(`${server.name}'s private key file is not where the connection says it is.`, fixServer)
+      return of(tr('panel.files.connect.keyMissing', { name: server.name }), fixServer)
     case 'passphrase':
-      return of(`${server.name}'s private key needs a passphrase.`, fixServer)
+      return of(tr('panel.files.connect.passphrase', { name: server.name }), fixServer)
     case 'auth':
-      return of(`${server.name} rejected the saved credential.`, fixServer)
+      return of(tr('panel.files.connect.auth', { name: server.name }), fixServer)
     case 'refused':
-      return of(`Nothing is listening on ${server.host}:${server.port}.`, fixServer)
+      return of(tr('panel.files.connect.refused', { address: `${server.host}:${server.port}` }), fixServer)
     case 'unreachable':
-      return of(`${server.host} did not answer in time.`, fixServer)
+      return of(tr('panel.files.connect.unreachable', { host: server.host }), fixServer)
     default:
-      return of(`Could not open files on ${server.name}.`)
+      return of(tr('panel.files.connect.failed', { name: server.name }))
   }
 }
 
 // Partial files a transfer could not remove, said once with every path.
-function reportLeftover(paths: string[] | undefined, where: string): void {
-  if (paths?.length)
-    toast(`${paths.length === 1 ? 'A partial file' : `${paths.length} partial files`} could not be removed ${where}: ${paths.join(', ')}`, 'error')
+function reportLeftover(paths: string[] | undefined, where: 'server' | 'local'): void {
+  if (!paths?.length) return
+  const list = paths.join(', ')
+  if (where === 'server')
+    toast(
+      paths.length === 1
+        ? tr('panel.files.leftover.oneServer', { paths: list })
+        : tr('panel.files.leftover.manyServer', { count: paths.length, paths: list }),
+      'error'
+    )
+  else
+    toast(
+      paths.length === 1
+        ? tr('panel.files.leftover.oneLocal', { paths: list })
+        : tr('panel.files.leftover.manyLocal', { count: paths.length, paths: list }),
+      'error'
+    )
 }
 
 /** An upload or download waiting for the channel, or on it. */
@@ -130,17 +149,18 @@ type OverwriteAnswer = 'overwrite' | 'skip' | 'cancel'
  */
 type OverwriteWhy = 'exists' | 'unchecked' | 'dir' | 'owner'
 
-const IN_PLACE_RISK = 'If the transfer fails or is cancelled, the file may be left incomplete.'
-
 // The next few names in the queue, which is what tells the user their drop
 // was kept.
 function queueNames(queue: Transfer[]): string {
   const names = queue.flatMap((t) => (t.kind === 'upload' ? t.paths.map(baseName) : t.remotes.map(baseName)))
-  return names.length > 3 ? `${names.slice(0, 3).join(', ')} and ${names.length - 3} more` : names.join(', ')
+  return names.length > 3
+    ? tr('panel.files.queueMore', { names: names.slice(0, 3).join(', '), count: names.length - 3 })
+    : names.join(', ')
 }
 
 // ---- Real SFTP -------------------------------------------------------------
 function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React.JSX.Element {
+  const t = useT()
   // Absent server means this machine.
   const local = server === undefined
   // One session per server, as before; one for this machine, shared the same
@@ -176,12 +196,12 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   // the result is reported back here.
   useEffect(() => {
     return bridgeOn('sftp.onExternalSaved', window.opsmaxx?.sftp?.onExternalSaved, (r) => {
-      const name = r.remotePath.split('/').pop()
-      if (r.ok) toast(`${name} saved to the server`, 'ok')
+      const name = r.remotePath.split('/').pop() ?? r.remotePath
+      if (r.ok) toast(tr('panel.files.external.saved', { name }), 'ok')
       // No button: the file is open in the user's own editor, and saving it
       // there again is the retry — one that exists outside this window.
-      else if (r.error) toast(`${name} was saved locally but not uploaded — ${r.error}`, 'error')
-      else toast(`${name} was saved locally, but uploading it to the server failed.`, 'error')
+      else if (r.error) toast(tr('panel.files.external.notUploadedDetail', { name, error: r.error }), 'error')
+      else toast(tr('panel.files.external.notUploaded', { name }), 'error')
     })
   }, [])
   // Following is one-way — the terminal moves this pane, browsing here never
@@ -286,30 +306,30 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const follow: { can: boolean; why: string; fix?: Fix } = server?.sftpOnly
     ? // A files-only tab still gets an ssh pane id, but no terminal is ever
       // started for it, so without this it read as "still connecting" forever.
-      { can: false, why: 'This account has no terminal, so there is nothing to follow.' }
+      { can: false, why: t('panel.files.follow.noTerminalAccount') }
     : !paneId
     ? {
         can: false,
         why: local
-          ? 'No local shell open in this tab to follow. Open one in the terminal beside this pane.'
-          : `No terminal on ${server?.name ?? 'this server'} open in this tab to follow.`
+          ? t('panel.files.follow.noLocalShell')
+          : t('panel.files.follow.noTerminal', { server: server?.name ?? t('panel.files.thisServer') })
       }
     : local && !integration
       ? {
           can: false,
-          why: 'Following needs shell integration, which is off. Without it the shell never tells OpsMaxx where it is.',
-          fix: { label: 'Turn on shell integration', run: () => openSettings('terminal') }
+          why: t('panel.files.follow.integrationOff'),
+          fix: { label: t('panel.files.follow.turnOnIntegration'), run: () => openSettings('terminal') }
         }
       : !session
-        ? { can: false, why: 'The terminal in this tab is not connected yet.' }
+        ? { can: false, why: t('panel.files.terminalNotConnected') }
         : !termCwd
           ? {
               can: true,
               why: local
-                ? 'This shell has not reported a directory. zsh, bash and fish report one; cmd, PowerShell and a login bash cannot be asked to.'
+                ? t('panel.files.follow.localNoReport')
                 : canAsk
-                  ? 'This shell has not been asked to report its folder.'
-                  : 'This shell did not report its folder. bash and zsh do; fish and sh cannot be asked.'
+                  ? t('panel.files.follow.notAsked')
+                  : t('panel.files.follow.noReport')
             }
           : { can: true, why: '' }
   const following = linked && follow.can && !!termCwd
@@ -342,7 +362,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       // browse must not raise an unlock dialog.
       server === undefined
         ? run()
-        : withVaultUnlock(`Opening files on ${server.name}`, run),
+        : withVaultUnlock(tr('panel.files.unlockReason', { name: server.name }), run),
     [server]
   )
 
@@ -365,10 +385,10 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       const detail = res?.error
       const message =
         classifyConnectionError(detail) === 'permission'
-          ? `You do not have permission to open ${p}.`
+          ? tr('panel.files.list.denied', { path: p })
           : detail && MISSING.test(detail)
-            ? `${p} is not there any more.`
-            : `Could not open ${p}.`
+            ? tr('panel.files.list.missing', { path: p })
+            : tr('panel.files.list.failed', { path: p })
       // A failed step into a directory leaves the last good one loaded, so the
       // way out is back to it rather than a retry that fails the same way.
       setError({
@@ -376,8 +396,8 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
         detail,
         retry:
           p === path
-            ? { label: 'Try again', run: () => void list(p) }
-            : { label: `Back to ${path}`, run: () => void list(path) }
+            ? { label: tr('panel.files.tryAgain'), run: () => void list(p) }
+            : { label: tr('panel.files.list.backTo', { path }), run: () => void list(path) }
       })
       setLoading(false)
       return false
@@ -397,26 +417,26 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
    * and ran — `rm -rf ` plus a click on `build` deleted `build`.
    */
   const cdBlocked = server?.sftpOnly
-    ? 'This account has no terminal.'
+    ? t('panel.files.cd.noTerminalAccount')
     : !paneId
       ? local
-        ? 'No local shell open in this tab.'
-        : `No terminal on ${server?.name ?? 'this server'} open in this tab.`
+        ? t('panel.files.cd.noLocalShell')
+        : t('panel.files.cd.noTerminal', { server: server?.name ?? t('panel.files.thisServer') })
       : !session
-        ? 'The terminal in this tab is not connected yet.'
+        ? t('panel.files.terminalNotConnected')
         : // The quoting is POSIX. A local shell that reports its folder is one
           // OpsMaxx instrumented — zsh, bash or fish — and cmd, PowerShell or
           // WSL never do, so this is what keeps a Windows path out of them.
           local && !termCwd
-          ? 'cd here needs a shell that reports its folder: zsh, bash or fish, with shell integration on.'
+          ? t('panel.files.cd.needsReporting')
           : !connectedRef.current
-            ? 'The folder list has not loaded yet.'
+            ? t('panel.files.cd.notLoaded')
             : ''
   const cdHere = (): void => {
     if (cdBlocked) return toast(cdBlocked, 'error')
     const line = cdLine(path)
     if (line === null)
-      return toast('This folder name has a backslash or control character, which cannot be typed into a shell safely.', 'error')
+      return toast(t('panel.files.cd.unsafeName'), 'error')
     writeToShell(line)
     if (tabId) setTabView(tabId, 'terminal')
   }
@@ -448,11 +468,11 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
         // itself rather than dressed as a connection problem.
         server === undefined
           ? {
-              message: res?.error ?? 'Could not open files on this machine.',
-              retry: { label: 'Try again', run: () => void connect(() => true) }
+              message: res?.error ?? tr('panel.files.connect.localFailed'),
+              retry: { label: tr('panel.files.tryAgain'), run: () => void connect(() => true) }
             }
           : connectFailure(server, res?.error, openServerEditor, {
-              label: 'Try again',
+              label: tr('panel.files.tryAgain'),
               run: () => void connect(() => true)
             })
       )
@@ -510,18 +530,18 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const openExternally = async (e: SftpEntry): Promise<void> => {
     const remote = join(path, e.name)
     const r = await window.opsmaxx?.sftp.editExternal(key, remote, editorCommand)
-    if (r?.ok) toast(`Opened ${e.name} — saves upload automatically`, 'ok')
+    if (r?.ok) toast(t('panel.files.external.opened', { name: e.name }), 'ok')
     else
       toast(fileFailure('open', e.name, path, r?.error), 'error', {
-        label: 'Open here instead',
+        label: t('panel.files.external.openHere'),
         run: () => void openFile(e)
       })
   }
 
   const openFile = async (e: SftpEntry): Promise<void> => {
     if (e.size > 2_000_000) {
-      toast(`${e.name} is ${bytes(e.size)} — too large for the editor in this window.`, 'error', {
-        label: editorCommand ? `Open in ${editorCommand}` : 'Open in your editor',
+      toast(t('panel.files.tooLarge', { name: e.name, size: bytes(e.size) }), 'error', {
+        label: editorCommand ? t('panel.files.openIn', { editor: editorCommand }) : t('panel.files.openInYourEditor'),
         run: () => void openExternally(e)
       })
       return
@@ -538,13 +558,13 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     const name = editor.path.split('/').pop() ?? editor.path
     const res = await window.opsmaxx?.sftp.write(key, editor.path, content)
     if (res?.ok) {
-      toast(`${name} saved`, 'ok')
+      toast(t('panel.files.saved', { name }), 'ok')
       setEditor(null)
     } else
       // The editor stays open, so the retry writes exactly what is still on
       // screen rather than whatever the file happens to hold now.
       toast(fileFailure('save', name, path, res?.error), 'error', {
-        label: 'Try again',
+        label: t('panel.files.tryAgain'),
         run: () => void saveFile(content)
       })
   }
@@ -553,7 +573,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     if (!newName.trim()) return setCreating(false)
     const res = await window.opsmaxx?.sftp.mkdir(key, join(path, newName.trim()))
     if (res?.ok) {
-      toast(`Created ${newName.trim()}`)
+      toast(t('panel.files.created', { name: newName.trim() }))
       setNewName('')
       setCreating(false)
       void list(path)
@@ -569,16 +589,16 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     if (res?.ok) void list(path)
     else
       toast(fileFailure('rename', from.name, path, res?.error), 'error', {
-        label: 'Rename again',
+        label: t('panel.files.renameAgain'),
         run: () => setRenaming(from.name)
       })
   }
 
   const remove = async (e: SftpEntry): Promise<void> => {
-    if (!window.confirm(`Delete ${e.name}? This cannot be undone.`)) return
+    if (!window.confirm(t('panel.files.deleteConfirm', { name: e.name }))) return
     const res = await window.opsmaxx?.sftp.remove(key, join(path, e.name), e.dir)
     if (res?.ok) {
-      toast(`Deleted ${e.name}`)
+      toast(t('panel.files.deleted', { name: e.name }))
       void list(path)
       // Actionless on purpose: the same delete against the same permissions
       // fails the same way, and a button that repeats it is theatre.
@@ -673,13 +693,13 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     if (sum.cancelled)
       toast(
         !done
-          ? 'Upload cancelled.'
+          ? t('panel.files.upload.cancelled')
           : done === chosen.length
-            ? 'Upload finished before it could be cancelled.'
-            : `Uploaded ${done} of ${chosen.length} files to ${dir}; the rest were cancelled.`,
+            ? t('panel.files.upload.finishedBeforeCancel')
+            : t('panel.files.upload.partlyCancelled', { done, total: chosen.length, dir }),
         'info'
       )
-    else if (done) toast(`Uploaded ${done} file${done > 1 ? 's' : ''} to ${dir}`, 'ok')
+    else if (done) toast(t('panel.files.upload.done', { count: done, dir }), 'ok')
     for (const f of sum.failed) {
       // The summary reports basenames; the local file that produced one is
       // still in `chosen`, which is what makes a per-file retry possible.
@@ -688,7 +708,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
         fileFailure('upload', f.name, dir, f.error),
         'error',
         local
-          ? { label: 'Try again', run: () => setQueue((q) => [...q, { kind: 'upload', paths: [local], dir }]) }
+          ? { label: t('panel.files.tryAgain'), run: () => setQueue((q) => [...q, { kind: 'upload', paths: [local], dir }]) }
           : undefined
       )
     }
@@ -696,17 +716,25 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     // sftpUpload), so what a cancel or failure can leave is a temporary copy —
     // named whenever removing one failed — or, for a file the user agreed to
     // overwrite in place, the file itself, part-written.
-    reportLeftover(sum.leftover, 'on the server')
+    reportLeftover(sum.leftover, 'server')
     if (sum.incomplete?.length)
       toast(
-        `${sum.incomplete.join(', ')} may be incomplete on the server: ${sum.incomplete.length === 1 ? 'it was' : 'they were'} being overwritten in place when the upload stopped.`,
+        sum.incomplete.length === 1
+          ? t('panel.files.upload.incompleteOne', { names: sum.incomplete.join(', ') })
+          : t('panel.files.upload.incompleteMany', { names: sum.incomplete.join(', ') }),
         'error'
       )
     if (!sum.cancelled && !done && !sum.failed.length && !again.length)
-      toast(res?.error ? `Nothing was uploaded to ${dir} — ${res.error}` : `Nothing was uploaded to ${dir}.`, 'error', {
-        label: 'Choose files',
-        run: () => void pickAndUpload()
-      })
+      toast(
+        res?.error
+          ? t('panel.files.upload.nothingDetail', { dir, error: res.error })
+          : t('panel.files.upload.nothing', { dir }),
+        'error',
+        {
+          label: t('panel.files.upload.chooseFiles'),
+          run: () => void pickAndUpload()
+        }
+      )
   }
 
   const pickAndUpload = async (): Promise<void> => {
@@ -725,9 +753,9 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const download = async (e: SftpEntry): Promise<void> => {
     if (e.dir) {
       toast(
-        `${e.name} is a folder. Only files can be downloaded so far — open it and download what is inside.`,
+        t('panel.files.download.isFolder', { name: e.name }),
         'info',
-        { label: `Open ${e.name}`, run: () => void list(join(path, e.name)) }
+        { label: t('panel.files.download.openFolder', { name: e.name }), run: () => void list(join(path, e.name)) }
       )
       return
     }
@@ -744,21 +772,31 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
     const saved = res?.data?.saved ?? []
     const failed = res?.data?.failed ?? []
     if (saved.length)
-      toast(saved.length === 1 ? `Saved ${saved[0]} to ${dir}` : `Saved ${saved.length} files to ${dir}`, 'ok')
+      toast(
+        saved.length === 1
+          ? t('panel.files.download.savedOne', { name: saved[0], dir })
+          : t('panel.files.download.savedMany', { count: saved.length, dir }),
+        'ok'
+      )
     for (const f of failed) {
       const remote = remotes.find((r) => name(r) === f.name)
       toast(
         fileFailure('download', f.name, remote ? remote.slice(0, -f.name.length - 1) || '/' : path, f.error),
         'error',
         remote
-          ? { label: 'Try again', run: () => setQueue((q) => [...q, { kind: 'download', remotes: [remote], dir }]) }
+          ? { label: t('panel.files.tryAgain'), run: () => setQueue((q) => [...q, { kind: 'download', remotes: [remote], dir }]) }
           : undefined
       )
     }
-    reportLeftover(res?.data?.leftover, 'on this machine')
-    if (res?.data?.cancelled) toast('Download cancelled.', 'info')
+    reportLeftover(res?.data?.leftover, 'local')
+    if (res?.data?.cancelled) toast(t('panel.files.download.cancelled'), 'info')
     else if (!saved.length && !failed.length)
-      toast(res?.error ? `Nothing was downloaded — ${res.error}` : 'Nothing was downloaded.', 'error')
+      toast(
+        res?.error
+          ? t('panel.files.download.nothingDetail', { error: res.error })
+          : t('panel.files.download.nothing'),
+        'error'
+      )
   }
 
   // Pressed, and not yet answered. Main returns at once even on a stalled link,
@@ -801,22 +839,22 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
   const menu = (e: SftpEntry): MenuEntry[] => [
     ...(!e.dir
       ? [
-          { label: 'Open in editor (inline)', icon: <Edit3 size={14} />, onClick: () => void openFile(e) },
+          { label: t('panel.files.menu.openInline'), icon: <Edit3 size={14} />, onClick: () => void openFile(e) },
           {
-            label: editorCommand ? `Open in ${editorCommand}` : 'Open in default app',
+            label: editorCommand ? t('panel.files.openIn', { editor: editorCommand }) : t('panel.files.menu.openDefault'),
             icon: <ExternalLink size={14} />,
             onClick: () => void openExternally(e)
           }
         ]
       : []),
-    { label: 'Rename', icon: <Edit3 size={14} />, onClick: () => setRenaming(e.name) },
+    { label: t('panel.files.menu.rename'), icon: <Edit3 size={14} />, onClick: () => setRenaming(e.name) },
     {
-      label: e.dir ? 'Download (files only)' : 'Download…',
+      label: e.dir ? t('panel.files.menu.downloadFilesOnly') : t('panel.files.menu.download'),
       icon: <Download size={14} />,
       onClick: () => void download(e)
     },
     { separator: true, label: '' },
-    { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => void remove(e) }
+    { label: t('common.delete'), icon: <Trash2 size={14} />, danger: true, onClick: () => void remove(e) }
   ]
 
   const parts = path === '/' ? [] : path.split('/').filter(Boolean)
@@ -864,7 +902,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       onDrop={onDrop}
     >
       <div className="viewbar" style={{ margin: '0 -20px 16px', paddingLeft: 20, paddingRight: 20 }}>
-        <button className="icon-btn" onClick={() => void list('/')} title="Root">
+        <button className="icon-btn" onClick={() => void list('/')} title={t('panel.files.root')}>
           <Home size={15} />
         </button>
         {/* Click the trail to type a path.
@@ -877,7 +915,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
           <div
             className="row"
             style={{ gap: 2, flex: 1, overflow: 'hidden', cursor: 'text' }}
-            title="Click to type a path"
+            title={t('panel.files.typePath')}
             onClick={() => setEditingPath(path)}
           >
             {parts.map((p, i) => (
@@ -901,7 +939,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
             className="input mono"
             style={{ flex: 1, height: 26 }}
             autoFocus
-            aria-label="Path"
+            aria-label={t('panel.files.pathLabel')}
             value={editingPath}
             onChange={(ev) => setEditingPath(ev.target.value)}
             onKeyDown={(ev) => {
@@ -933,20 +971,20 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
           className={clsx('icon-btn', following && 'active')}
           style={follow.can ? undefined : { opacity: 0.45 }}
           aria-disabled={!follow.can}
-          aria-label="Follow terminal"
+          aria-label={t('panel.files.follow.label')}
           aria-pressed={follow.can ? linked : undefined}
           title={
             !follow.can
               ? follow.why
               : !linked
                 ? canAsk && !termCwd
-                  ? 'Not following the terminal — click to link. Linking types one line into the terminal so its shell reports its folder; leave it at a prompt.'
-                  : 'Not following the terminal — click to link'
+                  ? t('panel.files.follow.linkAndAsk')
+                  : t('panel.files.follow.link')
                 : termCwd
-                  ? `Following the terminal (${termCwd}) — click to unlink`
+                  ? t('panel.files.follow.following', { cwd: termCwd })
                   : canAsk
-                    ? 'Click to ask this shell to report its folder. That types one line into the terminal; leave it at a prompt.'
-                    : `${follow.why} Click to unlink.`
+                    ? t('panel.files.follow.ask')
+                    : t('panel.files.follow.unlink', { why: follow.why })
           }
           onClick={() => {
             // A reason on a tooltip is a reason nobody on a keyboard ever
@@ -960,7 +998,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
             setLinked(true)
             if (asking) {
               ask()
-              toast('Asked the shell to report its folder. bash and zsh answer straight away; fish and sh cannot be asked.', 'info')
+              toast(t('panel.files.follow.asked'), 'info')
             } else if (follow.why) toast(follow.why, 'error', follow.fix)
           }}
         >
@@ -972,24 +1010,24 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
           className="icon-btn"
           style={cdBlocked ? { opacity: 0.45 } : undefined}
           aria-disabled={!!cdBlocked}
-          aria-label="cd terminal here"
-          title={cdBlocked || `Type cd ${path} into the terminal — press Enter there to run it`}
+          aria-label={t('panel.files.cd.label')}
+          title={cdBlocked || t('panel.files.cd.title', { path })}
           onClick={cdHere}
         >
           <SquareTerminal size={15} />
         </button>
-        <button className="icon-btn" title="Refresh" onClick={() => void list(path)}>
+        <button className="icon-btn" title={t('common.refresh')} onClick={() => void list(path)}>
           <RefreshCw size={14} />
         </button>
         <button className="btn sm" onClick={() => setCreating(true)}>
-          <FolderPlus size={13} /> New folder
+          <FolderPlus size={13} /> {t('panel.files.newFolder')}
         </button>
         <button
           className="btn sm"
-          title="Upload files — you can also drag them onto this list"
+          title={t('panel.files.uploadTitle')}
           onClick={() => void pickAndUpload()}
         >
-          <Upload size={13} /> Upload
+          <Upload size={13} /> {t('panel.files.upload')}
         </button>
       </div>
 
@@ -998,7 +1036,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
         <input
           className="input grow"
           style={{ paddingLeft: 30 }}
-          placeholder="Filter files…"
+          placeholder={t('panel.files.filter')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -1007,9 +1045,9 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       {progress && (
         <div className="row" style={{ marginBottom: queue.length ? 4 : 12, gap: 10 }}>
           {progress.direction === 'down' ? (
-            <Download size={14} className="faint" aria-label="Downloading" />
+            <Download size={14} className="faint" aria-label={t('panel.files.downloading')} />
           ) : (
-            <Upload size={14} className="faint" aria-label="Uploading" />
+            <Upload size={14} className="faint" aria-label={t('panel.files.uploading')} />
           )}
           <span className="faint" style={{ fontSize: 12, whiteSpace: 'nowrap' }}>
             {progress.name}
@@ -1024,7 +1062,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
             />
           </div>
           <button className="btn ghost sm" disabled={cancelling} onClick={cancelTransfer}>
-            {cancelling ? 'Cancelling…' : 'Cancel'}
+            {cancelling ? t('panel.files.cancelling') : t('common.cancel')}
           </button>
         </div>
       )}
@@ -1032,10 +1070,10 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       {queue.length > 0 && (
         <div className="row faint" style={{ marginBottom: 12, gap: 10, fontSize: 'var(--fs-caption)' }} data-testid="transfer-queue">
           <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {queue.length} queued: {queueNames(queue)}
+            {t('panel.files.queued', { count: queue.length, names: queueNames(queue) })}
           </span>
           <button className="btn ghost sm" onClick={() => setQueue([])}>
-            Clear queue
+            {t('panel.files.clearQueue')}
           </button>
         </div>
       )}
@@ -1043,7 +1081,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
       {loading && (
         <div className="empty" style={{ height: 200 }}>
           <Loader2 size={22} className="spin" />
-          <p>Loading {path}…</p>
+          <p>{t('panel.files.loadingPath', { path })}</p>
         </div>
       )}
 
@@ -1075,10 +1113,10 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
         <table className="table">
           <thead>
             <tr>
-              <th style={{ width: '50%' }}>Name</th>
-              <th>Size</th>
-              <th>Modified</th>
-              <th>Permissions</th>
+              <th style={{ width: '50%' }}>{t('panel.files.col.name')}</th>
+              <th>{t('panel.files.col.size')}</th>
+              <th>{t('panel.files.col.modified')}</th>
+              <th>{t('panel.files.col.perms')}</th>
             </tr>
           </thead>
           <tbody>
@@ -1091,7 +1129,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
                       className="input"
                       autoFocus
                       style={{ height: 28 }}
-                      placeholder="Folder name"
+                      placeholder={t('panel.files.folderName')}
                       value={newName}
                       onChange={(e) => setNewName(e.target.value)}
                       onKeyDown={(e) => {
@@ -1116,7 +1154,7 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
                     <CornerLeftUp size={15} style={{ color: 'var(--text-faint)' }} />
                     <span className="mono">..</span>
                     <span className="faint" style={{ fontSize: 11 }}>
-                      parent directory
+                      {t('panel.files.parentDir')}
                     </span>
                   </span>
                 </td>
@@ -1175,11 +1213,11 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
                 <td colSpan={4} style={{ padding: 0 }}>
                   <EmptyState
                     compact
-                    title={query ? 'Nothing matches' : 'Empty directory'}
+                    title={query ? t('panel.files.noMatchTitle') : t('panel.files.emptyTitle')}
                     message={
                       query
-                        ? `No file or folder here matches "${query}".`
-                        : 'There is nothing in this directory.'
+                        ? t('panel.files.noMatchMessage', { query })
+                        : t('panel.files.emptyMessage')
                     }
                   />
                 </td>
@@ -1195,33 +1233,38 @@ function RealSftp({ server, tabId }: { server?: Server; tabId?: string }): React
         <Modal
           title={
             overwrite.why === 'dir' || overwrite.why === 'owner'
-              ? 'Overwrite in place?'
-              : 'Replace files on the server?'
+              ? t('panel.files.overwrite.inPlaceTitle')
+              : t('panel.files.overwrite.replaceTitle')
           }
           subtitle={overwrite.dir}
           // Closing an in-place question is a Skip: those files were the only
           // ones left, so there is nothing else to cancel.
           onClose={() => overwrite.answer(overwrite.why === 'dir' || overwrite.why === 'owner' ? 'skip' : 'cancel')}
-          cancelLabel={overwrite.why === 'dir' || overwrite.why === 'owner' ? null : 'Cancel all'}
+          cancelLabel={overwrite.why === 'dir' || overwrite.why === 'owner' ? null : t('panel.files.overwrite.cancelAll')}
           footer={
             <button className="btn secondary size-28" onClick={() => overwrite.answer('skip')}>
-              Skip
+              {t('common.skip')}
             </button>
           }
           confirm={{
-            label: overwrite.why === 'dir' || overwrite.why === 'owner' ? 'Overwrite in place' : 'Overwrite',
+            label:
+              overwrite.why === 'dir' || overwrite.why === 'owner'
+                ? t('panel.files.overwrite.inPlace')
+                : t('panel.files.overwrite.overwrite'),
             destructive: true,
             onClick: () => overwrite.answer('overwrite')
           }}
         >
           <p style={{ marginTop: 0 }}>
             {overwrite.why === 'unchecked'
-              ? `Could not check ${overwrite.dir} for existing files, so any of these may replace one already there. Skip uploads none of them.`
+              ? t('panel.files.overwrite.unchecked', { dir: overwrite.dir })
               : overwrite.why === 'dir'
-                ? `This folder isn't writable, so the file can only be overwritten in place. ${IN_PLACE_RISK}`
+                ? t('panel.files.overwrite.dirNotWritable')
                 : overwrite.why === 'owner'
-                  ? `A new copy could not be given the existing file's owner or permissions, so it can only be overwritten in place, which keeps them. ${IN_PLACE_RISK}`
-                  : `${overwrite.names.length === 1 ? 'A file with this name is' : 'Files with these names are'} already in ${overwrite.dir}. Overwriting replaces ${overwrite.names.length === 1 ? 'it' : 'them'}; Skip uploads only the rest.`}
+                  ? t('panel.files.overwrite.owner')
+                  : overwrite.names.length === 1
+                    ? t('panel.files.overwrite.existsOne', { dir: overwrite.dir })
+                    : t('panel.files.overwrite.existsMany', { dir: overwrite.dir })}
           </p>
           <ul className="mono" style={{ fontSize: 'var(--fs-identifier)', maxHeight: 180, overflow: 'auto' }}>
             {overwrite.names.map((n) => (
@@ -1254,25 +1297,26 @@ function FileEditor({
   onClose: () => void
   onSave: (c: string) => void
 }): React.JSX.Element {
+  const t = useT()
   const [content, setContent] = useState(initial)
   const dirty = content !== initial
   return (
     <Modal
-      title={path.split('/').pop() ?? 'File'}
+      title={path.split('/').pop() ?? t('panel.files.editor.file')}
       subtitle={path}
       size="lg"
       onClose={onClose}
       footer={
         <>
           <span className="faint mono" style={{ fontSize: 11 }}>
-            {content.length} bytes {dirty ? '· modified' : ''}
+            {t('panel.files.editor.bytes', { count: content.length })} {dirty ? t('panel.files.editor.modified') : ''}
           </span>
           <span className="spacer" />
           <button className="btn" onClick={onClose}>
-            Close
+            {t('common.close')}
           </button>
           <button className="btn primary" disabled={!dirty} onClick={() => onSave(content)}>
-            Save
+            {t('common.save')}
           </button>
         </>
       }
@@ -1311,6 +1355,7 @@ const DEMO_TREE: Record<string, { name: string; dir: boolean; size: number; mtim
 const EDITORS = ['VS Code', 'Cursor', 'Sublime Text', 'Notepad++', 'System Default']
 
 function DemoSftp(): React.JSX.Element {
+  const t = useT()
   const setModal = useApp((s) => s.setModal)
   const [path, setPath] = useState('/opt/app')
   const [query, setQuery] = useState('')
@@ -1322,8 +1367,8 @@ function DemoSftp(): React.JSX.Element {
   // explains nothing to someone who never chose a demo — the way out of it is
   // a real server, so that is the button.
   const notReal = (what: string): void =>
-    toast(`${what} does nothing here — this is a sample file list, not a real server.`, 'info', {
-      label: 'Add a real server',
+    toast(t('panel.files.demo.notReal', { what }), 'info', {
+      label: t('panel.files.demo.addServer'),
       run: () => setModal('add-server')
     })
 
@@ -1338,7 +1383,7 @@ function DemoSftp(): React.JSX.Element {
   return (
     <div className="content" style={{ paddingTop: 0 }}>
       <div className="viewbar" style={{ margin: '0 -20px 16px', paddingLeft: 20, paddingRight: 20 }}>
-        <button className="icon-btn" onClick={() => setPath('/')} title="Root">
+        <button className="icon-btn" onClick={() => setPath('/')} title={t('panel.files.root')}>
           <Home size={15} />
         </button>
         <div className="row" style={{ gap: 2, flex: 1, overflow: 'hidden' }}>
@@ -1351,11 +1396,11 @@ function DemoSftp(): React.JSX.Element {
             </span>
           ))}
         </div>
-        <span className="chip warn">demo</span>
+        <span className="chip warn">{t('panel.files.demo.chip')}</span>
         {/* The only control in this pane that used to fail silently, in a pane
             whose entire design is "nothing works here, and it says so". */}
-        <button className="btn sm" onClick={() => notReal('Upload')}>
-          <Upload size={13} /> Upload
+        <button className="btn sm" onClick={() => notReal(t('panel.files.upload'))}>
+          <Upload size={13} /> {t('panel.files.upload')}
         </button>
       </div>
 
@@ -1364,7 +1409,7 @@ function DemoSftp(): React.JSX.Element {
         <input
           className="input grow"
           style={{ paddingLeft: 30 }}
-          placeholder="Filter files…"
+          placeholder={t('panel.files.filter')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
@@ -1373,10 +1418,10 @@ function DemoSftp(): React.JSX.Element {
       <table className="table">
         <thead>
           <tr>
-            <th style={{ width: '50%' }}>Name</th>
-            <th>Size</th>
-            <th>Modified</th>
-            <th>Permissions</th>
+            <th style={{ width: '50%' }}>{t('panel.files.col.name')}</th>
+            <th>{t('panel.files.col.size')}</th>
+            <th>{t('panel.files.col.modified')}</th>
+            <th>{t('panel.files.col.perms')}</th>
           </tr>
         </thead>
         <tbody>
@@ -1410,16 +1455,25 @@ function DemoSftp(): React.JSX.Element {
           y={ctx.y}
           onClose={() => setCtx(null)}
           entries={[
-            { label: 'Download', icon: <Download size={14} />, onClick: () => notReal('Download') },
+            {
+              label: t('panel.files.demo.download'),
+              icon: <Download size={14} />,
+              onClick: () => notReal(t('panel.files.demo.download'))
+            },
             ...(!ctx.dir
               ? EDITORS.map((ed) => ({
-                  label: `Open with ${ed}`,
+                  label: t('panel.files.demo.openWith', { editor: ed }),
                   icon: <Edit3 size={14} />,
-                  onClick: () => notReal(`Open with ${ed}`)
+                  onClick: () => notReal(t('panel.files.demo.openWith', { editor: ed }))
                 }))
               : []),
             { separator: true, label: '' },
-            { label: 'Delete', icon: <Trash2 size={14} />, danger: true, onClick: () => notReal('Delete') }
+            {
+              label: t('common.delete'),
+              icon: <Trash2 size={14} />,
+              danger: true,
+              onClick: () => notReal(t('common.delete'))
+            }
           ]}
         />
       )}

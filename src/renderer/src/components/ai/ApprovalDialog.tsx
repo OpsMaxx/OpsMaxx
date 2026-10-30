@@ -15,8 +15,9 @@ import { ToastSlot } from '../common/Toasts'
 import { ModePicker } from './ModePicker'
 import { openAi, openAiSession } from '../../store/nav'
 import { useArming } from '../../hooks/useArming'
+import { t as tr, useT } from '../../lib/i18n'
 import {
-  KILL_SWITCH_FAILED,
+  KILL_SWITCH_FAILED_KEY,
   canExtendFuse,
   deferApproval,
   denyAndStopAllAi,
@@ -168,10 +169,13 @@ export function capabilityLabel(capability: ApprovalRequest['capability']): stri
  */
 export function sessionGrantLabel(request: ApprovalRequest): string | null {
   if (request.sessionGrant === 'tool' && request.toolName) {
-    return `Allow ${request.toolName} on ${approvalTarget(request)} for this session`
+    return tr('ai.approval.grantTool', { tool: request.toolName, target: approvalTarget(request) })
   }
   if (request.sessionGrant) {
-    return `Allow “${capabilityLabel(request.capability)}” on ${approvalTarget(request)} for this session`
+    return tr('ai.approval.grantPermission', {
+      permission: capabilityLabel(request.capability),
+      target: approvalTarget(request)
+    })
   }
   return null
 }
@@ -187,17 +191,14 @@ export function sessionGrantLabel(request: ApprovalRequest): string | null {
  * included, is its tooltip.
  */
 export function sessionGrantShortLabel(request: ApprovalRequest): string | null {
-  if (request.sessionGrant === 'tool' && request.toolName) return `Allow ${request.toolName} this session`
-  if (request.sessionGrant) return `Allow “${capabilityLabel(request.capability)}” this session`
+  if (request.sessionGrant === 'tool' && request.toolName) {
+    return tr('ai.approval.grantToolShort', { tool: request.toolName })
+  }
+  if (request.sessionGrant) {
+    return tr('ai.approval.grantPermissionShort', { permission: capabilityLabel(request.capability) })
+  }
   return null
 }
-
-/**
- * Said next to a session grant on a write. The preview is the reason to
- * approve a write at all, and a remembered yes skips the dialog -- and with it
- * the preview -- for every later write it covers.
- */
-export const LATER_WRITES_UNSEEN = 'Later writes in this session won’t be shown to you.'
 
 /**
  * What write_file will put on the server, as far as a dialog can show it.
@@ -219,15 +220,15 @@ export function WritePreview({
   agentName: string
   preview: ContentPreview
 }): React.JSX.Element {
+  const t = useT()
   return (
     <div>
       <div style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-caption)', marginBottom: 4 }}>
-        What {agentName} wants written — the agent’s content, not OpsMaxx’s. Secrets are shown redacted, and
-        invisible characters as ⟨U+…⟩.
+        {t('ai.approval.previewHeading', { agent: agentName })}
       </div>
       <pre
         className="mono"
-        aria-label={`File content written by ${agentName}`}
+        aria-label={t('ai.approval.previewLabel', { agent: agentName })}
         style={{
           margin: 0,
           padding: '8px 10px',
@@ -246,9 +247,12 @@ export function WritePreview({
       </pre>
       {preview.omittedChars > 0 && (
         <div style={{ color: 'var(--warn)', fontSize: 'var(--fs-caption)', marginTop: 4 }}>
-          Only the start is shown: {preview.omittedChars.toLocaleString()} more characters
-          {preview.omittedLines > 0 ? ` (${preview.omittedLines.toLocaleString()} more lines)` : ''} are not.
-          Approving writes all of it.
+          {preview.omittedLines > 0
+            ? t('ai.approval.previewTruncatedLines', {
+                chars: preview.omittedChars.toLocaleString(),
+                lines: preview.omittedLines.toLocaleString()
+              })
+            : t('ai.approval.previewTruncated', { chars: preview.omittedChars.toLocaleString() })}
         </div>
       )}
     </div>
@@ -280,6 +284,7 @@ export function ApprovalDialog({
   const extendable = canExtendFuse()
   const grantLabel = sessionGrantLabel(request)
   const [stopFailed, setStopFailed] = useState(false)
+  const t = useT()
   // The session's mode from here on. Changing it answers nothing: this request
   // was raised under the old mode and still waits on the buttons below.
   const [mode, setMode] = useState<SessionMode>(sessionModeOf({ mode: request.sessionMode }))
@@ -296,17 +301,17 @@ export function ApprovalDialog({
     }
     const updated = await window.opsmaxx?.aiMcp?.setSessionMode?.(request.sessionId, next).catch(() => null)
     if (!updated) {
-      toast(`${request.agentName}’s profile was not changed — it is still ${sessionModeLabel(mode)}.`, 'error')
+      toast(t('ai.approval.modeNotChanged', { agent: request.agentName, profile: sessionModeLabel(mode) }), 'error')
       return
     }
     // Read only is the one change that answers: main denies every request this
     // session has waiting, this one included, and the dialog goes with it.
     if (next === 'readOnly') {
-      toast(`${request.agentName} is now on Read only. Its waiting requests, this one included, were denied.`, 'ok')
+      toast(t('ai.approval.nowReadOnly', { agent: request.agentName }), 'ok')
       return
     }
     setMode(next)
-    toast(`${request.agentName} is now on ${sessionModeLabel(next)} for later calls. This request still needs your answer.`, 'ok')
+    toast(t('ai.approval.modeChanged', { agent: request.agentName, profile: sessionModeLabel(next) }), 'ok')
   }
 
   // Leaving to change something is not an answer: the request is deferred, so
@@ -320,7 +325,7 @@ export function ApprovalDialog({
     deferApproval(request.id)
     openAi('groups', all?.find((x) => x.id === request.sessionId)?.groupId ?? null)
   }
-  const LEAVES = 'Keeps this request waiting in the status bar while you look.'
+  const LEAVES = t('ai.approval.leaves')
   // `request.sessionMode` is the mode it was ASKED under; the mode may have
   // been changed elsewhere since. Picking the stale value would be a no-op, so
   // the live one is read on open and again whenever the picker opens.
@@ -350,15 +355,15 @@ export function ApprovalDialog({
     // burning fuse and nothing on screen to say so.
     <div className="scrim approval-scrim">
       <ToastSlot />
-      <div className="modal" role="dialog" aria-modal aria-label="AI action requires approval">
+      <div className="modal" role="dialog" aria-modal aria-label={t('ai.approval.dialogLabel')}>
         <div className="modal-header">
           <div>
             <h2>
               <ShieldAlert size={15} style={{ verticalAlign: -2, marginRight: 6, color: toneText }} />
-              {request.agentName} is asking to act on {approvalTarget(request)}
+              {t('ai.approval.heading', { agent: request.agentName, target: approvalTarget(request) })}
             </h2>
             <div className="sub">
-              It is blocked until you answer. {waiting > 1 ? `${waiting - 1} more request(s) behind this one.` : ''}
+              {t('ai.approval.blocked')} {waiting > 1 ? t('ai.approval.moreBehind', { count: waiting - 1 }) : ''}
             </div>
             {(request.sessionMode || request.protectedTarget) && (
               <div className="row" style={{ gap: 6, marginTop: 6 }}>
@@ -366,18 +371,20 @@ export function ApprovalDialog({
                   <span
                     className={clsx('chip', request.sessionMode === 'bypass' && 'danger')}
                     data-testid="approval-mode"
-                    title="The session’s mode when it asked"
+                    title={t('ai.approval.askedUnderTitle')}
                   >
-                    Asked under: {sessionModeLabel(sessionModeOf({ mode: request.sessionMode }), request.sessionGroupName)}
+                    {t('ai.approval.askedUnder', {
+                      profile: sessionModeLabel(sessionModeOf({ mode: request.sessionMode }), request.sessionGroupName)
+                    })}
                   </span>
                 )}
                 {request.protectedTarget && (
                   <span
                     className="chip warn"
                     data-testid="approval-protected"
-                    title="This target is Protected: every change is approved first, whatever the session’s mode."
+                    title={t('ai.approval.protectedTitle')}
                   >
-                    Protected
+                    {t('ai.approval.protected')}
                   </span>
                 )}
               </div>
@@ -386,8 +393,7 @@ export function ApprovalDialog({
                 that approving it alone returns nothing. */}
             {request.workspaceOf && (
               <div className="sub">
-                Workspace {request.workspaceOf.index} of {request.workspaceOf.total} this call asks about. It returns
-                nothing unless you approve every one of them.
+                {t('ai.approval.workspaceOf', { index: request.workspaceOf.index, total: request.workspaceOf.total })}
               </div>
             )}
           </div>
@@ -411,7 +417,7 @@ export function ApprovalDialog({
                 }}
               >
                 <Clock size={12} />
-                {fuse.expired ? 'Expired — waiting for the bridge' : `Auto-denies in ${fuse.text}`}
+                {fuse.expired ? t('ai.approval.fuseExpired') : t('ai.approval.autoDenies', { time: fuse.text })}
               </div>
             )}
             {fuse.text !== null &&
@@ -421,15 +427,14 @@ export function ApprovalDialog({
                   style={{ marginTop: 6 }}
                   onClick={() => void extendApprovalFuse(request.id, 300)}
                 >
-                  Give me more time
+                  {t('ai.approval.moreTime')}
                 </button>
               ) : (
                 // The honest absence. The timer lives in main's approvals.ts
                 // and no IPC reaches it, so a "Give me more time" button here
                 // would be a control that looked like it worked and did not.
                 <div style={{ marginTop: 4, fontSize: 'var(--fs-caption)', color: 'var(--text-faint)', maxWidth: 210 }}>
-                  This build cannot extend the fuse. Decide later keeps it in the status bar — the clock keeps
-                  running either way.
+                  {t('ai.approval.cannotExtend')}
                 </div>
               ))}
           </div>
@@ -465,16 +470,18 @@ export function ApprovalDialog({
                   lineHeight: 1.5
                 }}
               >
-                Rule: {request.policyReason}
+                {t('ai.approvals.rule', { rule: request.policyReason })}
                 <div className="row" style={{ gap: 12, marginTop: 4 }}>
                   <button className="linklike" title={LEAVES} onClick={openSession}>
-                    Change this agent’s profile
+                    {t('ai.approval.changeProfile')}
                   </button>
                   {/* Only a Custom group's switch can be changed; a predefined
                       profile's is part of what the profile means. */}
                   {askedCustom && /confirm risky actions/i.test(request.policyReason) && (
                     <button className="linklike" title={LEAVES} onClick={() => void openGroup()}>
-                      Change Confirm risky actions{prov.groupName ? ` on ${prov.groupName}` : ''}
+                      {prov.groupName
+                        ? t('ai.approval.changeConfirmRiskyOn', { group: prov.groupName })
+                        : t('ai.approval.changeConfirmRisky')}
                     </button>
                   )}
                 </div>
@@ -492,7 +499,7 @@ export function ApprovalDialog({
             <div style={{ fontSize: 14, lineHeight: 1.55, color: 'var(--text)' }}>{consequence.text}</div>
             {!consequence.known && (
               <div style={{ fontSize: 'var(--fs-caption)', color: 'var(--warn)', marginTop: 6 }}>
-                Not being able to describe an action is itself a reason to look harder at it.
+                {t('ai.approval.undescribed')}
               </div>
             )}
           </div>
@@ -500,7 +507,7 @@ export function ApprovalDialog({
           {/* 3. The command, as evidence — secondary to the sentence above it. */}
           <div>
             <div style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-caption)', marginBottom: 4 }}>
-              What {request.agentName} asked OpsMaxx to run
+              {t('ai.approval.commandHeading', { agent: request.agentName })}
             </div>
             <pre
               className="mono"
@@ -524,42 +531,46 @@ export function ApprovalDialog({
 
           {/* 4. Provenance. */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <Row label="Agent">
+            <Row label={t('ai.approval.rowAgent')}>
               {request.agentName}
               {askedCustom
                 ? prov.groupName
-                  ? ` · access group ${prov.groupName} `
+                  ? t('ai.approval.agentGroup', { group: prov.groupName })
                   : ''
-                : ` · profile ${sessionModeLabel(sessionModeOf({ mode: request.sessionMode }))} `}
+                : t('ai.approval.agentProfile', {
+                    profile: sessionModeLabel(sessionModeOf({ mode: request.sessionMode }))
+                  })}
               {(prov.groupName || !askedCustom) && (
                 <button
                   className="linklike"
-                  title={`Open ${request.agentName} under Active Sessions. ${LEAVES}`}
+                  title={t('ai.approval.openSessionTitle', { agent: request.agentName, leaves: LEAVES })}
                   onClick={openSession}
                 >
-                  (change)
+                  {t('ai.approval.change')}
                 </button>
               )}
               {request.toolName ? (
-                <span className="mono" style={{ color: 'var(--text-faint)' }}> · called {request.toolName}</span>
+                <span className="mono" style={{ color: 'var(--text-faint)' }}>
+                  {t('ai.approval.calledTool', { tool: request.toolName })}
+                </span>
               ) : (
                 ''
               )}
             </Row>
-            <Row label="Where">{approvalWhere(request)}</Row>
+            <Row label={t('ai.approval.rowWhere')}>{approvalWhere(request)}</Row>
             {/* Which permission a yes is spent on. The capability was the one
                 fact on the request the dialog only used internally, and it is
                 the unit a session grant is measured in. */}
-            <Row label="Permission">
+            <Row label={t('ai.approval.rowPermission')}>
               {capabilityLabel(request.capability)}
               <span className="mono" style={{ color: 'var(--text-faint)' }}> · {request.capability}</span>
             </Row>
-            <Row label="Session">
+            <Row label={t('ai.approval.rowSession')}>
               {!prov.sessionRead ? (
-                'reading…'
+                t('ai.approval.reading')
               ) : prov.startedAt ? (
                 <>
-                  connected {duration(Date.parse(prov.startedAt))} ago
+                  {t('ai.approval.connectedAgo', { duration: duration(Date.parse(prov.startedAt)) })}
                   <span className="mono" style={{ color: 'var(--text-faint)' }}>
                     {' '}
                     ({request.sessionId})
@@ -567,26 +578,24 @@ export function ApprovalDialog({
                 </>
               ) : (
                 <span style={{ color: 'var(--warn)' }}>
-                  OpsMaxx has no session record for {request.sessionId} — it cannot say who this is or when they
-                  connected.
+                  {t('ai.approval.noSessionRecord', { session: request.sessionId })}
                 </span>
               )}
             </Row>
-            <Row label="Actions so far">
+            <Row label={t('ai.approval.rowActions')}>
               {prov.actions === null ? (
-                <span style={{ color: 'var(--warn)' }}>
-                  OpsMaxx could not read the audit log, so it cannot say whether this is this session’s first
-                  action or its fortieth.
-                </span>
+                <span style={{ color: 'var(--warn)' }}>{t('ai.approval.actionsUnreadable')}</span>
               ) : (
                 // "at least" only for the renderer's own tail read. Main counts
                 // the whole log or sends nothing, so a number that came from the
                 // request is exact and says so by not hedging — and a hedged
                 // number can never be mistaken for one.
-                `${prov.capped ? 'at least ' : ''}${prov.actions} recorded before this one`
+                prov.capped
+                  ? t('ai.approval.actionsAtLeast', { count: prov.actions })
+                  : t('ai.approval.actionsExact', { count: prov.actions })
               )}
             </Row>
-            <Row label="What led to this">
+            <Row label={t('ai.approval.rowIntent')}>
               {/* THE ONE FIELD ON THIS SCREEN THE AGENT WROTE.
                   Rendered as an attributed quotation, in the agent's name, and
                   never as OpsMaxx's own voice — the party asking for
@@ -601,19 +610,16 @@ export function ApprovalDialog({
                   not to say, which is a fact about the agent worth reading. */}
               {request.intent ? (
                 <>
-                  <span style={{ color: 'var(--text)' }}>“{request.intent}”</span>
+                  <span style={{ color: 'var(--text)' }}>{t('ai.approval.intentQuote', { intent: request.intent })}</span>
                   <div style={{ color: 'var(--text-faint)', fontSize: 'var(--fs-caption)', marginTop: 3 }}>
-                    {request.agentName}’s own words, not OpsMaxx’s. Nothing checked whether they are true.
+                    {t('ai.approval.intentAttribution', { agent: request.agentName })}
                   </div>
                 </>
               ) : (
-                <span style={{ color: 'var(--warn)' }}>
-                  {request.agentName} sent no reason. OpsMaxx asks for one on every gated call and does not
-                  require it, so nothing here knows what task this action belongs to.
-                </span>
+                <span style={{ color: 'var(--warn)' }}>{t('ai.approval.noIntent', { agent: request.agentName })}</span>
               )}
             </Row>
-            <Row label="If you deny">{describeDenial(subject)}</Row>
+            <Row label={t('ai.approval.rowIfDenied')}>{describeDenial(subject)}</Row>
           </div>
         </div>
 
@@ -625,25 +631,25 @@ export function ApprovalDialog({
             data-testid="later-writes-note"
             className="approval-note approval-later-writes"
           >
-            {LATER_WRITES_UNSEEN}
+            {t('ai.approval.laterWritesUnseen')}
           </div>
         )}
         {/* Future calls only, and said so: a mode change here is not an answer. */}
         <div className="approval-note approval-mode">
-          <span>Change this agent’s profile</span>
+          <span>{t('ai.approval.changeProfile')}</span>
           <ModePicker
             value={mode}
             onChange={changeMode}
             protectedCount={request.protectedTarget ? 1 : 0}
             onOpen={readMode}
             size="sm"
-            title="Applies to this agent’s later calls; this request still needs an answer. Read only is the exception: it also denies this request and any other this agent has waiting."
+            title={t('ai.approval.modePickerTitle')}
           />
         </div>
         {stopFailed && (
           <div className="approval-note approval-stop-failed state-alarm" role="alert">
             <span className="state-dot is-alarm" aria-hidden="true" />
-            {KILL_SWITCH_FAILED}. This request is still waiting on you.
+            {t('ai.approval.stopFailed', { failure: t(KILL_SWITCH_FAILED_KEY) })}
           </div>
         )}
         {/* Two groups that wrap rather than one row that overflows. At 1440
@@ -658,7 +664,7 @@ export function ApprovalDialog({
             style={{ color: 'var(--danger)', borderColor: 'transparent', background: 'transparent' }}
             onClick={() => void denyAndStopAllAi().then((ok) => setStopFailed(!ok))}
           >
-            <Octagon size={13} /> Deny and stop all AI access
+            <Octagon size={13} /> {t('ai.approval.denyAndStop')}
           </button>
           <div className="approval-answers">
             {/* Labelled, not a bare ✕.
@@ -673,7 +679,7 @@ export function ApprovalDialog({
                 clickable the whole time. A bare ✕ could not have been used for
                 this, because a ✕ does not say whether it denies or defers. */}
             <button className="btn ghost" onClick={() => deferApproval(request.id)}>
-              <X size={13} /> Decide later
+              <X size={13} /> {t('ai.approval.decideLater')}
             </button>
             {/* Two yeses, and they say different things. "Approve once" is this
                 call; the second button remembers the answer for the rest of the
@@ -706,7 +712,7 @@ export function ApprovalDialog({
                 if (allow(e)) void respondToApproval(request.id, 'approved', 'once')
               }}
             >
-              Approve once
+              {t('ai.approvals.approveOnce')}
             </button>
             <button
               className="btn"
@@ -719,7 +725,7 @@ export function ApprovalDialog({
               }}
               onClick={() => void respondToApproval(request.id, 'denied')}
             >
-              Deny
+              {t('ai.approvals.deny')}
             </button>
           </div>
         </div>

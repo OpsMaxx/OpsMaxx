@@ -4,6 +4,7 @@ import { useWsSessions } from '../../../store/wsSessions'
 import { toast } from '../../../store/toast'
 import { useApp } from '../../../store/app'
 import { keyLabel } from '../hotkeys'
+import { t } from '../../../lib/i18n'
 
 export interface ClosePlan {
   /** Saved requests with edits: one aggregate Save all / Discard / Cancel prompt covers them all. */
@@ -25,15 +26,19 @@ export function planClose(ids: Id[]): ClosePlan {
   const dirty = ids.filter((id) => http.isDirty(id))
   const connected = ids.filter((id) => ['open', 'connecting'].includes(sessions[id]?.state ?? ''))
   let prompt: string | null = null
-  const name = (): string => http.requestFor(dirty[0])?.name ?? 'this request'
+  const name = (): string => http.requestFor(dirty[0])?.name ?? t('http.tabs.thisRequest')
   if (dirty.length === 1)
-    prompt = connected.length ? `Save changes to “${name()}” and disconnect?` : `Save changes to “${name()}”?`
-  else if (dirty.length > 1) {
-    prompt = `${dirty.length} tabs have unsaved changes`
-    if (connected.length)
-      prompt += `, and ${connected.length === 1 ? 'a WebSocket' : `${connected.length} WebSockets`} will disconnect`
-  } else if (connected.length === 1) prompt = 'Disconnect and close?'
-  else if (connected.length > 1) prompt = `Disconnect ${connected.length} WebSockets and close?`
+    prompt = connected.length
+      ? t('http.tabs.saveChangesDisconnect', { name: name() })
+      : t('http.tabs.saveChanges', { name: name() })
+  else if (dirty.length > 1)
+    prompt = !connected.length
+      ? t('http.tabs.unsavedTabs', { count: dirty.length })
+      : connected.length === 1
+        ? t('http.tabs.unsavedTabsOneWs', { count: dirty.length })
+        : t('http.tabs.unsavedTabsWs', { count: dirty.length, ws: connected.length })
+  else if (connected.length === 1) prompt = t('http.tabs.disconnectAndClose')
+  else if (connected.length > 1) prompt = t('http.tabs.disconnectManyAndClose', { count: connected.length })
   return { dirty, connected, prompt }
 }
 
@@ -46,8 +51,8 @@ export function closeNow(ids: Id[]): void {
   focusActiveTab()
   if (scratch.length) {
     const key = keyLabel('reopen-tab')
-    toast(`Closed${key ? ` · Reopen (${key})` : ''}`, 'info', {
-      label: 'Reopen',
+    toast(key ? t('http.tabs.closedReopen', { key }) : t('http.tabs.closed'), 'info', {
+      label: t('http.tabs.reopen'),
       run: () => useHttp.getState().reopenClosed()
     })
   }

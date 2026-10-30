@@ -39,6 +39,8 @@ import {
   type RedisSlowlogValue
 } from '../../../../shared/dbOps'
 import type { DbConnectConfig, DbKind } from '../../../../shared/db'
+import type { MessageKey } from '../../../../shared/i18n'
+import { useT } from '../../lib/i18n'
 
 /**
  * The operations panel.
@@ -78,11 +80,22 @@ const LEVEL_CLASS: Record<DbVerdictLevel, string> = {
  *  never be mistaken at a glance for a clean read. */
 const GUARDED: DbAnswerStatus[] = ['denied', 'partial']
 
+const STATUS_LABEL: Record<DbAnswerStatus, MessageKey> = {
+  ok: 'databases.ops.status.ok',
+  partial: 'databases.ops.status.partial',
+  denied: 'databases.ops.status.denied',
+  absent: 'databases.ops.status.absent',
+  'not-applicable': 'databases.ops.status.notApplicable',
+  unsupported: 'databases.ops.status.unsupported',
+  error: 'databases.ops.status.error'
+}
+
 function StatusChip({ status }: { status: DbAnswerStatus }): React.JSX.Element | null {
+  const t = useT()
   if (status === 'ok') return null
   return (
     <span className={`chip${GUARDED.includes(status) ? ' warn' : ''}`} title={DB_ANSWER_HELP[status]}>
-      {GUARDED.includes(status) && <Lock size={11} />} {status === 'partial' ? 'partial view' : status}
+      {GUARDED.includes(status) && <Lock size={11} />} {t(STATUS_LABEL[status])}
     </span>
   )
 }
@@ -546,6 +559,7 @@ interface Props {
 }
 
 export function DbOpsPanel({ cfg, kind, onVerdict }: Props): React.JSX.Element {
+  const t = useT()
   const [report, setReport] = useState<DbOpsReport | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -560,8 +574,8 @@ export function DbOpsPanel({ cfg, kind, onVerdict }: Props): React.JSX.Element {
     try {
       const r = await window.opsmaxx?.db?.ops?.(cfg)
       if (mine !== generation.current) return
-      if (!r) setError('The preload bridge does not expose operational reads. Restart the app.')
-      else if (!r.ok) setError(r.error ?? 'The read failed.')
+      if (!r) setError(t('databases.ops.noBridge'))
+      else if (!r.ok) setError(r.error ?? t('databases.ops.readFailed'))
       else {
         setReport(r)
         onVerdict?.(worstVerdict(r.answers))
@@ -572,7 +586,7 @@ export function DbOpsPanel({ cfg, kind, onVerdict }: Props): React.JSX.Element {
     } finally {
       if (mine === generation.current) setLoading(false)
     }
-  }, [cfg, onVerdict])
+  }, [cfg, onVerdict, t])
 
   // A new connection must never show the previous one's answers, not even for
   // the frame before the fresh read lands.
@@ -629,20 +643,19 @@ export function DbOpsPanel({ cfg, kind, onVerdict }: Props): React.JSX.Element {
       )}
       <div className="row" style={{ marginBottom: 10 }}>
         <button className="btn primary sm" disabled={loading} onClick={() => void read()}>
-          {loading ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />} Read server state
+          {loading ? <Loader2 size={13} className="spin" /> : <RefreshCw size={13} />}{' '}
+          {t('databases.ops.read')}
         </button>
         <span className="spacer" />
         {report && (
           <span className="faint" style={{ fontSize: 11 }}>
-            {report.answers.length} questions in {report.elapsedMs} ms
+            {t('databases.ops.summary', { count: report.answers.length, ms: report.elapsedMs })}
           </span>
         )}
       </div>
 
       <div className="faint" style={{ fontSize: 11, marginBottom: 10 }}>
-        Read-only. Every statement here is a SELECT, a SHOW, a MongoDB read command or a Redis
-        INFO — nothing on this page changes the server, and there is no control that kills a
-        session or an operation, vacuums a table, purges a log, drops an index or sets a config.
+        {t('databases.ops.readOnly')}
       </div>
 
       {error && (
@@ -653,11 +666,12 @@ export function DbOpsPanel({ cfg, kind, onVerdict }: Props): React.JSX.Element {
 
       {!report && !loading && !error && (
         <div className="faint" style={{ fontSize: 12 }}>
-          Nothing has been read yet.{' '}
+          {t('databases.ops.notReadYet')}{' '}
           {supportsDbOps(kind) &&
-            `${DB_QUESTIONS_BY_ENGINE[kind].length} questions will be asked: ${DB_QUESTIONS_BY_ENGINE[kind]
-              .map((id) => DB_QUESTION_LABEL[id].toLowerCase())
-              .join(', ')}.`}
+            t('databases.ops.willAsk', {
+              count: DB_QUESTIONS_BY_ENGINE[kind].length,
+              list: DB_QUESTIONS_BY_ENGINE[kind].map((id) => DB_QUESTION_LABEL[id].toLowerCase()).join(', ')
+            })}
         </div>
       )}
 

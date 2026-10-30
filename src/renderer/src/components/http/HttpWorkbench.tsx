@@ -32,6 +32,7 @@ import {
   type SetVariableDetail
 } from './response/ResponsePane'
 import { HTTP_COMMAND_EVENT, type HttpCommandDetail } from './request/UrlBar'
+import { useT } from '../../lib/i18n'
 import './http.css'
 
 /**
@@ -53,6 +54,7 @@ export function HttpWorkbench(): React.JSX.Element {
   const [rootRef, width] = useWidth<HTMLDivElement>()
   const [setVariable, setSetVariable] = useState<SetVariableDetail | null>(null)
   const [curlSecrets, setCurlSecrets] = useState<Id | null>(null)
+  const t = useT()
   const widthNow = useRef(width)
   widthNow.current = width
 
@@ -163,11 +165,11 @@ export function HttpWorkbench(): React.JSX.Element {
       <ProductionPrompt />
       {curlSecrets && (
         <Modal
-          title="Copy as cURL with secrets?"
-          subtitle="Vault values and credentials go onto the clipboard as plain text, where any app can read them."
+          title={t('http.workbench.curlSecretsTitle')}
+          subtitle={t('http.workbench.curlSecretsSubtitle')}
           onClose={() => setCurlSecrets(null)}
           confirm={{
-            label: 'Copy with secrets',
+            label: t('http.workbench.copyWithSecrets'),
             destructive: true,
             onClick: () => {
               void copyAsCurl(curlSecrets, { secrets: 'include' })
@@ -210,6 +212,7 @@ const isCollectionGone = (route: Route): boolean =>
 function ProductionPrompt(): React.JSX.Element | null {
   const prompt = useHttpRuntime((s) => s.prompt)
   const [skip, setSkip] = useState(false)
+  const t = useT()
   if (!prompt) return null
   const answer = (send: boolean): void => {
     useHttpRuntime.getState().answer(send, send && skip)
@@ -217,9 +220,13 @@ function ProductionPrompt(): React.JSX.Element | null {
   }
   return (
     <Modal
-      title={`Send ${prompt.action} to production (${prompt.target}${prompt.via ? `, via ${prompt.via}` : ''})?`}
+      title={
+        prompt.via
+          ? t('http.workbench.prodTitleVia', { action: prompt.action, target: prompt.target, via: prompt.via })
+          : t('http.workbench.prodTitle', { action: prompt.action, target: prompt.target })
+      }
       onClose={() => answer(false)}
-      confirm={{ label: 'Send', onClick: () => answer(true), destructive: true }}
+      confirm={{ label: t('http.workbench.send'), onClick: () => answer(true), destructive: true }}
     >
       <label className="row">
         <input type="checkbox" checked={skip} onChange={(e) => setSkip(e.target.checked)} /> {prompt.skipLabel}
@@ -232,6 +239,7 @@ function ProductionPrompt(): React.JSX.Element | null {
 function Surface({ tabId }: { tabId: Id }): React.JSX.Element | null {
   const tab = useTabOrGhost(tabId)
   const kind = useHttp((s) => s.requestFor(tabId)?.kind ?? null)
+  const t = useT()
   if (!tab) return null
   if (tab.kind === 'collection') return tab.ref ? <CollectionTab tabId={tabId} /> : null
   if (tab.kind === 'environments') return <EnvironmentsTab tabId={tabId} />
@@ -240,11 +248,11 @@ function Surface({ tabId }: { tabId: Id }): React.JSX.Element | null {
   if (kind === 'http') return <HttpRequestPane tabId={tabId} />
   return (
     <div className="hc-empty-body">
-      <div className="hc-empty-title">This request no longer exists</div>
-      <div>It was deleted from its collection, here or on another device.</div>
+      <div className="hc-empty-title">{t('http.workbench.goneTitle')}</div>
+      <div>{t('http.workbench.goneBody')}</div>
       <div className="hc-empty-actions">
         <button className="btn" onClick={() => closeNow([tabId])}>
-          Close tab
+          {t('http.workbench.closeTab')}
         </button>
       </div>
     </div>
@@ -253,15 +261,16 @@ function Surface({ tabId }: { tabId: Id }): React.JSX.Element | null {
 
 /** One prompt for every tab a close would lose something from (§2.9, UX-m7). */
 function ClosePrompt({ ids }: { ids: Id[] }): React.JSX.Element {
+  const t = useT()
   const plan = planClose(ids)
   const cancelClose = (): void => useHttp.getState().setPendingClose(null)
   if (plan.dirty.length === 0) {
     return (
       <Modal
-        title={plan.prompt ?? 'Close?'}
-        subtitle="The connection closes with the tab."
+        title={plan.prompt ?? t('http.workbench.closeTitle')}
+        subtitle={t('http.workbench.connectionCloses')}
         onClose={cancelClose}
-        confirm={{ label: 'Disconnect and close', onClick: () => closeNow(ids), destructive: true }}
+        confirm={{ label: t('http.workbench.disconnectAndClose'), onClick: () => closeNow(ids), destructive: true }}
       >
         {null}
       </Modal>
@@ -280,15 +289,15 @@ function ClosePrompt({ ids }: { ids: Id[] }): React.JSX.Element {
   }
   return (
     <Modal
-      title={plan.prompt ?? 'Save changes?'}
-      subtitle={`Your changes are lost if you don’t save them.${plan.connected.length ? ' The connection closes with the tab.' : ''}`}
+      title={plan.prompt ?? t('http.workbench.saveChangesTitle')}
+      subtitle={plan.connected.length ? t('http.workbench.changesLostConnected') : t('http.workbench.changesLost')}
       onClose={cancelClose}
       footer={
         <button className="btn" onClick={() => closeNow(ids)}>
-          {plan.dirty.length === 1 ? 'Don’t save' : 'Discard'}
+          {plan.dirty.length === 1 ? t('http.workbench.dontSave') : t('http.workbench.discard')}
         </button>
       }
-      confirm={{ label: plan.dirty.length === 1 ? 'Save' : 'Save all', onClick: saveAll }}
+      confirm={{ label: plan.dirty.length === 1 ? t('common.save') : t('http.workbench.saveAll'), onClick: saveAll }}
     >
       {null}
     </Modal>

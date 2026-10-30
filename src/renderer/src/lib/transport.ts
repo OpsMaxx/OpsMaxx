@@ -4,6 +4,7 @@ import type { Server } from '../types'
 import { sshHopsFor } from './ssh'
 import { withVaultUnlock } from './withVaultUnlock'
 import { buildDockerShellCommand } from '../../../shared/docker'
+import { t } from './i18n'
 
 // Everything a terminal needs to run a session, with no knowledge of whether
 // the bytes come from a socket or a pty. `useTerminalSession` talks only to
@@ -142,7 +143,7 @@ export function sshTransport(
       // A credential kept in the vault is unreadable while the vault is
       // locked. Rather than failing with instructions to go and unlock it and
       // start again, ask here and carry straight on.
-      withVaultUnlock(`Connecting to ${server.name}`, () =>
+      withVaultUnlock(t('lib.transport.vaultReason.connect', { name: server.name }), () =>
         Promise.resolve(
           api()?.connect({
             sessionId,
@@ -178,7 +179,7 @@ export function sshTransport(
     onClose: (id, cb) => api()?.onClose(id, (info) => cb(sshCloseReason(info))) ?? ((): void => {}),
     pasteImage: async (id, png) => {
       const r = await api()?.pasteImage(id, png)
-      if (!r) throw new Error('This terminal is not connected.')
+      if (!r) throw new Error(t('lib.transport.notConnected'))
       if (!r.ok) throw new Error(r.error)
       return r.path
     },
@@ -274,7 +275,7 @@ export function containerTransport(
     // container pane and a host pane would share one terminal.
     paneKey: `container:${server.id}:${containerRef}`,
     title: containerRef,
-    subtitle: `container on ${server.name}`,
+    subtitle: t('lib.transport.containerSubtitle', { name: server.name }),
     endpoint: `${containerRef} · ${server.host}`,
     serverId: server.id,
     // The close reason is the container's, not the host's. See
@@ -284,7 +285,7 @@ export function containerTransport(
       window.opsmaxx?.ssh?.onClose(id, (info) => cb(containerCloseReason(info, containerRef))) ??
       ((): void => {}),
     connect: (sessionId, cols, rows) =>
-      withVaultUnlock(`Opening a shell in ${containerRef}`, () =>
+      withVaultUnlock(t('lib.transport.vaultReason.containerShell', { container: containerRef }), () =>
         Promise.resolve(
           window.opsmaxx?.ssh?.connect({
             sessionId,

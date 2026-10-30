@@ -8,6 +8,7 @@ import { bridgeHas, bridgeOn } from '../../lib/bridge'
 import { errorText } from '../../lib/connectionError'
 import { syncErrorText } from './collectionNames'
 import { duration } from '../../lib/format'
+import { t } from '../../lib/i18n'
 
 /**
  * What the panel needs main to tell it, and the shape it is asked for in.
@@ -161,9 +162,11 @@ export interface AddyStep {
 export function ago(atMs: number): string {
   const days = Math.floor((Date.now() - atMs) / 86_400_000)
   if (days < 1) return duration(atMs)
-  if (days < 30) return `${days}d`
+  if (days < 30) return t('addy.status.ago.days', { n: days })
   const months = Math.round(days / 30)
-  return months < 12 ? `${months}mo` : `${Math.round(days / 365)}y`
+  return months < 12
+    ? t('addy.status.ago.months', { n: months })
+    : t('addy.status.ago.years', { n: Math.round(days / 365) })
 }
 
 /** The host part of a relay URL, for a subtitle. The whole URL is too long for
@@ -203,97 +206,95 @@ export function addyJourney(
   const account: AddyStep = enrolled
     ? {
         key: 'account',
-        title: 'An account on a relay',
-        detail: relay ? `This device is on the account at ${relay}.` : 'This device is on an account.',
+        title: t('addy.journey.account.title'),
+        detail: relay ? t('addy.journey.account.enrolledAt', { relay }) : t('addy.journey.account.enrolled'),
         state: 'done'
       }
     : relay
       ? {
           key: 'account',
-          title: 'An account on a relay',
+          title: t('addy.journey.account.title'),
           // Reached only when main reported `enrolled: false`, which is
           // authoritative and works offline — it reads a note on disk. The
           // build knows perfectly well; it said no. Blaming the build sent
           // people looking for an update.
-          detail: `This device is not on an account. The address of the relay it last used, ${relay}, is remembered here.`,
+          detail: t('addy.journey.account.remembered', { relay }),
           state: supported ? 'now' : 'unknown'
         }
       : {
           key: 'account',
-          title: 'An account on a relay',
-          detail:
-            'Name the relay you run and create an account on it. The twelve-word recovery phrase is shown once, during this step, and nothing on this machine keeps a copy.',
+          title: t('addy.journey.account.title'),
+          detail: t('addy.journey.account.start'),
           state: 'now'
         }
 
   const device: AddyStep = !supported
     ? {
         key: 'device',
-        title: 'This device joins it',
-        detail: 'This build does not report which devices are enrolled.',
+        title: t('addy.journey.device.title'),
+        detail: t('addy.journey.device.notReported'),
         state: 'unknown'
       }
     : enrolled
       ? {
           key: 'device',
-          title: 'This device joins it',
-          detail: self ? `Enrolled as ${self.label}.` : 'This device is enrolled.',
+          title: t('addy.journey.device.title'),
+          detail: self ? t('addy.journey.device.enrolledAs', { label: self.label }) : t('addy.journey.device.enrolled'),
           state: 'done'
         }
-      : { key: 'device', title: 'This device joins it', detail: 'Happens when the account is created, or when this device is paired with one that already has an account.', state: 'todo' }
+      : { key: 'device', title: t('addy.journey.device.title'), detail: t('addy.journey.device.todo'), state: 'todo' }
 
   const pair: AddyStep = !supported
     ? {
         key: 'pair',
-        title: 'A second device pairs with it',
-        detail: 'This build does not report the device list.',
+        title: t('addy.journey.pair.title'),
+        detail: t('addy.journey.pair.notReported'),
         state: 'unknown'
       }
     : !enrolled
       ? {
           key: 'pair',
-          title: 'A second device pairs with it',
-          detail: 'Both machines have to be open at the same time; one shows a code and both compare the same emoji.',
+          title: t('addy.journey.pair.title'),
+          detail: t('addy.journey.pair.todo'),
           state: 'todo'
         }
       : others === undefined
         ? {
             key: 'pair',
-            title: 'A second device pairs with it',
+            title: t('addy.journey.pair.title'),
             // The ordinary cause is that the roster has not arrived yet: it is
             // read from the relay and held in memory, so an enrolled device
             // that launched offline is exactly here. Telling that person the
             // feature is half-built is the single most misleading string on
             // this screen, and it is the state a sysadmin lands in most often.
-            detail: `Waiting for the device list${relay ? ` from ${relay}` : ''}. It arrives the next time this device reaches the relay.`,
+            detail: relay ? t('addy.journey.pair.waitingFrom', { relay }) : t('addy.journey.pair.waiting'),
             state: 'unknown'
           }
         : others > 0
           ? {
               key: 'pair',
-              title: 'A second device pairs with it',
-              detail: `${others} other ${others === 1 ? 'device is' : 'devices are'} on this account.`,
+              title: t('addy.journey.pair.title'),
+              detail: t('addy.journey.pair.others', { count: others }),
               state: 'done'
             }
           : {
               key: 'pair',
-              title: 'A second device pairs with it',
-              detail:
-                'Nothing syncs to one device. Open OpsMaxx on the other machine, start pairing here, and compare the emoji on both.',
+              title: t('addy.journey.pair.title'),
+              detail: t('addy.journey.pair.now'),
               state: 'now'
             }
 
   const syncStep: AddyStep = !supported
     ? {
         key: 'sync',
-        title: 'Sync runs',
-        detail: 'Nothing is carrying data between devices yet: this build does not run the engine that would.',
+        title: t('addy.journey.sync.title'),
+        detail: t('addy.journey.sync.notReported'),
         state: 'unknown'
       }
     : sync?.running !== true
       ? {
           key: 'sync',
-          title: 'Sync runs',
+          title: t('addy.journey.sync.title'),
           // NOT "the account is unaffected" when there is a sign-in problem.
           // The engine starts only after this device signs in, so a `problem`
           // is the very reason it is not running — and the line used to
@@ -301,26 +302,26 @@ export function addyJourney(
           // sign in.
           detail:
             status?.problem !== undefined
-              ? 'Not running, because this device could not sign in to the relay. The reason is at the top of this page.'
-              : 'The sync engine is not running, so nothing is moving between devices.',
+              ? t('addy.journey.sync.signInProblem')
+              : t('addy.journey.sync.notRunning'),
           state: status?.problem !== undefined ? 'now' : 'unknown'
         }
       : sync.connected
-        ? { key: 'sync', title: 'Sync runs', detail: 'Connected to the relay.', state: 'done' }
+        ? { key: 'sync', title: t('addy.journey.sync.title'), detail: t('addy.journey.sync.connected'), state: 'done' }
         : {
             key: 'sync',
-            title: 'Sync runs',
+            title: t('addy.journey.sync.title'),
             detail: sync.error
-              ? `Running, but not connected: ${syncErrorText(sync.error.message)}`
-              : 'Running, and not connected to the relay right now.',
+              ? t('addy.journey.sync.notConnectedBecause', { reason: syncErrorText(sync.error.message) })
+              : t('addy.journey.sync.notConnected'),
             state: 'now'
           }
 
   const current: AddyStep = !supported || sync?.running !== true
     ? {
         key: 'current',
-        title: 'Both devices agree',
-        detail: 'Nothing can be said about this until sync runs.',
+        title: t('addy.journey.current.title'),
+        detail: t('addy.journey.current.unknown'),
         state: 'unknown'
       }
     : sync.error !== undefined
@@ -334,23 +335,22 @@ export function addyJourney(
           // why. Two contradictory statements on one screen, and the
           // reassuring one had the tick.
           key: 'current',
-          title: 'Both devices agree',
-          detail:
-            'The last pass failed, so some changes have not been carried. The reason is below.',
+          title: t('addy.journey.current.title'),
+          detail: t('addy.journey.current.failed'),
           state: 'now'
         }
       : sync.conflicts > 0
       ? {
           key: 'current',
-          title: 'Both devices agree',
-          detail: `${sync.conflicts} ${sync.conflicts === 1 ? 'change was' : 'changes were'} made in two places at once and need a choice.`,
+          title: t('addy.journey.current.title'),
+          detail: t('addy.journey.current.conflicts', { count: sync.conflicts }),
           state: 'now'
         }
       : sync.lastSyncAt === null
         ? {
             key: 'current',
-            title: 'Both devices agree',
-            detail: 'Nothing has synced yet.',
+            title: t('addy.journey.current.title'),
+            detail: t('addy.journey.current.nothingYet'),
             state: 'todo'
           }
         : others === 0
@@ -363,12 +363,11 @@ export function addyJourney(
               // one asking for a second device — a list where the later item
               // is complete and the earlier one is not.
               key: 'current',
-              title: 'Both devices agree',
-              detail:
-                'Only this device is on the account, so there is nothing to agree with yet. Everything it knows about has been carried to the relay and is waiting there.',
+              title: t('addy.journey.current.title'),
+              detail: t('addy.journey.current.alone'),
               state: 'todo'
             }
-          : { key: 'current', title: 'Both devices agree', detail: 'Everything this device knows about has been carried.', state: 'done' }
+          : { key: 'current', title: t('addy.journey.current.title'), detail: t('addy.journey.current.done'), state: 'done' }
 
   return [account, device, pair, syncStep, current]
 }

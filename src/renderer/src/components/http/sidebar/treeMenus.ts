@@ -19,6 +19,7 @@ import { useApi } from '../../../store/api'
 import { useHttp } from '../../../store/http'
 import { copyAsCurl as copyTabAsCurl } from '../../../lib/httpSend'
 import { collectionRoute, routeLabel } from '../collection/RouteSelect'
+import { t } from '../../../lib/i18n'
 
 // The §2.6 menus for the sidebar's rows, as data. The tree and the history
 // list attach behaviour through `TreeActions`; the items and their order live
@@ -45,10 +46,10 @@ export interface TreeActions {
 const SEP: MenuEntry = { separator: true, label: '' }
 
 const newItems = (a: TreeActions, colId: Id, parentId: Id | null): MenuEntry[] => [
-  { label: 'New HTTP request', onClick: () => a.newRequest(colId, parentId, 'http') },
-  { label: 'New WebSocket', onClick: () => a.newRequest(colId, parentId, 'ws') },
-  { label: 'New GraphQL request', onClick: () => a.newRequest(colId, parentId, 'graphql') },
-  { label: 'New folder', onClick: () => a.newFolder(colId, parentId) }
+  { label: t('http.treeMenu.newHttpRequest'), onClick: () => a.newRequest(colId, parentId, 'http') },
+  { label: t('http.treeMenu.newWebSocket'), onClick: () => a.newRequest(colId, parentId, 'ws') },
+  { label: t('http.treeMenu.newGraphQlRequest'), onClick: () => a.newRequest(colId, parentId, 'graphql') },
+  { label: t('http.treeMenu.newFolder'), onClick: () => a.newFolder(colId, parentId) }
 ]
 
 export function collectionMenu(c: ApiCollectionV2, a: TreeActions): MenuEntry[] {
@@ -56,12 +57,12 @@ export function collectionMenu(c: ApiCollectionV2, a: TreeActions): MenuEntry[] 
   return [
     ...newItems(a, c.id, null),
     SEP,
-    { label: 'Open collection settings', onClick: () => a.openSettings(c.id) },
-    { label: 'Rename', shortcut: 'F2', onClick: () => a.rename(c.id) },
-    { label: 'Duplicate', shortcut: k.dup, onClick: () => a.duplicate(c.id, c.id) },
-    ...(c.importedFrom ? [{ label: 'Re-import from OpenAPI…', onClick: () => a.reimport(c.id) }] : []),
+    { label: t('http.treeMenu.openSettings'), onClick: () => a.openSettings(c.id) },
+    { label: t('http.treeMenu.rename'), shortcut: 'F2', onClick: () => a.rename(c.id) },
+    { label: t('http.treeMenu.duplicate'), shortcut: k.dup, onClick: () => a.duplicate(c.id, c.id) },
+    ...(c.importedFrom ? [{ label: t('http.treeMenu.reimport'), onClick: () => a.reimport(c.id) }] : []),
     SEP,
-    { label: 'Delete collection…', shortcut: k.del, danger: true, onClick: () => a.remove(c.id, c.id) }
+    { label: t('http.treeMenu.deleteCollection'), shortcut: k.del, danger: true, onClick: () => a.remove(c.id, c.id) }
   ]
 }
 
@@ -70,26 +71,26 @@ export function folderMenu(colId: Id, folderId: Id, a: TreeActions): MenuEntry[]
   return [
     ...newItems(a, colId, folderId),
     SEP,
-    { label: 'Rename', shortcut: 'F2', onClick: () => a.rename(folderId) },
-    { label: 'Duplicate', shortcut: k.dup, onClick: () => a.duplicate(colId, folderId) },
+    { label: t('http.treeMenu.rename'), shortcut: 'F2', onClick: () => a.rename(folderId) },
+    { label: t('http.treeMenu.duplicate'), shortcut: k.dup, onClick: () => a.duplicate(colId, folderId) },
     SEP,
-    { label: 'Delete folder', shortcut: k.del, danger: true, onClick: () => a.remove(colId, folderId) }
+    { label: t('http.treeMenu.deleteFolder'), shortcut: k.del, danger: true, onClick: () => a.remove(colId, folderId) }
   ]
 }
 
 export function requestMenu(colId: Id, req: ApiRequest, a: TreeActions): MenuEntry[] {
   const k = keys()
   return [
-    { label: 'Open', shortcut: 'Enter', onClick: () => a.open(colId, req.id, true) },
-    { label: 'Open in new tab', shortcut: k.newTab, onClick: () => a.open(colId, req.id, false) },
+    { label: t('http.treeMenu.open'), shortcut: 'Enter', onClick: () => a.open(colId, req.id, true) },
+    { label: t('http.treeMenu.openInNewTab'), shortcut: k.newTab, onClick: () => a.open(colId, req.id, false) },
     SEP,
-    { label: 'Rename', shortcut: 'F2', onClick: () => a.rename(req.id) },
-    { label: 'Duplicate', shortcut: k.dup, onClick: () => a.duplicate(colId, req.id) },
-    { label: 'Move to…', onClick: () => a.moveTo(colId, req.id) },
+    { label: t('http.treeMenu.rename'), shortcut: 'F2', onClick: () => a.rename(req.id) },
+    { label: t('http.treeMenu.duplicate'), shortcut: k.dup, onClick: () => a.duplicate(colId, req.id) },
+    { label: t('http.treeMenu.moveTo'), onClick: () => a.moveTo(colId, req.id) },
     SEP,
     ...copyItems(req, { collectionId: colId }),
     SEP,
-    { label: 'Delete', shortcut: k.del, danger: true, onClick: () => a.remove(colId, req.id) }
+    { label: t('http.treeMenu.delete'), shortcut: k.del, danger: true, onClick: () => a.remove(colId, req.id) }
   ]
 }
 
@@ -108,25 +109,25 @@ export function historySourceExists(e: HistoryEntry): boolean {
 
 export function historyMenu(e: HistoryEntry, a: HistoryActions): MenuEntry[] {
   return [
-    { label: 'Send again', onClick: () => a.sendAgain(e) },
-    ...(historySourceExists(e) ? [{ label: 'Open request', onClick: () => a.openRequest(e) }] : []),
-    { label: 'Open as new request', onClick: () => a.openAsNew(e) },
-    { label: 'Save to collection…', onClick: () => a.saveToCollection(e) },
+    { label: t('http.treeMenu.sendAgain'), onClick: () => a.sendAgain(e) },
+    ...(historySourceExists(e) ? [{ label: t('http.treeMenu.openRequest'), onClick: () => a.openRequest(e) }] : []),
+    { label: t('http.treeMenu.openAsNew'), onClick: () => a.openAsNew(e) },
+    { label: t('http.treeMenu.saveToCollection'), onClick: () => a.saveToCollection(e) },
     ...copyItems(e.request, { route: e.route }),
     SEP,
-    { label: 'Delete entry', danger: true, onClick: () => a.remove(e) }
+    { label: t('http.treeMenu.deleteEntry'), danger: true, onClick: () => a.remove(e) }
   ]
 }
 
 function copyItems(req: ApiRequest, from: CurlSource): MenuEntry[] {
   return [
     {
-      label: 'Copy as cURL',
+      label: t('http.treeMenu.copyAsCurl'),
       shortcut: keys().curl,
       disabled: req.kind === 'ws',
       onClick: () => void copyAsCurl(req, from)
     },
-    { label: 'Copy URL', onClick: () => copyText(req.url) }
+    { label: t('http.treeMenu.copyUrl'), onClick: () => copyText(req.url) }
   ]
 }
 
@@ -172,9 +173,9 @@ export async function copyAsCurl(req: ApiRequest, from: CurlSource = {}): Promis
   try {
     const { text, notes } = toCurl(req, sent, { secrets: 'mask' })
     copyText(text)
-    toast(['Copied as cURL (secrets masked).', ...notes].join(' '), 'ok')
+    toast([t('http.treeMenu.copiedCurl'), ...notes].join(' '), 'ok')
   } catch {
-    toast('Could not copy this request as cURL.', 'error')
+    toast(t('http.treeMenu.copyCurlFailed'), 'error')
   }
 }
 

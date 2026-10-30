@@ -29,6 +29,8 @@ import {
 } from '../../../../shared/changelog'
 import type { Server } from '../../types'
 import { NoteWhy, PanelShell } from './PanelShell'
+import { useT } from '../../lib/i18n'
+import type { MessageKey, Translate } from '../../../../shared/i18n'
 
 // "What did I change on Tuesday." — roadmap item 14, the view.
 //
@@ -80,41 +82,61 @@ import { NoteWhy, PanelShell } from './PanelShell'
 // its FIRST member. An entry can therefore move up within its own day section
 // and can never move anywhere else.
 
-const WINDOWS: { id: string; label: string; short: string; ms: number | null }[] = [
-  { id: '24h', label: 'Last 24 hours', short: 'in the last 24 hours', ms: 86_400_000 },
-  { id: '7d', label: 'Last 7 days', short: 'in the last 7 days', ms: 7 * 86_400_000 },
-  { id: '30d', label: 'Last 30 days', short: 'in the last 30 days', ms: 30 * 86_400_000 },
-  { id: 'all', label: 'Everything kept', short: 'across everything kept', ms: null }
+const WINDOWS: { id: string; labelKey: MessageKey; shortKey: MessageKey; ms: number | null }[] = [
+  {
+    id: '24h',
+    labelKey: 'monitor.changeLog.window.24h',
+    shortKey: 'monitor.changeLog.window.24hShort',
+    ms: 86_400_000
+  },
+  {
+    id: '7d',
+    labelKey: 'monitor.changeLog.window.7d',
+    shortKey: 'monitor.changeLog.window.7dShort',
+    ms: 7 * 86_400_000
+  },
+  {
+    id: '30d',
+    labelKey: 'monitor.changeLog.window.30d',
+    shortKey: 'monitor.changeLog.window.30dShort',
+    ms: 30 * 86_400_000
+  },
+  {
+    id: 'all',
+    labelKey: 'monitor.changeLog.window.all',
+    shortKey: 'monitor.changeLog.window.allShort',
+    ms: null
+  }
 ]
 
-const ACTOR_LABEL: Record<ChangeLogActor, string> = {
-  human: 'You',
-  agent: 'An agent',
+const ACTOR_LABEL: Record<ChangeLogActor, MessageKey> = {
+  human: 'monitor.changeLog.actor.human',
+  agent: 'monitor.changeLog.actor.agent',
   // Not a person and not an agent. A host that went unreachable at 03:00 was
   // nobody's doing, and filing it under either of the other two would make
   // this screen answer "what did I do" with something nobody did.
-  system: 'OpsMaxx itself'
+  system: 'monitor.changeLog.actor.system'
 }
 
 /** The plural the summary band counts in. `ACTOR_LABEL` is the row's voice
  *  ("You · started a shell"); a tile is a heading over a number. */
-const ACTOR_TILE: Record<ChangeLogActor, { label: string; sub: string }> = {
-  human: { label: 'You', sub: 'done by a person at this app' },
-  agent: { label: 'Agents', sub: 'done through the MCP bridge' },
-  system: { label: 'OpsMaxx itself', sub: 'observed, not done by anyone' }
+const ACTOR_TILE: Record<ChangeLogActor, { labelKey: MessageKey; subKey: MessageKey }> = {
+  human: { labelKey: 'monitor.changeLog.actor.human', subKey: 'monitor.changeLog.tile.humanSub' },
+  agent: { labelKey: 'monitor.changeLog.tile.agents', subKey: 'monitor.changeLog.tile.agentSub' },
+  system: { labelKey: 'monitor.changeLog.actor.system', subKey: 'monitor.changeLog.tile.systemSub' }
 }
 
 /** Ranked, and the rank is the point: a person's actions lead, an agent's
  *  follow, and what nobody did comes last. */
 const ACTOR_ORDER: ChangeLogActor[] = ['human', 'agent', 'system']
 
-const KIND_LABEL: Record<ChangeLogKind, string> = {
-  shell: 'Local shells',
-  approval: 'Approvals',
-  'agent-action': 'Agent actions',
-  job: 'Jobs',
-  host: 'Hosts',
-  store: 'The store itself'
+const KIND_LABEL: Record<ChangeLogKind, MessageKey> = {
+  shell: 'monitor.changeLog.kind.shell',
+  approval: 'monitor.changeLog.kind.approval',
+  'agent-action': 'monitor.changeLog.kind.agentAction',
+  job: 'monitor.changeLog.kind.job',
+  host: 'monitor.changeLog.kind.host',
+  store: 'monitor.changeLog.kind.store'
 }
 
 /** One icon per event class, so a row is recognisable before it is read. The
@@ -153,15 +175,15 @@ function absolute(ts: number): string {
  * times in a column. The absolute never leaves — it is the `title`, and it is
  * also the day heading above every row.
  */
-function ago(ts: number, now: number): string {
+function ago(t: Translate, ts: number, now: number): string {
   const secs = Math.floor((now - ts) / 1000)
-  if (secs < 60) return 'just now'
+  if (secs < 60) return t('monitor.changeLog.justNow')
   const mins = Math.floor(secs / 60)
-  if (mins < 60) return `${mins} min ago`
+  if (mins < 60) return t('monitor.changeLog.minAgo', { count: mins })
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours} h ago`
+  if (hours < 24) return t('monitor.changeLog.hoursAgo', { count: hours })
   const days = Math.floor(hours / 24)
-  if (days < 7) return `${days} d ago`
+  if (days < 7) return t('monitor.changeLog.daysAgo', { count: days })
   return new Date(ts).toLocaleDateString()
 }
 
@@ -169,11 +191,11 @@ function dayKey(ts: number): string {
   return new Date(ts).toDateString()
 }
 
-function dayLabel(key: string, now: number): string {
-  if (key === dayKey(now)) return 'Today'
+function dayLabel(t: Translate, key: string, now: number): string {
+  if (key === dayKey(now)) return t('monitor.changeLog.today')
   const y = new Date(now)
   y.setDate(y.getDate() - 1)
-  if (key === y.toDateString()) return 'Yesterday'
+  if (key === y.toDateString()) return t('monitor.changeLog.yesterday')
   const d = new Date(key)
   return d.toLocaleDateString(undefined, {
     weekday: 'short',
@@ -238,7 +260,8 @@ function targetsOf(e: ChangeLogEntry, nameOf: (id: string) => string): string[] 
 export function groupChangeLog(
   entries: ChangeLogEntry[],
   nameOf: (id: string) => string,
-  now: number
+  now: number,
+  t: Translate
 ): ChangeLogDay[] {
   const days: ChangeLogDay[] = []
   let day: ChangeLogDay | null = null
@@ -247,7 +270,7 @@ export function groupChangeLog(
   for (const e of entries) {
     const key = dayKey(e.ts)
     if (day === null || day.key !== key) {
-      day = { key, label: dayLabel(key, now), groups: [], count: 0 }
+      day = { key, label: dayLabel(t, key, now), groups: [], count: 0 }
       days.push(day)
       index = new Map()
     }
@@ -323,20 +346,23 @@ export function summariseChangeLog(days: ChangeLogDay[]): ChangeLogSummary {
  * always rendered; the per-source prose is the body. A reader who never opens
  * it still cannot conclude the week was quiet.
  */
-function coverageHeadline(coverage: ChangeLogCoverage[]): { text: string; incomplete: boolean } {
+function coverageHeadline(
+  t: Translate,
+  coverage: ChangeLogCoverage[]
+): { text: string; incomplete: boolean } {
   const bad = coverage.filter((r) => r.state !== 'read')
   if (bad.length === 0) {
-    return { text: 'All four records were read in full for this window.', incomplete: false }
+    return { text: t('monitor.changeLog.coverageFull'), incomplete: false }
   }
   const names = bad.map((r) => {
-    if (r.state === 'unreadable') return 'one could not be read'
-    if (r.state === 'truncated') return 'one was read only back to a point'
-    if (r.state === 'absent') return 'one does not exist yet'
-    if (r.state === 'off') return 'one was not opened'
-    return 'one had lines that would not parse'
+    if (r.state === 'unreadable') return t('monitor.changeLog.coverage.unreadable')
+    if (r.state === 'truncated') return t('monitor.changeLog.coverage.truncated')
+    if (r.state === 'absent') return t('monitor.changeLog.coverage.absent')
+    if (r.state === 'off') return t('monitor.changeLog.coverage.off')
+    return t('monitor.changeLog.coverage.unparsed')
   })
   return {
-    text: `This timeline is NOT complete: of four records, ${[...new Set(names)].join(', ')}. What is missing is listed here.`,
+    text: t('monitor.changeLog.coverageIncomplete', { missing: [...new Set(names)].join(', ') }),
     incomplete: true
   }
 }
@@ -344,6 +370,7 @@ function coverageHeadline(coverage: ChangeLogCoverage[]): { text: string; incomp
 // ---------------------------------------------------------------------------
 
 export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.Element {
+  const t = useT()
   // main does not hold the workspace's server list — the renderer does — so the
   // name is resolved here.
   const nameOf = useCallback(
@@ -395,27 +422,24 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
   }, [read])
 
   const days = useMemo(
-    () => (page === null ? [] : groupChangeLog(page.entries, nameOf, readAt)),
-    [page, nameOf, readAt]
+    () => (page === null ? [] : groupChangeLog(page.entries, nameOf, readAt, t)),
+    [page, nameOf, readAt, t]
   )
   const stats = useMemo(() => summariseChangeLog(days), [days])
 
   // Whether pressing Refresh is the task, or a way of disturbing an answer that
   // is already on screen. It decides which of the two ranks the button wears.
   const nothingToShow = page === null || page.entries.length === 0
-  const windowShort = (WINDOWS.find((w) => w.id === windowId) ?? WINDOWS[1]).short
-  const coverage = page === null ? null : coverageHeadline(page.coverage)
+  const windowShort = t((WINDOWS.find((w) => w.id === windowId) ?? WINDOWS[1]).shortKey)
+  const coverage = page === null ? null : coverageHeadline(t, page.coverage)
 
   return (
     <PanelShell
       icon={<History size={14} />}
-      title="Change log"
+      title={t('modules.changeLog.label')}
       about={
         <>
-          <p>
-            What OpsMaxx itself changed on the estate, and when — with the coverage of each
-            source stated, so a quiet window is not read as a quiet week.
-          </p>
+          <p>{t('monitor.changeLog.about')}</p>
           <p data-testid="changelog-on">{CHANGELOG_SWITCH_ON}</p>
         </>
       }
@@ -427,14 +451,13 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
           onClick={() => void read()}
           disabled={reading}
         >
-          <RefreshCw size={13} className={clsx(reading && 'spin')} /> Refresh
+          <RefreshCw size={13} className={clsx(reading && 'spin')} /> {t('common.refresh')}
         </button>
       }
     >
       {unavailable && (
         <div className="panel-note is-alarm" data-testid="changelog-unavailable">
-          The change log could not be read: this window is newer than the preload script it booted
-          with. Restart the app to rebuild it. Nothing below is a statement about what happened.
+          {t('monitor.changeLog.unavailable')}
         </div>
       )}
 
@@ -442,7 +465,7 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
         <div className="panel-note is-unknown" data-testid="changelog-off">
           {CHANGELOG_SWITCH_OFF}{' '}
           <button className="btn ghost sm" onClick={() => openSettings('modules')}>
-            Modules
+            {t('nav.settings.modules')}
           </button>
         </div>
       )}
@@ -452,49 +475,49 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
           <div className="cl-toolbar">
             <select
               className="input sm"
-              aria-label="Time range"
+              aria-label={t('monitor.changeLog.timeRange')}
               value={windowId}
               onChange={(e) => setWindowId(e.target.value)}
             >
               {WINDOWS.map((w) => (
                 <option key={w.id} value={w.id}>
-                  {w.label}
+                  {t(w.labelKey)}
                 </option>
               ))}
             </select>
             <select
               className="input sm"
-              aria-label="Who"
+              aria-label={t('monitor.changeLog.who')}
               value={actor}
               onChange={(e) => setActor(e.target.value as ChangeLogActor | 'any')}
             >
-              <option value="any">Anyone</option>
+              <option value="any">{t('monitor.changeLog.anyone')}</option>
               {(Object.keys(ACTOR_LABEL) as ChangeLogActor[]).map((a) => (
                 <option key={a} value={a}>
-                  {ACTOR_LABEL[a]}
+                  {t(ACTOR_LABEL[a])}
                 </option>
               ))}
             </select>
             <select
               className="input sm"
-              aria-label="What"
+              aria-label={t('monitor.changeLog.what')}
               value={kind}
               onChange={(e) => setKind(e.target.value as ChangeLogKind | 'any')}
             >
-              <option value="any">Everything</option>
+              <option value="any">{t('monitor.changeLog.everything')}</option>
               {CHANGELOG_KINDS.map((k) => (
                 <option key={k} value={k}>
-                  {KIND_LABEL[k]}
+                  {t(KIND_LABEL[k])}
                 </option>
               ))}
             </select>
             <select
               className="input sm"
-              aria-label="Host"
+              aria-label={t('monitor.changeLog.host')}
               value={host}
               onChange={(e) => setHost(e.target.value)}
             >
-              <option value="">Every server</option>
+              <option value="">{t('monitor.changeLog.everyServer')}</option>
               {servers.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -511,20 +534,20 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
               an unknown number" would be the same lie the coverage rows exist
               to prevent, told by the summary instead of by the timeline. */}
           {page.entries.length > 0 && (
-            <section className="kpi-band" aria-label="What changed" data-testid="changelog-summary">
+            <section className="kpi-band" aria-label={t('monitor.changeLog.whatChanged')} data-testid="changelog-summary">
               <div className="kpi">
                 <div className="kpi-top">
                   <span className="kpi-icon">
                     <History size={13} />
                   </span>
-                  <span className="kpi-label">Changes</span>
+                  <span className="kpi-label">{t('monitor.changeLog.changes')}</span>
                 </div>
                 <div className="kpi-value">
                   {stats.total}
                   {page.more && <span className="kpi-unit">+</span>}
                 </div>
                 <div className="kpi-sub">
-                  {page.more ? 'at least — the page was cut' : windowShort}
+                  {page.more ? t('monitor.changeLog.pageCut') : windowShort}
                 </div>
               </div>
 
@@ -533,11 +556,13 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
                   <span className="kpi-icon">
                     <ServerIcon size={13} />
                   </span>
-                  <span className="kpi-label">Servers</span>
+                  <span className="kpi-label">{t('monitor.changeLog.servers')}</span>
                 </div>
                 <div className="kpi-value">{stats.hosts}</div>
                 <div className="kpi-sub">
-                  {stats.hosts === 0 ? 'none of this names a server' : 'named on these changes'}
+                  {stats.hosts === 0
+                    ? t('monitor.changeLog.noServerNamed')
+                    : t('monitor.changeLog.serversNamed')}
                 </div>
               </div>
 
@@ -550,10 +575,10 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
                     <span className="kpi-icon">
                       <ActorTileIcon actor={a} />
                     </span>
-                    <span className="kpi-label">{ACTOR_TILE[a].label}</span>
+                    <span className="kpi-label">{t(ACTOR_TILE[a].labelKey)}</span>
                   </div>
                   <div className="kpi-value">{stats.byActor[a]}</div>
-                  <div className="kpi-sub">{ACTOR_TILE[a].sub}</div>
+                  <div className="kpi-sub">{t(ACTOR_TILE[a].subKey)}</div>
                 </div>
               ))}
 
@@ -568,7 +593,7 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
                     <span className="kpi-icon">
                       <AlertTriangle size={13} />
                     </span>
-                    <span className="kpi-label">Repeated most</span>
+                    <span className="kpi-label">{t('monitor.changeLog.repeatedMost')}</span>
                   </div>
                   <div className="kpi-value">
                     <span className="kpi-unit">×</span>
@@ -612,17 +637,15 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
 
           {page.hostFilterHidUnattributed !== undefined && (
             <div className="panel-note is-unknown" data-testid="changelog-host-filter-note">
-              {page.hostFilterHidUnattributed} entries in this window name no server at all — a local
-              shell, or a job that had not reached one — so filtering by server hides them. They are
-              not absent; they are unattributed.
+              {t('monitor.changeLog.unattributed', { count: page.hostFilterHidUnattributed })}
             </div>
           )}
 
           {page.more && (
             <div className="panel-note" data-testid="changelog-more">
-              More entries matched than fit on one page. The oldest shown is{' '}
-              {page.oldest === null ? 'unknown' : absolute(page.oldest)}; narrow the window to see
-              further back.
+              {t('monitor.changeLog.more', {
+                oldest: page.oldest === null ? t('monitor.changeLog.unknown') : absolute(page.oldest)
+              })}
             </div>
           )}
 
@@ -631,11 +654,10 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
             // the one claim this panel exists to make.
             <div className="panel-empty" data-testid="changelog-empty">
               <p className="panel-empty-title">
-                Nothing matched this window — read the coverage above before reading that as a
-                quiet period.
+                {t('monitor.changeLog.emptyTitle')}
               </p>
               <p className="panel-empty-body">
-                Widening the time range, or clearing the server filter, is the next thing to try.
+                {t('monitor.changeLog.emptyBody')}
               </p>
             </div>
           ) : (
@@ -645,7 +667,7 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
                   <h3 className="cl-day-head">
                     <span className="cl-day-label">{day.label}</span>
                     <span className="cl-day-count">
-                      {day.count} {day.count === 1 ? 'change' : 'changes'}
+                      {t('monitor.changeLog.dayCount', { count: day.count })}
                     </span>
                   </h3>
                   {day.groups.map((g) => (
@@ -669,6 +691,7 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
  * people not to press the ones that matter.
  */
 function GroupRow({ group, now }: { group: ChangeLogGroup; now: number }): React.JSX.Element {
+  const t = useT()
   const first = group.entries[0]
   const n = group.entries.length
   const cls = clsx('cl-row', `is-${group.actor}`)
@@ -679,7 +702,7 @@ function GroupRow({ group, now }: { group: ChangeLogGroup; now: number }): React
         <KindIcon kind={group.kind} />
       </span>
       <span className="cl-line">
-        <b className="cl-actor">{ACTOR_LABEL[group.actor]}</b> · {group.summary}
+        <b className="cl-actor">{t(ACTOR_LABEL[group.actor])}</b> · {group.summary}
         {group.targets.length > 0 && (
           <span className="cl-target"> · {group.targets.join(', ')}</span>
         )}
@@ -692,9 +715,11 @@ function GroupRow({ group, now }: { group: ChangeLogGroup; now: number }): React
       <time
         className="cl-time"
         dateTime={new Date(first.ts).toISOString()}
-        title={n > 1 ? `Newest of ${n}: ${absolute(first.ts)}` : absolute(first.ts)}
+        title={
+          n > 1 ? t('monitor.changeLog.newestOf', { count: n, when: absolute(first.ts) }) : absolute(first.ts)
+        }
       >
-        {ago(first.ts, now)}
+        {ago(t, first.ts, now)}
       </time>
     </>
   )
@@ -720,7 +745,7 @@ function GroupRow({ group, now }: { group: ChangeLogGroup; now: number }): React
         {group.entries.map((e) => (
           <li key={e.id} className="cl-member">
             <time className="cl-time" dateTime={new Date(e.ts).toISOString()} title={absolute(e.ts)}>
-              {ago(e.ts, now)}
+              {ago(t, e.ts, now)}
             </time>
             <span className="cl-detail mono">
               {e.detail.length > 0 ? e.detail.join(' · ') : absolute(e.ts)}

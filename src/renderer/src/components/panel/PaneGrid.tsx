@@ -2,6 +2,7 @@ import { X, Terminal as TerminalIcon } from 'lucide-react'
 import { useApp } from '../../store/app'
 import type { Pane, PaneTarget, TabPanes } from '../../store/app'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import { EmptyState } from '../common/EmptyState'
 import { TerminalView } from '../terminal/TerminalView'
 import { localTransport, sshTransport, containerTransport} from '../../lib/transport'
@@ -26,6 +27,7 @@ import type { Server } from '../../types'
 //    session survives. Rendering the terminal bare when unsplit and wrapped when
 //    split would remount it on every toggle.
 export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.JSX.Element {
+  const t = useT()
   const servers = useApp((s) => s.servers)
   const localShells = useApp((s) => s.localShells)
   const setServerStatus = useApp((s) => s.setServerStatus)
@@ -117,8 +119,8 @@ export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.
           {!single && (
             <button
               className="icon-btn"
-              title="Close pane"
-              aria-label="Close pane"
+              title={t('panel.pane.closePane')}
+              aria-label={t('panel.pane.closePane')}
               // Sits over the terminal, so it carries its own background rather
               // than relying on whatever character happens to be underneath it.
               style={{
@@ -143,7 +145,7 @@ export function PaneGrid({ tabId, tp }: { tabId: string; tp: TabPanes }): React.
             pane={p}
             resolve={resolve}
             onClose={dismiss(p.id)}
-            closeLabel={single ? 'Close tab' : 'Close pane'}
+            closeLabel={single ? t('panel.pane.closeTab') : t('panel.pane.closePane')}
           />
         </div>
       ))}
@@ -162,16 +164,15 @@ function PaneBody({
   onClose: () => void
   closeLabel: string
 }): React.JSX.Element {
+  const t = useT()
   const { transport, server } = resolve(pane.target)
   if (!transport && !server) {
     return (
       <EmptyState
         icon={<TerminalIcon size={26} />}
-        title="Session unavailable"
+        title={t('panel.pane.unavailableTitle')}
         message={
-          pane.target.kind === 'local'
-            ? 'This shell is no longer available on this machine.'
-            : 'This server no longer exists.'
+          pane.target.kind === 'local' ? t('panel.pane.shellGone') : t('panel.pane.serverGone')
         }
       />
     )

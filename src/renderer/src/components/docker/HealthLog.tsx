@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { HeartPulse, RefreshCw, TriangleAlert } from 'lucide-react'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import {
   DOCKER_FAILURE_HELP,
   healthHeadline,
@@ -32,6 +33,7 @@ function tone(log: DockerHealthLog): string {
 }
 
 function Entries({ log }: { log: DockerHealthLog }): React.JSX.Element | null {
+  const t = useT()
   if (log.entries.length === 0) return null
   return (
     <table className="mini-table">
@@ -40,13 +42,13 @@ function Entries({ log }: { log: DockerHealthLog }): React.JSX.Element | null {
           <tr key={`${e.start}-${e.end}`}>
             <td className="mono faint">{e.start.slice(11, 19)}</td>
             <td className={clsx('mono', e.exitCode !== 0 && 'danger')}>
-              {e.exitCode === null ? 'exit ?' : `exit ${e.exitCode}`}
+              {e.exitCode === null ? t('docker.health.exitUnknown') : t('docker.health.exit', { code: e.exitCode })}
             </td>
             {/* Whatever the check printed. Empty is its own answer: a check
                 that fails silently gives an operator nothing to go on, and
                 saying so beats an empty cell that reads as a rendering bug. */}
             <td className="mono" style={{ whiteSpace: 'pre-wrap' }}>
-              {e.output.trim() === '' ? 'printed nothing' : e.output.trim()}
+              {e.output.trim() === '' ? t('docker.health.printedNothing') : e.output.trim()}
             </td>
           </tr>
         ))}
@@ -62,6 +64,7 @@ export function HealthLogPanel({
   refs: string[]
   read: (refs: string[]) => Promise<DockerHealthLogProbe>
 }): React.JSX.Element | null {
+  const t = useT()
   const [probe, setProbe] = useState<DockerHealthLogProbe | null>(null)
   const [loading, setLoading] = useState(false)
 
@@ -82,7 +85,7 @@ export function HealthLogPanel({
     <div style={{ padding: '4px 0 10px 12px', fontSize: 11 }}>
       <div className="row" style={{ gap: 8, alignItems: 'center' }}>
         <button className="btn ghost sm" disabled={loading} onClick={() => void load()}>
-          <HeartPulse size={12} /> {probe === null ? 'Read healthchecks' : 'Refresh'}
+          <HeartPulse size={12} /> {probe === null ? t('docker.health.read') : t('common.refresh')}
           {loading && <RefreshCw size={11} className="spin" />}
         </button>
       </div>
@@ -101,7 +104,7 @@ export function HealthLogPanel({
           <div key={log.container} className="list-row" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
             <div className="r-title">
               <span className="mono">{log.container}</span>{' '}
-              <span className={clsx('chip', tone(log))}>{log.status ?? 'no healthcheck'}</span>
+              <span className={clsx('chip', tone(log))}>{log.status ?? t('docker.health.none')}</span>
             </div>
             <div className={clsx('r-sub', tone(log) === 'danger' && 'danger')}>{healthHeadline(log)}</div>
             <Entries log={log} />

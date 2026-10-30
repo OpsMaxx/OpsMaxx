@@ -17,6 +17,7 @@ import {
   stamp,
   type LogFilter
 } from './frames'
+import { useT } from '../../../lib/i18n'
 
 export const ROW_H = 28
 
@@ -71,6 +72,7 @@ export function MessageLog({
   const listRef = useRef<HTMLDivElement>(null)
   /** Where auto-scroll last put the list: a scroll event landing there is ours, not the user's. */
   const autoTop = useRef(-1)
+  const t = useT()
 
   const q = query.trim().toLowerCase()
   const frames = useMemo(() => {
@@ -123,18 +125,26 @@ export function MessageLog({
     const text = frameText(f)
     const pretty = prettyJson(text)
     return [
-      { label: 'Copy message', onClick: () => window.opsmaxx.clipboard.write(text) },
-      { label: 'Copy as pretty JSON', disabled: pretty === null, onClick: () => pretty && window.opsmaxx.clipboard.write(pretty) },
-      { label: 'Load into composer', disabled: f.dir === 'system', onClick: () => onLoadIntoComposer(text) },
+      { label: t('http.ws.copyMessage'), onClick: () => window.opsmaxx.clipboard.write(text) },
       {
-        label: 'Resend',
+        label: t('http.ws.copyAsPrettyJson'),
+        disabled: pretty === null,
+        onClick: () => pretty && window.opsmaxx.clipboard.write(pretty)
+      },
+      { label: t('http.ws.loadIntoComposer'), disabled: f.dir === 'system', onClick: () => onLoadIntoComposer(text) },
+      {
+        label: t('http.ws.resend'),
         // Resend goes through httpSend, so the production confirm sees it too.
         disabled: f.dir !== 'out' || f.text === undefined || state !== 'open',
         onClick: () => void sendWsMessage(tabId, f.text ?? '')
       },
-      { label: f.bytes || f.text !== undefined ? 'Save frame to file' : 'Save first 64 KiB to file', disabled: f.dir === 'system', onClick: () => saveFrame(f) },
+      {
+        label: f.bytes || f.text !== undefined ? t('http.ws.saveFrame') : t('http.ws.saveFirst64k'),
+        disabled: f.dir === 'system',
+        onClick: () => saveFrame(f)
+      },
       { label: '', separator: true },
-      { label: 'Clear log', onClick: clear }
+      { label: t('http.ws.clearLog'), onClick: clear }
     ]
   }
 
@@ -157,14 +167,14 @@ export function MessageLog({
       <div className="hc-ws-logpane">
         {dropped > 0 && (
           <div className="hc-ws-row is-system hc-ws-dropped" role="note">
-            <Info size={13} aria-hidden /> {dropped.toLocaleString()} older frame{dropped === 1 ? '' : 's'} dropped
+            <Info size={13} aria-hidden /> {t('http.ws.dropped', { count: dropped, n: dropped.toLocaleString() })}
           </div>
         )}
         <div
           ref={listRef}
           className="hc-ws-list"
           role="listbox"
-          aria-label="Messages"
+          aria-label={t('http.ws.messages')}
           tabIndex={0}
           aria-activedescendant={frame ? `hc-ws-${tabId}-${frame.id}` : undefined}
           onScroll={onScroll}
@@ -183,10 +193,10 @@ export function MessageLog({
           {count === 0 ? (
             <p className="hc-ws-empty">
               {q !== '' || filter !== 'all'
-                ? 'No messages match.'
+                ? t('http.ws.noMatch')
                 : state === 'open'
-                  ? 'Connected. Messages appear here.'
-                  : 'Not connected. Connect to start the conversation.'}
+                  ? t('http.ws.connectedEmpty')
+                  : t('http.ws.notConnectedEmpty')}
             </p>
           ) : (
             <div className="hc-ws-spacer-rows" style={{ height: count * ROW_H }}>
@@ -218,7 +228,7 @@ export function MessageLog({
         </div>
         {unseen > 0 && (
           <button type="button" className="btn sm hc-ws-pill" onClick={follow}>
-            <ArrowDown size={13} aria-hidden /> {unseen} new
+            <ArrowDown size={13} aria-hidden /> {t('http.ws.unseen', { count: unseen })}
           </button>
         )}
       </div>
@@ -239,6 +249,7 @@ export function MessageToolbar({
   onView: (patch: Partial<LogView>) => void
 }): React.JSX.Element {
   const following = view.pausedAt === null
+  const t = useT()
   return (
     <div className="hc-ws-tools">
       <label className="hc-ws-search">
@@ -246,29 +257,29 @@ export function MessageToolbar({
         <input
           className="input mono"
           type="search"
-          placeholder="Search"
-          aria-label="Search messages"
+          placeholder={t('common.search')}
+          aria-label={t('http.ws.searchMessages')}
           value={view.query}
           onChange={(e) => onView({ query: e.target.value })}
         />
       </label>
       <select
         className="input"
-        aria-label="Filter messages"
+        aria-label={t('http.ws.filterMessages')}
         value={view.filter}
         onChange={(e) => onView({ filter: e.target.value as LogFilter })}
       >
-        <option value="all">All</option>
-        <option value="out">Sent</option>
-        <option value="in">Received</option>
-        <option value="system">System</option>
+        <option value="all">{t('http.ws.filterAll')}</option>
+        <option value="out">{t('http.ws.dirSent')}</option>
+        <option value="in">{t('http.ws.dirReceived')}</option>
+        <option value="system">{t('http.ws.dirSystem')}</option>
       </select>
       <button
         type="button"
         className={clsx('btn ghost sm', !following && 'is-on')}
         aria-pressed={!following}
-        aria-label={following ? 'Pause auto-scroll' : 'Resume auto-scroll'}
-        title={following ? 'Pause auto-scroll' : 'Resume auto-scroll'}
+        aria-label={following ? t('http.ws.pauseScroll') : t('http.ws.resumeScroll')}
+        title={following ? t('http.ws.pauseScroll') : t('http.ws.resumeScroll')}
         onClick={() => onView({ pausedAt: following ? lastId(tabId) : null })}
       >
         {following ? <Pause size={13} /> : <Play size={13} />}
@@ -276,8 +287,8 @@ export function MessageToolbar({
       <button
         type="button"
         className="btn ghost sm"
-        aria-label="Clear log"
-        title="Clear log"
+        aria-label={t('http.ws.clearLog')}
+        title={t('http.ws.clearLog')}
         onClick={() => useWsSessions.getState().clear(tabId)}
       >
         <Trash2 size={13} />

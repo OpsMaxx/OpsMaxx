@@ -536,10 +536,16 @@ describe('the drain refuses before it runs, not after', () => {
       'utf8'
     )
     expect(panel).toMatch(/drainCheck\.assessment\.safe \? \(/)
-    expect(panel).toContain('This drain will not be offered while any of the above is true')
+    // The sentences live in en.json; the panel renders them by key.
+    const en = JSON.parse(
+      readFileSync(join(__dirname, '..', 'src/shared/locales/en.json'), 'utf8')
+    ) as Record<string, string>
+    expect(panel).toContain("t('k8s.panel.drainRefused')")
+    expect(en['k8s.panel.drainRefused']).toContain('This drain will not be offered while any of the above is true')
     // The unchecked reads are rendered, and rendered as hard as a blocker.
     expect(panel).toMatch(/drainCheck\.assessment\.unchecked\.map/)
-    expect(panel).toContain('read did not answer, so nobody can say')
+    expect(panel).toContain("t('k8s.panel.drainUnchecked'")
+    expect(en['k8s.panel.drainUnchecked']).toContain('read did not answer, so nobody can say')
     // And there is no override anywhere in the panel.
     expect(panel).not.toContain('--force')
     expect(panel).not.toContain('delete-emptydir-data')

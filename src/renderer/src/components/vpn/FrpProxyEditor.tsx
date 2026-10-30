@@ -2,6 +2,7 @@ import { Trash2 } from 'lucide-react'
 import type { FrpProxy, FrpProxyType } from '../../types'
 import { BindWarning } from './VpnStatusCard'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
 
 const TYPES: FrpProxyType[] = ['tcp', 'udp', 'http', 'https', 'stcp', 'sudp', 'xtcp', 'tcpmux']
 
@@ -27,6 +28,7 @@ export function FrpProxyEditor({
   onChange,
   onRemove
 }: FrpProxyEditorProps): React.JSX.Element {
+  const t = useT()
   const set = (patch: Partial<FrpProxy>): void => onChange({ ...proxy, ...patch })
 
   const byDomain = BY_DOMAIN.includes(proxy.type)
@@ -41,10 +43,17 @@ export function FrpProxyEditor({
   // so say what is missing instead, and refuse to be ticked until it is real.
   // `where` is used rather than the bare server address because for an
   // http/https proxy the reachable name is the domain, not the frp host.
-  const missing = !proxy.localPort ? 'a local port' : !where.trim() ? 'the frp server address' : null
-  const exposureSentence = missing
-    ? `Set ${missing} first — then confirm what this proxy makes reachable.`
-    : `Make ${proxy.localIp || '127.0.0.1'}:${proxy.localPort} reachable from ${where.trim()}.`
+  const missing = !proxy.localPort
+    ? t('vpn.frp.proxy.setLocalPortFirst')
+    : !where.trim()
+      ? t('vpn.frp.proxy.setServerFirst')
+      : null
+  const exposureSentence =
+    missing ??
+    t('vpn.frp.proxy.exposure', {
+      local: `${proxy.localIp || '127.0.0.1'}:${proxy.localPort}`,
+      where: where.trim()
+    })
   const toggleExposure = (): void => {
     if (missing) return
     set({ acknowledgedExposure: !proxy.acknowledgedExposure })
@@ -56,7 +65,7 @@ export function FrpProxyEditor({
         <input
           className="input"
           style={{ flex: 1, minWidth: 110 }}
-          placeholder="Proxy name"
+          placeholder={t('vpn.frp.proxy.namePlaceholder')}
           value={proxy.name}
           onChange={(e) => set({ name: e.target.value })}
         />
@@ -72,7 +81,7 @@ export function FrpProxyEditor({
             </option>
           ))}
         </select>
-        <button className="icon-btn sm" title="Remove proxy" onClick={onRemove}>
+        <button className="icon-btn sm" title={t('vpn.frp.proxy.remove')} onClick={onRemove}>
           <Trash2 size={14} />
         </button>
       </div>
@@ -88,7 +97,7 @@ export function FrpProxyEditor({
         <input
           className="input"
           type="number"
-          placeholder="Local port"
+          placeholder={t('vpn.frp.proxy.localPortPlaceholder')}
           value={proxy.localPort || ''}
           onChange={(e) => set({ localPort: Number(e.target.value) })}
         />
@@ -96,7 +105,7 @@ export function FrpProxyEditor({
           <input
             className="input"
             type="number"
-            placeholder="Remote port"
+            placeholder={t('vpn.frp.proxy.remotePortPlaceholder')}
             value={proxy.remotePort ?? ''}
             onChange={(e) => set({ remotePort: e.target.value ? Number(e.target.value) : undefined })}
           />
@@ -105,13 +114,13 @@ export function FrpProxyEditor({
       {issues.localIp && <FieldError message={issues.localIp} />}
       {issues.localPort && <FieldError message={issues.localPort} />}
       {issues.remotePort && <FieldError message={issues.remotePort} />}
-      <BindWarning host={proxy.localIp} what="the service behind this proxy" />
+      <BindWarning host={proxy.localIp} what="proxy" />
 
       {byDomain && (
         <div className="input-group">
           <input
             className="input"
-            placeholder="Custom domain (app.example.com)"
+            placeholder={t('vpn.frp.proxy.customDomainPlaceholder')}
             value={proxy.customDomains?.join(', ') ?? ''}
             onChange={(e) =>
               set({
@@ -124,7 +133,7 @@ export function FrpProxyEditor({
           />
           <input
             className="input"
-            placeholder="Subdomain"
+            placeholder={t('vpn.frp.proxy.subdomainPlaceholder')}
             value={proxy.subdomain ?? ''}
             onChange={(e) => set({ subdomain: e.target.value || undefined })}
           />
@@ -133,7 +142,7 @@ export function FrpProxyEditor({
 
       {secret && (
         <span className="field-hint">
-          Visitors need the shared secret for this proxy. It lives in the vault, not here.
+          {t('vpn.frp.proxy.secretNote')}
         </span>
       )}
 

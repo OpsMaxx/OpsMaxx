@@ -208,6 +208,11 @@ describe('a watch can be added, or the alert fires for nobody', () => {
   it('says what watching does and what it does not', () => {
     // Specifically that a restart COUNT is not a restart RATE, since that is
     // the whole reason the first sweep says nothing.
-    expect(panel()).toContain('restart count goes up between checks')
+    // The sentence lives in en.json; the panel renders it by key.
+    const en = JSON.parse(
+      readFileSync(join(__dirname, '..', 'src/shared/locales/en.json'), 'utf8')
+    ) as Record<string, string>
+    expect(panel()).toContain('i18nKey="k8s.panel.watching"')
+    expect(en['k8s.panel.watching']).toContain('restart count goes up between checks')
   })
 })

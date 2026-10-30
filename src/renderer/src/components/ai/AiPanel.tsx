@@ -10,6 +10,7 @@ import { AiSecurity } from './AiSecurity'
 import { ConnectAgent } from './ConnectAgent'
 import { useNav, AI_SECTIONS, AI_SECTION_LABEL_KEYS } from '../../store/nav'
 import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 import type { AiSection } from '../../store/nav'
 import type { McpAgentSession, ApprovalRequest } from '../../../../shared/mcp'
 
@@ -31,6 +32,7 @@ function Overview(): React.JSX.Element {
   const [sessions, setSessions] = useState<McpAgentSession[]>([])
   const [approvals, setApprovals] = useState<ApprovalRequest[]>([])
   const [status, setStatus] = useState<{ running: boolean; port: number | null }>({ running: false, port: null })
+  const t = useT()
 
   const load = (): void => {
     void window.opsmaxx?.aiMcp.listSessions().then((s) => setSessions(s ?? []))
@@ -40,54 +42,50 @@ function Overview(): React.JSX.Element {
 
   useEffect(() => {
     load()
-    const t = setInterval(load, 4000)
-    return () => clearInterval(t)
+    const timer = setInterval(load, 4000)
+    return () => clearInterval(timer)
   }, [])
 
   const active = sessions.filter((s) => !s.revoked && (!s.expiresAt || new Date(s.expiresAt) > new Date()))
 
   return (
     <div className="settings-section">
-      <h2>AI & MCP</h2>
-      <div className="sub">
-        Let AI agents like Claude Code, Codex, Gemini CLI and other MCP-compatible clients operate your
-        servers through OpsMaxx — without ever seeing an SSH password, private key or database
-        credential. OpsMaxx resolves the friendly names, enforces access-group policy and asks for
-        your approval on anything sensitive.
-      </div>
+      <h2>{t('layout.activity.ai')}</h2>
+      <div className="sub">{t('ai.overview.intro')}</div>
 
       <div className="card-grid" style={{ marginTop: 18 }}>
         <div className="card">
-          <div className="s-title">Bridge status</div>
-          <div className="s-desc">{status.running ? `Running on 127.0.0.1:${status.port}` : 'Disabled'}</div>
+          <div className="s-title">{t('ai.overview.bridgeStatus')}</div>
+          <div className="s-desc">
+            {status.running ? t('ai.overview.runningOn', { address: `127.0.0.1:${status.port}` }) : t('common.disabled')}
+          </div>
         </div>
         <div className="card">
-          <div className="s-title">Active sessions</div>
-          <div className="s-desc">{active.length} of {sessions.length} connected agent session(s)</div>
+          <div className="s-title">{t('ai.overview.activeSessions')}</div>
+          <div className="s-desc">{t('ai.overview.sessionCount', { active: active.length, count: sessions.length })}</div>
         </div>
         <div className="card">
-          <div className="s-title">Pending approvals</div>
-          <div className="s-desc">{approvals.length} action(s) waiting on you</div>
+          <div className="s-title">{t('ai.overview.pendingApprovals')}</div>
+          <div className="s-desc">{t('ai.overview.approvalCount', { count: approvals.length })}</div>
         </div>
       </div>
 
       <ConnectAgent onConnected={load} />
 
-      <h3 style={{ marginTop: 24 }}>How it works</h3>
+      <h3 style={{ marginTop: 24 }}>{t('ai.overview.howItWorks')}</h3>
       <ol className="s-desc" style={{ lineHeight: 1.8 }}>
-        <li>Pick a profile — Read only, Ask first, Auto (routine work runs, risky actions ask) or Bypass; or Custom, to use an access group instead.</li>
-        <li>Create an AI Agent session scoped to one or more workspaces with that profile, and copy its token.</li>
-        <li>Point Claude Code, Codex or another MCP client at OpsMaxx's local MCP server with that token.</li>
-        <li>Approve or deny actions as they come up — the AI waits for your answer.</li>
+        <li>{t('ai.overview.step1')}</li>
+        <li>{t('ai.overview.step2')}</li>
+        <li>{t('ai.overview.step3')}</li>
+        <li>{t('ai.overview.step4')}</li>
       </ol>
+      <div className="s-desc">{t('ai.overview.optional')}</div>
       <div className="s-desc">
-        Optional: under Access Groups, hold a workspace or server below every session's group with an
-        assignment, or mark it Protected so agents there are held at Ask first — for production.
-      </div>
-      <div className="s-desc">
-        <b>Connect an agent</b> above does steps 1–4 in one click. Codex and Gemini CLI are still
-        wired up by hand — <code className="mono">opsmaxx codex</code>, or the snippet under AI
-        Agents.
+        <Trans
+          i18nKey="ai.overview.connectHint"
+          values={{ command: 'opsmaxx codex' }}
+          components={{ b: <b />, code: <code className="mono" /> }}
+        />
       </div>
     </div>
   )

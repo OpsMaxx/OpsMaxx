@@ -6,6 +6,7 @@ import { useApi } from '../../../store/api'
 import { useApp } from '../../../store/app'
 import { Field, Modal } from '../../common/Modal'
 import { MoveToVaultDialog } from './MoveToVaultDialog'
+import { useT } from '../../../lib/i18n'
 import '../nav.css'
 
 const NAME = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/
@@ -78,47 +79,57 @@ export function SetVariableDialog({
   const [value, setValue] = useState(initialValue)
   const [scope, setScope] = useState<VariableScope>(env ? 'environment' : collection ? 'collection' : 'global')
   const [vaulting, setVaulting] = useState(false)
+  const t = useT()
   const secret = looksLikeCredential(name, value)
-  const nameError = name && !NAME.test(name) ? 'Letters, digits, _ . and -, starting with a letter or _.' : null
+  const nameError = name && !NAME.test(name) ? t('http.setVariable.nameInvalid') : null
   const commit = (v: string): void => {
     setVariable(scope, name, v, { workspaceId: ws, collectionId })
     onClose()
   }
   const scopes: { id: VariableScope; label: string; off: boolean }[] = [
-    { id: 'environment', label: env ? `Environment (${env.name})` : 'Environment (none active)', off: !env },
-    { id: 'collection', label: collection ? `Collection (${collection.name})` : 'Collection (not saved)', off: !collection },
-    { id: 'global', label: 'Globals', off: false }
+    {
+      id: 'environment',
+      label: env ? t('http.setVariable.scopeEnvironment', { name: env.name }) : t('http.setVariable.scopeEnvironmentNone'),
+      off: !env
+    },
+    {
+      id: 'collection',
+      label: collection
+        ? t('http.setVariable.scopeCollection', { name: collection.name })
+        : t('http.setVariable.scopeCollectionNone'),
+      off: !collection
+    },
+    { id: 'global', label: t('http.setVariable.scopeGlobals'), off: false }
   ]
   return (
     <Modal
-      title="Set as variable"
+      title={t('http.setVariable.title')}
       onClose={onClose}
       confirm={{
-        label: 'Set variable',
+        label: t('http.setVariable.confirm'),
         disabled: !name || !!nameError,
         onClick: () => commit(value)
       }}
       footer={
         secret ? (
           <button type="button" className="btn" disabled={!name || !!nameError} onClick={() => setVaulting(true)}>
-            Store in vault…
+            {t('http.setVariable.storeInVault')}
           </button>
         ) : undefined
       }
     >
-      <Field label="Name" error={nameError}>
+      <Field label={t('http.setVariable.name')} error={nameError}>
         <input className="input hc-mono" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
       </Field>
-      <Field label="Value">
+      <Field label={t('http.setVariable.value')}>
         <input className="input hc-mono" value={value} onChange={(e) => setValue(e.target.value)} />
       </Field>
       {secret && (
         <p className="hc-warn-line" role="note">
-          This looks like a credential. As a variable it is saved and synced as plain text; Store in vault keeps only a
-          reference to it.
+          {t('http.setVariable.credentialWarning')}
         </p>
       )}
-      <div role="radiogroup" aria-label="Scope" className="hc-dest-list">
+      <div role="radiogroup" aria-label={t('http.setVariable.scope')} className="hc-dest-list">
         {scopes.map((s) => (
           <label key={s.id} className="hc-dest">
             <input
@@ -134,7 +145,7 @@ export function SetVariableDialog({
       </div>
       {vaulting && (
         <MoveToVaultDialog
-          defaultName={`${scopes.find((x) => x.id === scope)?.label ?? 'Variable'} · ${name}`}
+          defaultName={`${scopes.find((x) => x.id === scope)?.label ?? t('http.setVariable.variable')} · ${name}`}
           value={value}
           onClose={() => setVaulting(false)}
           onMoved={(ref) => commit(ref)}

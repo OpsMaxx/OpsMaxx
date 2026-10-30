@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import EN from '../src/shared/locales/en.json'
 import { act, renderHook } from '@testing-library/react'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
@@ -433,11 +434,14 @@ describe('the failure card', () => {
   it('no longer promises that reconnecting reuses the pooled connection', () => {
     // It said so at the exact moment that was the wrong thing to do.
     expect(SRC).not.toMatch(/Reconnecting reuses the pooled connection/)
-    expect(SRC).toMatch(/drops the shared connection first/)
+    expect(SRC).toContain("t('terminal.dead.scrollbackKept')")
+    expect(EN['terminal.dead.scrollbackKept']).toMatch(/drops the shared connection first/)
+    expect(Object.values(EN).join('\n')).not.toMatch(/Reconnecting reuses the pooled connection/)
   })
 
   it('shows the run and offers a way out of it', () => {
-    expect(SRC).toMatch(/Stop trying/)
+    expect(SRC).toContain("t('terminal.recovery.stop')")
+    expect(EN['terminal.recovery.stop']).toBe('Stop trying')
     expect(SRC).toMatch(/recovery\.attempt/)
     expect(SRC).toMatch(/recovery\.nextInSec/)
   })

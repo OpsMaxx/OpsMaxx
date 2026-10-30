@@ -6,7 +6,18 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
-      rollupOptions: { input: { index: resolve('src/main/index.ts') } }
+      rollupOptions: {
+        input: { index: resolve('src/main/index.ts') },
+        output: {
+          // The English pack gets a chunk of its own (the others already do: they
+          // are loaded on demand). electron-vite injects its CommonJS shim after
+          // the last `import … from '…'` it finds by regex, and inlined into
+          // index.js the pack is 6,000 strings of prose — "Unlock vault and
+          // import" followed by a quote matched, and the shim landed inside the
+          // JSON. A chunk with no `require(` is never shimmed.
+          manualChunks: (id) => (/[\\/]shared[\\/]locales[\\/]en\.json$/.test(id) ? 'locale-en' : undefined)
+        }
+      }
     }
   },
   preload: {

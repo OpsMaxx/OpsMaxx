@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { useApp } from './app'
 import { bridgeOn } from '../lib/bridge'
 import { toast } from './toast'
+import { t } from '../lib/i18n'
 import type { VaultEntry, VaultField, VaultKind, VaultStage } from '../../../shared/vault'
 
 let seq = 0
@@ -140,7 +141,7 @@ export const useVault = create<VaultState>((set, get) => ({
     if (!r?.ok) {
       // A cancelled prompt should not shout; the password field is right
       // there and is the expected fallback.
-      set({ error: r?.error ?? 'Biometric unlock failed.' })
+      set({ error: r?.error ?? t('store.vault.error.bioUnlockFailed') })
       await get().refreshBiometrics()
       return false
     }
@@ -154,7 +155,7 @@ export const useVault = create<VaultState>((set, get) => ({
     if (typeof v?.bioEnable !== 'function') return false
     const r = on ? await v.bioEnable(scope) : await v.bioDisable()
     await get().refreshBiometrics()
-    if (!r?.ok) set({ error: r?.error ?? 'Could not change biometric unlock.' })
+    if (!r?.ok) set({ error: r?.error ?? t('store.vault.error.bioChangeFailed') })
     return !!r?.ok
   },
 
@@ -180,7 +181,7 @@ export const useVault = create<VaultState>((set, get) => ({
     const r = await window.opsmaxx?.vault.create(password)
     set({ busy: false })
     if (!r?.ok) {
-      set({ error: r?.error ?? 'Could not create the vault.' })
+      set({ error: r?.error ?? t('store.vault.error.createFailed') })
       return false
     }
     set({ exists: true, unlocked: true, stage: 'open', entries: [] })
@@ -192,7 +193,7 @@ export const useVault = create<VaultState>((set, get) => ({
     const r = await window.opsmaxx?.vault.unlock(password)
     set({ busy: false })
     if (!r?.ok) {
-      set({ error: r?.error ?? 'Could not unlock the vault.' })
+      set({ error: r?.error ?? t('store.vault.error.unlockFailed') })
       return false
     }
     set({ unlocked: true, stage: 'open' })
@@ -210,7 +211,7 @@ export const useVault = create<VaultState>((set, get) => ({
     const r = await window.opsmaxx?.vault.changePassword(current, next)
     set({ busy: false })
     if (!r?.ok) {
-      set({ error: r?.error ?? 'Could not change the password.' })
+      set({ error: r?.error ?? t('store.vault.error.changePasswordFailed') })
       return false
     }
     return true
@@ -219,7 +220,7 @@ export const useVault = create<VaultState>((set, get) => ({
   destroy: async () => {
     const r = await window.opsmaxx?.vault.destroy()
     if (!r?.ok) {
-      set({ error: r?.error ?? 'Could not delete the vault.' })
+      set({ error: r?.error ?? t('store.vault.error.deleteFailed') })
       return false
     }
     // `damaged` and `stage` too, not just `exists`. The unlock modal branches
@@ -265,7 +266,7 @@ export const useVault = create<VaultState>((set, get) => ({
      * forgetting to a no-op instead of a data loss.
      */
     if (get().stage !== 'open') {
-      set({ error: 'The vault is locked. Unlock it to save a credential.' })
+      set({ error: t('store.vault.error.lockedCannotSave') })
       return null
     }
     const e = { ...newEntry(kind, useApp.getState().activeWorkspaceId), ...patch }
@@ -303,7 +304,7 @@ export const useVault = create<VaultState>((set, get) => ({
 // Returns a primitive, so it is safe as a zustand selector in both screens.
 export const bioBlockedReason = (s: VaultState): string | null =>
   s.bioEnabled && !s.bioAvailable
-    ? s.bioReason ?? 'Biometric unlock is not available on this machine right now.'
+    ? s.bioReason ?? t('store.vault.bioUnavailable')
     : null
 
 async function persist(
@@ -311,7 +312,7 @@ async function persist(
   set: (partial: Partial<VaultState>) => void
 ): Promise<void> {
   const r = await window.opsmaxx?.vault.save(entries)
-  if (!r?.ok) set({ error: r?.error ?? 'Could not save the vault.' })
+  if (!r?.ok) set({ error: r?.error ?? t('store.vault.error.saveFailed') })
 }
 
 /**
@@ -344,11 +345,11 @@ export function startVaultLockWatch(): () => void {
 
   const offSecured = bridgeOn('vault.onSecured', window.opsmaxx?.vault?.onSecured, () => {
     clear('secured')
-    toast('Vault secured after inactivity — connections and checks keep running', 'info')
+    toast(t('store.vault.toast.secured'), 'info')
   })
   const offLocked = bridgeOn('vault.onAutoLocked', window.opsmaxx?.vault?.onAutoLocked, () => {
     clear('locked')
-    toast('Vault locked — enter your master password to open it again', 'info')
+    toast(t('store.vault.toast.locked'), 'info')
   })
   // Same thing to the data, a different thing to say about it: nothing timed
   // out and nothing is wrong with this machine. Sync brought another of the
@@ -356,7 +357,7 @@ export function startVaultLockWatch(): () => void {
   const offReplaced = bridgeOn('vault.onReplaced', window.opsmaxx?.vault?.onReplaced, () => {
     clear('locked')
     toast(
-      'Vault replaced by sync — unlock it with the master password from your other device',
+      t('store.vault.toast.replaced'),
       'info'
     )
   })

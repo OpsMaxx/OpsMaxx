@@ -11,12 +11,13 @@ import { FrpTunnelSetup } from './FrpTunnelSetup'
 import { NgrokSetup } from './NgrokSetup'
 import { PublicUrlWizard } from './PublicUrlWizard'
 import { isReverseProxyKind } from '../../../../shared/vpn'
+import { useT } from '../../lib/i18n'
 
-function blankFrpProfile(workspaceId: string): VpnProfile {
+function blankFrpProfile(workspaceId: string, name: string): VpnProfile {
   return {
     id: `vpn-${crypto.randomUUID()}`,
     workspaceId,
-    name: 'New frp client',
+    name,
     autoStart: false,
     // No proxies: a fresh client connects and exposes nothing, which is the
     // only safe thing an empty form can mean here.
@@ -36,6 +37,7 @@ function blankFrpProfile(workspaceId: string): VpnProfile {
  *  `useVpnProfiles` — but the reverse direction: a VPN brings you onto a remote
  *  network, an frp client publishes something here onto a remote one. */
 export function FrpManager(): React.JSX.Element {
+  const t = useT()
   const profiles = useWorkspaceVpns().filter((p) => isReverseProxyKind(p.spec.kind))
   const { row, dialogs, importProfile, editProfile } = useVpnProfiles()
 
@@ -59,7 +61,7 @@ export function FrpManager(): React.JSX.Element {
   const wanted = /^\d+$/.test(port.trim()) ? Number(port.trim()) : 0
   const portOk = wanted > 0 && wanted < 65536
 
-  const newClient = (): void => editProfile(blankFrpProfile(useApp.getState().activeId()))
+  const newClient = (): void => editProfile(blankFrpProfile(useApp.getState().activeId(), t('vpn.frp.manager.newClientName')))
 
   /**
    * The click.
@@ -73,7 +75,7 @@ export function FrpManager(): React.JSX.Element {
    */
   const publish = (): void => {
     if (!portOk) {
-      toast('Enter the port your service is listening on.', 'error')
+      toast(t('vpn.frp.manager.portRequired'), 'error')
       return
     }
     setGaps(null)
@@ -96,15 +98,15 @@ export function FrpManager(): React.JSX.Element {
 
   const copy = (url: string): void => {
     window.opsmaxx?.clipboard.write(url)
-    toast('Address copied', 'ok')
+    toast(t('vpn.frp.manager.addressCopied'), 'ok')
   }
 
   return (
     <div className="content">
       <div className="content-header">
         <div>
-          <h1>Reverse proxies (frp)</h1>
-          <div className="sub">Publish a local service through an frp server</div>
+          <h1>{t('vpn.frp.manager.title')}</h1>
+          <div className="sub">{t('vpn.frp.manager.subtitle')}</div>
         </div>
         <div className="spacer" />
         {/* Demoted, both of them. This screen used to stack four things that
@@ -114,24 +116,24 @@ export function FrpManager(): React.JSX.Element {
             vocabulary and none of those three is what a person came here to
             do. One primary survives, below. */}
         <button className="btn quiet size-28" onClick={() => importProfile('frp')}>
-          Import frpc config
+          {t('vpn.frp.manager.importConfig')}
         </button>
         <button className="btn quiet size-28" onClick={newClient}>
-          New frp client
+          {t('vpn.frp.manager.newClient')}
         </button>
         <button className="btn quiet size-28" onClick={() => setAddingNgrok(true)}>
-          Add ngrok
+          {t('vpn.frp.manager.addNgrok')}
         </button>
       </div>
 
       <div className="hop-card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
         <div className="row" style={{ gap: 8, alignItems: 'center' }}>
-          <span style={{ fontSize: 13 }}>Publish localhost:</span>
+          <span style={{ fontSize: 13 }}>{t('vpn.frp.manager.publishLocalhost')}</span>
           <input
             className="input"
             style={{ width: 92 }}
             placeholder="3000"
-            aria-label="Local port"
+            aria-label={t('vpn.frp.manager.localPortLabel')}
             value={port}
             onChange={(e) => setPort(e.target.value)}
             onKeyDown={(e) => {
@@ -139,7 +141,7 @@ export function FrpManager(): React.JSX.Element {
             }}
           />
           <button className="btn primary size-32" onClick={publish}>
-            <Globe size={14} /> Get a public URL
+            <Globe size={14} /> {t('vpn.frp.manager.getPublicUrl')}
           </button>
           <span className="grow" />
         </div>
@@ -154,7 +156,7 @@ export function FrpManager(): React.JSX.Element {
             ))}
             <div className="row">
               <button className="btn secondary size-28" onClick={() => setSettingUp(true)}>
-                Set up a tunnel server
+                {t('vpn.frp.manager.setUpServer')}
               </button>
             </div>
           </div>
@@ -171,8 +173,8 @@ export function FrpManager(): React.JSX.Element {
                 <span className="grow" />
                 <button
                   className="icon-btn sm"
-                  title={`Copy ${p.url}`}
-                  aria-label={`Copy ${p.url}`}
+                  title={t('vpn.frp.manager.copyUrl', { url: p.url })}
+                  aria-label={t('vpn.frp.manager.copyUrl', { url: p.url })}
                   onClick={() => copy(p.url)}
                 >
                   <Copy size={13} />
@@ -186,11 +188,11 @@ export function FrpManager(): React.JSX.Element {
       {profiles.length === 0 ? (
         <EmptyState
           icon={<Share2 size={26} />}
-          title="No reverse proxies"
-          message="An frp client makes a service on this machine reachable through a server you control. The box above is the short way in — type the port your service is on."
+          title={t('vpn.frp.manager.emptyTitle')}
+          message={t('vpn.frp.manager.emptyMessage')}
           action={
             <button className="btn secondary size-32" onClick={newClient}>
-              <Share2 size={15} /> New frp client
+              <Share2 size={15} /> {t('vpn.frp.manager.newClient')}
             </button>
           }
         />

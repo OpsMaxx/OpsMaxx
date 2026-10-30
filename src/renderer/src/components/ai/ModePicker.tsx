@@ -8,6 +8,8 @@ import type { MenuEntry } from '../connections/ContextMenu'
 import { Modal } from '../common/Modal'
 import { clsx } from '../../lib/format'
 import { toast } from '../../store/toast'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 // The approval dialog paints above every Modal and menu; opened from inside it,
 // both have to be mounted in its layer or they appear underneath it.
@@ -52,6 +54,7 @@ export function ModePicker({
 }): React.JSX.Element {
   const [menu, setMenu] = useState<DOMRect | null>(null)
   const [confirming, setConfirming] = useState(false)
+  const t = useT()
   const layer = useRef<Element | undefined>(undefined)
   const groupName = groups?.find((g) => g.id === groupId)?.name ?? null
   const button = useRef<HTMLButtonElement>(null)
@@ -65,7 +68,7 @@ export function ModePicker({
     try {
       await onChange(mode)
     } catch (err) {
-      toast(`The profile was not changed: ${err instanceof Error ? err.message : String(err)}`, 'error')
+      toast(t('ai.modePicker.notChanged', { error: err instanceof Error ? err.message : String(err) }), 'error')
     }
   }
 
@@ -83,7 +86,7 @@ export function ModePicker({
   }
 
   const entries: MenuEntry[] = SESSION_MODES.map((m, i) => ({
-    section: i === 0 ? 'Profile' : m.id === 'custom' ? 'Advanced' : undefined,
+    section: i === 0 ? t('ai.modePicker.sectionProfile') : m.id === 'custom' ? t('ai.modePicker.sectionAdvanced') : undefined,
     label: m.label,
     detail: m.detail,
     shortcut: m.shortcut,
@@ -95,10 +98,10 @@ export function ModePicker({
 
   const confirm = confirming && (
     <Modal
-      title={defaultScope ? 'Make Bypass the default for new sessions?' : 'Bypass all permissions?'}
+      title={defaultScope ? t('ai.modePicker.confirmDefaultTitle') : t('ai.modePicker.confirmTitle')}
       onClose={closeConfirm}
       confirm={{
-        label: defaultScope ? 'Make Bypass the default' : 'Enable Bypass',
+        label: defaultScope ? t('ai.modePicker.confirmDefaultLabel') : t('ai.modePicker.confirmLabel'),
         destructive: true,
         onClick: () => {
           closeConfirm()
@@ -108,28 +111,24 @@ export function ModePicker({
     >
       <div data-testid="bypass-confirm" className="s-desc" style={{ lineHeight: 1.6 }}>
         {defaultScope && (
-          <p style={{ margin: '0 0 8px', color: 'var(--danger)' }}>
-            Every new agent session will start in Bypass — including CLI-paired and OAuth sessions, which
-            connect without showing anyone a profile picker. Sessions that already exist keep their profile.
-          </p>
+          <p style={{ margin: '0 0 8px', color: 'var(--danger)' }}>{t('ai.modePicker.defaultWarning')}</p>
         )}
         <p style={{ margin: 0 }}>
-          {defaultScope ? 'A session in Bypass' : 'The agent'} runs everything it asks for, with no prompt and no
-          refusal. This lifts:
+          {defaultScope ? t('ai.modePicker.liftsDefault') : t('ai.modePicker.lifts')}
         </p>
         <ul style={{ margin: '4px 0 10px' }}>
-          <li>access-group restrictions on workspaces and servers</li>
-          <li>the rules guarding sensitive files such as /etc/shadow and ~/.ssh</li>
-          <li>escalation shells such as sudo -i and su</li>
-          <li>frp reverse proxies</li>
-          <li>every approval prompt</li>
+          <li>{t('ai.modePicker.liftsGroups')}</li>
+          <li>{t('ai.modePicker.liftsFileRules', { path1: '/etc/shadow', path2: '~/.ssh' })}</li>
+          <li>{t('ai.modePicker.liftsShells', { command1: 'sudo -i', command2: 'su' })}</li>
+          <li>{t('ai.modePicker.liftsFrp')}</li>
+          <li>{t('ai.modePicker.liftsPrompts')}</li>
         </ul>
-        <p style={{ margin: 0 }}>Still in force:</p>
+        <p style={{ margin: 0 }}>{t('ai.modePicker.stillInForce')}</p>
         <ul style={{ margin: '4px 0 0' }}>
-          <li>Protected workspaces and servers, where the agent is held at Ask first</li>
-          <li>No AI Access, and the workspaces the session is scoped to</li>
-          <li>Stop All AI Access</li>
-          <li>the audit log, which marks every call that ran only because of Bypass</li>
+          <li>{t('ai.modePicker.keepsProtected')}</li>
+          <li>{t('ai.modePicker.keepsNoAccess')}</li>
+          <li>{t('ai.modePicker.keepsStopAll')}</li>
+          <li>{t('ai.modePicker.keepsAudit')}</li>
         </ul>
       </div>
     </Modal>
@@ -144,7 +143,11 @@ export function ModePicker({
         className={clsx('btn', size === 'sm' && 'sm', 'hc-mode-picker', value === 'bypass' && 'is-bypass')}
         disabled={disabled}
         title={title}
-        aria-label={`Profile: ${sessionModeLabel(value, groupName)}${title ? `. ${title}` : ''}`}
+        aria-label={
+          title
+            ? t('ai.modePicker.ariaLabelWithTitle', { profile: sessionModeLabel(value, groupName), title })
+            : t('ai.modePicker.ariaLabel', { profile: sessionModeLabel(value, groupName) })
+        }
         aria-haspopup="menu"
         aria-expanded={menu !== null}
         onPointerDown={() => (wasOpen.current = menu !== null)}
@@ -156,20 +159,20 @@ export function ModePicker({
           setMenu(reopen ? e.currentTarget.getBoundingClientRect() : null)
         }}
       >
-        {value === 'custom' && groups ? 'Custom' : sessionModeLabel(value, groupName)}
+        {value === 'custom' && groups ? t('ai.modePicker.custom') : sessionModeLabel(value, groupName)}
         <ChevronDown size={13} aria-hidden="true" />
       </button>
       {value === 'custom' && groups && (
         <select
           className="input"
           style={{ maxWidth: 180 }}
-          aria-label="Access group for the Custom profile"
+          aria-label={t('ai.modePicker.groupSelect')}
           data-testid="custom-group"
           value={groupId ?? ''}
           disabled={disabled}
           onChange={(e) => void onGroupChange?.(e.target.value)}
         >
-          {!groupId && <option value="">Pick an access group…</option>}
+          {!groupId && <option value="">{t('ai.modePicker.pickGroup')}</option>}
           {groups.map((g) => (
             <option key={g.id} value={g.id}>
               {g.name}
@@ -184,10 +187,10 @@ export function ModePicker({
           anchor={menu}
           entries={entries}
           container={layer.current}
-          ariaLabel="Session profile"
+          ariaLabel={t('ai.modePicker.menuLabel')}
           footer={
             protectedCount > 0
-              ? `Every profile but Read only is held at Ask first on ${protectedCount} protected target${protectedCount === 1 ? '' : 's'}.`
+              ? t('ai.modePicker.protectedFooter', { count: protectedCount })
               : undefined
           }
           onClose={() => setMenu(null)}
@@ -205,8 +208,10 @@ export function ModePicker({
  * is Custom on the default access group, and no access at all without one.
  */
 export function StartsInMode(): React.JSX.Element {
-  // undefined while reading, null when it could not be read.
-  const [label, setLabel] = useState<{ mode: SessionMode; text: string } | null | undefined>(undefined)
+  // undefined while reading, null when it could not be read. A null `text` is
+  // Custom with no access group, worded at render so it follows the language.
+  const [label, setLabel] = useState<{ mode: SessionMode; text: string | null } | null | undefined>(undefined)
+  const t = useT()
   useEffect(() => {
     let live = true
     const api = window.opsmaxx
@@ -226,7 +231,7 @@ export function StartsInMode(): React.JSX.Element {
             mode === 'custom'
               ? group.id
                 ? sessionModeLabel(mode, group.name)
-                : 'Custom · no access group — nothing is allowed until you pick one'
+                : null
               : sessionModeLabel(mode)
         })
       })
@@ -235,18 +240,15 @@ export function StartsInMode(): React.JSX.Element {
       live = false
     }
   }, [])
-  if (label === undefined) return <div className="s-desc">Starts in: reading your default profile…</div>
-  if (label === null) {
-    return (
-      <div className="s-desc warn">
-        Starts in your default profile, which could not be read — check it under AI &amp; MCP → Security.
-      </div>
-    )
-  }
+  if (label === undefined) return <div className="s-desc">{t('ai.modePicker.startsInReading')}</div>
+  if (label === null) return <div className="s-desc warn">{t('ai.modePicker.startsInUnreadable')}</div>
   return (
     <div className="s-desc" data-testid="starts-in-mode">
-      Starts in: <span className={clsx('chip', label.mode === 'bypass' && 'danger')}>{label.text}</span> (your
-      default — change under AI &amp; MCP → Security)
+      <Trans
+        i18nKey="ai.modePicker.startsIn"
+        values={{ profile: label.text ?? t('ai.modePicker.customNoGroup') }}
+        components={{ chip: <span className={clsx('chip', label.mode === 'bypass' && 'danger')} /> }}
+      />
     </div>
   )
 }

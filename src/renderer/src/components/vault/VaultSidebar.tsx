@@ -2,6 +2,7 @@ import { KeyRound, Lock, Globe, StickyNote, User, FileKey, Shield, Trash2 } from
 import { useVault } from '../../store/vault'
 import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
+import { useT } from '../../lib/i18n'
 import { vaultMatches, vaultEntriesFor, isSharedVaultEntry, type VaultKind } from '../../../../shared/vault'
 
 const KIND_ICON: Record<VaultKind, React.ReactNode> = {
@@ -14,6 +15,7 @@ const KIND_ICON: Record<VaultKind, React.ReactNode> = {
 }
 
 export function VaultSidebar(): React.JSX.Element {
+  const t = useT()
   const unlocked = useVault((s) => s.unlocked)
   const entries = useVault((s) => s.entries)
   const selectedId = useVault((s) => s.selectedId)
@@ -27,7 +29,7 @@ export function VaultSidebar(): React.JSX.Element {
     return (
       <div className="tree-section">
         <div className="faint" style={{ padding: '10px 12px', fontSize: 12, display: 'flex', gap: 6 }}>
-          <Lock size={13} /> Vault is locked.
+          <Lock size={13} /> {t('vault.sidebar.locked')}
         </div>
       </div>
     )
@@ -46,20 +48,20 @@ export function VaultSidebar(): React.JSX.Element {
         <input
           className="input"
           style={{ height: 30, width: '100%' }}
-          placeholder="Search vault…"
+          placeholder={t('vault.sidebar.search')}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
         />
       </div>
       <div className="tree-section">
         <div className="tree-section-label">
-          Entries <span className="count">{shown.length}</span>
+          {t('vault.sidebar.entries')} <span className="count">{shown.length}</span>
         </div>
         {hiddenCount > 0 && (
           // Saying nothing here would recreate the original confusion in the
           // opposite direction: entries you saved would simply be missing.
           <div className="faint" style={{ padding: '2px 12px 6px', fontSize: 11 }}>
-            {hiddenCount} more in other workspaces
+            {t('vault.sidebar.hiddenCount', { count: hiddenCount })}
           </div>
         )}
         {shown.map((e) => (
@@ -71,8 +73,8 @@ export function VaultSidebar(): React.JSX.Element {
           >
             {KIND_ICON[e.kind]}
             {isSharedVaultEntry(e) && (
-              <span className="faint" style={{ fontSize: 'var(--fs-xs)' }} title="Visible in every workspace">
-                shared
+              <span className="faint" style={{ fontSize: 'var(--fs-xs)' }} title={t('vault.sidebar.sharedTitle')}>
+                {t('vault.sidebar.shared')}
               </span>
             )}
             <span className="label">{e.name}</span>
@@ -93,14 +95,12 @@ export function VaultSidebar(): React.JSX.Element {
                 alignItems: 'center',
                 color: 'inherit'
               }}
-              title={`Delete ${e.name}`}
-              aria-label={`Delete ${e.name}`}
+              title={t('vault.sidebar.deleteEntry', { name: e.name })}
+              aria-label={t('vault.sidebar.deleteEntry', { name: e.name })}
               onClick={(ev) => {
                 ev.stopPropagation()
                 if (
-                  !window.confirm(
-                    `Delete “${e.name}” from the vault?\n\nThis cannot be undone, and anything using this entry will stop being able to authenticate.`
-                  )
+                  !window.confirm(t('vault.entry.confirmDelete', { name: e.name }))
                 ) {
                   return
                 }
@@ -113,7 +113,7 @@ export function VaultSidebar(): React.JSX.Element {
         ))}
         {shown.length === 0 && (
           <div className="faint" style={{ padding: '8px 10px', fontSize: 12 }}>
-            {entries.length ? 'No matches.' : 'No entries yet.'}
+            {entries.length ? t('vault.sidebar.noMatches') : t('vault.sidebar.noEntries')}
           </div>
         )}
       </div>

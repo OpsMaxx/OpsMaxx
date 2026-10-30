@@ -3,12 +3,14 @@ import { KeyRound } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import type { VpnPrompt } from '../../types'
 import { bridgeOn } from '../../lib/bridge'
+import { useT } from '../../lib/i18n'
+import type { MessageKey } from '../../../../shared/i18n'
 
-const FIELD_LABEL: Record<VpnPrompt['kind'], string> = {
-  otp: 'Code',
-  password: 'Password',
-  passphrase: 'Key passphrase',
-  username: 'Username'
+const FIELD_LABEL: Record<VpnPrompt['kind'], MessageKey> = {
+  otp: 'vpn.prompt.fieldCode',
+  password: 'vpn.prompt.fieldPassword',
+  passphrase: 'vpn.prompt.fieldPassphrase',
+  username: 'vpn.prompt.fieldUsername'
 }
 
 // Answers an engine's mid-connection challenge: an OpenVPN static challenge, a
@@ -19,6 +21,7 @@ const FIELD_LABEL: Record<VpnPrompt['kind'], string> = {
 // for an OTP long after the user has switched to a terminal, and a prompt
 // nobody can see is a connection that hangs for no visible reason.
 export function VpnPromptModal(): React.JSX.Element | null {
+  const t = useT()
   // A queue, not a single slot. Engines do not take turns: two profiles can be
   // starting at once, and `autoStart` makes that the ordinary case rather than
   // the odd one. Holding one request meant the second overwrote the first, the
@@ -76,7 +79,7 @@ export function VpnPromptModal(): React.JSX.Element | null {
 
   return (
     <Modal
-      title={request.kind === 'otp' ? 'One-time code required' : 'Authentication required'}
+      title={request.kind === 'otp' ? t('vpn.prompt.titleOtp') : t('vpn.prompt.titleAuth')}
       subtitle={request.profileName}
       // Escape and a click outside both land here, which is a decline, not a
       // dismissal: replying null lets the driver abort cleanly instead of
@@ -86,10 +89,10 @@ export function VpnPromptModal(): React.JSX.Element | null {
         <>
           <span className="spacer" />
           <button className="btn" onClick={cancel}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button className="btn primary" disabled={!value} onClick={submit}>
-            Continue
+            {t('common.continue')}
           </button>
         </>
       }
@@ -100,12 +103,12 @@ export function VpnPromptModal(): React.JSX.Element | null {
           {/* The engine's own wording, verbatim: the server chose it, and the
               user has probably seen it in another client already. */}
           <span className="muted" style={{ fontSize: 12 }}>
-            {request.label.trim() || 'The VPN server is asking for another credential.'}
+            {request.label.trim() || t('vpn.prompt.defaultLabel')}
           </span>
         </div>
 
         <label className="field">
-          <span className="field-label">{FIELD_LABEL[request.kind]}</span>
+          <span className="field-label">{t(FIELD_LABEL[request.kind])}</span>
           <input
             ref={field}
             className="input"
@@ -123,15 +126,15 @@ export function VpnPromptModal(): React.JSX.Element | null {
 
         {request.kind === 'otp' && (
           <span className="faint" style={{ fontSize: 11 }}>
-            One-time codes change every login and are never stored.
+            {t('vpn.prompt.otpNote')}
           </span>
         )}
 
         {waiting > 0 && (
           <span className="faint" style={{ fontSize: 11 }}>
             {waiting === 1
-              ? 'One more profile is waiting for a credential after this one.'
-              : `${waiting} more profiles are waiting for a credential after this one.`}
+              ? t('vpn.prompt.waitingOne')
+              : t('vpn.prompt.waitingMany', { count: waiting })}
           </span>
         )}
       </div>

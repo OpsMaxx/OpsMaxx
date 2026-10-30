@@ -19,6 +19,7 @@ import {
 import type { Server } from '../../types'
 import { NoteWhy, PanelShell } from './PanelShell'
 import { SweepEmpty } from './SweepEmpty'
+import { useT } from '../../lib/i18n'
 
 // The estate inventory — roadmap item C, renderer half.
 //
@@ -43,6 +44,7 @@ function SortHeader({
   sort: { column: InventoryColumnId; direction: SortDirection }
   onSort: (id: InventoryColumnId) => void
 }): React.JSX.Element {
+  const t = useT()
   const active = sort.column === column.id
   return (
     <th
@@ -54,8 +56,8 @@ function SortHeader({
         onClick={() => onSort(column.id)}
         title={
           column.help
-            ? `${column.help} Click to sort; servers with no value for this column always sort last.`
-            : 'Click to sort. Servers with no value for this column always sort last.'
+            ? t('monitor.inventory.sortTitleHelp', { help: column.help })
+            : t('monitor.inventory.sortTitle')
         }
       >
         {column.label}
@@ -67,6 +69,7 @@ function SortHeader({
 }
 
 function Cell({ row, column }: { row: InventoryRow; column: InventoryColumn }): React.JSX.Element {
+  const t = useT()
   const cell = row.cells[column.id]
   return (
     // `data-host`/`data-col` name the cell for anything that has to find one —
@@ -84,7 +87,7 @@ function Cell({ row, column }: { row: InventoryRow; column: InventoryColumn }): 
               the two facts have to arrive together or the first one wins. */}
           {cell.staleMetadata && (
             <span className="chip warn inv-stale" title={cell.help}>
-              stale cache
+              {t('monitor.inventory.staleCache')}
             </span>
           )}
         </>
@@ -108,6 +111,7 @@ export function InventoryPanel({
   servers: Server[]
   onOpen?: (serverId: string) => void
 }): React.JSX.Element {
+  const t = useT()
   const samples = useFleet((s) => s.samples)
   const facts = useFleet((s) => s.facts)
   const reportFacts = useFleet((s) => s.reportFacts)
@@ -204,7 +208,7 @@ export function InventoryPanel({
     <CheckNowButton
       primary={primary}
       disabled={servers.length === 0}
-      collects="host facts"
+      collects={t('monitor.inventory.collects')}
       serverIds={servers.map((s) => s.id)}
       onCollected={check}
     />
@@ -217,13 +221,9 @@ export function InventoryPanel({
     // state where refreshing IS the task — see below.
     <PanelShell
       icon={<Boxes size={14} />}
-      title="Inventory"
+      title={t('modules.inventory.label')}
       about={
-        <p>
-          What each server is running and what it is owed — distribution, kernel, pending and
-          security updates. Read from package caches as they are; nothing is installed or
-          refreshed.
-        </p>
+        <p>{t('monitor.inventory.about')}</p>
       }
       actions={
         <>
@@ -231,9 +231,9 @@ export function InventoryPanel({
             <button
               className="btn ghost sm"
               onClick={() => setHardware((h) => !h)}
-              title="Kernel, architecture, CPU model, RAM and virtualisation — what the server IS, as opposed to what it needs."
+              title={t('monitor.inventory.hardwareTitle')}
             >
-              {hardware ? 'Hide hardware' : 'Show hardware'}
+              {hardware ? t('monitor.inventory.hideHardware') : t('monitor.inventory.showHardware')}
             </button>
           )}
           {/* Primary ONLY while the table is empty — at that point Check now
@@ -261,28 +261,33 @@ export function InventoryPanel({
         // it never had: the primary stays in the header, where it is in the
         // same place on every panel, so it is deliberately NOT repeated here.
         <SweepEmpty
-          subject="No server facts have been collected yet."
+          subject={t('monitor.inventory.emptySubject')}
           busy={busy}
           onCheckNow={() => void check()}
-          note="Nothing is installed or refreshed by this: package caches are read as they are, and their age is reported next to the counts."
+          note={t('monitor.inventory.emptyNote')}
         />
       ) : (
         <>
           <div className="panel-stats">
             <span>
-              {summary.hosts} server{summary.hosts === 1 ? '' : 's'} · facts for {summary.withFacts}
+              {t('monitor.inventory.hostsWithFacts', {
+                count: summary.hosts,
+                withFacts: summary.withFacts
+              })}
             </span>
             <span>
-              {summary.pendingTotal} pending update{summary.pendingTotal === 1 ? '' : 's'}
+              {t('monitor.inventory.pending', { count: summary.pendingTotal })}
               {/* Counted, not skipped. A total drawn from nine hosts out of
                   twelve is a different number from a total drawn from twelve. */}
               {summary.pendingUnknown > 0 && (
-                <span className="state-unknown"> · {summary.pendingUnknown} server
-                  {summary.pendingUnknown === 1 ? '' : 's'} could not be counted</span>
+                <span className="state-unknown">
+                  {' · '}
+                  {t('monitor.inventory.pendingUnknown', { count: summary.pendingUnknown })}
+                </span>
               )}
             </span>
             <span>
-              {summary.securityTotal} security update{summary.securityTotal === 1 ? '' : 's'}
+              {t('monitor.inventory.security', { count: summary.securityTotal })}
               {/* The same treatment the pending total already had, and the one
                   whose absence made this line dangerous: a security total with
                   nothing beside it reads as an estate-wide figure. Three hosts
@@ -290,8 +295,10 @@ export function InventoryPanel({
                   not one word more, which is the exact sentence a non-root
                   account must never be shown during the week a CVE lands. */}
               {summary.securityUnknown > 0 && (
-                <span className="state-unknown"> · {summary.securityUnknown} server
-                  {summary.securityUnknown === 1 ? '' : 's'} could not answer</span>
+                <span className="state-unknown">
+                  {' · '}
+                  {t('monitor.inventory.securityUnknownShort', { count: summary.securityUnknown })}
+                </span>
               )}
             </span>
             {/* The counts above are read out of package caches, and a cache
@@ -301,15 +308,14 @@ export function InventoryPanel({
             {summary.staleMetadata > 0 && (
               <span
                 className="state-watch"
-                title="OpsMaxx never refreshes a package cache — refreshing is a network operation and on some package managers it can break the server — so a count read out of an old cache is reported with the cache's age beside it rather than silently presented as current."
+                title={t('monitor.inventory.staleTitle')}
               >
-                {summary.staleMetadata} server{summary.staleMetadata === 1 ? '' : 's'} counted from a
-                stale package cache
+                {t('monitor.inventory.stale', { count: summary.staleMetadata })}
               </span>
             )}
             {summary.rebootsOwed > 0 && (
               <span className="state-watch">
-                {summary.rebootsOwed} server{summary.rebootsOwed === 1 ? '' : 's'} awaiting a reboot
+                {t('monitor.inventory.reboots', { count: summary.rebootsOwed })}
               </span>
             )}
           </div>
@@ -321,17 +327,15 @@ export function InventoryPanel({
           {summary.securityUnanswerable > 0 && (
             <div className="panel-note is-unknown">
               <ShieldQuestion size={12} />{' '}
-              {summary.securityUnanswerable} server
-              {summary.securityUnanswerable === 1 ? '' : 's'} can never report a security update
-              count, so {summary.securityUnanswerable === 1 ? 'it is' : 'they are'} not in the{' '}
-              {summary.securityTotal} above. Treat{' '}
-              {summary.securityUnanswerable === 1 ? 'it' : 'them'} as unknown, never as zero.
+              {t('monitor.inventory.unanswerable', {
+                count: summary.securityUnanswerable,
+                total: summary.securityTotal
+              })}
               {/* The sentence above is the finding and does not fold. What folds
                   is which distributions and why — true, useful once, and 38px
                   of a table's window every time it is not being read. */}
-              <NoteWhy summary="Why they cannot answer">
-                Arch and Alpine have no security channel at all, and dnf cannot answer where the
-                repositories publish no updateinfo.
+              <NoteWhy summary={t('monitor.inventory.unanswerableWhy')}>
+                {t('monitor.inventory.unanswerableWhyBody')}
               </NoteWhy>
             </div>
           )}
@@ -346,21 +350,20 @@ export function InventoryPanel({
               fact about their estate, and the reverse. */}
           {summary.securityUnknown > 0 && (
             <div className="panel-note is-unknown">
-              <ShieldQuestion size={12} /> {summary.securityUnknown} server
-              {summary.securityUnknown === 1 ? '' : 's'} did not answer the security question, so{' '}
-              {summary.securityUnknown === 1 ? 'it is' : 'they are'} not in the{' '}
-              {summary.securityTotal} above.
-              <NoteWhy summary="These gaps can close">
-                A probe refused for want of privilege answers for an account that has it, and a
-                server whose facts have not been collected yet answers on the next sweep. The
-                Security column says which applies to which server.
+              <ShieldQuestion size={12} />{' '}
+              {t('monitor.inventory.securityUnknown', {
+                count: summary.securityUnknown,
+                total: summary.securityTotal
+              })}
+              <NoteWhy summary={t('monitor.inventory.gapsCanClose')}>
+                {t('monitor.inventory.gapsCanCloseBody')}
               </NoteWhy>
             </div>
           )}
 
           {failed.map((f) => (
             <div key={f.name} className="panel-note is-alarm">
-              {f.name}: the facts probe failed — {f.error}
+              {t('monitor.inventory.probeFailed', { name: f.name, error: f.error })}
             </div>
           ))}
 
@@ -386,7 +389,7 @@ export function InventoryPanel({
                             <button
                               className="inv-host"
                               onClick={() => onOpen(r.serverId)}
-                              title={`Open ${r.serverName}`}
+                              title={t('monitor.common.openServer', { name: r.serverName })}
                             >
                               {r.serverName}
                             </button>

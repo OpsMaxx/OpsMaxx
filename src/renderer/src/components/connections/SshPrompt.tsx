@@ -4,11 +4,13 @@ import { Modal } from '../common/Modal'
 import type { SshPromptRequest } from '../../../../preload/index'
 import { bridgeOn } from '../../lib/bridge'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
 
 // Answers keyboard-interactive challenges: the second factor on servers with
 // AuthenticationMethods publickey,keyboard-interactive, or the password on
 // servers that only offer keyboard-interactive.
 export function SshPrompt(): React.JSX.Element | null {
+  const t = useT()
   /**
    * A QUEUE, not a slot.
    *
@@ -90,7 +92,7 @@ export function SshPrompt(): React.JSX.Element | null {
 
   return (
     <Modal
-      title={request.name?.trim() || 'Additional authentication required'}
+      title={request.name?.trim() || t('connections.sshPrompt.title')}
       subtitle={`${request.username}@${request.host}`}
       onClose={cancel}
       // In front of anything else that is open. A connection is WAITING on
@@ -103,7 +105,7 @@ export function SshPrompt(): React.JSX.Element | null {
         <div className="row" style={{ gap: 8 }}>
           <KeyRound size={16} className="faint" />
           <span className="muted" style={{ fontSize: 12 }}>
-            {request.instructions?.trim() || 'The server is requesting a second authentication factor.'}
+            {request.instructions?.trim() || t('connections.sshPrompt.instructions')}
           </span>
         </div>
 
@@ -134,30 +136,30 @@ export function SshPrompt(): React.JSX.Element | null {
           <label className="row" style={{ gap: 8 }}>
             <Switch checked={remember} onChange={setRemember} />
             <span className="muted" style={{ fontSize: 12 }}>
-              Remember this answer for {request.host} (stored in OS secure storage)
+              {t('connections.sshPrompt.remember', { host: request.host })}
             </span>
           </label>
         )}
         {looksOneTime && (
           <span className="faint" style={{ fontSize: 11 }}>
-            One-time codes change each login and are never stored.
+            {t('connections.sshPrompt.oneTime')}
           </span>
         )}
         {waiting > 0 && (
           <span className="field-hint">
             {waiting === 1
-              ? 'One more server is waiting to be authenticated after this one.'
-              : `${waiting} more servers are waiting to be authenticated after this one.`}
+              ? t('connections.sshPrompt.waitingOne')
+              : t('connections.sshPrompt.waitingMany', { count: waiting })}
           </span>
         )}
 
         <div className="row" style={{ gap: 8 }}>
           <span className="spacer" />
           <button className="btn sm" onClick={cancel}>
-            Cancel
+            {t('common.cancel')}
           </button>
           <button className="btn primary sm" onClick={submit}>
-            Continue
+            {t('common.continue')}
           </button>
         </div>
       </div>

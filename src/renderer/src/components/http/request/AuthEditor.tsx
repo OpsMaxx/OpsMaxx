@@ -4,6 +4,8 @@ import type { Auth } from '../../../../../shared/apiModel'
 import type { VariableScopeChain } from '../../../../../shared/apiVariables'
 import { VariableInput, type VariableInputProps } from '../fields/VariableInput'
 import { VaultValueField } from '../fields/VaultValueField'
+import { useT } from '../../../lib/i18n'
+import type { MessageKey } from '../../../../../shared/i18n'
 import './request.css'
 
 export interface AuthEditorProps {
@@ -65,13 +67,20 @@ export function deadVaultField(auth: Auth, entryIds: ReadonlySet<string>): Secre
   return id && !entryIds.has(id) ? field : null
 }
 
-const TYPES: { type: Auth['type']; label: string }[] = [
-  { type: 'inherit', label: 'Inherit from collection' },
-  { type: 'none', label: 'No auth' },
-  { type: 'bearer', label: 'Bearer token' },
-  { type: 'basic', label: 'Basic' },
-  { type: 'apikey', label: 'API key' }
+const TYPES: { type: Auth['type']; labelKey: MessageKey }[] = [
+  { type: 'inherit', labelKey: 'http.auth.typeInherit' },
+  { type: 'none', labelKey: 'http.auth.typeNone' },
+  { type: 'bearer', labelKey: 'http.auth.typeBearer' },
+  { type: 'basic', labelKey: 'http.auth.typeBasic' },
+  { type: 'apikey', labelKey: 'http.auth.typeApikey' }
 ]
+
+/** A secret field's name inside a sentence ("Type the password instead"). */
+const FIELD_NAME: Record<SecretField, MessageKey> = {
+  token: 'http.auth.fieldToken',
+  password: 'http.auth.fieldPassword',
+  value: 'http.auth.fieldValue'
+}
 
 function blank(type: Auth['type']): Auth {
   switch (type) {
@@ -96,14 +105,16 @@ export function AuthEditor({
   stripped = [],
   onMoveToVault
 }: AuthEditorProps): React.JSX.Element {
+  const t = useT()
   const change = (next: Auth): void => {
     if (!readOnly) onChange(next)
   }
   // A scratch request has no collection to inherit from.
-  const types = TYPES.filter((t) => t.type !== 'inherit' || collectionName !== undefined || value.type === 'inherit')
+  const types = TYPES.filter((x) => x.type !== 'inherit' || collectionName !== undefined || value.type === 'inherit')
   const secret = (field: SecretField, label: string, v: string, set: (next: string) => void): React.JSX.Element => (
     <SecretInput
       label={label}
+      fieldName={t(FIELD_NAME[field])}
       value={v}
       onChange={set}
       chain={chain}
@@ -116,16 +127,16 @@ export function AuthEditor({
   return (
     <div className="hc-auth">
       <label className="hc-field">
-        <span className="ui-label">Type</span>
+        <span className="ui-label">{t('http.auth.type')}</span>
         <select
           className="hc-select"
           value={value.type}
           disabled={readOnly}
           onChange={(e) => change(blank(e.target.value as Auth['type']))}
         >
-          {types.map((t) => (
-            <option key={t.type} value={t.type}>
-              {t.label}
+          {types.map((x) => (
+            <option key={x.type} value={x.type}>
+              {t(x.labelKey)}
             </option>
           ))}
         </select>
@@ -134,51 +145,53 @@ export function AuthEditor({
       {value.type === 'inherit' && (
         <p className="hc-note">
           {collectionName
-            ? `Uses ${inheritFrom ?? 'the auth'} set on ${collectionName}.`
-            : 'Uses the auth set on the collection.'}
+            ? inheritFrom
+              ? t('http.auth.usesAuthOn', { auth: inheritFrom, name: collectionName })
+              : t('http.auth.usesTheAuthOn', { name: collectionName })
+            : t('http.auth.usesCollectionAuth')}
         </p>
       )}
-      {value.type === 'none' && <p className="hc-note">This request sends no credentials.</p>}
-      {value.type === 'bearer' && secret('token', 'Token', value.token, (token) => change({ ...value, token }))}
+      {value.type === 'none' && <p className="hc-note">{t('http.auth.noCredentials')}</p>}
+      {value.type === 'bearer' && secret('token', t('http.auth.token'), value.token, (token) => change({ ...value, token }))}
       {value.type === 'basic' && (
         <>
           <div className="hc-field">
-            <span className="ui-label">Username</span>
+            <span className="ui-label">{t('http.auth.username')}</span>
             <VarField
               readOnly={readOnly}
               value={value.username}
               onChange={(username) => change({ ...value, username })}
               chain={chain}
-              ariaLabel="Username"
+              ariaLabel={t('http.auth.username')}
             />
           </div>
-          {secret('password', 'Password', value.password, (password) => change({ ...value, password }))}
+          {secret('password', t('http.auth.password'), value.password, (password) => change({ ...value, password }))}
         </>
       )}
       {value.type === 'apikey' && (
         <>
           <div className="hc-field">
-            <span className="ui-label">Key</span>
+            <span className="ui-label">{t('http.auth.key')}</span>
             <VarField
               readOnly={readOnly}
               value={value.name}
               onChange={(name) => change({ ...value, name })}
               chain={chain}
-              ariaLabel="Key name"
+              ariaLabel={t('http.auth.keyName')}
               placeholder="X-Api-Key"
             />
           </div>
-          {secret('value', 'Value', value.value, (v) => change({ ...value, value: v }))}
+          {secret('value', t('http.auth.value'), value.value, (v) => change({ ...value, value: v }))}
           <label className="hc-field">
-            <span className="ui-label">Add to</span>
+            <span className="ui-label">{t('http.auth.addTo')}</span>
             <select
               className="hc-select"
               value={value.in}
               disabled={readOnly}
               onChange={(e) => change({ ...value, in: e.target.value as 'header' | 'query' })}
             >
-              <option value="header">Header</option>
-              <option value="query">Query parameter</option>
+              <option value="header">{t('http.auth.addToHeader')}</option>
+              <option value="query">{t('http.auth.addToQuery')}</option>
             </select>
           </label>
         </>
@@ -193,6 +206,7 @@ export function AuthEditor({
  */
 function SecretInput({
   label,
+  fieldName,
   value,
   onChange,
   chain,
@@ -201,6 +215,7 @@ function SecretInput({
   onMoveToVault
 }: {
   label: string
+  fieldName: string
   value: string
   onChange: (v: string) => void
   chain: VariableScopeChain
@@ -209,7 +224,7 @@ function SecretInput({
   onMoveToVault?: () => void
 }): React.JSX.Element {
   const [vaultMode, setVaultMode] = useState(value.startsWith('vault:'))
-  const lower = label.toLowerCase()
+  const t = useT()
   const paste = async (): Promise<void> => onChange(await window.opsmaxx.clipboard.read())
 
   return (
@@ -227,8 +242,12 @@ function SecretInput({
           className="btn ghost sm"
           disabled={readOnly}
           aria-pressed={vaultMode}
-          aria-label={vaultMode ? `Type the ${lower} instead` : `Use a vault entry for the ${lower}`}
-          title={vaultMode ? 'Type a value instead' : 'Use a vault entry'}
+          aria-label={
+            vaultMode
+              ? t('http.auth.typeInstead', { field: fieldName })
+              : t('http.auth.useVaultFor', { field: fieldName })
+          }
+          title={vaultMode ? t('http.auth.typeValueInstead') : t('http.auth.useVault')}
           onClick={() => {
             setVaultMode(!vaultMode)
             onChange('')
@@ -239,21 +258,21 @@ function SecretInput({
       </div>
       {stripped && value === '' && (
         <p className="hc-note hc-warn" role="note">
-          Not kept from last session.{' '}
+          {t('http.auth.notKept')}{' '}
           <button className="btn quiet sm" onClick={() => void paste()} disabled={readOnly}>
-            Paste
+            {t('http.auth.paste')}
           </button>{' '}
           <button className="btn quiet sm" onClick={() => setVaultMode(true)} disabled={readOnly}>
-            Use vault…
+            {t('http.auth.useVaultMenu')}
           </button>
         </p>
       )}
       {!vaultMode && isLiteralSecret(value) && (
         <p className="hc-note hc-warn" role="note">
-          Not saved — kept for this session only.{' '}
+          {t('http.auth.notSaved')}{' '}
           {onMoveToVault && (
             <button className="btn quiet sm" onClick={onMoveToVault} disabled={readOnly}>
-              Move to vault…
+              {t('http.auth.moveToVault')}
             </button>
           )}
         </p>

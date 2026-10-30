@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { t } from '../../lib/i18n'
 import type {
   InspectFlow,
   InspectPinnedHost,
@@ -183,7 +184,7 @@ export const useInspect = create<InspectState>((set, get) => ({
       // A declined prompt is a decision, not a failure. Reporting it as an
       // error would tell someone who deliberately said no that something
       // broke.
-      if (!res.ok && !res.declined) set({ error: res.message ?? 'The certificate was not installed.' })
+      if (!res.ok && !res.declined) set({ error: res.message ?? t('inspect.ca.notInstalled') })
       // Cleared on any outcome that is not "we ran out of automatic routes",
       // so a command that has already been run stops being advice.
       set({ manualTrustCommand: res.ok ? null : (res.manualCommand ?? null) })
@@ -201,7 +202,7 @@ export const useInspect = create<InspectState>((set, get) => ({
     set({ busy: true, error: null })
     try {
       const res = await api.removeTrust(store)
-      if (!res.ok && !res.declined) set({ error: res.message ?? 'The certificate was not removed.' })
+      if (!res.ok && !res.declined) set({ error: res.message ?? t('inspect.ca.notRemoved') })
       if (res.ok) set({ manualTrustCommand: null })
       await get().refresh()
     } catch (e) {

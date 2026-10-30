@@ -14,8 +14,7 @@ import { useApi } from '../../../store/api'
 import { KeyValueTable } from '../../common/KeyValueTable'
 import { VaultValueField } from '../fields/VaultValueField'
 import { MoveToVaultDialog } from '../dialogs/MoveToVaultDialog'
-
-export const CREDENTIAL_WARNING = 'Sent as a credential; saved and synced as plain text. Move it to the vault from the row menu.'
+import { useT } from '../../../lib/i18n'
 
 const namesIn = (text: string, into: Set<string>): void => {
   for (const m of text.matchAll(VARIABLE_TOKEN)) into.add(m[1])
@@ -85,6 +84,7 @@ export function VariablesTable({
     [collections, workspaceId]
   )
   const [moving, setMoving] = useState<Row | null>(null)
+  const t = useT()
   const rows = variables.map(toRow)
   const warn = (r: Row): boolean => isLiteral(r.value) && (credentials.has(r.key) || isSensitiveName(r.key))
   return (
@@ -96,19 +96,20 @@ export function VariablesTable({
         onChange={(next) => onChange(next.map(toVar))}
         valueCell={(row, onValue) => {
           const field = (
-            <VaultValueField value={row.value} onChange={onValue} allowLiteral ariaLabel={`Value, ${row.key || 'variable'}`} />
+            <VaultValueField value={row.value} onChange={onValue} allowLiteral ariaLabel={t('http.variables.valueOf', { name: row.key || t('http.variables.variable') })}
+            />
           )
           return overriddenBy?.keys.has(row.key) ? (
-            <span className="hc-overridden" title={`Overridden by ${overriddenBy.by}`}>
+            <span className="hc-overridden" title={t('http.variables.overriddenBy', { name: overriddenBy.by })}>
               {field}
-              <span className="hc-sr-only">, overridden by {overriddenBy.by}</span>
+              <span className="hc-sr-only">{t('http.variables.overriddenBySr', { name: overriddenBy.by })}</span>
             </span>
           ) : (
             field
           )
         }}
-        warnFor={(r) => (warn(r) ? CREDENTIAL_WARNING : null)}
-        extraRowMenu={(r) => (warn(r) ? [{ label: 'Move to vault…', onClick: () => setMoving(r) }] : [])}
+        warnFor={(r) => (warn(r) ? t('http.variables.credentialWarning') : null)}
+        extraRowMenu={(r) => (warn(r) ? [{ label: t('http.variables.moveToVault'), onClick: () => setMoving(r) }] : [])}
       />
       {moving && (
         <MoveToVaultDialog

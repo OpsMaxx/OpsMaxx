@@ -100,6 +100,7 @@ function GroupSection({
   const toggleMonitorGroup = useApp((s) => s.toggleMonitorGroup)
   const renameMonitorGroup = useApp((s) => s.renameMonitorGroup)
   const deleteMonitorGroup = useApp((s) => s.deleteMonitorGroup)
+  const t = useT()
   const [renaming, setRenaming] = useState(false)
 
   const draggingCard = drag?.kind === 'card'
@@ -183,7 +184,7 @@ function GroupSection({
         {!group.system && !renaming && (
           <button
             className="icon-btn xs"
-            title="Delete group — its cards move back to Ungrouped"
+            title={t('monitor.fleet.deleteGroup')}
             onClick={(e) => {
               e.stopPropagation()
               deleteMonitorGroup(group.id)
@@ -239,7 +240,7 @@ function GroupSection({
           ))}
           {slotAt(cards.length)}
           {cards.length === 0 && (
-            <div className="mg-empty">Drag cards here</div>
+            <div className="mg-empty">{t('monitor.fleet.dragHere')}</div>
           )}
         </div>
       )}
@@ -536,11 +537,15 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
       <div className="panel-body" style={hidden ? { display: 'none' } : undefined}>
         <EmptyState
           icon={rail === 'operations' ? <Wrench size={26} /> : <Activity size={26} />}
-          title={rail === 'operations' ? 'Nothing to operate on' : 'Nothing to monitor'}
+          title={
+            rail === 'operations'
+              ? t('monitor.fleet.nothingToOperate')
+              : t('monitor.fleet.nothingToMonitor')
+          }
           message={
             rail === 'operations'
-              ? 'Add a server before running commands or installing updates across the estate.'
-              : 'Add a server to start streaming live CPU, memory, disk and network metrics.'
+              ? t('monitor.fleet.nothingToOperateBody')
+              : t('monitor.fleet.nothingToMonitorBody')
           }
           /* An empty state that only says "this is empty" is a dead end, and
              this one sits behind an activity-bar icon somebody just pressed --
@@ -549,10 +554,10 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
           action={
             <div className="row" style={{ gap: 8, justifyContent: 'center' }}>
               <button className="btn" onClick={() => setModal('import-ssh')}>
-                <Download size={15} /> Import from ~/.ssh/config
+                <Download size={15} /> {t('layout.sidebar.importSsh')}
               </button>
               <button className="btn primary" onClick={() => setModal('add-server')}>
-                <Plus size={15} /> Add Server
+                <Plus size={15} /> {t('monitor.fleet.addServer')}
               </button>
             </div>
           }
@@ -613,16 +618,16 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
           <>
         <div className="content-header">
           <div>
-            <h1 className="ui-page-title">Monitoring</h1>
+            <h1 className="ui-page-title">{t('layout.activity.monitor')}</h1>
             {/* "reading only" rather than "live metrics": it is the contract of
                 the destination now, not a description of the overview tab. */}
             <div className="sub ui-note">
-              {online} of {servers.length} servers online · reading only
+              {t('monitor.fleet.onlineSummary', { online, total: servers.length })}
             </div>
           </div>
           <span className="spacer" />
-          <button className="btn ghost" onClick={() => addMonitorGroup('New group')}>
-            <FolderPlus size={14} /> New group
+          <button className="btn ghost" onClick={() => addMonitorGroup(t('monitor.fleet.newGroupName'))}>
+            <FolderPlus size={14} /> {t('monitor.fleet.newGroup')}
           </button>
         </div>
 
@@ -634,13 +639,13 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
             className={clsx('seg-btn', activeTab === 'overview' && 'active')}
             onClick={() => setTab('overview')}
           >
-            Overview
+            {t('monitor.fleet.overview')}
           </button>
           <button
             className={clsx('seg-btn', activeTab === 'alerts' && 'active')}
             onClick={() => setTab('alerts')}
           >
-            Alerts
+            {t('monitor.fleet.alerts')}
             {/* The count, so the tab says whether it is worth opening. Only when
                 there is one: a permanent "0" trains people to stop reading it. */}
             {alertCount > 0 && <span className="chip danger" style={{ marginLeft: 6 }}>{alertCount}</span>}
@@ -672,7 +677,7 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
                   setOffOpen(false)
                 }}
               >
-                More <ChevronDown size={13} />
+                {t('monitor.fleet.more')} <ChevronDown size={13} />
               </button>
               {moreOpen && (
                 <div className="mon-pop">
@@ -710,7 +715,7 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
               <button
                 ref={offBtn}
                 className={clsx('seg-btn', offOpen && 'active')}
-                title={`${offTabs.length} more monitoring modules are available and switched off`}
+                title={t('monitor.fleet.offModulesTitle', { count: offTabs.length })}
                 aria-expanded={offOpen}
                 onClick={() => {
                   setOffOpen((v) => !v)
@@ -722,7 +727,7 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
               {offOpen && (
                 <div className="mon-pop wide">
                   <div className="s-desc" style={{ marginBottom: 6 }}>
-                    Switched off. Enabling one adds a tab here.
+                    {t('monitor.fleet.offModulesNote')}
                   </div>
                   {offTabs.map((m) => (
                     <div key={m.id} className="mon-pop-row static">
@@ -738,7 +743,7 @@ export function FleetMonitor({ hidden = false }: { hidden?: boolean }): React.JS
                       openSettings('modules')
                     }}
                   >
-                    Choose modules
+                    {t('monitor.fleet.chooseModules')}
                   </button>
                 </div>
               )}

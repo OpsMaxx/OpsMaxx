@@ -4,6 +4,7 @@ import type { TunnelsTab } from '../../store/app'
 import type { VpnProfile } from '../../types'
 import { isReverseProxyKind } from '../../../../shared/vpn'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 import { TunnelManager } from './TunnelManager'
 import { VpnManager } from '../vpn/VpnManager'
 import { FrpManager } from '../vpn/FrpManager'
@@ -26,6 +27,7 @@ import { useInspect } from '../inspect/useInspect'
 const isReverseProxy = (p: VpnProfile): boolean => isReverseProxyKind(p.spec.kind)
 
 export function TunnelsView(): React.JSX.Element {
+  const t = useT()
   const tab = useApp((s) => s.tunnelsTab)
   const setTab = useApp((s) => s.setTunnelsTab)
   const tunnels = useWorkspaceTunnels()
@@ -33,16 +35,16 @@ export function TunnelsView(): React.JSX.Element {
   const flowCount = useInspect((s) => s.flows.length)
 
   const tabs: { id: TunnelsTab; label: string; icon: React.ReactNode; count: number }[] = [
-    { id: 'tunnels', label: 'Tunnels', icon: <Network size={14} />, count: tunnels.length },
+    { id: 'tunnels', label: t('tunnels.tab.tunnels'), icon: <Network size={14} />, count: tunnels.length },
     {
       id: 'vpn',
-      label: 'VPN',
+      label: t('tunnels.tab.vpn'),
       icon: <Globe size={14} />,
       count: vpns.filter((p) => !isReverseProxy(p)).length
     },
     {
       id: 'frp',
-      label: 'Reverse proxies',
+      label: t('tunnels.tab.frp'),
       icon: <Share2 size={14} />,
       count: vpns.filter(isReverseProxy).length
     },
@@ -51,20 +53,20 @@ export function TunnelsView(): React.JSX.Element {
     // because it is the same question — what is this machine talking to — and
     // a fifth activity icon for one panel is how an icon bar stops being
     // scannable. Its count is live flows, which is 0 until capture is on.
-    { id: 'inspect', label: 'Traffic', icon: <Radar size={14} />, count: flowCount }
+    { id: 'inspect', label: t('tunnels.tab.inspect'), icon: <Radar size={14} />, count: flowCount }
   ]
 
   return (
     <div className="main">
       <div className="viewbar">
         <div className="segment">
-          {tabs.map((t) => (
+          {tabs.map((tb) => (
             <button
-              key={t.id}
-              className={clsx('seg-btn', tab === t.id && 'active')}
-              onClick={() => setTab(t.id)}
+              key={tb.id}
+              className={clsx('seg-btn', tab === tb.id && 'active')}
+              onClick={() => setTab(tb.id)}
             >
-              {t.icon} {t.label} <span className="count">{t.count}</span>
+              {tb.icon} {tb.label} <span className="count">{tb.count}</span>
             </button>
           ))}
         </div>

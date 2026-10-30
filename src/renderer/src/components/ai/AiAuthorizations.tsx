@@ -3,6 +3,8 @@ import { Check, X } from 'lucide-react'
 import type { AccessGroup, SessionMode } from '../../../../shared/mcp'
 import { SESSION_MODES, sessionModeLabel } from '../../../../shared/mcp'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
+import { Trans } from '../../lib/Trans'
 
 /** Marks a predefined profile's value in the consent select, apart from group ids. */
 const PROFILE = 'profile:'
@@ -44,6 +46,7 @@ export function AiAuthorizations(): React.JSX.Element {
   const [choice, setChoice] = useState<Record<string, { groupId: string; workspaceIds: string[] }>>({})
   const [busy, setBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const t = useT()
 
   const load = (): void => {
     void window.opsmaxx?.aiMcp
@@ -61,8 +64,8 @@ export function AiAuthorizations(): React.JSX.Element {
     load()
     // An authorization expires on its own after a few minutes, so this list
     // has to stop showing one that can no longer be granted.
-    const t = setInterval(load, 2000)
-    return () => clearInterval(t)
+    const timer = setInterval(load, 2000)
+    return () => clearInterval(timer)
   }, [])
 
   const current = (id: string): { groupId: string; workspaceIds: string[] } =>
@@ -101,7 +104,7 @@ export function AiAuthorizations(): React.JSX.Element {
       // than a throw, and silently doing nothing would look like a dead button.
       if (result && !result.ok) setError(result.error)
     } catch {
-      setError('That approval could not be recorded. The request may have expired.')
+      setError(t('ai.authorizations.recordFailed'))
     } finally {
       setBusy(null)
       load()
@@ -120,22 +123,15 @@ export function AiAuthorizations(): React.JSX.Element {
 
   return (
     <div className="settings-section">
-      <h2>Authorization requests</h2>
-      <div className="sub">
-        A client that asked to connect over OAuth waits here. Nothing is granted until you choose
-        what it may do — there is no default, and the client cannot choose for itself. Approving
-        creates a session exactly as if you had made one by hand.
-      </div>
+      <h2>{t('ai.authorizations.title')}</h2>
+      <div className="sub">{t('ai.authorizations.intro')}</div>
 
       {unreadable ? (
-        <div className="s-desc state-unknown">
-          The list of authorization requests could not be read, so this is not a statement that none
-          are waiting.
-        </div>
+        <div className="s-desc state-unknown">{t('ai.authorizations.unreadable')}</div>
       ) : pending === null ? (
-        <div className="s-desc state-unknown">Checking for anything waiting…</div>
+        <div className="s-desc state-unknown">{t('ai.approvals.checking')}</div>
       ) : pending.length === 0 ? (
-        <div className="s-desc">No client is waiting to be authorized.</div>
+        <div className="s-desc">{t('ai.authorizations.none')}</div>
       ) : null}
 
       {error ? <div className="s-desc state-unknown">{error}</div> : null}
@@ -151,17 +147,19 @@ export function AiAuthorizations(): React.JSX.Element {
                   control characters in main before it ever reaches here. */}
               <div className="r-title">{request.clientName}</div>
               <div className="r-sub">
-                asked to connect · returns to <span className="mono">{request.redirectUri}</span>
+                {/* A self-closing tag, so the client's string is never parsed for markup. */}
+                <Trans
+                  i18nKey="ai.authorizations.returnsTo"
+                  components={{ uri: <span className="mono">{request.redirectUri}</span> }}
+                />
               </div>
 
               <div className="r-sub" style={{ marginTop: 10 }}>
-                Workspaces it may see
+                {t('ai.authorizations.workspaces')}
               </div>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 6 }}>
                 {workspaces.length === 0 ? (
-                  <div className="s-desc">
-                    There are no workspaces yet, and a session has to be scoped to at least one.
-                  </div>
+                  <div className="s-desc">{t('ai.authorizations.noWorkspaces')}</div>
                 ) : (
                   workspaces.map((w) => (
                     // The click target is the whole label, not just the switch.
@@ -183,7 +181,7 @@ export function AiAuthorizations(): React.JSX.Element {
               </div>
 
               <div className="r-sub" style={{ marginTop: 10 }}>
-                What it may do
+                {t('ai.authorizations.whatItMayDo')}
               </div>
               {/* No preselection, deliberately. Everywhere else in this app a
                   group picker lands on a configured default; here the whole
@@ -196,7 +194,7 @@ export function AiAuthorizations(): React.JSX.Element {
                 value={picked.groupId}
                 onChange={(e) => setFor(request.id, { groupId: e.target.value })}
               >
-                <option value="">Choose a profile…</option>
+                <option value="">{t('ai.authorizations.chooseProfile')}</option>
                 {/* Bypass is not offered: it is confirmed where it is set, and
                     it can be picked afterwards under Active Sessions. */}
                 {SESSION_MODES.filter((m) => m.id !== 'custom' && m.id !== 'bypass').map((m) => (
@@ -204,7 +202,7 @@ export function AiAuthorizations(): React.JSX.Element {
                     {m.label} — {m.detail}
                   </option>
                 ))}
-                <optgroup label="Custom — an access group, exactly as written">
+                <optgroup label={t('ai.authorizations.customGroup')}>
                   {groups.map((g) => (
                     <option key={g.id} value={g.id}>
                       {g.name}
@@ -220,15 +218,15 @@ export function AiAuthorizations(): React.JSX.Element {
                 disabled={busy === request.id}
                 onClick={() => deny(request.id)}
               >
-                <X size={13} /> Deny
+                <X size={13} /> {t('ai.approvals.deny')}
               </button>
               <button
                 className="btn sm primary"
                 disabled={!ready || busy === request.id}
-                title={ready ? undefined : 'Choose a workspace and a profile first'}
+                title={ready ? undefined : t('ai.authorizations.chooseFirst')}
                 onClick={() => approve(request.id)}
               >
-                <Check size={13} /> Approve
+                <Check size={13} /> {t('ai.authorizations.approve')}
               </button>
             </div>
           </div>

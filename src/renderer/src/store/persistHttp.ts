@@ -24,6 +24,7 @@ import { globalsReviewKey, useApi } from './api'
 import { useApp } from './app'
 import { useHttp } from './http'
 import { useToasts } from './toast'
+import { t } from '../lib/i18n'
 
 // The HTTP client's one persistence choke point. Everything saved for
 // `apiCollections` and `httpSession` passes `stripLiteralSecrets` here, and so
@@ -200,7 +201,7 @@ export function apiSaveFields(): ApiSaveFields {
     apiCollections = lastGoodCollections as ApiCollectionV2[]
     useToasts
       .getState()
-      .push('Collections are over 4 MB and were not saved. Delete or re-import a large collection to save again.', 'error', undefined, {
+      .push(t('store.persistHttp.overCap'), 'error', undefined, {
         key: 'http-collections-cap'
       })
   } else {

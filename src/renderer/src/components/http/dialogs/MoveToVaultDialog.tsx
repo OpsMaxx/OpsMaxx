@@ -4,6 +4,7 @@ import { useApp } from '../../../store/app'
 import { vaultReference } from '../../../../../shared/apiSecrets'
 import { VAULT_MIN_PASSWORD } from '../../../../../shared/vault'
 import { Field, Modal } from '../../common/Modal'
+import { useT } from '../../../lib/i18n'
 import '../nav.css'
 
 /**
@@ -31,14 +32,15 @@ export function MoveToVaultDialog({
   const [password, setPassword] = useState('')
   const [again, setAgain] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const t = useT()
 
   const creating = exists === false
   const locked = !creating && !unlocked
   const pwError =
     creating && password && password.length < VAULT_MIN_PASSWORD
-      ? `At least ${VAULT_MIN_PASSWORD} characters.`
+      ? t('http.moveToVault.minLength', { min: VAULT_MIN_PASSWORD })
       : creating && again && again !== password
-        ? 'The two passwords differ.'
+        ? t('http.moveToVault.mismatch')
         : null
   const ready =
     !!name.trim() &&
@@ -56,7 +58,7 @@ export function MoveToVaultDialog({
       workspaceId: useApp.getState().activeWorkspaceId
     })
     if (!id) {
-      setError('The value could not be stored in the vault.')
+      setError(t('http.moveToVault.storeFailed'))
       return
     }
     onMoved(vaultReference(id, 'password'))
@@ -65,32 +67,36 @@ export function MoveToVaultDialog({
 
   return (
     <Modal
-      title="Move to vault"
-      subtitle="The value is stored in the vault and the field keeps only a reference to it."
+      title={t('http.moveToVault.title')}
+      subtitle={t('http.moveToVault.subtitle')}
       onClose={onClose}
       confirm={{
-        label: creating ? 'Create vault and move' : locked ? 'Unlock and move' : 'Move to vault',
+        label: creating
+          ? t('http.moveToVault.createAndMove')
+          : locked
+            ? t('http.moveToVault.unlockAndMove')
+            : t('http.moveToVault.move'),
         onClick: () => void move(),
         disabled: !ready
       }}
       footerNote={error ?? vaultError ?? undefined}
     >
-      <Field label="Entry name" error={name.trim() ? null : 'Name the entry.'}>
+      <Field label={t('http.moveToVault.entryName')} error={name.trim() ? null : t('http.moveToVault.nameRequired')}>
         <input className="input" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
       </Field>
       {creating && (
         <>
-          <p>There is no vault on this machine yet. Choose its master password to create one.</p>
-          <Field label="Master password" error={pwError}>
+          <p>{t('http.moveToVault.noVault')}</p>
+          <Field label={t('http.moveToVault.masterPassword')} error={pwError}>
             <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </Field>
-          <Field label="Master password again">
+          <Field label={t('http.moveToVault.masterPasswordAgain')}>
             <input className="input" type="password" value={again} onChange={(e) => setAgain(e.target.value)} />
           </Field>
         </>
       )}
       {locked && (
-        <Field label="Vault password" hint="The vault is closed; this opens it.">
+        <Field label={t('http.moveToVault.vaultPassword')} hint={t('http.moveToVault.vaultPasswordHint')}>
           <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
         </Field>
       )}

@@ -6,6 +6,7 @@ import { useHttp } from '../../store/http'
 import { useApi } from '../../store/api'
 import { useApp } from '../../store/app'
 import { clsx } from '../../lib/format'
+import { useT } from '../../lib/i18n'
 
 export interface RouteChipProps {
   tabId: Id
@@ -33,6 +34,7 @@ export function RouteChip({ tabId, compact }: RouteChipProps): React.JSX.Element
   const allServers = useApp((s) => s.servers)
   const allVpns = useApp((s) => s.vpns)
   const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null)
+  const t = useT()
   if (!tab) return null
 
   const servers = allServers.filter((s) => s.workspaceId === tab.workspaceId)
@@ -47,14 +49,20 @@ export function RouteChip({ tabId, compact }: RouteChipProps): React.JSX.Element
   const orphaned = route.kind === 'server' && route.serverId === COLLECTION_GONE_SERVER_ID
   const missing = (route.kind === 'server' && !server) || (route.kind === 'vpn' && !vpn)
   const name = orphaned
-    ? 'Collection removed'
+    ? t('http.route.collectionRemoved')
     : missing
-      ? `${route.kind === 'server' ? 'Server' : 'VPN'} removed`
+      ? route.kind === 'server'
+        ? t('http.route.serverRemoved')
+        : t('http.route.vpnRemoved')
       : route.kind === 'direct'
-        ? 'This machine'
+        ? t('http.route.thisMachine')
         : (server?.name ?? vpn?.name ?? '')
-  const text = collection && !missing ? `${name} · from collection` : name
-  const label = `Route: ${text}${orphaned ? '. Requests will not be sent until it is saved to a collection' : missing ? '. Requests will not be sent' : ''}`
+  const text = collection && !missing ? t('http.route.fromCollection', { name }) : name
+  const label = orphaned
+    ? t('http.route.labelOrphaned', { text })
+    : missing
+      ? t('http.route.labelMissing', { text })
+      : t('http.route.label', { text })
   const Icon = missing
     ? AlertTriangle
     : route.kind === 'direct'
@@ -80,13 +88,13 @@ export function RouteChip({ tabId, compact }: RouteChipProps): React.JSX.Element
   const entries: MenuEntry[] = [
     option(
       { kind: 'direct' },
-      'This machine',
-      collection ? `Changes it for every request in ${collection.name}` : 'Send from'
+      t('http.route.thisMachine'),
+      collection ? t('http.route.changesForCollection', { name: collection.name }) : t('http.route.sendFrom')
     ),
     ...servers.map((s, i) =>
-      option({ kind: 'server', serverId: s.id }, s.name, i === 0 ? 'Through a server' : undefined)
+      option({ kind: 'server', serverId: s.id }, s.name, i === 0 ? t('http.route.throughServer') : undefined)
     ),
-    ...vpns.map((v, i) => option({ kind: 'vpn', vpnProfileId: v.id }, v.name, i === 0 ? 'Through a VPN' : undefined))
+    ...vpns.map((v, i) => option({ kind: 'vpn', vpnProfileId: v.id }, v.name, i === 0 ? t('http.route.throughVpn') : undefined))
   ]
 
   return (

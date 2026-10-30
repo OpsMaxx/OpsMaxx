@@ -3,6 +3,7 @@ import { Activity, Radio } from 'lucide-react'
 import { useApp, useWorkspaceServers } from '../../store/app'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { sshTargetFor } from '../../lib/ssh'
+import { useT } from '../../lib/i18n'
 import {
   buildPingCommand,
   buildTracerouteCommand,
@@ -32,6 +33,7 @@ import {
 type Tool = 'ping' | 'traceroute'
 
 export function NetToolsPanel(): React.JSX.Element {
+  const t = useT()
   const servers = useWorkspaceServers()
   const localAllowed = useApp((s) => s.settings.localTerminalEnabled !== false)
 
@@ -95,13 +97,13 @@ export function NetToolsPanel(): React.JSX.Element {
       // Null means the host did not pass validation. The button is disabled on
       // the same predicate, so reaching here would be a bug rather than input.
       if (!command) {
-        setFailure('That is not a host this can probe.')
+        setFailure(t('monitor.netTools.notProbeable'))
         return
       }
 
       const target = source === 'local' ? LOCAL_TARGET : server ? sshTargetFor(server) : null
       if (!target) {
-        setFailure('Choose where to run this from.')
+        setFailure(t('monitor.netTools.chooseSource'))
         return
       }
 
@@ -109,7 +111,7 @@ export function NetToolsPanel(): React.JSX.Element {
       const timeoutMs = tool === 'ping' ? 30_000 : 90_000
       const r = await window.opsmaxx?.netTools?.run(target as never, command, timeoutMs)
       if (!r) {
-        setFailure('This build of the bridge cannot run network tools.')
+        setFailure(t('monitor.netTools.noBridge'))
         return
       }
       const text = `${r.stdout ?? ''}\n${r.stderr ?? ''}`
@@ -118,7 +120,7 @@ export function NetToolsPanel(): React.JSX.Element {
       // not a failure, which is why this checks the transport and not the exit
       // code.
       if (!r.ok && !text.trim()) {
-        setFailure(r.error ?? 'The command could not be run.')
+        setFailure(r.error ?? t('monitor.netTools.couldNotRun'))
         return
       }
       if (tool === 'ping') setPing(parsePing(text))
@@ -132,17 +134,17 @@ export function NetToolsPanel(): React.JSX.Element {
     <div className="content">
       <div className="content-header">
         <div>
-          <h1>Network tools</h1>
-          <div className="sub">Run ping and traceroute from this machine or from a server</div>
+          <h1>{t('modules.netTools.label')}</h1>
+          <div className="sub">{t('monitor.netTools.sub')}</div>
         </div>
       </div>
 
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="row" style={{ gap: 8, flexWrap: 'wrap', alignItems: 'flex-end' }}>
           <label className="field" style={{ minWidth: 180 }}>
-            <span className="field-label">Run from</span>
+            <span className="field-label">{t('monitor.netTools.runFrom')}</span>
             <select className="input" value={source} onChange={(e) => setSource(e.target.value)}>
-              {localAllowed && <option value="local">This machine</option>}
+              {localAllowed && <option value="local">{t('monitor.common.thisMachine')}</option>}
               {servers.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.name}
@@ -152,7 +154,7 @@ export function NetToolsPanel(): React.JSX.Element {
           </label>
 
           <label className="field" style={{ minWidth: 120 }}>
-            <span className="field-label">Tool</span>
+            <span className="field-label">{t('monitor.netTools.tool')}</span>
             <select
               className="input"
               value={tool}
@@ -164,10 +166,10 @@ export function NetToolsPanel(): React.JSX.Element {
           </label>
 
           <label className="field" style={{ flex: 1, minWidth: 200 }}>
-            <span className="field-label">Host</span>
+            <span className="field-label">{t('monitor.netTools.host')}</span>
             <input
               className="input"
-              placeholder="example.com or 10.0.0.1"
+              placeholder={t('monitor.netTools.hostPlaceholder')}
               value={host}
               onChange={(e) => setHost(e.target.value)}
               onKeyDown={(e) => {
@@ -177,15 +179,14 @@ export function NetToolsPanel(): React.JSX.Element {
           </label>
 
           <button className="btn primary" disabled={!valid || busy} onClick={() => void run()}>
-            <Radio size={14} /> {busy ? 'Running…' : 'Run'}
+            <Radio size={14} /> {busy ? t('monitor.netTools.running') : t('monitor.netTools.run')}
           </button>
         </div>
         {host.trim() !== '' && !valid && (
           // Said as soon as it is true, rather than on submit: the button is
           // already disabled, and a disabled button with no reason is a puzzle.
           <span className="field-hint">
-            Enter a hostname or an IP address. Anything else is refused before a
-            command is built.
+            {t('monitor.netTools.hostHint')}
           </span>
         )}
       </div>
@@ -209,22 +210,22 @@ export function NetToolsPanel(): React.JSX.Element {
           </div>
           <div className="info-grid">
             <div>
-              <div className="ft-label">Reachable</div>
-              <div className="ft-value">{ping.reachable ? 'Yes' : 'No'}</div>
+              <div className="ft-label">{t('monitor.netTools.reachable')}</div>
+              <div className="ft-value">{ping.reachable ? t('common.yes') : t('common.no')}</div>
             </div>
             <div>
-              <div className="ft-label">Packet loss</div>
+              <div className="ft-label">{t('monitor.netTools.packetLoss')}</div>
               <div className="ft-value">{ping.loss}%</div>
             </div>
             {ping.avgMs !== undefined && (
               <div>
-                <div className="ft-label">Average</div>
+                <div className="ft-label">{t('monitor.netTools.average')}</div>
                 <div className="ft-value">{ping.avgMs.toFixed(1)} ms</div>
               </div>
             )}
             {ping.minMs !== undefined && ping.maxMs !== undefined && (
               <div>
-                <div className="ft-label">Range</div>
+                <div className="ft-label">{t('monitor.netTools.range')}</div>
                 <div className="ft-value">
                   {ping.minMs.toFixed(1)}–{ping.maxMs.toFixed(1)} ms
                 </div>
@@ -244,10 +245,10 @@ export function NetToolsPanel(): React.JSX.Element {
       {hops && (
         <div className="card">
           <div className="sidebar-title" style={{ marginBottom: 10 }}>
-            Route to {host}
+            {t('monitor.netTools.routeTo', { host })}
           </div>
           <div className="col" style={{ gap: 3 }}>
-            {hops.length === 0 && <span className="faint">No hops were reported.</span>}
+            {hops.length === 0 && <span className="faint">{t('monitor.netTools.noHops')}</span>}
             {hops.map((h) => (
               <div key={h.hop} className="row" style={{ gap: 10, alignItems: 'baseline' }}>
                 <span className="mono faint" style={{ minWidth: 26, textAlign: 'right' }}>
@@ -259,7 +260,9 @@ export function NetToolsPanel(): React.JSX.Element {
                   {h.host ?? '*'}
                 </span>
                 <span className="faint" style={{ fontSize: 11 }}>
-                  {h.timedOut ? 'no reply' : h.timesMs.map((t) => `${t} ms`).join('  ')}
+                  {h.timedOut
+                    ? t('monitor.netTools.noReply')
+                    : h.timesMs.map((ms) => `${ms} ms`).join('  ')}
                 </span>
               </div>
             ))}

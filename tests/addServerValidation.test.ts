@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import en from '../src/shared/locales/en.json'
 
 // Certificate was once offered with no fields behind it, and the transport then
 // folded it into 'key' -- so choosing it silently connected as plain private-key
@@ -76,9 +77,18 @@ describe('the jump-host row is labelled', () => {
   // disappears the moment the field has a value, so the row a user comes back
   // to is four anonymous strings, and there is nothing for a screen reader to
   // announce either.
+  // The label text lives in en.json now; the element is still a real label
+  // whose key says what it is.
   it('gives every hop field a real label', () => {
-    for (const label of ['Label', 'Server / IP', 'Port', 'Username']) {
-      expect(hops, label).toContain(`<span className="field-label">${label}</span>`)
+    const labels: Record<string, string> = {
+      'connections.hops.labelLabel': 'Label',
+      'connections.addServer.hostLabel': 'Server / IP',
+      'connections.addServer.portLabel': 'Port',
+      'connections.addServer.usernameLabel': 'Username'
+    }
+    for (const [key, label] of Object.entries(labels)) {
+      expect(hops, label).toContain(`<span className="field-label">{t('${key}')}</span>`)
+      expect(en[key as keyof typeof en], key).toBe(label)
     }
   })
 
@@ -165,7 +175,8 @@ describe('a profile can be checked before it is saved', () => {
   // so a first run ends with a connection list holding entries that have never
   // connected.
   it('offers Test connection beside the primary, where the fields are editable', () => {
-    expect(modal).toMatch(/Test connection/)
+    expect(modal).toContain("t('connections.addServer.testConnection')")
+    expect(en['connections.addServer.testConnection']).toBe('Test connection')
     expect(modal).toMatch(/onClick=\{\(\) => void testConnection\(\)\}/)
   })
 
@@ -192,7 +203,8 @@ describe('a profile can be checked before it is saved', () => {
   it('shows the server’s own words only when it could not explain them', () => {
     expect(modal).toContain("fault === 'unknown'")
     // Guarded by the fault, not appended unconditionally.
-    const i = modal.indexOf('It said:')
+    expect(en['connections.addServer.testFailRaw']).toContain('It said:')
+    const i = modal.indexOf("'connections.addServer.testFailRaw'")
     expect(i).toBeGreaterThan(-1)
     expect(modal.slice(Math.max(0, i - 200), i)).toContain("fault === 'unknown'")
   })
@@ -200,7 +212,8 @@ describe('a profile can be checked before it is saved', () => {
   // A button that quietly does nothing is worse than no button — the rule the
   // rest of the app applies to an unwired bridge.
   it('says so when the bridge has no test channel', () => {
-    expect(modal).toMatch(/This build cannot test a connection/)
+    expect(modal).toContain("t('connections.addServer.testUnwired')")
+    expect(en['connections.addServer.testUnwired']).toMatch(/This build cannot test a connection/)
   })
 
   // `acquire` pools for reuse, which is right for a session and wrong here: a
