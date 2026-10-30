@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated": "2026-10-27",
+  "generated": "2026-10-30",
   "nodes": [
     {
       "id": "claude",
@@ -50,8 +50,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 161,
-      "hash": "0a0cd018f8eaad56",
+      "lines": 164,
+      "hash": "9d35f4a17c338309",
       "generated": false
     },
     {
@@ -78,6 +78,19 @@
       "kind": "document",
       "lines": 600,
       "hash": "2e4816dd9cedc292",
+      "generated": false
+    },
+    {
+      "id": "adr-0001-localization",
+      "path": "docs/03-architecture/adr/0001-localization.md",
+      "type": "architecture.adr",
+      "authority": "decision",
+      "visibility": "internal",
+      "domain": null,
+      "status": "draft",
+      "kind": "document",
+      "lines": 114,
+      "hash": "a99fe82071205360",
       "generated": false
     },
     {
@@ -116,7 +129,7 @@
       "status": "active",
       "kind": "document",
       "lines": 108,
-      "hash": "d7744273260982e1",
+      "hash": "a5fc41d3ac88a6c2",
       "generated": false
     },
     {
@@ -128,8 +141,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 108,
-      "hash": "9e297ee7868289b2",
+      "lines": 146,
+      "hash": "e8e5477e9ea735e1",
       "generated": false
     },
     {
@@ -453,8 +466,8 @@
       "domain": null,
       "status": "active",
       "kind": "document",
-      "lines": 418,
-      "hash": "446a6f18b41e54ca",
+      "lines": 432,
+      "hash": "8e5254ef8e37f2b8",
       "generated": false
     },
     {
@@ -760,6 +773,12 @@
     {
       "from": "readme",
       "to": "docs-vault",
+      "rel": "references",
+      "inferred": true
+    },
+    {
+      "from": "readme",
+      "to": "sync-and-devices",
       "rel": "references",
       "inferred": true
     },

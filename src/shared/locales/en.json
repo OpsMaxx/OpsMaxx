@@ -1,0 +1,17 @@
+{
+  "menu.edit": "Edit",
+  "menu.view": "View",
+  "menu.undo": "Undo",
+  "menu.redo": "Redo",
+  "menu.cut": "Cut",
+  "menu.copy": "Copy",
+  "menu.paste": "Paste",
+  "menu.pasteAndMatchStyle": "Paste and Match Style",
+  "menu.delete": "Delete",
+  "menu.selectAll": "Select All",
+  "menu.toggleDevTools": "Toggle Developer Tools",
+  "menu.toggleFullScreen": "Toggle Full Screen",
+  "settings.language.title": "Language",
+  "settings.language.desc": "The language OpsMaxx uses. Anything not translated yet stays in English.",
+  "settings.language.system": "Match system"
+}

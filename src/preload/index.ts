@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type { AddyLink } from '../shared/addyLink'
+import type { Locale } from '../shared/i18n'
 import type { IpcRendererEvent } from 'electron'
 import type { AutoStartSettings, AutoStartState } from '../shared/autostart'
 import type { UnitDraft, UserUnitsReading } from '../shared/userUnits'
@@ -681,6 +682,11 @@ const api = {
   diagnostics: {
     text: (crash?: DiagnosticsCrash | null): Promise<string> =>
       ipcRenderer.invoke('diagnostics:text', crash ?? null)
+  },
+  /** The language to render the first frame in, and the OS's languages for
+   *  resolving "Match system" after that. See `i18n:boot` in main. */
+  i18n: {
+    boot: (): Promise<{ locale: Locale; system: string[] }> => ipcRenderer.invoke('i18n:boot')
   },
   /**
    * The other half of a bug report: what the app DID.

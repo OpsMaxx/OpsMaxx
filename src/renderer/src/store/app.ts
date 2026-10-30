@@ -3,6 +3,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { FLEET_INTERVAL_DEFAULT_MS } from '../../../shared/fleet'
 import { defaultModuleState, type ModuleState } from '../../../shared/modules'
 import type { DriftWatchProposal } from '../../../shared/driftWatch'
+import type { LanguagePref } from '../../../shared/i18n'
 import { forgetServer } from './serverCleanup'
 import {
   moveTab as moveTabIn,
@@ -115,6 +116,12 @@ export interface TabPanes {
 export const MAX_PANES = 4
 
 export interface AppSettings {
+  /**
+   * 'system' follows the OS; anything else is a pack in shared/locales. Read
+   * through parseLanguagePref wherever it is used, because it arrives from a
+   * file on disk. Main keeps its own copy for the menu (services/locale.ts).
+   */
+  language: LanguagePref
   // Set whenever stored data changes and cleared on a successful export, so
   // the UI can warn that the last backup no longer reflects reality.
   backupDirty: boolean
@@ -402,6 +409,7 @@ export interface AppSettings {
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
+  language: 'system',
   backupDirty: false,
   lastBackupAt: null,
   lastBackupTo: null,

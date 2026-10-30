@@ -148,8 +148,11 @@
   --ws-cyan: #22c7d6;
   --ws-pink: #db61a2;
 
-  /* Typography */
-  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+  /* Typography. The CJK families are there because neither bundled UI face has
+     a single Chinese glyph; named ahead of system-ui so Windows picks a
+     Simplified face rather than a Japanese one for the same code points. */
+  --font-ui: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', 'SF Mono', 'Cascadia Code', 'Menlo', Consolas, monospace;
   /* Five sizes, five roles, and no step you cannot name.
      A count of what shipped before this: 22, 20, 18, 17, 16, 15, 14, 13, 12.5,
@@ -430,7 +433,8 @@
      in the title bar, switcher and status bar is the one teal left. */
   --ws-cyan: #c5f23a;
 
-  --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+  --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'SF Mono', 'Cascadia Code', 'Menlo', Consolas, monospace;
   --fw-display: 700;
   --fw-title: 650;
@@ -504,7 +508,8 @@
   --ansi-bright-cyan: #0b5f6b;
   --ansi-bright-white: #3d3f35;
 
-  --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, system-ui, sans-serif;
+  --font-ui: 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
+    'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'SF Mono', 'Cascadia Code', 'Menlo', Consolas, monospace;
   --fw-display: 700;
   --fw-title: 650;

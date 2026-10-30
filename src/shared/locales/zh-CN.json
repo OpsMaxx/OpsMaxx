@@ -1,0 +1,17 @@
+{
+  "menu.edit": "编辑",
+  "menu.view": "视图",
+  "menu.undo": "撤销",
+  "menu.redo": "重做",
+  "menu.cut": "剪切",
+  "menu.copy": "复制",
+  "menu.paste": "粘贴",
+  "menu.pasteAndMatchStyle": "粘贴并匹配样式",
+  "menu.delete": "删除",
+  "menu.selectAll": "全选",
+  "menu.toggleDevTools": "切换开发者工具",
+  "menu.toggleFullScreen": "切换全屏",
+  "settings.language.title": "语言",
+  "settings.language.desc": "OpsMaxx 使用的语言。尚未翻译的内容仍显示为英文。",
+  "settings.language.system": "跟随系统"
+}

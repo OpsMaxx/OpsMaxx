@@ -92,6 +92,8 @@ import { SchemePicker } from './SchemePicker'
 import { useFleetStatus } from '../../store/fleetStatus'
 import { toast } from '../../store/toast'
 import { Switch } from '../common/Switch'
+import { useT } from '../../lib/i18n'
+import { LOCALES, LOCALE_NAMES, PSEUDO_LOCALE, parseLanguagePref } from '../../../../shared/i18n'
 
 // The OpsMaxx pair first, the classic pair after. Labelled rather than
 // capitalised, because "OpsMaxx" is not what capitalising "opsmaxx" gives.
@@ -231,6 +233,12 @@ const SETTING_INDEX: SettingEntry[] = [
     title: 'Ask for Touch ID when the vault is locked',
     desc: 'Raise the fingerprint prompt when you open a locked vault.',
     aliases: 'biometrics touchid fingerprint face id unlock'
+  },
+  {
+    section: 'appearance',
+    title: 'Language',
+    desc: 'The language OpsMaxx uses.',
+    aliases: 'language locale translation chinese french spanish german 中文 français español deutsch'
   },
   { section: 'appearance', title: 'Compact density', desc: 'Tighter rows and padding across trees, lists and the docked monitor.', aliases: 'dense spacing compact size' },
   // Terminal
@@ -854,6 +862,7 @@ export function Settings(): React.JSX.Element {
   const settings = useApp((s) => s.settings)
   const setSettings = useApp((s) => s.setSettings)
   const zoomTerminal = useApp((s) => s.zoomTerminal)
+  const t = useT()
 
   // The search box, and the row a result asked for.
   //
@@ -989,6 +998,28 @@ export function Settings(): React.JSX.Element {
                     </button>
                   ))}
                 </div>
+              </div>
+              <div className="setting-row">
+                <div className="s-info">
+                  <div className="s-title">{t('settings.language.title')}</div>
+                  <div className="s-desc">{t('settings.language.desc')}</div>
+                </div>
+                <select
+                  className="select"
+                  style={{ width: 220 }}
+                  value={parseLanguagePref(settings.language)}
+                  onChange={(e) => setSettings({ language: parseLanguagePref(e.target.value) })}
+                >
+                  <option value="system">{t('settings.language.system')}</option>
+                  {/* Each in its own language, never translated: someone who
+                      cannot read the current one is looking for theirs. */}
+                  {LOCALES.map((l) => (
+                    <option key={l} value={l}>
+                      {LOCALE_NAMES[l]}
+                    </option>
+                  ))}
+                  {import.meta.env.DEV && <option value={PSEUDO_LOCALE}>{LOCALE_NAMES[PSEUDO_LOCALE]}</option>}
+                </select>
               </div>
               <AutoStartSetting />
               <SettingSwitch

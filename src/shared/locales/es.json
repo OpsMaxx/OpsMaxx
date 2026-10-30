@@ -1,0 +1,17 @@
+{
+  "menu.edit": "Editar",
+  "menu.view": "Ver",
+  "menu.undo": "Deshacer",
+  "menu.redo": "Rehacer",
+  "menu.cut": "Cortar",
+  "menu.copy": "Copiar",
+  "menu.paste": "Pegar",
+  "menu.pasteAndMatchStyle": "Pegar con el mismo estilo",
+  "menu.delete": "Eliminar",
+  "menu.selectAll": "Seleccionar todo",
+  "menu.toggleDevTools": "Mostrar/ocultar herramientas de desarrollo",
+  "menu.toggleFullScreen": "Activar/desactivar pantalla completa",
+  "settings.language.title": "Idioma",
+  "settings.language.desc": "El idioma que usa OpsMaxx. Lo que aún no está traducido sigue en inglés.",
+  "settings.language.system": "Igual que el sistema"
+}

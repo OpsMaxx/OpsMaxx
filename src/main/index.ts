@@ -69,6 +69,7 @@ import {
   parseLocalConnect,
   syncLocalTerminalEnabled
 } from './services/localGate'
+import { currentLocale, mt, syncLanguage } from './services/locale'
 import {
   sftpConnect,
   sftpList,
@@ -6022,6 +6023,16 @@ ipcMain.on('debug:event', (_e, kind: unknown, message: unknown, stack: unknown) 
   })
 })
 
+// ---- Language ----
+// Asked once, before the renderer's first render, so the first frame is
+// already in the right language rather than English for a moment. The OS list
+// comes back too: the renderer resolves "Match system" itself after that, from
+// the same list main uses.
+ipcMain.handle('i18n:boot', () => {
+  const system = app.getPreferredSystemLanguages()
+  return { locale: currentLocale(system), system }
+})
+
 // ---- Data persistence ----
 ipcMain.handle('data:load', () => {
   // The renderer reads the file to reload what sync wrote, so from here what
@@ -6040,6 +6051,7 @@ ipcMain.handle('data:save', (_e, incoming: unknown) => {
   // local.connect() directly and never read it. So main keeps its own copy,
   // refreshed from the same blob, and every local:* handler consults that.
   syncLocalTerminalEnabled(data)
+  syncLanguage(data, app.getPreferredSystemLanguages(), installMenu)
   // Turning the switch off has to end what it already allowed. A local Files
   // session is keyed at connect and every later call carries only that key, so
   // an open session would otherwise keep answering reads and writes for as long
@@ -6430,36 +6442,39 @@ function quitTeardown(): void {
 // The window is frameless, so no menu bar is drawn — but an application menu
 // still has to exist for the clipboard accelerators (Ctrl/Cmd+C, V, X, A) to
 // reach focused inputs. Without it, copy and paste silently do nothing.
+//
+// Every item carries its own label because Electron's role labels are English
+// whatever the language. Rebuilt by syncLanguage when the language changes.
 function installMenu(): void {
   const isMac = process.platform === 'darwin'
   const menu = Menu.buildFromTemplate([
     ...(isMac ? [{ role: 'appMenu' as const }] : []),
     {
-      label: 'Edit',
+      label: mt('menu.edit'),
       submenu: [
-        { role: 'undo' as const },
-        { role: 'redo' as const },
+        { role: 'undo' as const, label: mt('menu.undo') },
+        { role: 'redo' as const, label: mt('menu.redo') },
         { type: 'separator' as const },
-        { role: 'cut' as const },
-        { role: 'copy' as const },
-        { role: 'paste' as const },
-        { role: 'pasteAndMatchStyle' as const },
-        { role: 'delete' as const },
-        { role: 'selectAll' as const }
+        { role: 'cut' as const, label: mt('menu.cut') },
+        { role: 'copy' as const, label: mt('menu.copy') },
+        { role: 'paste' as const, label: mt('menu.paste') },
+        { role: 'pasteAndMatchStyle' as const, label: mt('menu.pasteAndMatchStyle') },
+        { role: 'delete' as const, label: mt('menu.delete') },
+        { role: 'selectAll' as const, label: mt('menu.selectAll') }
       ]
     },
     {
-      label: 'View',
+      label: mt('menu.view'),
       submenu: [
         // No 'reload' role. Its Ctrl+R accelerator is swallowed app-wide and
         // shells bind Ctrl+R to reverse history search — losing that, and
         // having every open terminal torn down by an accidental reload, is far
         // worse than not having a reload menu item.
-        { role: 'toggleDevTools' as const, accelerator: 'F12' },
+        { role: 'toggleDevTools' as const, accelerator: 'F12', label: mt('menu.toggleDevTools') },
         { type: 'separator' as const },
         // No zoom roles: Ctrl +/-/0 resize the terminal font instead, and the
         // menu accelerators would otherwise zoom the whole UI at the same time.
-        { role: 'togglefullscreen' as const }
+        { role: 'togglefullscreen' as const, label: mt('menu.toggleFullScreen') }
       ]
     },
     // No 'Window' submenu. Its two roles carry CmdOrCtrl+M and CmdOrCtrl+W
@@ -6608,6 +6623,8 @@ app.whenReady().then(() => {
   // shell before its first data:save, so main reads the persisted setting itself
   // rather than starting from a default it would later have to correct.
   syncLocalTerminalEnabled(boot)
+  // The menu was just built in English; this rebuilds it once the pack loads.
+  syncLanguage(boot, app.getPreferredSystemLanguages(), installMenu)
   // The Files view's local half reads and writes arbitrary paths, and the vault,
   // the access policy and the audit log are all files under this directory —
   // every constraint this app advertises is enforced by one of them. Told once

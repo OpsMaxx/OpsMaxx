@@ -8,6 +8,7 @@
     "skipLibCheck": true,
     "strict": true,
     "noUnusedLocals": true,
+    "resolveJsonModule": true,
     "types": ["node", "electron-vite/node"]
   },
   "include": [

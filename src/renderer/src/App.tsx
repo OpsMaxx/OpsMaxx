@@ -9,6 +9,7 @@ import { startAddyLinkWatch } from './store/addy'
 import { clsx } from './lib/format'
 import { deferredView } from './lib/deferredView'
 import { initPersistence } from './store/persist'
+import { applyLanguage } from './lib/i18n'
 import { startVaultLockWatch } from './store/vault'
 import { useHotkeys } from './hooks/useHotkeys'
 import { TitleBar } from './components/layout/TitleBar'
@@ -194,6 +195,13 @@ export default function App(): React.JSX.Element {
   // on screen, and the setup flow it fills may not be mounted. See
   // startAddyLinkWatch.
   useEffect(() => startAddyLinkWatch(), [])
+
+  // The first frame's language came from main (bootLocale); this follows the
+  // setting from then on, including the saved value arriving on load.
+  const language = useApp((s) => s.settings.language)
+  useEffect(() => {
+    void applyLanguage(language)
+  }, [language])
 
   // Density is a root attribute so it can tighten every surface from CSS
   // rather than threading a prop through every component.

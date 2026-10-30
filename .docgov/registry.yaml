@@ -1,5 +1,14 @@
 version: 1
 documents:
+  adr-0001-localization:
+    path: docs/03-architecture/adr/0001-localization.md
+    type: architecture.adr
+    authority: decision
+    visibility: internal
+    title: Translate the UI with a small in-house translator that reads i18next-format packs
+    status: draft
+    hash: a99fe82071205360
+    lines: 114
   claude:
     path: CLAUDE.md
     type: unknown
@@ -207,8 +216,8 @@ documents:
     authority: historical
     visibility: internal
     title: Terminal
-    hash: 446a6f18b41e54ca
-    lines: 418
+    hash: 8e5254ef8e37f2b8
+    lines: 432
   docs-tunnels:
     path: docs/tunnels.md
     type: unknown
@@ -255,7 +264,7 @@ documents:
     authority: audience
     visibility: public
     title: Mount a folder from this computer
-    hash: d7744273260982e1
+    hash: a5fc41d3ac88a6c2
     lines: 108
   packaging-winget-readme:
     path: packaging/winget/README.md
@@ -271,8 +280,8 @@ documents:
     authority: historical
     visibility: internal
     title: OpsMaxx
-    hash: 0a0cd018f8eaad56
-    lines: 161
+    hash: 9d35f4a17c338309
+    lines: 164
   reverse-mount-spike:
     path: docs/10-internal/reverse-mount-spike.md
     type: note.internal
@@ -345,8 +354,8 @@ documents:
     authority: audience
     visibility: public
     title: "Sync & devices"
-    hash: 9e297ee7868289b2
-    lines: 108
+    hash: e8e5477e9ea735e1
+    lines: 146
   tests-probe-readme:
     path: tests/probe/README.md
     type: unknown
