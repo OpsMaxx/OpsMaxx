@@ -1,0 +1,6 @@
+/* The macOS folder-access prompts. English is in electron-builder.yml, mac.extendInfo;
+   tests/packagingLocales.test.ts keeps the keys in step. */
+"NSDocumentsFolderUsageDescription" = "OpsMaxx benötigt Zugriff auf Ihren Ordner „Dokumente“, damit Befehle, die Sie in einem lokalen Terminal ausführen, dort Dateien lesen und schreiben können.";
+"NSDesktopFolderUsageDescription" = "OpsMaxx benötigt Zugriff auf Ihren Schreibtisch, damit Befehle, die Sie in einem lokalen Terminal ausführen, dort Dateien lesen und schreiben können.";
+"NSDownloadsFolderUsageDescription" = "OpsMaxx benötigt Zugriff auf Ihren Ordner „Downloads“, damit Befehle, die Sie in einem lokalen Terminal ausführen, dort Dateien lesen und schreiben können.";
+"NSRemovableVolumesUsageDescription" = "OpsMaxx benötigt Zugriff auf Wechselmedien, damit Befehle, die Sie in einem lokalen Terminal ausführen, Dateien auf externen Laufwerken lesen und schreiben können.";

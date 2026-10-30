@@ -248,6 +248,15 @@ mac:
     NSRemovableVolumesUsageDescription: >-
       OpsMaxx needs access to removable volumes so that commands you run in a
       local terminal can read and write files on external drives.
+  # The same four prompts in the languages the app speaks. macOS reads
+  # <lang>.lproj/InfoPlist.strings from Contents/Resources and picks the user's
+  # language; the folder names are the ones Electron already ships, so this
+  # adds a file to each rather than a second Chinese localization. Merged with
+  # the top-level extraResources above, not instead of it.
+  extraResources:
+    - from: build/locales
+      to: .
+      filter: ['*.lproj/InfoPlist.strings']
   # The tunnel engines under Resources/bin are Mach-O executables and arm64
   # macOS refuses to run an unsigned one at all. electron-builder discovers and
   # signs nested binaries, and they are spawned as separate processes rather
@@ -293,6 +302,10 @@ linux:
     entry:
       Name: OpsMaxx
       Comment: SSH, SFTP, tunnels and databases in one place
+      Comment[de]: SSH, SFTP, Tunnel und Datenbanken an einem Ort
+      Comment[es]: SSH, SFTP, túneles y bases de datos en un solo lugar
+      Comment[fr]: SSH, SFTP, tunnels et bases de données réunis au même endroit
+      Comment[zh_CN]: SSH、SFTP、隧道和数据库集于一处
       Categories: Development;Utility;
       Terminal: 'false'
   target:
