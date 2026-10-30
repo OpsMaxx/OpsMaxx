@@ -578,7 +578,7 @@
   "layout.activity.http": "HTTP-Client",
   "layout.activity.httpRail": "HTTP",
   "layout.activity.monitor": "Überwachung",
-  "layout.activity.monitorRail": "Überwachung",
+  "layout.activity.monitorRail": "Monitoring",
   "layout.activity.vault": "Tresor",
   "layout.activity.ai": "KI & MCP",
   "layout.activity.operations": "Betrieb",

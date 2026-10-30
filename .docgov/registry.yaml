@@ -298,8 +298,8 @@ documents:
     visibility: internal
     title: Screenshot demo
     status: draft
-    hash: 732f2954fb9dcbd8
-    lines: 93
+    hash: 3d7834c6f2143286
+    lines: 100
   security:
     path: SECURITY.md
     type: unknown

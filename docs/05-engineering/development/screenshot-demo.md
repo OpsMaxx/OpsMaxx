@@ -44,7 +44,14 @@ before it writes anything.
 ```sh
 npm run demo                 # open the invented estate and click around
 npm run demo:shots [outdir]  # walk every screen, save the PNGs, quit (default out/shots)
+OPSMAXX_DEMO_LANGS=de,zh-CN,en-XA npm run demo:shots   # each screen in those languages too
 ```
+
+With `OPSMAXX_DEMO_LANGS`, every shot is also saved as `<name>.<lang>.png`. The walk
+still runs in English, since it finds controls by their English words; the language
+is switched in place just before each capture and back after. `en-XA` is the
+pseudo-locale: accented, a third longer, and in brackets, so untranslated text and
+text that will not fit in German both stand out.
 
 `demo:shots` takes about two minutes and opens a window while it runs. Each
 shot is 1800×909, the site's 99:50 frame. The walk, and which screen each file

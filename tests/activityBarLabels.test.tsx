@@ -127,13 +127,25 @@ describe('a label cannot break the column', () => {
   // French run longer than English, and a label only found to be cut off once
   // somebody switches language is the case this exists for. A CJK character is
   // about two Latin ones wide at this size.
+  // Roughly how wide a label draws, in average letters: a capital or a w or m
+  // is wider than most, a CJK character about two. Calibrated against the
+  // English labels below rather than a fixed count, because "Überwachung" has
+  // eleven letters like "Connections" and still did not fit.
+  const width = (s: string): number =>
+    [...s].reduce(
+      (n, ch) =>
+        n + (/[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 2 : /[wmWM]/.test(ch) ? 1.5 : /\p{Lu}/u.test(ch) ? 1.2 : 1),
+      0
+    )
+
   it.each(LOCALES.filter((l) => l !== 'en'))('keeps every %s rail label inside the same width', async (locale) => {
-    const width = (s: string): number =>
-      [...s].reduce((n, ch) => n + (/[\u2e80-\u9fff\uff00-\uffef]/.test(ch) ? 2 : 1), 0)
+    const { unmount } = render(<ActivityBar />)
+    const widest = Math.max(...labels().map(width))
+    unmount()
     await act(() => applyLanguage(locale))
     try {
       render(<ActivityBar />)
-      expect(labels().filter((l) => width(l) > 11)).toEqual([])
+      expect(labels().filter((l) => width(l) > widest)).toEqual([])
     } finally {
       await act(() => applyLanguage('en'))
     }

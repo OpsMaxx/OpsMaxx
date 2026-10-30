@@ -102,6 +102,10 @@ export function formatRiskLabel(level: string): string {
 }
 
 /** "HIGH", in the reader's language. Only for a level riskPosition placed. */
+// The sentence frame ends with its own full stop, and a reason from main
+// usually ends with one too: "…production traffic.." on every approval.
+const joinReasons = (reasons: string[]): string => reasons.map((r) => r.replace(/[.\s]+$/, '')).join('; ')
+
 function levelWord(level: string): string {
   return st(`shared.approvalRisk.level.${level as ApprovalRiskLevel}`)
 }
@@ -280,8 +284,8 @@ export function explainRisk(s: ApprovalSubject): RiskExplanation {
     reasonSource: fromBridge ? 'bridge' : reasons.length ? 'derived' : 'none',
     sentence: reasons.length
       ? position
-        ? st('shared.approvalRisk.because', { level: levelWord(s.risk), reasons: reasons.join('; ') })
-        : st('shared.approvalRisk.thisBecause', { reasons: reasons.join('; ') })
+        ? st('shared.approvalRisk.because', { level: levelWord(s.risk), reasons: joinReasons(reasons) })
+        : st('shared.approvalRisk.thisBecause', { reasons: joinReasons(reasons) })
       : position
         ? st('shared.approvalRisk.unrecorded', { level: levelWord(s.risk) })
         : st('shared.approvalRisk.unrecognised', { risk: s.risk })

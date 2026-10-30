@@ -116,6 +116,11 @@ describe('why this one scored what it scored', () => {
   it('leads with the level word when it has reasons to give', () => {
     expect(explainRisk(subject()).sentence.startsWith('HIGH because: ')).toBe(true)
   })
+
+  it('ends with one full stop when the reason from main already has its own', () => {
+    const e = explainRisk(subject({ riskReason: 'Restarts a service that is serving production traffic.' }))
+    expect(e.sentence).toBe('HIGH because: Restarts a service that is serving production traffic.')
+  })
 })
 
 describe('what the action will do', () => {

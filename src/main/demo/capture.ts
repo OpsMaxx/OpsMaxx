@@ -130,6 +130,55 @@ async function capture(win: BrowserWindow, crop: string, file: string, focus?: s
   writeFileSync(file, img.resize({ width: OUT_W, height: OUT_H, quality: 'best' }).toPNG())
 }
 
+/**
+ * Languages to photograph each screen in as well, from OPSMAXX_DEMO_LANGS
+ * (`de,zh-CN,en-XA`). The walk itself stays in English — it finds controls by
+ * their English words — and the language is switched in place just before the
+ * capture, then back. Saved beside the English shot as `<name>.<lang>.png`.
+ */
+const LANGS = (process.env.OPSMAXX_DEMO_LANGS ?? '')
+  .split(',')
+  .map((l) => l.trim())
+  .filter(Boolean)
+
+/**
+ * What a reviewer would otherwise squint at the PNG for. In every language,
+ * text that is cut off: an element narrower than its own text with its overflow
+ * hidden. In the pseudo-locale, text still in plain English: every translated
+ * string comes out accented and bracketed, so a visible run of ASCII words did
+ * not go through the catalog. Identifiers and data (names, addresses, sizes)
+ * are ASCII too; the list is for reading, not for asserting.
+ */
+async function audit(p: Page, scope: string, pseudo: boolean): Promise<{ truncated: string[]; english: string[] }> {
+  return p.js(`(() => {
+    const root = document.querySelector(${JSON.stringify(scope)}) || document.body
+    const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
+    const truncated = new Set()
+    for (const e of root.querySelectorAll('*')) {
+      if (!seen(e) || e.children.length > 0) continue
+      const text = (e.textContent || '').trim()
+      if (!text || e.scrollWidth <= e.clientWidth + 1) continue
+      const st = getComputedStyle(e)
+      if (st.overflow === 'hidden' || st.overflowX === 'hidden' || st.textOverflow === 'ellipsis') truncated.add(text)
+    }
+    const english = new Set()
+    if (${pseudo}) {
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const text = n.textContent.trim()
+        if (!/[A-Za-z]{3,}[^A-Za-z]+[A-Za-z]{3,}/.test(text) || /[^\\x00-\\x7f]/.test(text)) continue
+        if (n.parentElement && seen(n.parentElement) && !n.parentElement.closest('.xterm, .cm-editor, code, pre, kbd')) english.add(text)
+      }
+    }
+    return { truncated: [...truncated], english: [...english] }
+  })()`)
+}
+
+async function speak(p: Page, lang: string): Promise<void> {
+  await p.js(`window.__opsmaxxLanguage?.(${JSON.stringify(lang)})`)
+  await p.sleep(800)
+}
+
 export async function runCapture(outdir: string, shots: Shot[], defaultCrop: string): Promise<void> {
   mkdirSync(outdir, { recursive: true })
   const win = BrowserWindow.getAllWindows()[0]
@@ -142,6 +191,14 @@ export async function runCapture(outdir: string, shots: Shot[], defaultCrop: str
       await p.sleep(1200)
       await capture(win, shot.crop ?? defaultCrop, join(outdir, `${shot.name}.png`), shot.focus)
       console.warn(`[demo] captured ${shot.name}`)
+      const report: Record<string, { truncated: string[]; english: string[] }> = {}
+      for (const lang of LANGS) {
+        await speak(p, lang)
+        await capture(win, shot.crop ?? defaultCrop, join(outdir, `${shot.name}.${lang}.png`), shot.focus)
+        report[lang] = await audit(p, shot.focus ?? shot.crop ?? defaultCrop, lang === 'en-XA')
+      }
+      if (LANGS.length) writeFileSync(join(outdir, `${shot.name}.audit.json`), JSON.stringify(report, null, 2))
+      if (LANGS.length) await speak(p, 'en')
     } catch (err) {
       failed.push(shot.name)
       console.warn(`[demo] ${shot.name} failed: ${(err as Error).message}`)

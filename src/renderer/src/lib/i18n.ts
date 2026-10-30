@@ -64,3 +64,10 @@ export async function bootLocale(): Promise<void> {
 export function applyLanguage(pref: unknown): Promise<void> {
   return setLocale(resolveLocale(parseLanguagePref(pref), system))
 }
+
+// The screenshot demo (src/main/demo/capture.ts) switches language in place
+// before each capture, so one walk in English photographs every screen in
+// every language. Development builds only; the setting itself is untouched.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  ;(window as unknown as { __opsmaxxLanguage?: typeof applyLanguage }).__opsmaxxLanguage = applyLanguage
+}
