@@ -999,28 +999,34 @@ export function Settings(): React.JSX.Element {
                   ))}
                 </div>
               </div>
-              <div className="setting-row">
-                <div className="s-info">
-                  <div className="s-title">{t('settings.language.title')}</div>
-                  <div className="s-desc">{t('settings.language.desc')}</div>
+              {/* Development builds only until the everyday screens are translated:
+                  offering German over a UI that is still English reads as broken.
+                  "Match system" already applies everywhere, and the one thing it
+                  changes today, the Edit and View menus, is fully translated. */}
+              {import.meta.env.DEV && (
+                <div className="setting-row">
+                  <div className="s-info">
+                    <div className="s-title">{t('settings.language.title')}</div>
+                    <div className="s-desc">{t('settings.language.desc')}</div>
+                  </div>
+                  <select
+                    className="select"
+                    style={{ width: 220 }}
+                    value={parseLanguagePref(settings.language)}
+                    onChange={(e) => setSettings({ language: parseLanguagePref(e.target.value) })}
+                  >
+                    <option value="system">{t('settings.language.system')}</option>
+                    {/* Each in its own language, never translated: someone who
+                        cannot read the current one is looking for theirs. */}
+                    {LOCALES.map((l) => (
+                      <option key={l} value={l}>
+                        {LOCALE_NAMES[l]}
+                      </option>
+                    ))}
+                    {import.meta.env.DEV && <option value={PSEUDO_LOCALE}>{LOCALE_NAMES[PSEUDO_LOCALE]}</option>}
+                  </select>
                 </div>
-                <select
-                  className="select"
-                  style={{ width: 220 }}
-                  value={parseLanguagePref(settings.language)}
-                  onChange={(e) => setSettings({ language: parseLanguagePref(e.target.value) })}
-                >
-                  <option value="system">{t('settings.language.system')}</option>
-                  {/* Each in its own language, never translated: someone who
-                      cannot read the current one is looking for theirs. */}
-                  {LOCALES.map((l) => (
-                    <option key={l} value={l}>
-                      {LOCALE_NAMES[l]}
-                    </option>
-                  ))}
-                  {import.meta.env.DEV && <option value={PSEUDO_LOCALE}>{LOCALE_NAMES[PSEUDO_LOCALE]}</option>}
-                </select>
-              </div>
+              )}
               <AutoStartSetting />
               <SettingSwitch
                 label="Compact density"
