@@ -64,6 +64,7 @@
 // prune`.
 
 import { SUDO_PROBE } from './docker'
+import { englishT, st, type MessageKey, translatedTable } from './i18n'
 
 // ---------------------------------------------------------------------------
 // Statuses
@@ -113,18 +114,15 @@ export const DRIFT_STATUSES: DriftStatus[] = [
 ]
 
 /** One sentence per status, written for the person deciding whether to act. */
-export const DRIFT_STATUS_HELP: Record<DriftStatus, string> = {
-  ok: 'Read in full and compared. A verdict of "identical" here means identical, not "we could not look".',
-  partial:
-    'The file is larger than the read cap, so only the beginning could be read — and a comparison over the beginning would call two files with different endings the same. It is reported, and not compared.',
-  absent: 'This server does not have the file, and that was checked rather than inferred from a failed stat.',
-  denied:
-    'It exists and this account was not allowed to read it, or the directory above it could not be traversed. This is NOT the same as the file being absent, and it is NOT the same as matching.',
-  'no-tool': 'The server has no base64, so the collector had no safe way to carry the content back.',
-  unsupported: 'The path exists and is not a regular file. There is nothing here to compare.',
-  unknown:
-    'The probe ran and this file was not reported on, or its content arrived cut off. Treat as UNKNOWN — never as "none" and never as "the same as everyone else".'
-}
+export const DRIFT_STATUS_HELP: Record<DriftStatus, string> = translatedTable({
+  ok: 'shared.drift.statusHelp.ok',
+  partial: 'shared.drift.statusHelp.partial',
+  absent: 'shared.drift.statusHelp.absent',
+  denied: 'shared.drift.statusHelp.denied',
+  'no-tool': 'shared.drift.statusHelp.noTool',
+  unsupported: 'shared.drift.statusHelp.unsupported',
+  unknown: 'shared.drift.statusHelp.unknown'
+})
 
 // ---------------------------------------------------------------------------
 // Normalisation rules — the declared half of the feature
@@ -175,64 +173,109 @@ export const DRIFT_RULE_ORDER: DriftRuleId[] = [
 export const DRIFT_RULES: DriftRule[] = [
   {
     id: 'line-endings',
-    label: 'Line endings',
-    detail:
-      'Treats a CRLF line ending as a LF one. A file edited on Windows and the same file edited on the server are the same file.',
+    get label() {
+      return st('shared.drift.rule.lineEndings.label')
+    },
+    get detail() {
+      return st('shared.drift.rule.lineEndings.detail')
+    },
     example: { before: 'listen 80;\\r\\n', after: 'listen 80;\\n' }
   },
   {
     id: 'include-lines',
-    label: 'Include directives',
-    detail:
-      'Drops whole lines whose first word is include, Include, include_dir, includedir or .include. These point at per-server drop-in directories, so they differ by design — and dropping them means the CONTENT of those drop-ins is not compared either, because this reads one path per server.',
-    example: { before: 'Include /etc/ssh/sshd_config.d/*.conf', after: '(line removed)' }
+    get label() {
+      return st('shared.drift.rule.includeLines.label')
+    },
+    get detail() {
+      return st('shared.drift.rule.includeLines.detail')
+    },
+    example: {
+      before: 'Include /etc/ssh/sshd_config.d/*.conf',
+      get after() {
+        return st('shared.drift.example.lineRemoved')
+      }
+    }
   },
   {
     id: 'comments',
-    label: 'Whole-line comments',
-    detail:
-      "Drops lines whose first non-blank character is the watched file's comment character. Only WHOLE-line comments: a trailing comment after a directive is left alone, because deciding where a comment starts inside a line means knowing the file's quoting rules, and getting that wrong silently changes a directive.",
-    example: { before: '# managed by puppet', after: '(line removed)' }
+    get label() {
+      return st('shared.drift.rule.comments.label')
+    },
+    get detail() {
+      return st('shared.drift.rule.comments.detail')
+    },
+    example: {
+      before: '# managed by puppet',
+      get after() {
+        return st('shared.drift.example.lineRemoved')
+      }
+    }
   },
   {
     id: 'timestamps',
-    label: 'Dates and times',
-    detail:
-      'Replaces ISO dates, ISO date-times, bare HH:MM:SS clock times and ten-digit unix seconds with a placeholder. This is what a "generated at" header churns on. It also hides a genuine difference between two dates that are both dates — a certificate validity line, for instance — so it is off for files where a date is the setting.',
+    get label() {
+      return st('shared.drift.rule.timestamps.label')
+    },
+    get detail() {
+      return st('shared.drift.rule.timestamps.detail')
+    },
     example: { before: '# generated 2026-09-03T04:00:11Z', after: '# generated <date>T<time>Z' }
   },
   {
     id: 'hostnames',
-    label: "The server's own name",
-    detail:
-      "Replaces this server's hostname, its short name and the server's name in OpsMaxx with a placeholder, case-insensitively. A template that stamps the machine's name into a file makes every copy unique; this is what makes them comparable. It cannot see a per-server name it was not told about.",
+    get label() {
+      return st('shared.drift.rule.hostnames.label')
+    },
+    get detail() {
+      return st('shared.drift.rule.hostnames.detail')
+    },
     example: { before: 'server_name web-03.example.internal;', after: 'server_name <host>.example.internal;' }
   },
   {
     id: 'trailing-space',
-    label: 'Trailing whitespace',
-    detail: 'Removes spaces and tabs at the end of a line. Nothing reads them and every editor treats them differently.',
+    get label() {
+      return st('shared.drift.rule.trailingSpace.label')
+    },
+    get detail() {
+      return st('shared.drift.rule.trailingSpace.detail')
+    },
     example: { before: 'worker_processes 4;   ', after: 'worker_processes 4;' }
   },
   {
     id: 'inner-space',
-    label: 'Runs of spaces inside a line',
-    detail:
-      'Collapses a run of spaces or tabs BETWEEN two tokens down to one space. Leading indentation is left exactly as it is, because in a YAML file indentation is the syntax.',
+    get label() {
+      return st('shared.drift.rule.innerSpace.label')
+    },
+    get detail() {
+      return st('shared.drift.rule.innerSpace.detail')
+    },
     example: { before: 'PermitRootLogin\tno', after: 'PermitRootLogin no' }
   },
   {
     id: 'blank-lines',
-    label: 'Blank lines',
-    detail:
-      "Drops lines that are empty or contain only whitespace. A file's final newline is its terminator rather than a blank line, so whether a file ends with one stops being a difference — and this rule does not report itself as having done work merely because a file ended properly.",
-    example: { before: '(an empty line)', after: '(line removed)' }
+    get label() {
+      return st('shared.drift.rule.blankLines.label')
+    },
+    get detail() {
+      return st('shared.drift.rule.blankLines.detail')
+    },
+    example: {
+      get before() {
+        return st('shared.drift.example.emptyLine')
+      },
+      get after() {
+        return st('shared.drift.example.lineRemoved')
+      }
+    }
   },
   {
     id: 'line-order',
-    label: 'Line order',
-    detail:
-      'Sorts the remaining lines, so two files with the same lines in a different order compare equal. The loudest rule here: in a file where order is meaning — an nginx location block, an iptables ruleset — this will call two genuinely different configurations the same. It is off unless the watched file is a set rather than a sequence.',
+    get label() {
+      return st('shared.drift.rule.lineOrder.label')
+    },
+    get detail() {
+      return st('shared.drift.rule.lineOrder.detail')
+    },
     example: { before: 'b\\na', after: 'a\\nb' }
   }
 ]
@@ -246,7 +289,7 @@ export function driftRule(id: DriftRuleId): DriftRule {
     r ?? {
       id,
       label: id,
-      detail: 'This version of OpsMaxx does not know what this rule does, so it is not applied.',
+      detail: st('shared.drift.rule.unknown.detail'),
       example: { before: '', after: '' }
     }
   )
@@ -291,7 +334,9 @@ export interface DriftWatch {
 export const DRIFT_WATCHES: DriftWatch[] = [
   {
     id: 'sshd-config',
-    label: 'sshd configuration',
+    get label() {
+      return st('shared.drift.watch.sshdConfig.label')
+    },
     path: '/etc/ssh/sshd_config',
     comment: '#',
     rules: [
@@ -302,7 +347,9 @@ export const DRIFT_WATCHES: DriftWatch[] = [
       'inner-space',
       'blank-lines'
     ],
-    note: 'Include lines are dropped because a drop-in directory is per-server by design. Order is NOT normalised: in sshd_config the first occurrence of a keyword wins, so two files with the same lines in a different order are two different configurations.'
+    get note() {
+      return st('shared.drift.watch.sshdConfig.note')
+    }
   },
   {
     id: 'nginx-conf',
@@ -318,7 +365,9 @@ export const DRIFT_WATCHES: DriftWatch[] = [
       'inner-space',
       'blank-lines'
     ],
-    note: 'Hostnames are substituted because server_name is templated per server. Order is not normalised: location matching is ordered.'
+    get note() {
+      return st('shared.drift.watch.nginxConf.note')
+    }
   },
   {
     id: 'resolv-conf',
@@ -326,7 +375,9 @@ export const DRIFT_WATCHES: DriftWatch[] = [
     path: '/etc/resolv.conf',
     comment: '#',
     rules: ['line-endings', 'comments', 'trailing-space', 'inner-space', 'blank-lines'],
-    note: 'Order is not normalised: nameserver lines are tried in the order they appear, so a server that lists the secondary first is genuinely different.'
+    get note() {
+      return st('shared.drift.watch.resolvConf.note')
+    }
   },
   {
     id: 'hosts',
@@ -342,7 +393,9 @@ export const DRIFT_WATCHES: DriftWatch[] = [
       'blank-lines',
       'line-order'
     ],
-    note: 'The one watch with line-order on: /etc/hosts is a lookup table, not a sequence, and every server has its own name in it — which the hostnames rule substitutes so the tables can be compared at all.'
+    get note() {
+      return st('shared.drift.watch.hosts.note')
+    }
   },
   {
     id: 'sysctl-conf',
@@ -357,7 +410,9 @@ export const DRIFT_WATCHES: DriftWatch[] = [
       'blank-lines',
       'line-order'
     ],
-    note: 'Order is normalised: sysctl.conf is a set of key = value settings and the last assignment wins, so two files with the same assignments in a different order do apply the same kernel settings.'
+    get note() {
+      return st('shared.drift.watch.sysctlConf.note')
+    }
   },
   {
     id: 'chrony-conf',
@@ -372,7 +427,9 @@ export const DRIFT_WATCHES: DriftWatch[] = [
       'inner-space',
       'blank-lines'
     ],
-    note: 'Time sources drifting apart across a fleet is the classic cause of "the logs do not line up". Order is not normalised: chrony tries sources in order.'
+    get note() {
+      return st('shared.drift.watch.chronyConf.note')
+    }
   },
   {
     id: 'timezone',
@@ -380,7 +437,9 @@ export const DRIFT_WATCHES: DriftWatch[] = [
     path: '/etc/timezone',
     comment: '#',
     rules: ['line-endings', 'trailing-space', 'blank-lines'],
-    note: 'One line. Almost nothing is normalised because there is almost nothing to normalise, which makes it the cheapest illustration of what a clean comparison looks like.'
+    get note() {
+      return st('shared.drift.watch.timezone.note')
+    }
   }
 ]
 
@@ -1029,7 +1088,7 @@ export function compareDrift(input: DriftComparisonInput): DriftComparison {
         ...common,
         verdict: 'unread' as const,
         status: 'unknown' as const,
-        detail: r.error ?? 'this server has not been collected yet'
+        detail: r.error ?? st('shared.drift.verdict.notCollected')
       }
     }
     if (reading.status === 'absent') {
@@ -1043,7 +1102,7 @@ export function compareDrift(input: DriftComparisonInput): DriftComparison {
     }
     if (baseNorm === undefined) {
       // Nothing to compare against — every readable host is its own island.
-      return { ...common, verdict: 'unread' as const, status: 'ok' as const, detail: 'no baseline to compare against' }
+      return { ...common, verdict: 'unread' as const, status: 'ok' as const, detail: st('shared.drift.verdict.noBaseline') }
     }
     if (reading.normalisedHash !== baseNorm) {
       return { ...common, verdict: 'differs' as const, status: 'ok' as const }
@@ -1083,22 +1142,19 @@ export function compareDrift(input: DriftComparisonInput): DriftComparison {
  */
 export function driftCoverageSentence(c: DriftCoverage): string | null {
   const list = (names: string[]): string =>
-    names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and ${names.length - 3} more`
+    names.length <= 3
+      ? names.join(', ')
+      : st('shared.drift.coverage.andMore', { names: names.slice(0, 3).join(', '), count: names.length - 3 })
   const parts: string[] = []
-  if (c.notCollected.length) parts.push(`${list(c.notCollected)} have not been collected yet`)
-  if (c.denied.length) parts.push(`${list(c.denied)} would not let this account read it — that is not the same as matching`)
-  if (c.tooLarge.length) parts.push(`too large to compare on ${list(c.tooLarge)}`)
-  if (c.noTool.length) parts.push(`no base64 on ${list(c.noTool)}`)
-  if (c.unsupported.length) parts.push(`the path is not a regular file on ${list(c.unsupported)}`)
-  if (c.unknown.length) parts.push(`${list(c.unknown)} did not report on it`)
-  if (c.redacted.length) {
-    parts.push(
-      `secret-shaped text was replaced before comparing on ${list(c.redacted)}, so a difference inside it is invisible here`
-    )
-  }
+  if (c.notCollected.length) parts.push(st('shared.drift.coverage.notCollected', { hosts: list(c.notCollected) }))
+  if (c.denied.length) parts.push(st('shared.drift.coverage.denied', { hosts: list(c.denied) }))
+  if (c.tooLarge.length) parts.push(st('shared.drift.coverage.tooLarge', { hosts: list(c.tooLarge) }))
+  if (c.noTool.length) parts.push(st('shared.drift.coverage.noTool', { hosts: list(c.noTool) }))
+  if (c.unsupported.length) parts.push(st('shared.drift.coverage.unsupported', { hosts: list(c.unsupported) }))
+  if (c.unknown.length) parts.push(st('shared.drift.coverage.unknown', { hosts: list(c.unknown) }))
+  if (c.redacted.length) parts.push(st('shared.drift.coverage.redacted', { hosts: list(c.redacted) }))
   if (parts.length === 0) return null
-  const n = c.compared.length
-  return `Compared on ${n} server${n === 1 ? '' : 's'} — ${parts.join('; ')}.`
+  return st('shared.drift.coverage.sentence', { count: c.compared.length, parts: parts.join('; ') })
 }
 
 // ---------------------------------------------------------------------------
@@ -1137,8 +1193,6 @@ export function driftCoverageSentence(c: DriftCoverage): string | null {
  * Copying a file to a set of hosts is a job. It is spelled as one, with the
  * plan and the approval a job carries.
  */
-export const DRIFT_NO_PUSH =
-  'Configuration drift reads and compares. It never writes a file to a server to bring it into line: ' +
-  'that is a job, and it goes through a plan you read and an approval minted against it, not a button ' +
-  'on a comparison. Nor could this panel decide which side is right — a server that was fixed first and a ' +
-  'server that drifted look the same from here.'
+export const DRIFT_NO_PUSH_KEY: MessageKey = 'shared.drift.noPush'
+/** English, fixed at import. A screen renders `t(DRIFT_NO_PUSH_KEY)`. */
+export const DRIFT_NO_PUSH = englishT(DRIFT_NO_PUSH_KEY)

@@ -4,6 +4,7 @@ import {
   loadTranslator,
   parseLanguagePref,
   resolveLocale,
+  setSharedTranslator,
   type Locale,
   type Translate
 } from '../../../shared/i18n'
@@ -40,6 +41,7 @@ async function setLocale(next: Locale): Promise<void> {
   if (wanted !== next || !tr) return
   locale = next
   current = tr
+  setSharedTranslator(tr)
   // Also what makes Chromium pick Simplified Chinese glyph shapes over Japanese
   // ones for the same code points.
   document.documentElement.lang = next

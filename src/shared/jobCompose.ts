@@ -1,3 +1,4 @@
+import { st } from './i18n'
 import type { JobSpec, JobStep } from './jobs'
 
 // Turning what an operator typed into a job spec.
@@ -74,27 +75,27 @@ export type JobDraftCheck = { ok: true } | { ok: false; reason: string }
  */
 export function checkJobDraft(draft: JobDraft, targetCount: number): JobDraftCheck {
   const title = draft.title.trim()
-  if (title === '') return { ok: false, reason: 'Give the job a title. It is what the list shows later.' }
-  if (title.length > 120) return { ok: false, reason: 'The title is too long to read in a list. Keep it under 120 characters.' }
+  if (title === '') return { ok: false, reason: st('shared.jobCompose.noTitle') }
+  if (title.length > 120) return { ok: false, reason: st('shared.jobCompose.titleTooLong') }
 
   const steps = parseJobSteps(draft.steps)
-  if (steps.length === 0) return { ok: false, reason: 'Add at least one command. Blank lines and # comments do not count.' }
+  if (steps.length === 0) return { ok: false, reason: st('shared.jobCompose.noSteps') }
   if (steps.length > JOB_MAX_STEPS) {
-    return { ok: false, reason: `${steps.length} steps is more than the ${JOB_MAX_STEPS} this dialog can show you at once, and a confirmation nobody can read is not one.` }
+    return { ok: false, reason: st('shared.jobCompose.tooManySteps', { steps: steps.length, max: JOB_MAX_STEPS }) }
   }
 
   const rollback = parseJobSteps(draft.rollback)
   if (rollback.length > JOB_MAX_STEPS) {
-    return { ok: false, reason: `The rollback has more than ${JOB_MAX_STEPS} steps, which is more than the dialog can show you.` }
+    return { ok: false, reason: st('shared.jobCompose.tooManyRollbackSteps', { max: JOB_MAX_STEPS }) }
   }
 
-  if (targetCount === 0) return { ok: false, reason: 'Pick at least one server.' }
+  if (targetCount === 0) return { ok: false, reason: st('shared.jobCompose.noTargets') }
 
   if (!Number.isInteger(draft.waveSize) || draft.waveSize < 0) {
-    return { ok: false, reason: 'The wave size must be a whole number, or 0 for all servers at once.' }
+    return { ok: false, reason: st('shared.jobCompose.badWaveSize') }
   }
   if (draft.waveSize > JOB_MAX_WAVE) {
-    return { ok: false, reason: `A wave of ${draft.waveSize} servers is more than this will run at once. Use ${JOB_MAX_WAVE} or fewer.` }
+    return { ok: false, reason: st('shared.jobCompose.waveTooBig', { size: draft.waveSize, max: JOB_MAX_WAVE }) }
   }
 
   // A gate with one wave gates nothing, and an operator who ticked it believes
@@ -102,7 +103,7 @@ export function checkJobDraft(draft: JobDraft, targetCount: number): JobDraftChe
   if (draft.gate && (draft.waveSize === 0 || draft.waveSize >= targetCount)) {
     return {
       ok: false,
-      reason: 'The health gate holds each wave until the previous one is healthy, so it needs more than one wave. Set a wave size smaller than the number of servers, or untick the gate.'
+      reason: st('shared.jobCompose.gateNeedsWaves')
     }
   }
 

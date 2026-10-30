@@ -20,7 +20,7 @@ import { useT } from '../../lib/i18n'
 import { Trans } from '../../lib/Trans'
 import type { MessageKey } from '../../../../shared/i18n'
 import {
-  DRIFT_NO_PUSH,
+  DRIFT_NO_PUSH_KEY,
   DRIFT_PREVIEW_CHARS,
   DRIFT_RULE_ORDER,
   DRIFT_STATUS_HELP,
@@ -308,7 +308,7 @@ export function DriftPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               read, so no number on the page becomes misleading without it. It
               is still on this panel, where someone looking for the button that
               fixes three diverging hosts will look. */}
-          <p data-testid="drift-no-push">{DRIFT_NO_PUSH}</p>
+          <p data-testid="drift-no-push">{t(DRIFT_NO_PUSH_KEY)}</p>
         </>
       }
       actions={

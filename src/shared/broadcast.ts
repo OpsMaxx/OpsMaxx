@@ -36,6 +36,7 @@
 // decision.
 
 import { assessCommand, type BroadcastConfirmation, type BroadcastRisk } from './commandRisk'
+import { st, type MessageKey } from './i18n'
 // Re-exported so every existing consumer keeps its import path: the classifier
 // moved for the reason commandRisk.ts explains, and moving its callers too
 // would have made that a much larger diff than the reason warrants.
@@ -144,15 +145,23 @@ export type BroadcastHostOutcome =
   /** Never started, because the run was cancelled. */
   | 'cancelled'
 
-export const BROADCAST_OUTCOME_LABEL: Record<BroadcastHostOutcome, string> = {
-  ok: 'ok',
-  nonzero: 'non-zero exit',
-  'missing-command': 'command not on this server',
-  'permission-denied': 'permission denied',
-  timeout: 'timed out',
-  unreachable: 'unreachable',
-  cancelled: 'not run'
+const OUTCOME_LABEL_KEY: Record<BroadcastHostOutcome, MessageKey> = {
+  ok: 'shared.broadcast.outcome.ok',
+  nonzero: 'shared.broadcast.outcome.nonzero',
+  'missing-command': 'shared.broadcast.outcome.missingCommand',
+  'permission-denied': 'shared.broadcast.outcome.permissionDenied',
+  timeout: 'shared.broadcast.outcome.timeout',
+  unreachable: 'shared.broadcast.outcome.unreachable',
+  cancelled: 'shared.broadcast.outcome.cancelled'
 }
+
+/** Each read translates, so a label is in whatever language is current when shown. */
+export const BROADCAST_OUTCOME_LABEL: Readonly<Record<BroadcastHostOutcome, string>> = Object.defineProperties(
+  {} as Record<BroadcastHostOutcome, string>,
+  Object.fromEntries(
+    Object.entries(OUTCOME_LABEL_KEY).map(([o, k]) => [o, { get: () => st(k), enumerable: true }])
+  )
+)
 
 // A missing command is reported by the SHELL, not by the program, and every
 // shell words it differently — the same problem the Docker module solves for

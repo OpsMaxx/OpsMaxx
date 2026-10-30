@@ -87,10 +87,7 @@ function blobKey(key: string): CollectionSource {
     const data = loadData() as Record<string, unknown> | null
     if (data) return data
     if (dataFileExists()) {
-      throw new AddyError(
-        'config-invalid',
-        'the local data file cannot be read, so nothing will be written over it'
-      )
+      throw new AddyError('config-invalid', { key: 'main.addy.collections.dataUnreadable' })
     }
     return null
   }
@@ -125,10 +122,10 @@ function blobKey(key: string): CollectionSource {
        */
       const back = loadData() as Record<string, unknown> | null
       if (!back || JSON.stringify(back[key]) !== JSON.stringify(value)) {
-        throw new AddyError(
-          'internal',
-          `${key} could not be written to the local data file`
-        )
+        throw new AddyError('internal', {
+          key: 'main.addy.collections.writeFailed',
+          vars: { collection: key }
+        })
       }
       awaitingReload.set(key, Date.now())
     }

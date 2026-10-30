@@ -3,7 +3,6 @@ import { ShieldAlert, TriangleAlert } from 'lucide-react'
 import { clsx } from '../../lib/format'
 import { useT } from '../../lib/i18n'
 import {
-  SCANNER_UNMEASURED,
   summariseScan,
   type ImageScanProbe,
   type ScanSummary
@@ -90,7 +89,7 @@ export function ImageScanPanel({
           )}
           {summary.status === 'no-scanner' && (
             <div className="faint" style={{ fontSize: 11 }}>
-              {SCANNER_UNMEASURED}
+              {t('shared.imageScan.scannerUnmeasured')}
             </div>
           )}
           {probe?.ok === true &&

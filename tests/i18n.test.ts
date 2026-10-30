@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import {
   LOCALES,
   PSEUDO_LOCALE,
@@ -106,5 +107,45 @@ describe('pseudo-locale', () => {
     const out = pseudoLocalize('Delete {{count}} files')
     expect(out).toMatch(/^\[Ðéĺéţé \{\{count\}\} ƒîĺéš~+\]$/)
     expect(out.length).toBeGreaterThan('Delete {{count}} files'.length * 1.3)
+  })
+})
+
+describe('the shared translator', () => {
+  it('speaks English until something points it elsewhere, which only the renderer does', async () => {
+    const { st, setSharedTranslator, englishT, loadTranslator } = await import('../src/shared/i18n')
+    const key = 'menu.edit' as MessageKey
+    expect(st(key)).toBe('Edit')
+    try {
+      setSharedTranslator(await loadTranslator('de'))
+      expect(st(key)).toBe('Bearbeiten')
+      expect(englishT(key)).toBe('Edit')
+    } finally {
+      setSharedTranslator(englishT)
+    }
+  })
+
+  it('leaves names that are stored with a grant in English, whatever the screen speaks', async () => {
+    const { setSharedTranslator, englishT, loadTranslator } = await import('../src/shared/i18n')
+    const { resolveDefaultSessionGroup, sessionModeLabel } = await import('../src/shared/mcp')
+    try {
+      setSharedTranslator(await loadTranslator('de'))
+      expect(resolveDefaultSessionGroup(null, []).name).toBe('No AI Access')
+      expect(sessionModeLabel('auto', undefined, englishT)).toBe('Auto')
+    } finally {
+      setSharedTranslator(englishT)
+    }
+  })
+
+  it('is never pointed anywhere by main', () => {
+    let hits = ''
+    try {
+      hits = execFileSync('git', ['grep', '-l', 'setSharedTranslator', '--', 'src/main', 'src/cli', 'src/preload'], {
+        encoding: 'utf8'
+      })
+    } catch (e) {
+      // Exit 1 is git grep finding nothing, which is the point.
+      if ((e as { status?: number }).status !== 1) throw e
+    }
+    expect(hits).toBe('')
   })
 })

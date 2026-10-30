@@ -58,6 +58,7 @@ import {
   type K8sWorkload,
   type K8sAllocatableProbe
 } from '../../../../shared/kubernetes'
+import { allocationHeadline } from '../../../../shared/k8sAllocatable'
 import { useApp } from '../../store/app'
 import {
   assessNodeSkew,
@@ -1699,7 +1700,7 @@ export function KubernetesPanel({ servers }: { servers: Server[] }): React.JSX.E
                       percentage, because a cluster at 8% whose pods are unsized
                       has headroom nobody can compute. */}
                   <div className="faint" style={{ fontSize: 11, marginBottom: 4 }}>
-                    {alloc.headline}
+                    {allocationHeadline(alloc.report)}
                   </div>
                   {alloc.report.nodes.map((n) => (
                     <div key={n.node} className="cron-row">

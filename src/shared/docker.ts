@@ -1,5 +1,6 @@
 // Docker: list containers on a server, read their logs, open a shell in one.
 //
+import { st, translatedTable } from './i18n'
 // Two decisions, both taken from the roadmap and both worth restating because
 // the rest follows from them.
 //
@@ -83,15 +84,12 @@ export type DockerFailure =
   | 'permission-denied'
   | 'unknown'
 
-export const DOCKER_FAILURE_HELP: Record<DockerFailure, string> = {
-  'not-installed':
-    'No docker on this server. Looked on PATH and in /usr/bin, /usr/local/bin, /snap/bin, /opt/homebrew/bin and /usr/sbin. If it lives somewhere else, a symlink into /usr/local/bin is the usual fix.',
-  'daemon-unreachable':
-    'Docker is installed but its daemon is not answering. It may not be running, or it may be listening on a socket this user cannot see.',
-  'permission-denied':
-    'This user cannot talk to the docker socket. Adding them to the docker group grants root-equivalent access on most installs, so that is a decision worth making deliberately.',
-  unknown: 'Docker returned an error that could not be classified. The raw message is below.'
-}
+export const DOCKER_FAILURE_HELP: Record<DockerFailure, string> = translatedTable({
+  'not-installed': 'shared.docker.failure.notInstalled',
+  'daemon-unreachable': 'shared.docker.failure.daemonUnreachable',
+  'permission-denied': 'shared.docker.failure.permissionDenied',
+  unknown: 'shared.docker.failure.unknown'
+})
 
 // A missing binary is reported by the *shell*, not by docker, and every shell
 // words it differently. `no such file or directory` is deliberately NOT in this
@@ -1832,25 +1830,28 @@ export function sortUnhealthyFirst(logs: DockerHealthLog[]): DockerHealthLog[] {
 
 /** One line per container, saying the thing the status alone does not. */
 export function healthHeadline(log: DockerHealthLog): string {
-  if (log.status === null) return `${log.container} has no healthcheck, so nothing is checking it.`
+  const container = log.container
+  if (log.status === null) return st('shared.docker.health.noHealthcheck', { container })
   if (log.status === 'unhealthy') {
-    const streak =
-      log.failingStreak === null
-        ? 'it has been failing'
-        : `it has failed ${log.failingStreak} check${log.failingStreak === 1 ? '' : 's'} in a row`
-    const sample = log.sampled
-      ? `, and docker keeps only the last ${log.entries.length} of them`
-      : ''
-    return `${log.container} is unhealthy: ${streak}${sample}.`
+    const kept = log.entries.length
+    if (log.failingStreak === null) {
+      return log.sampled
+        ? st('shared.docker.health.unhealthyFailingSampled', { container, kept })
+        : st('shared.docker.health.unhealthyFailing', { container })
+    }
+    const count = log.failingStreak
+    return log.sampled
+      ? st('shared.docker.health.unhealthyStreakSampled', { container, count, kept })
+      : st('shared.docker.health.unhealthyStreak', { container, count })
   }
   if (log.status === 'starting') {
     const failing = log.entries.length > 0 && log.entries.every((e) => e.exitCode !== 0)
     return failing
-      ? `${log.container} still reports "starting" and every check it has run has failed. Its start period is hiding that.`
-      : `${log.container} is inside its start period; docker is not calling it unhealthy yet.`
+      ? st('shared.docker.health.startingFailing', { container })
+      : st('shared.docker.health.starting', { container })
   }
-  if (log.status === 'healthy') return `${log.container} is passing its healthcheck.`
-  return `${log.container} reported a health status this build does not know: ${log.status}.`
+  if (log.status === 'healthy') return st('shared.docker.health.healthy', { container })
+  return st('shared.docker.health.unknownStatus', { container, status: log.status })
 }
 
 // ---------------------------------------------------------------- stats
@@ -2022,9 +2023,9 @@ export const DOCKER_TYPE_ABOVE_CONTAINERS = 1
 export function planDockerAction(action: DockerAction, targets: string[]): DockerActionPlan {
   const reasons: string[] = []
   const risk: DockerActionRisk = action === 'start' ? 'ordinary' : 'elevated'
-  if (action === 'stop') reasons.push('stops a running container and every connection it is serving')
-  if (action === 'restart') reasons.push('interrupts every connection the container is serving')
-  if (targets.length > 1) reasons.push(`affects ${targets.length} containers at once`)
+  if (action === 'stop') reasons.push(st('shared.docker.action.stopReason'))
+  if (action === 'restart') reasons.push(st('shared.docker.action.restartReason'))
+  if (targets.length > 1) reasons.push(st('shared.docker.action.manyReason', { count: targets.length }))
 
   let confirmation: DockerConfirmation
   if (targets.length === 0) confirmation = { kind: 'confirm' }
@@ -2286,7 +2287,7 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
   for (const c of disk.containers) {
     const label = c.name === '' ? c.id : c.name
     if (c.state === 'running') {
-      withheld.push({ kind: 'container', id: c.id, label, reason: 'it is running' })
+      withheld.push({ kind: 'container', id: c.id, label, reason: st('shared.docker.reclaim.withheld.running') })
       continue
     }
     if (c.state === 'paused' || c.state === 'restarting') {
@@ -2294,12 +2295,17 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
         kind: 'container',
         id: c.id,
         label,
-        reason: `it is ${c.state}, which docker does not prune either`
+        reason: st('shared.docker.reclaim.withheld.notPruned', { state: c.state })
       })
       continue
     }
     if (!RECLAIMABLE_CONTAINER_STATES.includes(c.state)) {
-      withheld.push({ kind: 'container', id: c.id, label, reason: 'its state could not be read' })
+      withheld.push({
+        kind: 'container',
+        id: c.id,
+        label,
+        reason: st('shared.docker.reclaim.withheld.stateUnread')
+      })
       continue
     }
     items.push({
@@ -2319,7 +2325,7 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
         kind: 'image',
         id: '',
         label,
-        reason: 'this runtime printed no image id, and an image is only ever removed by id'
+        reason: st('shared.docker.reclaim.withheld.noImageId')
       })
       continue
     }
@@ -2328,7 +2334,7 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
         kind: 'image',
         id: i.id,
         label,
-        reason: 'this runtime did not say how many containers reference it'
+        reason: st('shared.docker.reclaim.withheld.imageRefsUnknown')
       })
       continue
     }
@@ -2337,7 +2343,7 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
         kind: 'image',
         id: i.id,
         label,
-        reason: `${i.containers} container${i.containers === 1 ? '' : 's'} still reference it`
+        reason: st('shared.docker.reclaim.withheld.imageReferenced', { count: i.containers })
       })
       continue
     }
@@ -2359,7 +2365,7 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
         kind: 'volume',
         id: v.name,
         label: v.name,
-        reason: 'this runtime did not say how many containers are linked to it'
+        reason: st('shared.docker.reclaim.withheld.volumeLinksUnknown')
       })
       continue
     }
@@ -2368,7 +2374,7 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
         kind: 'volume',
         id: v.name,
         label: v.name,
-        reason: `${v.links} container${v.links === 1 ? '' : 's'} linked to it`
+        reason: st('shared.docker.reclaim.withheld.volumeLinked', { count: v.links })
       })
       continue
     }
@@ -2387,7 +2393,7 @@ export function buildDockerReclaimPreview(disk: DockerDiskDetail): DockerReclaim
       kind: 'cache',
       id: c.id,
       label: c.id,
-      reason: 'a build cache entry can only be removed by `docker builder prune`, and nothing here runs a prune'
+      reason: st('shared.docker.reclaim.withheld.buildCache')
     })
   }
 
@@ -2614,7 +2620,7 @@ export function buildDockerNetworkPreview(
         kind: 'network',
         id: net.id,
         label: net.name,
-        reason: 'docker creates this one and refuses to remove it'
+        reason: st('shared.docker.network.withheld.default')
       })
       continue
     }
@@ -2627,8 +2633,11 @@ export function buildDockerNetworkPreview(
         label: net.name,
         reason:
           running === on.length
-            ? `${on.length} container${on.length === 1 ? '' : 's'} on it`
-            : `${on.length} container${on.length === 1 ? '' : 's'} on it, ${on.length - running} of them stopped and still attached`
+            ? st('shared.docker.network.withheld.inUse', { count: on.length })
+            : st('shared.docker.network.withheld.inUseStopped', {
+                count: on.length,
+                stopped: on.length - running
+              })
       })
       continue
     }
@@ -2677,27 +2686,19 @@ export function planDockerReclaim(items: DockerReclaimItem[]): DockerReclaimPlan
   const images = of('image')
   const volumes = of('volume')
   const networks = of('network')
-  const plural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
-
   const reasons: string[] = []
   const caveats: string[] = []
 
   if (volumes.length > 0) {
-    reasons.push(
-      `removes ${plural(volumes.length, 'volume')}, and what is inside a volume cannot be recovered afterwards`
-    )
+    reasons.push(st('shared.docker.reclaim.removesVolumes', { count: volumes.length }))
   }
   if (containers.length > 0) {
-    reasons.push(
-      `removes ${plural(containers.length, 'container')}, which can only be brought back if you know how it was run`
-    )
+    reasons.push(st('shared.docker.reclaim.removesContainers', { count: containers.length }))
   }
   if (images.length > 0) {
-    reasons.push(
-      `removes ${plural(images.length, 'image')}, which has to be pulled or rebuilt to come back`
-    )
+    reasons.push(st('shared.docker.reclaim.removesImages', { count: images.length }))
   }
-  if (networks.length > 0) reasons.push(`removes ${plural(networks.length, 'network')}`)
+  if (networks.length > 0) reasons.push(st('shared.docker.reclaim.removesNetworks', { count: networks.length }))
 
   const named = volumes.filter((v) => v.anonymous !== true)
   if (named.length > 0) {
@@ -2705,29 +2706,19 @@ export function planDockerReclaim(items: DockerReclaimItem[]): DockerReclaimPlan
     // removing them was the regret people kept reporting. This does remove
     // them — by name, one at a time, because that is what was selected — and
     // saying so is the difference between a decision and a surprise.
-    caveats.push(
-      `${plural(named.length, 'named volume')} — docker's own \`volume prune\` skips these on Docker 23 and later, and this does not, because you picked them by name`
-    )
+    caveats.push(st('shared.docker.reclaim.namedVolumes', { count: named.length }))
   }
   if (images.some((i) => i.dangling === true)) {
-    caveats.push(
-      'a dangling image is a previous build\'s layers; no registry has a copy, so it comes back only by rebuilding'
-    )
+    caveats.push(st('shared.docker.reclaim.dangling'))
   }
   if (images.length > 0) {
-    caveats.push(
-      'an image carrying more than one tag is refused rather than untagged — docker says so per image and the image stays'
-    )
+    caveats.push(st('shared.docker.reclaim.multiTag'))
   }
   const orphaning = containers.filter((c) => (c.mountedVolumes ?? 0) > 0)
   if (orphaning.length > 0) {
-    caveats.push(
-      `${plural(orphaning.length, 'container')} here mount local volumes; removing the container leaves those volumes behind, it does not delete them`
-    )
+    caveats.push(st('shared.docker.reclaim.orphanVolumes', { count: orphaning.length }))
   }
-  caveats.push(
-    'only the ids listed here are removed — anything that became removable while this dialog was open is left alone'
-  )
+  caveats.push(st('shared.docker.reclaim.onlyListed'))
 
   const risk: DockerReclaimRisk = volumes.length > 0 ? 'destructive' : 'elevated'
   const confirmation: DockerConfirmation =
@@ -2839,11 +2830,11 @@ export function diffDockerReclaim(
       continue
     }
     if (now.label !== item.label) {
-      changed.push({ item, detail: `it is now ${now.label}, not ${item.label}` })
+      changed.push({ item, detail: st('shared.docker.reclaim.changed', { now: now.label, was: item.label }) })
       continue
     }
     if (now.size !== item.size) {
-      changed.push({ item, detail: `it is now ${now.size}, not ${item.size}` })
+      changed.push({ item, detail: st('shared.docker.reclaim.changed', { now: now.size, was: item.size }) })
     }
   }
 

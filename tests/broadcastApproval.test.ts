@@ -585,7 +585,7 @@ describe('where the broadcast approval is enforced', () => {
     expect(at('planBroadcast(')).toBeLessThan(run)
     // The refusal has to be a THROW, before the runner. A logged disagreement
     // that still runs the command is not a refusal.
-    expect(at('throw new Error')).toBeLessThan(run)
+    expect(at('throw new LocalizedError')).toBeLessThan(run)
     expect(at('!verdict.ok')).toBeLessThan(run)
   })
 

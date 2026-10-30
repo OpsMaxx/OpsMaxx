@@ -1,5 +1,6 @@
 import { app, clipboard } from 'electron'
 import { askInWindow } from './promptWindow'
+import { mt } from './locale'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -142,10 +143,10 @@ export function verifyHostKey(
   if (openssh.revoked) {
     return askInWindow({
         type: 'error',
-        title: 'Host key revoked',
-        message: `The host key for ${id} is marked @revoked in your ~/.ssh/known_hosts.`,
-        detail: `Fingerprint: ${fp}\n\nThe connection has been refused. Remove the @revoked line if this was a mistake.`,
-        buttons: ['OK'],
+        title: mt('main.hostKey.revokedTitle'),
+        message: mt('main.hostKey.revokedMessage', { id }),
+        detail: mt('main.hostKey.revokedDetail', { fp }),
+        buttons: [mt('common.ok')],
         defaultId: 0
       })
       .then(() => false)
@@ -158,23 +159,16 @@ export function verifyHostKey(
   const shared = known?.fingerprint === fp
   const prompt: Promise<boolean> = askInWindow({
       type: recognised ? 'question' : 'warning',
-      title: recognised ? 'Confirm server' : 'Unknown server',
-      message: recognised
-        ? `${id} is already trusted in your ~/.ssh/known_hosts.`
-        : `The authenticity of ${id} cannot be established.`,
+      title: recognised ? mt('main.hostKey.confirmTitle') : mt('main.hostKey.unknownTitle'),
+      message: recognised ? mt('main.hostKey.recognisedMessage', { id }) : mt('main.hostKey.unknownMessage', { id }),
       detail: recognised
-        ? `Fingerprint: ${fp}\n\nThis is the same key OpenSSH has for ${canonicalHostname(host, port)}. ` +
-          'OpsMaxx keeps its own list of trusted servers, so it has to be added here once too.'
+        ? mt('main.hostKey.recognisedDetail', { fp, host: canonicalHostname(host, port) })
         : openssh.knownUnderAnotherKey
-          ? `Fingerprint: ${fp}\n\nWarning: ~/.ssh/known_hosts has an entry for this server under a different key. ` +
-            'That can mean the server was rebuilt, or that this connection is being intercepted. ' +
-            'Check the fingerprint before trusting it.'
+          ? mt('main.hostKey.otherKeyDetail', { fp })
           : shared
-            ? `Fingerprint: ${fp}\n\nAnother of your devices trusted this key and shared it through Sync. ` +
-              'OpsMaxx still asks once on each device, because a shared entry is not something this one can check. ' +
-              'Trust this server on this device?'
-            : `Fingerprint: ${fp}\n\nTrust this server and remember it for future connections?`,
-      buttons: ['Trust and connect', 'Cancel'],
+            ? mt('main.hostKey.sharedDetail', { fp })
+            : mt('main.hostKey.unknownDetail', { fp }),
+      buttons: [mt('main.hostKey.trustAndConnect'), mt('common.cancel')],
       // Pre-selecting Trust is only defensible when we have independent
       // evidence for this exact key; anything else keeps Cancel as the default.
       defaultId: recognised ? 0 : 1,
@@ -221,22 +215,24 @@ function changedKey(id: string, expected: string, fp: string, person: boolean): 
   const key = `changed:${id}`
   const inFlight = pending.get(key)
   if (inFlight) return inFlight
-  const compare =
-    `Trusted: ${expected}\nPresented now: ${fp}\n\n` +
-    'A rebuilt server, or regenerated keys, looks like this — so does an interception. ' +
-    'To tell which, read the key on the server itself, from its console rather than over SSH: ' +
-    'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub'
+  const compare = mt('main.hostKey.compare', {
+    expected,
+    fp,
+    command: 'ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub'
+  })
   const copy = (): void => clipboard.writeText(`${id}\ntrusted: ${expected}\npresented: ${fp}\n`)
   const ask = async (): Promise<boolean> => {
     for (;;) {
       const r = await askInWindow({
         type: 'error',
-        title: 'Host key changed',
-        message: `${id} presented a different host key, so the connection was stopped.`,
+        title: mt('main.hostKey.changedTitle'),
+        message: mt('main.hostKey.changedMessage', { id }),
         detail: person
-          ? `${compare}\n\nIf it matches what the server shows, replace the trusted key and connect.`
-          : `${compare}\n\nA background check found this, so nothing is offered here. If you rebuilt the server, open it from the sidebar: that connection lets you replace the key.`,
-        buttons: person ? ['Cancel', 'Copy fingerprints', 'Replace the trusted key…'] : ['OK', 'Copy fingerprints'],
+          ? mt('main.hostKey.changedDetailPerson', { compare })
+          : mt('main.hostKey.changedDetailBackground', { compare }),
+        buttons: person
+          ? [mt('common.cancel'), mt('main.hostKey.copyFingerprints'), mt('main.hostKey.replaceTrustedKey')]
+          : [mt('common.ok'), mt('main.hostKey.copyFingerprints')],
         defaultId: 0,
         cancelId: 0
       })
@@ -247,12 +243,10 @@ function changedKey(id: string, expected: string, fp: string, person: boolean): 
       if (!person || r?.response !== 2) return false
       const sure = await askInWindow({
         type: 'warning',
-        title: 'Replace the trusted key?',
-        message: `Trust the new key for ${id}?`,
-        detail:
-          `New key: ${fp}\n\nOnly if you rebuilt this server or regenerated its keys, or checked the key on its console. ` +
-          'If neither is true, someone may be between you and the server, and anything you type next goes to them.',
-        buttons: ['Cancel', 'Replace and connect'],
+        title: mt('main.hostKey.replaceTitle'),
+        message: mt('main.hostKey.replaceMessage', { id }),
+        detail: mt('main.hostKey.replaceDetail', { fp }),
+        buttons: [mt('common.cancel'), mt('main.hostKey.replaceAndConnect')],
         defaultId: 0,
         cancelId: 0
       })

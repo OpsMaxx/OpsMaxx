@@ -18,6 +18,8 @@
 // are unambiguous -- who is named, whether a password is required, and whether
 // the grant is ALL -- and reports the rest verbatim for a person to read.
 
+import { st } from './i18n'
+
 /** Per value, because these strings are rendered. A sudoers file with a
  *  100 KB alias is a file designed to break whatever displays it. */
 const VALUE_CAP = 512
@@ -260,26 +262,29 @@ export function sudoPrivilegesFor(
  *  is most likely to be wrong. */
 export function describeSudo(findings: SudoFinding[], reading: SudoersReading): string {
   const gaps: string[] = []
-  if (reading.includes.length > 0) gaps.push(`${reading.includes.length} included file(s) not read`)
-  if (reading.unparsed.length > 0) gaps.push(`${reading.unparsed.length} line(s) this could not read`)
-  if (reading.truncated) gaps.push('the file was longer than this reads')
-  const tail = gaps.length > 0 ? ` — but ${gaps.join(', ')}, so this is not the whole picture.` : ''
+  if (reading.includes.length > 0) gaps.push(st('shared.sudoers.gap.includes', { count: reading.includes.length }))
+  if (reading.unparsed.length > 0) gaps.push(st('shared.sudoers.gap.unparsed', { count: reading.unparsed.length }))
+  if (reading.truncated) gaps.push(st('shared.sudoers.gap.truncated'))
+  const say = (claim: string): string =>
+    gaps.length > 0
+      ? st('shared.sudoers.claimWithGaps', { claim, gaps: gaps.join(', ') })
+      : st('shared.sudoers.claim', { claim })
 
-  if (findings.length === 0) return `No sudoers rule names this account${tail || '.'}`
+  if (findings.length === 0) return say(st('shared.sudoers.none'))
   const root = findings.filter((f) => f.grantsAll)
   const free = findings.filter((f) => f.noPassword === 'all')
   const mixed = findings.filter((f) => f.noPassword === 'some')
   if (root.length > 0 && free.length > 0) {
-    return `Can run ANY command, WITHOUT a password${tail || '.'}`
+    return say(st('shared.sudoers.anyNoPassword'))
   }
-  if (root.length > 0) return `Can run any command, with a password${tail || '.'}`
-  if (free.length > 0) return `Can run ${free.length} listed command set(s) without a password${tail || '.'}`
+  if (root.length > 0) return say(st('shared.sudoers.anyWithPassword'))
+  if (free.length > 0) return say(st('shared.sudoers.listedNoPassword', { count: free.length }))
   // Said rather than rounded to one side: some of these commands need a
   // password and some do not, and which is which is per command.
   if (mixed.length > 0) {
-    return `Named by ${findings.length} rule(s), some of whose commands need no password${tail || '.'}`
+    return say(st('shared.sudoers.namedSomeNoPassword', { count: findings.length }))
   }
-  return `Named by ${findings.length} rule(s), with a password${tail || '.'}`
+  return say(st('shared.sudoers.namedWithPassword', { count: findings.length }))
 }
 
 // ---------------------------------------------------------------------------
@@ -396,7 +401,11 @@ export function sudoAcrossFiles(
   const base = describeSudo(findings, merged)
   const sentence =
     unreadable.length > 0
-      ? `${base.replace(/\.$/, '')} — and ${unreadable.length} file(s) could not be read (${unreadable.join(', ')}), which usually means this sweep was not root.`
+      ? st('shared.sudoers.filesUnreadable', {
+          base: base.replace(/[.。]$/, ''),
+          count: unreadable.length,
+          files: unreadable.join(', ')
+        })
       : base
   return { findings, unreadable, sentence }
 }

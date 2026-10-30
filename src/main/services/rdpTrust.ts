@@ -1,5 +1,6 @@
 import { app } from 'electron'
 import { askInWindow } from './promptWindow'
+import { mt } from './locale'
 import { join } from 'node:path'
 import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
@@ -117,13 +118,10 @@ export function verifyRdpCertificate(host: string, port: number, leafDer: Buffer
     // corrupting a local file cheaper than forging a certificate.
     return askInWindow({
         type: 'error',
-        title: 'Remote desktop certificates unreadable',
-        message: 'The list of trusted remote desktop certificates could not be read.',
-        detail:
-          `${FILE}\n\nThe connection has been refused, because a damaged list cannot be ` +
-          'told apart from one that would have refused this machine. Move or delete that ' +
-          'file to start the list again — every host will then ask on first connection.',
-        buttons: ['OK'],
+        title: mt('main.rdpTrust.unreadableTitle'),
+        message: mt('main.rdpTrust.unreadableMessage'),
+        detail: mt('main.rdpTrust.unreadableDetail', { file: FILE }),
+        buttons: [mt('common.ok')],
         defaultId: 0
       })
       .then(() => false)
@@ -136,14 +134,10 @@ export function verifyRdpCertificate(host: string, port: number, leafDer: Buffer
     // common for Windows hosts — or an interception. Never decide it silently.
     return askInWindow({
         type: 'error',
-        title: 'Remote desktop certificate changed',
-        message: `The certificate for ${id} does not match the one previously trusted.`,
-        detail:
-          `Expected: ${known.fingerprint}\nReceived: ${fp}\n\n` +
-          'Windows presents a new certificate when a machine is rebuilt or re-imaged — but this is ' +
-          'also what an interception looks like. The connection has been refused. If you are certain ' +
-          'the machine changed, forget the saved certificate in Settings → Security and reconnect.',
-        buttons: ['OK'],
+        title: mt('main.rdpTrust.changedTitle'),
+        message: mt('main.rdpTrust.changedMessage', { id }),
+        detail: mt('main.rdpTrust.changedDetail', { expected: known.fingerprint, fp }),
+        buttons: [mt('common.ok')],
         defaultId: 0
       })
       .then(() => false)
@@ -154,14 +148,10 @@ export function verifyRdpCertificate(host: string, port: number, leafDer: Buffer
 
   const ask = askInWindow({
       type: 'warning',
-      title: 'Unrecognised remote desktop',
-      message: `${id} is presenting a certificate this machine has not seen before.`,
-      detail:
-        `Fingerprint: ${fp}\n\n` +
-        'Remote desktop servers are normally self-signed, so this is expected the first time you ' +
-        'connect to a machine. Continue only if you recognise it. The fingerprint will be ' +
-        'remembered, and you will be warned if it ever changes.',
-      buttons: ['Connect', 'Cancel'],
+      title: mt('main.rdpTrust.unknownTitle'),
+      message: mt('main.rdpTrust.unknownMessage', { id }),
+      detail: mt('main.rdpTrust.unknownDetail', { fp }),
+      buttons: [mt('main.rdpTrust.connect'), mt('common.cancel')],
       // Cancel is both the default and the escape action: the safe answer must
       // be the one a stray Return or Escape produces.
       defaultId: 1,

@@ -16,8 +16,8 @@ import { clsx } from '../../lib/format'
 import { openSettings } from '../../store/nav'
 import {
   CHANGELOG_KINDS,
-  CHANGELOG_SWITCH_OFF,
-  CHANGELOG_SWITCH_ON,
+  CHANGELOG_SWITCH_OFF_KEY,
+  CHANGELOG_SWITCH_ON_KEY,
   changeLogCoverageText,
   type ChangeLogActor,
   type ChangeLogBridge,
@@ -440,7 +440,7 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
       about={
         <>
           <p>{t('monitor.changeLog.about')}</p>
-          <p data-testid="changelog-on">{CHANGELOG_SWITCH_ON}</p>
+          <p data-testid="changelog-on">{t(CHANGELOG_SWITCH_ON_KEY)}</p>
         </>
       }
       actions={
@@ -463,7 +463,7 @@ export function ChangeLogPanel({ servers }: { servers: Server[] }): React.JSX.El
 
       {page !== null && !page.enabled && (
         <div className="panel-note is-unknown" data-testid="changelog-off">
-          {CHANGELOG_SWITCH_OFF}{' '}
+          {t(CHANGELOG_SWITCH_OFF_KEY)}{' '}
           <button className="btn ghost sm" onClick={() => openSettings('modules')}>
             {t('nav.settings.modules')}
           </button>

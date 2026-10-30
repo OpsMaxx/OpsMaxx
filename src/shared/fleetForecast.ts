@@ -25,6 +25,7 @@
 
 import type { CapacityMetric, CapacityReport, Forecast, RefusalReason, Trend } from './capacity'
 import { formatBytes } from './bytesForecast'
+import { englishT, st, type MessageKey } from './i18n'
 
 export interface FleetForecastInput {
   hostId: string
@@ -58,12 +59,18 @@ function windowHours(f: Forecast): number {
   return Math.max(0, Math.round((f.to - f.from) / 3_600_000))
 }
 
-const METRIC_WORD: Record<CapacityMetric, string> = {
-  cpu: 'CPU',
-  memPct: 'memory',
-  diskPct: 'disk',
-  inodePct: 'inodes'
+const METRIC_KEY: Record<CapacityMetric, MessageKey> = {
+  cpu: 'shared.fleetForecast.metric.cpu',
+  memPct: 'shared.fleetForecast.metric.memPct',
+  diskPct: 'shared.fleetForecast.metric.diskPct',
+  inodePct: 'shared.fleetForecast.metric.inodePct'
 }
+
+// The digest below is for an agent and stays English; the rows and headline
+// are for the screen and follow the user's language. Both read the same keys.
+const METRIC_WORD = Object.fromEntries(
+  Object.entries(METRIC_KEY).map(([m, k]) => [m, englishT(k)])
+) as Record<CapacityMetric, string>
 
 /**
  * Why no forecast, in the operator's words rather than the enum's.
@@ -74,20 +81,23 @@ const METRIC_WORD: Record<CapacityMetric, string> = {
  * all but time, and a `step-change` host needs somebody to find out what was
  * untarred.
  */
-export const FORECAST_REFUSAL_WORDS: Record<RefusalReason, string> = {
-  'no-data': 'nothing was sampled in this window',
-  stale: 'it stopped reporting, so a forecast would be about the past',
-  'too-few-points': 'too few samples yet',
-  'window-too-short': 'the samples cover too short a stretch to have a rate',
-  'already-past': 'it is already at or over the threshold',
-  flat: 'it is not moving enough to call a trend',
-  falling: 'it is going down',
-  noisy: 'the readings scatter too far from any line to extrapolate',
-  'step-change': 'the rise is one jump rather than a trend, so something was added at once',
-  'beyond-horizon': 'the rate is real but the crossing is beyond the horizon this will predict',
-  sparse:
-    'the samples sit in too few parts of the window to describe it, so a line through them would be about those hours instead'
+const REFUSAL_KEY: Record<RefusalReason, MessageKey> = {
+  'no-data': 'shared.fleetForecast.refusal.noData',
+  stale: 'shared.fleetForecast.refusal.stale',
+  'too-few-points': 'shared.fleetForecast.refusal.tooFewPoints',
+  'window-too-short': 'shared.fleetForecast.refusal.windowTooShort',
+  'already-past': 'shared.fleetForecast.refusal.alreadyPast',
+  flat: 'shared.fleetForecast.refusal.flat',
+  falling: 'shared.fleetForecast.refusal.falling',
+  noisy: 'shared.fleetForecast.refusal.noisy',
+  'step-change': 'shared.fleetForecast.refusal.stepChange',
+  'beyond-horizon': 'shared.fleetForecast.refusal.beyondHorizon',
+  sparse: 'shared.fleetForecast.refusal.sparse'
 }
+
+export const FORECAST_REFUSAL_WORDS = Object.fromEntries(
+  Object.entries(REFUSAL_KEY).map(([r, k]) => [r, englishT(k)])
+) as Record<RefusalReason, string>
 
 /**
  * One row.
@@ -99,7 +109,9 @@ export const FORECAST_REFUSAL_WORDS: Record<RefusalReason, string> = {
  */
 export function fleetForecastRow(input: FleetForecastInput): FleetForecastRow {
   const { hostId, hostName, metric, forecast: f } = input
-  const what = METRIC_WORD[metric]
+  // `hostName: ` stays outside the translated sentence: the capacity panel
+  // strips it when the host already has a column of its own.
+  const what = st(METRIC_KEY[metric])
   if (f.ok) {
     return {
       hostId,
@@ -110,11 +122,15 @@ export function fleetForecastRow(input: FleetForecastInput): FleetForecastRow {
       days: f.days,
       reason: null,
       confidence: f.confidence,
-      because:
-        `${hostName}: ${what} reaches ${f.threshold}% in ${f.days} day(s), ` +
-        // The window is not a footnote. "Fills in 11 days" is not an honest
-        // sentence; "from 6 hours of data" is what makes it one.
-        `from ${windowHours(f)}h of data (${f.confidence} confidence).`
+      // The window is not a footnote. "Fills in 11 days" is not an honest
+      // sentence; "from 6 hours of data" is what makes it one.
+      because: `${hostName}: ${st('shared.fleetForecast.rowCrossing', {
+        what,
+        threshold: f.threshold,
+        days: f.days,
+        hours: windowHours(f),
+        confidence: st(`shared.fleetForecast.confidence.${f.confidence}`)
+      })}`
     }
   }
   // `already-past` is promoted out of the refusals. It is the only one that
@@ -130,7 +146,7 @@ export function fleetForecastRow(input: FleetForecastInput): FleetForecastRow {
       days: null,
       reason: 'already-past',
       confidence: null,
-      because: `${hostName}: ${what} is already at or over its threshold.`
+      because: `${hostName}: ${st('shared.fleetForecast.rowOver', { what })}`
     }
   }
   return {
@@ -142,7 +158,7 @@ export function fleetForecastRow(input: FleetForecastInput): FleetForecastRow {
     days: null,
     reason: f.reason,
     confidence: null,
-    because: `${hostName}: no ${what} forecast — ${FORECAST_REFUSAL_WORDS[f.reason]}.`
+    because: `${hostName}: ${st('shared.fleetForecast.rowRefused', { what, why: st(REFUSAL_KEY[f.reason]) })}`
   }
 }
 
@@ -197,16 +213,15 @@ export function forecastHeadline(
   soonest: FleetForecastRow | null
 ): string {
   const total = counts.over + counts.crossing + counts.refused
-  if (total === 0) return 'No host has been sampled for long enough to say anything about capacity.'
+  if (total === 0) return st('shared.fleetForecast.headline.noHosts')
   const forecastable = counts.over + counts.crossing
-  const of = `${forecastable} of ${total} could be forecast`
   if (counts.over > 0) {
-    return `${counts.over} already over threshold; ${of}.`
+    return st('shared.fleetForecast.headline.over', { over: counts.over, forecastable, total })
   }
   if (soonest !== null && soonest.days !== null) {
-    return `Soonest: ${soonest.hostName} in ${soonest.days} day(s); ${of}.`
+    return st('shared.fleetForecast.headline.soonest', { host: soonest.hostName, days: soonest.days, forecastable, total })
   }
-  return `Nothing is forecast to cross a threshold; ${of}.`
+  return st('shared.fleetForecast.headline.nothing', { forecastable, total })
 }
 
 

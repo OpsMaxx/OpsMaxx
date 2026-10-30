@@ -117,6 +117,8 @@
 // which holds it out of the bridge by import closure, by vocabulary and by
 // literal symbol name.
 
+import { englishT, st } from './i18n'
+
 // --------------------------------------------------------------------- caps
 
 /** How many processes one install may hold. Not a resource limit — it is a cap
@@ -329,10 +331,7 @@ export interface ProcessDraft {
 export const PROCESS_SECRET_KEY_RX =
   /(PASSWORD|PASSWD|PASSPHRASE|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|CREDENTIAL|ACCESS_?KEY)/i
 
-export const PROCESS_SECRET_LITERAL_REFUSAL =
-  'That looks like a secret, so it cannot be stored as a plain value. Add it to the vault and ' +
-  'reference the entry instead — the value is then read when the process starts and never ' +
-  'written to disk here.'
+export const PROCESS_SECRET_LITERAL_REFUSAL = englishT('shared.processes.secretLiteral')
 
 /**
  * The supervisor's error codes, in this feature's words.
@@ -459,24 +458,24 @@ export function sanitiseProcesses(raw: unknown): ManagedProcess[] {
 
 /** What is wrong with a draft, or null. One sentence, said to the user. */
 export function processDraftProblem(draft: ProcessDraft | null | undefined): string | null {
-  if (!draft || typeof draft !== 'object') return 'That is not a process.'
-  if (!str(draft.name).trim()) return 'Give it a name.'
-  if (!str(draft.command).trim()) return 'Give it a command to run.'
-  if (!str(draft.cwd).trim()) return 'Give it a working directory.'
-  if (!Array.isArray(draft.args)) return 'Arguments must be a list.'
-  if (draft.args.length > PROCESS_ARGS_MAX) return `That is more than ${PROCESS_ARGS_MAX} arguments.`
-  if (!Array.isArray(draft.env)) return 'Environment must be a list.'
-  if (draft.env.length > PROCESS_ENV_MAX) return `That is more than ${PROCESS_ENV_MAX} variables.`
+  if (!draft || typeof draft !== 'object') return st('shared.processes.draft.notAProcess')
+  if (!str(draft.name).trim()) return st('shared.processes.draft.noName')
+  if (!str(draft.command).trim()) return st('shared.processes.draft.noCommand')
+  if (!str(draft.cwd).trim()) return st('shared.processes.draft.noCwd')
+  if (!Array.isArray(draft.args)) return st('shared.processes.draft.argsNotList')
+  if (draft.args.length > PROCESS_ARGS_MAX) return st('shared.processes.draft.tooManyArgs', { max: PROCESS_ARGS_MAX })
+  if (!Array.isArray(draft.env)) return st('shared.processes.draft.envNotList')
+  if (draft.env.length > PROCESS_ENV_MAX) return st('shared.processes.draft.tooManyEnv', { max: PROCESS_ENV_MAX })
   for (const e of draft.env) {
     const key = str((e as { key?: unknown })?.key).trim()
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-      return `${key || 'That'} is not a usable environment variable name.`
+      return key ? st('shared.processes.draft.badEnvName', { key }) : st('shared.processes.draft.badEnvNameEmpty')
     }
     if ((e as { kind?: unknown })?.kind === 'literal' && PROCESS_SECRET_KEY_RX.test(key)) {
-      return `${key}: ${PROCESS_SECRET_LITERAL_REFUSAL}`
+      return `${key}: ${st('shared.processes.secretLiteral')}`
     }
   }
-  if (!sanitiseReadiness(draft.readiness)) return 'That readiness check is not valid.'
+  if (!sanitiseReadiness(draft.readiness)) return st('shared.processes.draft.badReadiness')
   return null
 }
 

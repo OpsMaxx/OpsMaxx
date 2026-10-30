@@ -1,4 +1,5 @@
 import type { AccessAccount, AccessStatus } from './access'
+import { st } from './i18n'
 
 // Item 45's "dead users and keys": which accounts still hold a working key
 // nobody has used.
@@ -91,7 +92,7 @@ export function staleAccounts(hosts: StaleAccountsInput[], days: number, now = D
           ...base,
           verdict: 'unknown',
           daysSinceLogin: null,
-          because: `The keys on ${a.user} could not be read, so whether this account is a way in is unknown.`
+          because: st('shared.staleAccounts.keysUnreadable', { user: a.user })
         })
         continue
       }
@@ -104,7 +105,7 @@ export function staleAccounts(hosts: StaleAccountsInput[], days: number, now = D
           ...base,
           verdict: 'never-used',
           daysSinceLogin: null,
-          because: `${a.user} holds ${keyCount} key(s) and has never logged in.`
+          because: st('shared.staleAccounts.neverLoggedIn', { user: a.user, keys: keyCount ?? 0 })
         })
         continue
       }
@@ -117,8 +118,8 @@ export function staleAccounts(hosts: StaleAccountsInput[], days: number, now = D
           verdict: 'unknown',
           daysSinceLogin: null,
           because: a.lastLoginText
-            ? `${a.user}'s last login could not be turned into a date, so how long its ${keyCount} key(s) have been idle is unknown.`
-            : `This server did not report a last login for ${a.user}, so how long its ${keyCount} key(s) have been idle is unknown. A server without lastlog answers this way about accounts in daily use.`
+            ? st('shared.staleAccounts.loginUnparsed', { user: a.user, keys: keyCount ?? 0 })
+            : st('shared.staleAccounts.loginUnreported', { user: a.user, keys: keyCount ?? 0 })
         })
         continue
       }
@@ -130,8 +131,8 @@ export function staleAccounts(hosts: StaleAccountsInput[], days: number, now = D
         daysSinceLogin: idle,
         because:
           now - a.lastLoginAt >= window
-            ? `${a.user} holds ${keyCount} key(s) and last logged in ${idle} days ago.`
-            : `${a.user} logged in ${idle} days ago.`
+            ? st('shared.staleAccounts.stale', { user: a.user, keys: keyCount ?? 0, days: idle })
+            : st('shared.staleAccounts.active', { user: a.user, days: idle })
       })
     }
   }
@@ -156,13 +157,13 @@ export function summariseStaleAccounts(findings: StaleAccountFinding[]): {
   const unknown = findings.filter((f) => f.verdict === 'unknown').length
 
   if (stale === 0 && neverUsed === 0 && unknown === 0) {
-    return { stale, neverUsed, unknown, headline: 'Every account with a key has been used recently.' }
+    return { stale, neverUsed, unknown, headline: st('shared.staleAccounts.allRecent') }
   }
   const parts: string[] = []
-  if (neverUsed > 0) parts.push(`${neverUsed} never used`)
-  if (stale > 0) parts.push(`${stale} idle`)
-  if (unknown > 0) parts.push(`${unknown} that could not be answered`)
-  return { stale, neverUsed, unknown, headline: `Accounts holding keys: ${parts.join(', ')}.` }
+  if (neverUsed > 0) parts.push(st('shared.staleAccounts.part.neverUsed', { count: neverUsed }))
+  if (stale > 0) parts.push(st('shared.staleAccounts.part.idle', { count: stale }))
+  if (unknown > 0) parts.push(st('shared.staleAccounts.part.unknown', { count: unknown }))
+  return { stale, neverUsed, unknown, headline: st('shared.staleAccounts.headline', { parts: parts.join(', ') }) }
 }
 
 // ---------------------------------------------------------------------------
@@ -246,10 +247,10 @@ export function serviceAccountsWithKeys(
         verdict: a.neverLoggedIn ? 'never-used' : idle === null ? 'unknown' : 'active',
         because:
           loginDisabled === true
-            ? `${a.user} is a system account with ${a.keys.length} key(s); its shell (${a.shell}) refuses a login.`
+            ? st('shared.staleAccounts.systemNoLogin', { user: a.user, keys: a.keys.length, shell: String(a.shell) })
             : loginDisabled === false
-              ? `${a.user} is a system account with ${a.keys.length} key(s) and a working login shell (${a.shell}).`
-              : `${a.user} is a system account with ${a.keys.length} key(s); its login shell could not be read.`
+              ? st('shared.staleAccounts.systemLogin', { user: a.user, keys: a.keys.length, shell: String(a.shell) })
+              : st('shared.staleAccounts.systemShellUnknown', { user: a.user, keys: a.keys.length })
       })
     }
   }

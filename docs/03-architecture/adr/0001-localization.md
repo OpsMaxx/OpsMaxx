@@ -49,6 +49,18 @@ language packs in the file format i18next reads.
   already in the chosen language.
 - **Out of scope:** the CLI, MCP tool text, shell commands and audit entries stay English,
   because agents and scripts parse them.
+- **Text from main and shared code** goes through one of three routes:
+  - `st()` in `src/shared`. The renderer points it at the user's language; main never does,
+    and a test enforces that. So one shared function shows the user's language on screen and
+    stays English in an agent reply, a log line or a webhook. A table built at import uses
+    `translatedTable` so each entry is read at call time.
+  - `mt()` in main, for what main draws itself: native dialogs, trust prompts and
+    notifications.
+  - `LocalizedError` for an error a handler throws. Its message is English; a tap on
+    `ipcMain.handle`, installed beside the debug tap, re-says it in the user's language on
+    the way to the renderer.
+- **Stored or sent-on text stays English** even when built on screen: group names saved with
+  a grant, job titles, webhook summaries. Those call sites use `englishT` explicitly.
 - **Guardrails:**
   - `tests/i18n.test.ts` rejects packs that have keys English does not, change placeholders,
     or contain empty strings.
@@ -87,6 +99,11 @@ language packs in the file format i18next reads.
   Chinese. Those need a separate key chosen in code.
 - A string missing from a pack shows in English with no runtime warning. Coverage is
   visible only by comparing pack sizes.
+
+- Sentences main computes and returns as data (database verdicts, VPN results, host
+  facts) arrive on screen in English, because `st()` in main is English by design and the
+  same result also reaches agents. Translating them needs the result to carry a key and
+  values that the renderer renders.
 
 **Revisit when** either of these is true; at that point adopt i18next rather than growing
 this file:

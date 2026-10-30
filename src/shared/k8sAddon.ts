@@ -28,6 +28,8 @@
 //     this view exists to catch. It is only usable one-shot with a deadline,
 //     so the command builder below will not produce one without.
 
+import { st } from './i18n'
+
 export const ADDON_DS_COLS =
   'custom-columns=NS:.metadata.namespace,NAME:.metadata.name,' +
   'DESIRED:.status.desiredNumberScheduled,CURRENT:.status.currentNumberScheduled,' +
@@ -112,7 +114,7 @@ export function daemonSetVerdict(ds: AddonDaemonSet): AddonVerdict {
     // every number below it describes the PREVIOUS version.
     return {
       level: 'unknown',
-      because: `${where} has been changed and its controller has not acted on it yet, so these numbers are the previous version's.`
+      because: st('shared.k8sAddon.notObserved', { ds: where })
     }
   }
   if (ds.desired === 0) {
@@ -121,7 +123,7 @@ export function daemonSetVerdict(ds: AddonDaemonSet): AddonVerdict {
     // matches no node -- for a CNI, that it is installed nowhere.
     return {
       level: 'watch',
-      because: `${where} is scheduled onto no nodes at all, so nothing was rolled out. Its node selector matches nothing on this cluster.`
+      because: st('shared.k8sAddon.noNodes', { ds: where })
     }
   }
   if (ds.available < ds.desired) {
@@ -129,17 +131,17 @@ export function daemonSetVerdict(ds: AddonDaemonSet): AddonVerdict {
     return {
       level: 'alarm',
       because: done
-        ? `${where} finished rolling out to all ${ds.desired} node(s) and ${ds.desired - ds.available} of them has no working pod. The rollout is complete and the add-on is not running.`
-        : `${where} is part way through: ${ds.updated} of ${ds.desired} node(s) updated, ${ds.available} working.`
+        ? st('shared.k8sAddon.doneNotRunning', { ds: where, desired: ds.desired, missing: ds.desired - ds.available })
+        : st('shared.k8sAddon.partWay', { ds: where, updated: ds.updated, desired: ds.desired, available: ds.available })
     }
   }
   if (ds.misscheduled > 0) {
     return {
       level: 'watch',
-      because: `${where} has ${ds.misscheduled} pod(s) on nodes it should not be on.`
+      because: st('shared.k8sAddon.misscheduled', { ds: where, count: ds.misscheduled })
     }
   }
-  return { level: 'ok', because: `${where} is running on all ${ds.desired} node(s).` }
+  return { level: 'ok', because: st('shared.k8sAddon.ok', { ds: where, desired: ds.desired }) }
 }
 
 // ---------------------------------------------------------------------------

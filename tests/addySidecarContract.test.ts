@@ -59,6 +59,9 @@ describe('the load request matches what the sidecar requires', () => {
     expect(body, 'no guard: the failure surfaces as a sidecar type error').toMatch(
       /rootSignPub === undefined|rootSignPub === ''/
     )
-    expect(body, 'the guard does not say what to do about it').toMatch(/twelve-word|pair it again/)
+    // The sentence is a catalog key now; what it says is checked in English.
+    const key = body.match(/'(main\.addy\.[\w.]+)'/)?.[1] ?? ''
+    const en = JSON.parse(readFileSync(join(__dirname, '../src/shared/locales/en.json'), 'utf8'))
+    expect(en[key] ?? '', 'the guard does not say what to do about it').toMatch(/twelve-word|pair it again/)
   })
 })

@@ -6,6 +6,8 @@
 // terminal — and so a malformed file someone downloaded cannot do anything
 // worse than fail to parse.
 
+import { st } from './i18n'
+
 /**
  * The sixteen ANSI slots, in the order every terminal format lists them.
  *
@@ -206,7 +208,7 @@ export function parseWindowsTerminalScheme(text: string, want?: string): SchemeI
   try {
     json = JSON.parse(text)
   } catch {
-    return { ok: false, error: 'That file is not valid JSON.' }
+    return { ok: false, error: st('shared.terminalTheme.notJson') }
   }
 
   const candidates: Record<string, unknown>[] = []
@@ -231,8 +233,8 @@ export function parseWindowsTerminalScheme(text: string, want?: string): SchemeI
     return {
       ok: false,
       error: candidates.length
-        ? 'No scheme in that file has all sixteen colours.'
-        : 'That file contains no colour scheme.'
+        ? st('shared.terminalTheme.noCompleteScheme')
+        : st('shared.terminalTheme.noScheme')
     }
   }
 
@@ -241,7 +243,7 @@ export function parseWindowsTerminalScheme(text: string, want?: string): SchemeI
     const raw = pick[WT_KEYS[i]]
     const six = typeof raw === 'string' ? toHex6(raw) : null
     if (!six) {
-      return { ok: false, error: `"${WT_KEYS[i]}" is missing or is not a #rrggbb colour.` }
+      return { ok: false, error: st('shared.terminalTheme.badColour', { key: WT_KEYS[i] }) }
     }
     ansi[ANSI_KEYS[i]] = six
   }
@@ -278,7 +280,7 @@ export function parseWindowsTerminalScheme(text: string, want?: string): SchemeI
  */
 export function parseITermColors(text: string): SchemeImport {
   if (!/<plist|<dict/i.test(text)) {
-    return { ok: false, error: 'That file is not an iTerm2 colour preset.' }
+    return { ok: false, error: st('shared.terminalTheme.notIterm') }
   }
 
   // Each entry: <key>NAME</key> ... <dict> ... </dict>
@@ -315,7 +317,7 @@ export function parseITermColors(text: string): SchemeImport {
   const ansi = {} as Record<AnsiKey, string>
   for (let i = 0; i < ANSI_KEYS.length; i++) {
     const value = toHex(`Ansi ${i} Color`)
-    if (!value) return { ok: false, error: `"Ansi ${i} Color" is missing or unreadable.` }
+    if (!value) return { ok: false, error: st('shared.terminalTheme.badItermColour', { key: `Ansi ${i} Color` }) }
     ansi[ANSI_KEYS[i]] = value
   }
 
@@ -350,6 +352,6 @@ export function parseTerminalScheme(text: string, name?: string): SchemeImport {
   }
   return {
     ok: false,
-    error: 'Unrecognised file. Import an iTerm2 .itermcolors or a Windows Terminal scheme.'
+    error: st('shared.terminalTheme.unrecognised')
   }
 }

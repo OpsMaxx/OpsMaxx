@@ -56,6 +56,8 @@
 // forwards what it does not recognise is an open relay, and one sitting on
 // loopback with a credential attached is an open relay that pays.
 
+import { englishT, st, type MessageKey, type Translate } from './i18n'
+
 /** The header a caller proves itself with. See CRED_PROXY_TOKEN_NOTE. */
 export const CRED_PROXY_TOKEN_HEADER = 'x-opsmaxx-proxy-token'
 
@@ -65,16 +67,14 @@ export const DEFAULT_CRED_PROXY_PORT = 5178
 /** What the panel must say out loud next to the token, because a token whose
  *  power the holder has not been told is a token they will paste into a chat
  *  window. */
-export const CRED_PROXY_TOKEN_NOTE =
-  'Anything holding this token can spend your API budget through every rule below. ' +
-  'It is not a password for you — it is the key a script or an agent presents instead of the ' +
-  'credential itself. Treat it like the API key it stands in for, and rotate it when you would ' +
-  'have rotated that.'
+export const CRED_PROXY_TOKEN_NOTE_KEY: MessageKey = 'shared.credproxy.tokenNote'
+/** English, fixed at import. A screen renders `t(CRED_PROXY_TOKEN_NOTE_KEY)`. */
+export const CRED_PROXY_TOKEN_NOTE = englishT(CRED_PROXY_TOKEN_NOTE_KEY)
 
 /** Why loopback alone is not an authorisation. */
-export const CRED_PROXY_LOOPBACK_NOTE =
-  'Every process on this machine can reach a loopback port, so being local is not a ' +
-  'permission. The token is what separates your script from anything else running as you.'
+export const CRED_PROXY_LOOPBACK_NOTE_KEY: MessageKey = 'shared.credproxy.loopbackNote'
+/** English, fixed at import. A screen renders `t(CRED_PROXY_LOOPBACK_NOTE_KEY)`. */
+export const CRED_PROXY_LOOPBACK_NOTE = englishT(CRED_PROXY_LOOPBACK_NOTE_KEY)
 
 // --------------------------------------------------------------------- rules
 
@@ -301,22 +301,30 @@ export const HOP_BY_HOP_HEADERS = [
   CRED_PROXY_TOKEN_HEADER
 ]
 
-export function validateInjection(inj: CredProxyInjection): { ok: true } | { ok: false; error: string } {
+/** `t` is for main, which runs this for the panel and can pass its own `mt`. */
+export function validateInjection(
+  inj: CredProxyInjection,
+  t: Translate = st
+): { ok: true } | { ok: false; error: string } {
   if (inj.kind === 'bearer') return { ok: true }
   const name = (inj.name ?? '').trim()
   if (name === '') {
-    const what =
-      inj.kind === 'header' ? 'a header name' : inj.kind === 'query' ? 'a parameter name' : 'a username'
-    return { ok: false, error: `This rule needs ${what}.` }
+    const key: MessageKey =
+      inj.kind === 'header'
+        ? 'shared.credproxy.injection.needsHeaderName'
+        : inj.kind === 'query'
+          ? 'shared.credproxy.injection.needsParameterName'
+          : 'shared.credproxy.injection.needsUsername'
+    return { ok: false, error: t(key) }
   }
   if (inj.kind === 'header') {
-    if (!HEADER_NAME.test(name)) return { ok: false, error: `"${name}" is not a valid header name.` }
+    if (!HEADER_NAME.test(name)) return { ok: false, error: t('shared.credproxy.injection.invalidHeader', { name }) }
     if (UNINJECTABLE_HEADERS.includes(name.toLowerCase())) {
-      return { ok: false, error: `"${name}" cannot carry a credential.` }
+      return { ok: false, error: t('shared.credproxy.injection.uninjectableHeader', { name }) }
     }
   }
   if (inj.kind === 'basic' && /[:\s]/.test(name)) {
-    return { ok: false, error: 'A basic-auth username cannot contain a colon or whitespace.' }
+    return { ok: false, error: t('shared.credproxy.injection.basicUsername') }
   }
   return { ok: true }
 }
@@ -327,11 +335,11 @@ export function describeInjection(inj: CredProxyInjection): string {
     case 'bearer':
       return 'Authorization: Bearer'
     case 'header':
-      return `header ${inj.name}`
+      return st('shared.credproxy.describeInjection.header', { name: String(inj.name) })
     case 'query':
-      return `query parameter ${inj.name}`
+      return st('shared.credproxy.describeInjection.query', { name: String(inj.name) })
     case 'basic':
-      return `basic auth as ${inj.name}`
+      return st('shared.credproxy.describeInjection.basic', { name: String(inj.name) })
   }
 }
 
@@ -531,8 +539,11 @@ export function credProxyTokenUsable(t: CredProxyToken, now: number): boolean {
 }
 
 /** Why a presented token was refused, for the call log and the panel. */
-export const CRED_PROXY_TOKEN_STATE_NOTE: Record<CredProxyTokenState, string> = {
-  active: 'Usable.',
-  expired: 'Past its end date. Create a new token rather than extending this one.',
-  revoked: 'Revoked. It is kept here so the call log can still name it.'
-}
+export const CRED_PROXY_TOKEN_STATE_NOTE: Record<CredProxyTokenState, string> = Object.defineProperties(
+  {} as Record<CredProxyTokenState, string>,
+  {
+    active: { get: () => st('shared.credproxy.tokenState.active'), enumerable: true },
+    expired: { get: () => st('shared.credproxy.tokenState.expired'), enumerable: true },
+    revoked: { get: () => st('shared.credproxy.tokenState.revoked'), enumerable: true }
+  }
+)

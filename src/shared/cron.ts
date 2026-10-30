@@ -17,6 +17,7 @@
 // /usr/bin:/bin, and that `sudo -n` is the only escalation that cannot prompt —
 // and a second copy of either is a second thing to drift.
 import { SUDO_PROBE, resolveBinary } from './docker'
+import { st, type MessageKey } from './i18n'
 
 export type CronSourceKind =
   | 'user-crontab'
@@ -135,12 +136,18 @@ export interface CronCollection extends CronParseResult {
   sources: CronSourceReport[]
 }
 
+// Two of these are prose and read when shown, so they follow the language; the
+// rest are a command and two paths, and stay as typed.
 export const CRON_SOURCE_LABEL: Record<CronSourceId, string> = {
   'user-crontab': 'crontab -l',
   'system-crontab': '/etc/crontab',
   'cron.d': '/etc/cron.d',
-  'other-crontabs': 'other users’ crontabs',
-  'systemd-timers': 'systemd timers'
+  get 'other-crontabs'() {
+    return st('shared.cron.source.otherCrontabs')
+  },
+  get 'systemd-timers'() {
+    return st('shared.cron.source.systemdTimers')
+  }
 }
 
 /**
@@ -150,14 +157,21 @@ export const CRON_SOURCE_LABEL: Record<CronSourceId, string> = {
  * systemd timers, and that is a fact rather than a gap. `denied`, `partial` and
  * `unknown` are gaps, and the panel must say so.
  */
-export const CRON_STATUS_HELP: Record<CronSourceStatus, string> = {
-  ok: 'read in full',
-  partial: 'only partly readable — some files were refused',
-  absent: 'not present on this server',
-  denied: 'exists, but this account may not read it (and root was not available without a password)',
-  'no-tool': 'nothing here can schedule a job — the tool that would read it is not installed or not running',
-  unknown: 'the collector did not report on this source'
+const CRON_STATUS_HELP_KEY: Record<CronSourceStatus, MessageKey> = {
+  ok: 'shared.cron.status.ok',
+  partial: 'shared.cron.status.partial',
+  absent: 'shared.cron.status.absent',
+  denied: 'shared.cron.status.denied',
+  'no-tool': 'shared.cron.status.noTool',
+  unknown: 'shared.cron.status.unknown'
 }
+
+export const CRON_STATUS_HELP: Record<CronSourceStatus, string> = Object.defineProperties(
+  {} as Record<CronSourceStatus, string>,
+  Object.fromEntries(
+    Object.entries(CRON_STATUS_HELP_KEY).map(([status, k]) => [status, { get: () => st(k), enumerable: true }])
+  )
+)
 
 const CRON_SOURCE_IDS: CronSourceId[] = [
   'user-crontab',
@@ -194,8 +208,29 @@ export function summariseCronSources(sources: CronSourceReport[]): {
   }
 }
 
-const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const DOW: MessageKey[] = [
+  'shared.cron.weekday.sunday',
+  'shared.cron.weekday.monday',
+  'shared.cron.weekday.tuesday',
+  'shared.cron.weekday.wednesday',
+  'shared.cron.weekday.thursday',
+  'shared.cron.weekday.friday',
+  'shared.cron.weekday.saturday'
+]
+const MONTHS: MessageKey[] = [
+  'shared.cron.month.january',
+  'shared.cron.month.february',
+  'shared.cron.month.march',
+  'shared.cron.month.april',
+  'shared.cron.month.may',
+  'shared.cron.month.june',
+  'shared.cron.month.july',
+  'shared.cron.month.august',
+  'shared.cron.month.september',
+  'shared.cron.month.october',
+  'shared.cron.month.november',
+  'shared.cron.month.december'
+]
 
 // The three-letter names cron accepts, in the two fields that accept them.
 // Cron compares them case-insensitively, so `JAN`, `Jan` and `jan` are one
@@ -203,15 +238,15 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 const MONTH_ABBR = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec']
 const DOW_ABBR = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat']
 
-const SPECIALS: Record<string, string> = {
-  '@reboot': 'at boot',
-  '@yearly': 'once a year, at midnight on 1 January',
-  '@annually': 'once a year, at midnight on 1 January',
-  '@monthly': 'at midnight on the 1st of each month',
-  '@weekly': 'at midnight on Sunday',
-  '@daily': 'at midnight every day',
-  '@midnight': 'at midnight every day',
-  '@hourly': 'at the top of every hour'
+const SPECIALS: Record<string, MessageKey> = {
+  '@reboot': 'shared.cron.schedule.atBoot',
+  '@yearly': 'shared.cron.schedule.yearly',
+  '@annually': 'shared.cron.schedule.yearly',
+  '@monthly': 'shared.cron.schedule.monthly',
+  '@weekly': 'shared.cron.schedule.weekly',
+  '@daily': 'shared.cron.schedule.daily',
+  '@midnight': 'shared.cron.schedule.daily',
+  '@hourly': 'shared.cron.schedule.hourly'
 }
 
 /**
@@ -265,11 +300,10 @@ const isCronFieldSet = (f: string[]): boolean =>
 // ---- Describing a schedule --------------------------------------------
 
 interface Unit {
-  /** How a single value reads: "minute 5", "on Monday". */
-  one: string
-  /** How a step reads: "every 5 minutes". */
-  many: string
-  names?: string[]
+  /** Which field: its phrases are the keys shared.cron.schedule.<field>.* —
+   *  "minute 5", "on Monday", "every 5 minutes" and so on. */
+  field: 'minute' | 'hour' | 'day' | 'month' | 'weekday'
+  names?: MessageKey[]
   abbr?: string[]
 }
 
@@ -277,13 +311,23 @@ function label(v: string, u: Unit): string {
   if (!u.names) return v
   if (u.abbr) {
     const i = u.abbr.indexOf(v.toLowerCase())
-    if (i !== -1) return u.names[i] ?? v
+    if (i !== -1) return u.names[i] ? st(u.names[i]) : v
   }
   const n = Number(v)
   if (!Number.isInteger(n)) return v
   // Cron months are 1-based (1 = January); days of the week are 0-based on
   // Sunday, with 7 accepted as Sunday too.
-  return u.names === MONTHS ? (MONTHS[n - 1] ?? v) : (u.names[n % u.names.length] ?? v)
+  const name = u.names === MONTHS ? MONTHS[n - 1] : u.names[n % u.names.length]
+  return name ? st(name) : v
+}
+
+/** A step of 1 is every value, and reads as "every minute", never "every 1 minutes". */
+function every(u: Unit, step: string, range?: { from: string; to: string }): string {
+  const one = Number(step) === 1
+  if (!range) return one ? st(`shared.cron.schedule.${u.field}.everyOne`) : st(`shared.cron.schedule.${u.field}.every`, { step })
+  return one
+    ? st(`shared.cron.schedule.${u.field}.everyOneRange`, range)
+    : st(`shared.cron.schedule.${u.field}.everyRange`, { step, ...range })
 }
 
 /** One comma-separated item, or null if we will not describe it. */
@@ -292,18 +336,17 @@ function describeItem(item: string, u: Unit): string | null {
   if (extraSteps.length > 0) return null
   const known = (v: string): boolean => /^\d+$/.test(v) || (u.abbr?.includes(v.toLowerCase()) ?? false)
 
-  if (range === '*') return step ? `every ${step} ${u.many}` : null
+  if (range === '*') return step ? every(u, step) : null
   const [from, to, ...extra] = range.split('-')
   if (extra.length > 0) return null
   if (!known(from) || (to !== undefined && !known(to))) return null
   if (to === undefined) {
     // `N/S` means "from N to the end of the field, every S", and the end of the
     // field depends which field it is. Declining beats guessing.
-    return step ? null : `${u.one} ${label(from, u)}`
+    return step ? null : st(`shared.cron.schedule.${u.field}.value`, { value: label(from, u) })
   }
-  return step
-    ? `every ${step} ${u.many} from ${label(from, u)} to ${label(to, u)}`
-    : `${u.one} ${label(from, u)} to ${label(to, u)}`
+  const span = { from: label(from, u), to: label(to, u) }
+  return step ? every(u, step, span) : st(`shared.cron.schedule.${u.field}.range`, span)
 }
 
 function describeField(value: string, u: Unit): string | null {
@@ -313,7 +356,9 @@ function describeField(value: string, u: Unit): string | null {
   // `0,15,30,45` is one list of values, not four separate clauses. Naming the
   // unit once reads as the crontab does; repeating it gives "minute 0, minute
   // 15, minute 30, minute 45".
-  if (items.every(bare)) return `${u.one} ${items.map((v) => label(v, u)).join(', ')}`
+  if (items.every(bare)) {
+    return st(`shared.cron.schedule.${u.field}.value`, { value: items.map((v) => label(v, u)).join(', ') })
+  }
 
   const parts: string[] = []
   for (const item of items) {
@@ -324,6 +369,10 @@ function describeField(value: string, u: Unit): string | null {
   return parts.join(', ')
 }
 
+const MINUTE: Unit = { field: 'minute' }
+
+const clock = (hour: string, min: string): string => `${hour.padStart(2, '0')}:${min.padStart(2, '0')}`
+
 /**
  * Plain English for a five-field schedule, or null.
  *
@@ -333,7 +382,10 @@ function describeField(value: string, u: Unit): string | null {
  */
 export function describeSchedule(schedule: string): string | null {
   const s = schedule.trim()
-  if (s.startsWith('@')) return SPECIALS[s.toLowerCase()] ?? null
+  if (s.startsWith('@')) {
+    const special = SPECIALS[s.toLowerCase()]
+    return special ? st(special) : null
+  }
 
   const f = s.split(/\s+/)
   if (f.length !== 5) return null
@@ -342,21 +394,23 @@ export function describeSchedule(schedule: string): string | null {
   // The common, unambiguous shapes get a real sentence; anything else falls
   // through to the field-by-field walk, and then to null.
   if (/^\d+$/.test(min) && /^\d+$/.test(hour) && dom === '*' && mon === '*' && dow === '*') {
-    return `at ${hour.padStart(2, '0')}:${min.padStart(2, '0')} every day`
+    return st('shared.cron.schedule.dailyAt', { time: clock(hour, min) })
   }
   if (/^\d+$/.test(min) && /^\d+$/.test(hour) && dom === '*' && mon === '*' && /^\d$/.test(dow)) {
-    return `at ${hour.padStart(2, '0')}:${min.padStart(2, '0')} every ${DOW[Number(dow) % 7]}`
+    return st('shared.cron.schedule.weeklyAt', { time: clock(hour, min), weekday: st(DOW[Number(dow) % 7]) })
   }
   const everyMin = min.match(/^\*\/(\d+)$/)
   if (everyMin && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
-    return `every ${everyMin[1]} minutes`
+    return every(MINUTE, everyMin[1])
   }
-  if (min === '*' && hour === '*' && dom === '*' && mon === '*' && dow === '*') return 'every minute'
+  if (min === '*' && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
+    return st('shared.cron.schedule.minute.everyOne')
+  }
   if (/^\d+$/.test(min) && hour === '*' && dom === '*' && mon === '*' && dow === '*') {
-    return `at ${min} minutes past every hour`
+    return st('shared.cron.schedule.hourlyAt', { count: Number(min), minute: min })
   }
   if (/^\d+$/.test(min) && /^\d+$/.test(hour) && /^\d+$/.test(dom) && mon === '*' && dow === '*') {
-    return `at ${hour.padStart(2, '0')}:${min.padStart(2, '0')} on day ${dom} of each month`
+    return st('shared.cron.schedule.monthlyAt', { time: clock(hour, min), day: dom })
   }
 
   // Every non-* field must be describable. The earlier version described the
@@ -364,11 +418,11 @@ export function describeSchedule(schedule: string): string | null {
   // `0 0 1-7 * 1#2` came back as "minute 0, hour 0, day 1 to 7" — a confident
   // sentence omitting the part that decides when it actually runs.
   const fields: [string, Unit][] = [
-    [min, { one: 'minute', many: 'minutes' }],
-    [hour, { one: 'hour', many: 'hours' }],
-    [dom, { one: 'day', many: 'days' }],
-    [mon, { one: 'month', many: 'months', names: MONTHS, abbr: MONTH_ABBR }],
-    [dow, { one: 'on', many: 'days of the week', names: DOW, abbr: DOW_ABBR }]
+    [min, MINUTE],
+    [hour, { field: 'hour' }],
+    [dom, { field: 'day' }],
+    [mon, { field: 'month', names: MONTHS, abbr: MONTH_ABBR }],
+    [dow, { field: 'weekday', names: DOW, abbr: DOW_ABBR }]
   ]
   const parts: string[] = []
   for (const [value, u] of fields) {
@@ -1230,21 +1284,18 @@ export function isValidCronSchedule(schedule: string): boolean {
  * answer to "why can't I edit this one" is on screen rather than in a commit
  * message.
  */
-const CRON_EDIT_REFUSAL: Record<CronSourceKind, string | null> = {
+const CRON_EDIT_REFUSAL: Record<CronSourceKind, MessageKey | null> = {
   'user-crontab': null,
-  'system-crontab':
-    '/etc/crontab is root-owned and is rewritten by the distribution’s own packages. OpsMaxx does not edit it: a write here needs root, and a root-owned file that a package manager also writes is not a file to round-trip from a laptop.',
-  'cron.d':
-    '/etc/cron.d files are root-owned and mostly belong to packages, which replace them wholesale on upgrade. OpsMaxx does not edit them.',
-  'systemd-timer':
-    'a systemd timer is two unit files and a systemctl daemon-reload, not a line in a file. OpsMaxx reads timers and does not edit them — doing it properly is its own piece of work, and doing it improperly leaves a unit that no longer matches what systemd has loaded.',
-  'other-user-crontab':
-    'another account’s crontab can only be written as that account or as root. OpsMaxx edits only the crontab of the account it is connected as.'
+  'system-crontab': 'shared.cron.editRefusal.systemCrontab',
+  'cron.d': 'shared.cron.editRefusal.cronD',
+  'systemd-timer': 'shared.cron.editRefusal.systemdTimer',
+  'other-user-crontab': 'shared.cron.editRefusal.otherUserCrontab'
 }
 
 /** `null` when this source can be edited, or the sentence saying why not. */
 export function cronEditRefusal(kind: CronSourceKind): string | null {
-  return CRON_EDIT_REFUSAL[kind]
+  const key = CRON_EDIT_REFUSAL[kind]
+  return key === null ? null : st(key)
 }
 
 /** The kinds `cronEditRefusal` lets through, for a panel that wants to say so up front. */

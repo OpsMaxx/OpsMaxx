@@ -17,6 +17,8 @@
 // most needs to see and the one a boolean cannot hold. A node whose kubelet is
 // dead reports `Ready: Unknown`, not `Ready: False`.
 
+import { st } from './i18n'
+
 export type ConditionValue = 'True' | 'False' | 'Unknown'
 
 export interface K8sNodeHealth {
@@ -93,33 +95,38 @@ export function judgeNodes(nodes: K8sNodeHealth[]): NodeFinding[] {
         return {
           node: n.name,
           verdict: 'unreported',
-          because: `${n.name}'s kubelet has stopped reporting. Its other conditions are the last ones it sent and may describe a machine that has since changed.`
+          because: st('shared.k8sNodes.unreported', { node: n.name })
         }
       }
       if (n.ready === 'False') {
-        return { node: n.name, verdict: 'not-ready', because: `${n.name} is reporting NotReady.` }
+        return { node: n.name, verdict: 'not-ready', because: st('shared.k8sNodes.notReady', { node: n.name }) }
       }
       // The pressures, and `Unknown` counts: a pressure nobody could read is
       // not a pressure that is absent.
       const pressures = [
         ['memory', n.memoryPressure],
         ['disk', n.diskPressure],
-        ['PID', n.pidPressure]
-      ].filter(([, v]) => v !== 'False') as [string, ConditionValue][]
+        ['pid', n.pidPressure]
+      ].filter(([, v]) => v !== 'False') as ['memory' | 'disk' | 'pid', ConditionValue][]
       if (pressures.length > 0) {
         return {
           node: n.name,
           verdict: 'pressure',
-          because: `${n.name} reports ${pressures
-            .map(([k, v]) => (v === 'Unknown' ? `${k} pressure unknown` : `${k} pressure`))
-            .join(', ')}. The kubelet evicts pods under pressure, so this is why they move.`
+          because: st('shared.k8sNodes.pressure', {
+            node: n.name,
+            pressures: pressures
+              .map(([k, v]) =>
+                v === 'Unknown' ? st(`shared.k8sNodes.${k}PressureUnknown`) : st(`shared.k8sNodes.${k}Pressure`)
+              )
+              .join(', ')
+          })
         }
       }
       if (n.taints.includes(CORDON_TAINT)) {
         return {
           node: n.name,
           verdict: 'unschedulable',
-          because: `${n.name} is cordoned. It is not broken — nothing new will schedule on it until it is uncordoned.`
+          because: st('shared.k8sNodes.cordoned', { node: n.name })
         }
       }
       return null

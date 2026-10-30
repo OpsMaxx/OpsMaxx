@@ -116,7 +116,10 @@ interface RawConflict {
 export async function listConflicts(deps: ConflictDeps): Promise<ConflictCopy[]> {
   const resp = await deps.relay.request('GET', '/v1/conflicts')
   if (!resp.ok) {
-    throw new AddyError('internal', `listing conflicts: ${resp.status} ${resp.statusText}`)
+    throw new AddyError('internal', {
+      key: 'main.addy.conflicts.listFailed',
+      vars: { status: resp.status, detail: resp.statusText }
+    })
   }
   const { conflicts } = (await resp.json()) as { conflicts: RawConflict[] }
 
@@ -240,7 +243,7 @@ async function openConflict(
     typeof env.writtenAt !== 'string' ||
     typeof env.body !== 'string'
   ) {
-    throw new AddyError('internal', 'the conflict copy opened but its contents are not in a shape this version reads')
+    throw new AddyError('internal', { key: 'main.addy.conflicts.unreadableShape' })
   }
   return env as ConflictEnvelope
 }
@@ -298,7 +301,10 @@ export async function resolveConflict(
 
   const resp = await deps.relay.request('POST', `/v1/conflicts/${id}/resolve`)
   if (!resp.ok && resp.status !== 404) {
-    throw new AddyError('internal', `resolving conflict ${id}: ${resp.status} ${resp.statusText}`)
+    throw new AddyError('internal', {
+      key: 'main.addy.conflicts.resolveFailed',
+      vars: { id, status: resp.status, detail: resp.statusText }
+    })
   }
 }
 
@@ -313,6 +319,9 @@ export async function resolveConflict(
 export async function discardConflict(deps: ConflictDeps, id: number): Promise<void> {
   const resp = await deps.relay.request('POST', `/v1/conflicts/${id}/resolve`)
   if (!resp.ok && resp.status !== 404) {
-    throw new AddyError('internal', `discarding conflict ${id}: ${resp.status} ${resp.statusText}`)
+    throw new AddyError('internal', {
+      key: 'main.addy.conflicts.discardFailed',
+      vars: { id, status: resp.status, detail: resp.statusText }
+    })
   }
 }

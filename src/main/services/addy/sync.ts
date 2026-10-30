@@ -318,7 +318,7 @@ export async function syncOnce(deps: SyncDeps): Promise<SyncResult> {
       // put back exactly what they meant to discard, and the entries are
       // stale by definition: they were agreed under an epoch or an account
       // this device has since moved off.
-      throw new AddyError('config-invalid', 'the sync state was reset while this pass was running')
+      throw new AddyError('config-invalid', { key: 'main.addy.sync.stateReset' })
     }
     saveState(state)
   } catch (err) {
@@ -793,10 +793,7 @@ async function openObject(
         (err instanceof AddyError && err.code === 'roster-rewound') ||
         (err instanceof Error && /counter is behind|went backwards/.test(err.message))
       if (rolledBack) {
-        throw new AddyError(
-          'rolled-back',
-          `the relay served an older copy of ${name} than this device has already seen, so it was not used. If the relay was restored from a backup, leave the account on this device and pair it again; otherwise the relay is serving stale data.`
-        )
+        throw new AddyError('rolled-back', { key: 'main.addy.sync.rolledBack', vars: { name } })
       }
       throw err
     })

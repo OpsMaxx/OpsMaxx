@@ -22,6 +22,8 @@
 // So: the projected path is walked, cluster-owned names are never proposed, and
 // the result is called a candidate list with the blind spot printed next to it.
 
+import { st } from './i18n'
+
 export interface PodReferences {
   namespace: string
   pod: string
@@ -170,12 +172,8 @@ export function proposable(candidates: UnusedCandidate[]): UnusedCandidate[] {
  * references and that is needed the moment anybody scales it back up.
  */
 export function unusedCaveat(kind: 'configmap' | 'pvc', count: number): string {
-  const what = kind === 'configmap' ? 'ConfigMap' : 'PersistentVolumeClaim'
-  if (count === 0) return `Every ${what} here is named by a running pod.`
-  return (
-    `${count} ${what}${count === 1 ? ' is' : 's are'} named by no pod that exists right now. ` +
-    'That is not the same as unused: a workload scaled to zero has no pods, and nothing here ' +
-    'looked at Deployments, StatefulSets, CronJobs, Helm hooks, operators or anything outside ' +
-    'the cluster. Check each one before acting on it.'
-  )
+  if (kind === 'configmap') {
+    return count === 0 ? st('shared.k8sUnused.configMapsAllNamed') : st('shared.k8sUnused.configMapsUnnamed', { count })
+  }
+  return count === 0 ? st('shared.k8sUnused.claimsAllNamed') : st('shared.k8sUnused.claimsUnnamed', { count })
 }

@@ -180,7 +180,7 @@ export async function sendClipboard(deps: ClipboardDeps): Promise<{ sent: number
         sealed
       })
       if (resp.ok) sent++
-      else failed.push((await relayError(resp, `device ${peer.slice(0, 8)}`)).message)
+      else failed.push((await relayError(resp, 'main.addy.relay.failed.device', { device: peer.slice(0, 8) })).message)
     } catch (err) {
       failed.push(`device ${peer.slice(0, 8)}: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -206,7 +206,7 @@ export async function receiveClipboard(
   deps: ClipboardDeps
 ): Promise<{ applied: boolean; from?: string; reason?: string }> {
   const resp = await deps.relay.request('GET', '/v1/mail')
-  if (!resp.ok) throw await relayError(resp, 'collecting mail')
+  if (!resp.ok) throw await relayError(resp, 'main.addy.relay.failed.collectingMail')
   const { messages } = (await resp.json()) as {
     messages: { id: number; fromDevice: string; kind: string; sealed: string }[]
   }
@@ -307,7 +307,7 @@ async function openClipboard(
   // and it would be applied a second time — into whatever terminal has focus.
   // Remembered here by signer and signed time until that window closes.
   if (seenBefore(`${opened.from}:${opened.sentAt}`, opened.sentAt + maxAgeMs + 5 * 60_000)) {
-    throw new AddyError('config-invalid', 'this clipboard was already delivered once')
+    throw new AddyError('config-invalid', { key: 'main.addy.clipboard.alreadyDelivered' })
   }
   return { ...opened, clip: JSON.parse(opened.payload.toString('utf8')) as ClipboardPayload }
 }

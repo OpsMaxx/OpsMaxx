@@ -14,6 +14,8 @@
  * connection editor, so repeating it is not a disclosure; a password, a
  * passphrase or a key's contents would be, and none of them are here.
  */
+
+import { st } from './i18n'
 export type CredentialKind =
   /** Nothing stored. The app would dial with no credential of its own. */
   | 'none'
@@ -76,17 +78,17 @@ export function credentialNote(shape: CredentialShape | null): string | null {
       // offered, which no amount of checking the username will reveal.
       // The second sentence is for a synced server: its credential sits in the
       // keychain of the device that saved it, which this one cannot read.
-      return 'OpsMaxx has no credential saved for this connection, so it offered none. Add a key, a password or an agent in Edit connection. If it is saved on another of your devices, move it into the vault there (Vault, Move into the vault) and this device can use it.'
+      return st('shared.credentialShape.none')
     case 'vault':
       return shape.vaultLocked === true
-        ? 'This connection authenticates from the vault, and the vault is locked, so nothing could be offered. Unlock it and try again.'
+        ? st('shared.credentialShape.vaultLocked')
         : null
     case 'key':
       return shape.keyPath
-        ? `OpsMaxx offered the private key at ${shape.keyPath}. If that key is not in this account's authorized_keys, the server refuses it whatever the username.`
+        ? st('shared.credentialShape.key', { path: shape.keyPath })
         : null
     case 'agent':
-      return 'OpsMaxx offered whatever keys your SSH agent holds. If the agent has none loaded, the server sees no credential at all — check with ssh-add -l.'
+      return st('shared.credentialShape.agent')
     default:
       return null
   }

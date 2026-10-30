@@ -9,6 +9,8 @@ import type {
   LocalStatusPhase
 } from '../../shared/local'
 import { recordLocalSession } from './localSessionLog'
+import { LocalizedError } from '../../shared/i18n'
+import { mt } from './locale'
 import { findShell, sanitisedEnv } from './shellDiscovery'
 import { integrationSpawn } from './shellIntegrationFiles'
 import { isShellIntegrationEnabled } from './localGate'
@@ -35,7 +37,7 @@ type Pty = {
 }
 type NodePty = { spawn(file: string, args: string[], opts: Record<string, unknown>): Pty }
 let ptyModule: NodePty | null = null
-let ptyLoadError: string | null = null
+let ptyLoadError: LocalizedError | null = null
 
 // Kill switch for the whole feature, checked before the native import so that
 // setting it genuinely prevents the binding from being dlopen'd at all. This is
@@ -45,24 +47,21 @@ const DISABLE_ENV = 'ELECTRON_DISABLE_LOCAL_TERMINAL'
 
 async function loadPty(): Promise<NodePty> {
   if (ptyModule) return ptyModule
-  if (ptyLoadError) throw new Error(ptyLoadError)
+  if (ptyLoadError) throw ptyLoadError
 
   if (process.env[DISABLE_ENV] === '1') {
-    ptyLoadError =
-      `The local terminal is disabled on this machine (${DISABLE_ENV}=1). ` +
-      `Unset it and restart OpsMaxx to use local shells. SSH sessions are unaffected.`
-    throw new Error(ptyLoadError)
+    ptyLoadError = new LocalizedError('main.localPty.disabled', { setting: `${DISABLE_ENV}=1` })
+    throw ptyLoadError
   }
 
   let raw: unknown
   try {
     raw = await import('@lydell/node-pty')
   } catch (err) {
-    ptyLoadError =
-      `The local terminal is unavailable on this machine: the pseudo-terminal ` +
-      `binding failed to load (${err instanceof Error ? err.message : String(err)}). ` +
-      `SSH sessions are unaffected.`
-    throw new Error(ptyLoadError)
+    ptyLoadError = new LocalizedError('main.localPty.bindingFailed', {
+      detail: err instanceof Error ? err.message : String(err)
+    })
+    throw ptyLoadError
   }
 
   // @lydell/node-pty is CommonJS. Under an ESM `import()` its module.exports
@@ -76,11 +75,8 @@ async function loadPty(): Promise<NodePty> {
     // Deliberately a different message from the catch above: this is the
     // module's export shape changing, not the native binding failing, and the
     // two have completely different fixes.
-    ptyLoadError =
-      `The local terminal is unavailable on this machine: @lydell/node-pty loaded ` +
-      `but exposes no spawn() function (got ${typeof mod.spawn}) — the module's ` +
-      `export shape is not what OpsMaxx expects. SSH sessions are unaffected.`
-    throw new Error(ptyLoadError)
+    ptyLoadError = new LocalizedError('main.localPty.noSpawn', { got: typeof mod.spawn })
+    throw ptyLoadError
   }
 
   ptyModule = mod
@@ -378,7 +374,7 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
     const shell = await findShell(cfg.shellId)
     // findShell is exact-match-or-null: an unknown id is a real error, not a
     // reason to silently hand the user some other shell (finding #25).
-    if (!shell) throw new Error(`No shell is configured under the id "${cfg.shellId}".`)
+    if (!shell) throw new LocalizedError('main.localPty.unknownShell', { id: cfg.shellId })
     shellForLog = shell
     // Captured before the spawn rather than read twice: whether this shell is
     // pointed at the inspector and whether it is RECORDED as pointed at it
@@ -501,7 +497,8 @@ export async function localConnect(wc: WebContents, cfg: LocalConnectConfig): Pr
     // localWrite/localAck would silently no-op against forever.
     if (sessions.get(sessionId) === placeholder) sessions.delete(sessionId)
     const message = err instanceof Error ? err.message : String(err)
-    status(wc, sessionId, 'error', { message })
+    // The tab says it in the user's language; the session log keeps the English.
+    status(wc, sessionId, 'error', { message: err instanceof LocalizedError ? mt(err.key, err.vars) : message })
     // A spawn that never happened is worth a line too — "nothing ran" and "we
     // tried and it failed" are different answers to the same question, and only
     // one of them means the machine is fine.

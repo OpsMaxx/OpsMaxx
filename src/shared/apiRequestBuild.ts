@@ -46,6 +46,7 @@ import {
   VaultUnavailableError,
   type SecretLookup
 } from './apiSecrets'
+import { englishT, st } from './i18n'
 import { ensureScheme, fillPathParams, maskUrl, splitUrl, withParams, wsUrlFor } from './apiUrl'
 import { resolveTemplate, scopeChain } from './apiVariables'
 import { buildGraphQlBody, parseVariables } from './graphql'
@@ -183,27 +184,29 @@ function findHeader(headers: Record<string, string>, name: string): string | und
 /** §2.8: which names, and where they were looked for. */
 export function unresolvedMessage(names: string[], envName?: string): string {
   const list =
-    names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
-  const verb = names.length === 1 ? 'is' : 'are'
+    names.length === 1
+      ? names[0]
+      : st('shared.apiRequestBuild.nameList', { names: names.slice(0, -1).join(', '), last: names[names.length - 1] })
+  const count = names.length
   return envName
-    ? `${list} ${verb} not defined in ${envName} (or its collection or globals)`
-    : `${list} ${verb} not defined in globals or this collection`
+    ? st('shared.apiRequestBuild.unresolvedInEnv', { count, list, env: envName })
+    : st('shared.apiRequestBuild.unresolvedInGlobals', { count, list })
 }
 
 function routeFor(route: Route, ctx: BuildCtx): { via: HttpVia; routeKey: RouteKey; label: string } {
   if (route.kind === 'server' && route.serverId === COLLECTION_GONE_SERVER_ID) {
-    throw new BuildError('route-missing', 'The collection this request belonged to no longer exists.')
+    throw new BuildError('route-missing', st('shared.apiRequestBuild.collectionGone'))
   }
   if (route.kind === 'server') {
     const server = ctx.servers.find((s) => s.id === route.serverId)
     if (!server) {
-      throw new BuildError('route-missing', 'The server this request is sent through no longer exists.')
+      throw new BuildError('route-missing', st('shared.apiRequestBuild.serverGone'))
     }
     return { via: { kind: 'server', server: server.target }, routeKey: `server:${server.id}`, label: server.name }
   }
   if (route.kind === 'vpn') {
     const vpn = ctx.vpns.find((v) => v.id === route.vpnProfileId)
-    if (!vpn) throw new BuildError('route-missing', 'The VPN profile this request is sent through no longer exists.')
+    if (!vpn) throw new BuildError('route-missing', st('shared.apiRequestBuild.vpnGone'))
     return { via: { kind: 'vpn', vpnProfileId: vpn.id }, routeKey: `vpn:${vpn.id}`, label: vpn.name }
   }
   return { via: { kind: 'direct' }, routeKey: 'direct', label: 'This machine' }
@@ -211,7 +214,7 @@ function routeFor(route: Route, ctx: BuildCtx): { via: HttpVia; routeKey: RouteK
 
 const enabled = <R extends Row>(rows: R[]): R[] => rows.filter((r) => r.enabled && r.key.trim() !== '')
 
-export const CONNECTION_REVIEW_MESSAGE = "Review this collection's connection changes"
+export const CONNECTION_REVIEW_MESSAGE = englishT('shared.apiRequestBuild.connectionReview')
 
 function assemble(input: CoreInput, ctx: BuildCtx, vault: SecretLookup): Assembled {
   // Connection settings that arrived by sync (TLS off, a CA, a route or a
@@ -241,7 +244,7 @@ function assemble(input: CoreInput, ctx: BuildCtx, vault: SecretLookup): Assembl
     const names = [...unresolved]
     throw new BuildError('unresolved-variable', unresolvedMessage(names, ctx.env?.name), names)
   }
-  if (url.trim() === '') throw new BuildError('other', 'Enter a URL to send this request.')
+  if (url.trim() === '') throw new BuildError('other', st('shared.apiRequestBuild.noUrl'))
 
   // 2–3. Vault-resolve the auth fields, then encode them.
   const headers: Record<string, string> = {}
@@ -371,7 +374,7 @@ function concat(parts: Uint8Array[]): Uint8Array {
 }
 
 function missingFile(): never {
-  throw new BuildError('other', 'File contents are not kept between sessions. Choose the file again to send it.')
+  throw new BuildError('other', st('shared.apiRequestBuild.fileGone'))
 }
 
 function bodyEncoder(body: Body, ctx: BuildCtx): CoreInput['body'] {
@@ -521,7 +524,7 @@ export function buildWsSpec(req: WsRequest, ctx: BuildCtx): WsBuildResult {
 export function buildGraphQlSpec(req: GraphQlRequest, ctx: BuildCtx, operationName?: string): BuildResult {
   const body: CoreInput['body'] = (tpl) => {
     const vars = parseVariables(tpl(req.variables))
-    if (!vars.ok) throw new BuildError('other', `Variables: ${vars.error}`)
+    if (!vars.ok) throw new BuildError('other', st('shared.apiRequestBuild.variablesError', { error: vars.error }))
     const name = operationName ?? req.operationName
     const text = buildGraphQlBody({ query: req.query, variables: vars.variables, operationName: name || undefined })
     return { bytes: utf8(text), contentType: 'application/json' }

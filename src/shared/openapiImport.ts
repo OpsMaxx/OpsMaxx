@@ -16,6 +16,7 @@
 import { parse as parseYaml } from 'yaml'
 import { upgradeFromTwoToThree } from '@scalar/openapi-upgrader/2.0-to-3.0'
 import type { OpenApi3Doc } from './apiOpenApi'
+import { st } from './i18n'
 
 /** The same ceiling `http:chooseSpecFile` reads to. */
 export const MAX_SPEC_CHARS = 32 * 1024 * 1024
@@ -63,7 +64,7 @@ export function parseOpenApi(
   text: string,
   source: { url?: string; fileName?: string }
 ): { ok: true; doc: OpenApi3Doc; externalRefs: number } | { ok: false; error: string } {
-  if (text.length > MAX_SPEC_CHARS) return { ok: false, error: 'That description is larger than 32 MB.' }
+  if (text.length > MAX_SPEC_CHARS) return { ok: false, error: st('shared.openapiImport.tooLarge') }
   let raw: unknown
   try {
     raw = /^\s*[{[]/.test(text)
@@ -72,21 +73,21 @@ export function parseOpenApi(
         // lines of anchors that expand to gigabytes.
         parseYaml(text, { maxAliasCount: 100 })
   } catch (err) {
-    return { ok: false, error: `Could not read it as JSON or YAML: ${err instanceof Error ? err.message : String(err)}` }
+    return { ok: false, error: st('shared.openapiImport.unreadable', { error: err instanceof Error ? err.message : String(err) }) }
   }
-  if (!isObj(raw)) return { ok: false, error: 'That is not an OpenAPI description.' }
+  if (!isObj(raw)) return { ok: false, error: st('shared.openapiImport.notOpenApi') }
 
   let doc: Record<string, unknown>
   if (raw.swagger === '2.0' || raw.swagger === 2) {
     try {
       doc = upgradeFromTwoToThree(raw) as Record<string, unknown>
     } catch (err) {
-      return { ok: false, error: `Could not upgrade the Swagger 2 description: ${err instanceof Error ? err.message : String(err)}` }
+      return { ok: false, error: st('shared.openapiImport.upgradeFailed', { error: err instanceof Error ? err.message : String(err) }) }
     }
   } else if (typeof raw.openapi === 'string' && /^3\.[0-2](\.|$)/.test(raw.openapi)) {
     doc = raw
   } else {
-    return { ok: false, error: 'That is not an OpenAPI 3 or Swagger 2 description.' }
+    return { ok: false, error: st('shared.openapiImport.unsupportedVersion') }
   }
 
   // servers[0], absolute: a relative one is resolved against where the spec

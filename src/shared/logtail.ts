@@ -21,6 +21,7 @@
 // account become root" is a second thing to keep in step with reality, and the
 // answers do not differ by feature.
 import { SUDO_PROBE, resolveBinary, validateContainerRef } from './docker'
+import { st, type MessageKey } from './i18n'
 
 export type LogSourceKind = 'unit' | 'file' | 'container'
 
@@ -129,21 +130,21 @@ const PATH_RE = /^\/[A-Za-z0-9/._@:+-]{1,255}$/
 
 export function validateLogSource(source: LogSource): { ok: true } | { ok: false; error: string } {
   const t = source.target.trim()
-  if (t === '') return { ok: false, error: 'Give a unit name or a log file path.' }
+  if (t === '') return { ok: false, error: st('shared.logtail.source.noTarget') }
   // Every one of these reaches main through IPC, where the type annotations are
   // a compile-time claim about a structured-clone value and nothing more. They
   // are all interpolated into a shell command, so they are all checked here —
   // the same rule the target has always followed.
   if (source.sudo !== undefined && !['auto', 'never', 'always'].includes(source.sudo)) {
-    return { ok: false, error: 'Unrecognised sudo mode.' }
+    return { ok: false, error: st('shared.logtail.source.sudoMode') }
   }
   if (source.priority !== undefined && !validatePriority(source.priority)) {
-    return { ok: false, error: `Priority must be one of ${LOG_PRIORITIES.join(', ')}.` }
+    return { ok: false, error: st('shared.logtail.source.priority', { allowed: LOG_PRIORITIES.join(', ') }) }
   }
   if (source.since !== undefined && source.since.trim() !== '' && !validateSince(source.since)) {
     return {
       ok: false,
-      error: 'That is not a time journalctl will take. Try "2 hours ago", "yesterday" or "2024-01-01 09:30".'
+      error: st('shared.logtail.source.since')
     }
   }
   // A container reference is validated by docker's own rule rather than a
@@ -151,26 +152,26 @@ export function validateLogSource(source: LogSource): { ok: true } | { ok: false
   // accepting something the other refuses.
   if (source.kind === 'container') {
     if (!validateContainerRef(t)) {
-      return { ok: false, error: 'That is not a container name or id.' }
+      return { ok: false, error: st('shared.logtail.source.containerRef') }
     }
     if (source.priority || (source.since && source.since.trim() !== '')) {
       // Both are journalctl flags. `docker logs` has --since but not -p, and
       // silently ignoring a filter the user set is how a pane looks unfiltered
       // for no visible reason.
-      return { ok: false, error: 'Priority and since are journald filters and do not apply to a container.' }
+      return { ok: false, error: st('shared.logtail.source.containerFilters') }
     }
     return { ok: true }
   }
 
   if (source.kind === 'unit') {
     if (!UNIT_RE.test(t)) {
-      return { ok: false, error: 'That is not a unit name. Letters, digits and - _ . @ : only.' }
+      return { ok: false, error: st('shared.logtail.source.unitName') }
     }
     return { ok: true }
   }
-  if (!t.startsWith('/')) return { ok: false, error: 'Use an absolute path, starting with /.' }
-  if (t.includes('..')) return { ok: false, error: 'Paths with .. are refused.' }
-  if (!PATH_RE.test(t)) return { ok: false, error: 'That path contains characters this will not pass to a shell.' }
+  if (!t.startsWith('/')) return { ok: false, error: st('shared.logtail.source.relativePath') }
+  if (t.includes('..')) return { ok: false, error: st('shared.logtail.source.traversal') }
+  if (!PATH_RE.test(t)) return { ok: false, error: st('shared.logtail.source.pathChars') }
   return { ok: true }
 }
 
@@ -255,31 +256,33 @@ export interface LogDiagnosis {
   waiting: boolean
 }
 
-export const LOG_ISSUE_HELP: Record<LogTailIssue, string> = {
-  ok: '',
-  'no-journal':
-    'No journalctl on this server, so it is not running systemd — Alpine, a container, or a pre-systemd distribution. Switch to File and give a path such as /var/log/messages.',
-  'no-tail': 'No tail on the PATH an SSH session gets, which is unusual enough to be worth checking by hand.',
-  'unit-not-loaded':
-    'systemd does not know this unit. Check the name: journalctl will follow a unit that does not exist and show you nothing at all.',
-  'unit-masked': 'This unit is masked, so it cannot run and will not be logging.',
-  'journal-unreadable':
-    'The journal returned nothing for this unit and this account is not root, nor in systemd-journal, adm or wheel. An empty pane here does NOT mean the service is quiet — it means you are not being shown what it said.',
-  'unit-quiet': 'The unit exists and its journal is readable, so it genuinely has not logged anything in this window.',
-  'file-missing':
-    'That path does not exist yet. tail -F keeps waiting and picks the file up the moment it appears — right when you are watching for a log about to be written, and an empty pane forever otherwise.',
-  'file-denied':
-    'That file exists but this account cannot read it. /var/log/secure and /var/log/audit/audit.log are root-only on most servers.',
-  'file-is-dir': 'That path is a directory, not a file.',
-  'no-docker':
-    'No docker on this server. Looked on PATH and in the usual install directories — if it lives somewhere else, a symlink into /usr/local/bin is the usual fix.',
-  'docker-denied':
-    'This account cannot reach the docker socket, so it cannot read container logs. Adding it to the docker group grants root-equivalent access on most installs, which is a decision worth making deliberately.',
-  'container-missing':
-    'No container with that name or id on this server. It may have been removed, or the name may belong to a different server.',
-  'container-stopped':
-    'That container is not running. Its logs are still readable — this is history, not a live stream, and nothing new will arrive until it starts again.'
+const LOG_ISSUE_HELP_KEY: Record<LogTailIssue, MessageKey | null> = {
+  ok: null,
+  'no-journal': 'shared.logtail.issue.noJournal',
+  'no-tail': 'shared.logtail.issue.noTail',
+  'unit-not-loaded': 'shared.logtail.issue.unitNotLoaded',
+  'unit-masked': 'shared.logtail.issue.unitMasked',
+  'journal-unreadable': 'shared.logtail.issue.journalUnreadable',
+  'unit-quiet': 'shared.logtail.issue.unitQuiet',
+  'file-missing': 'shared.logtail.issue.fileMissing',
+  'file-denied': 'shared.logtail.issue.fileDenied',
+  'file-is-dir': 'shared.logtail.issue.fileIsDir',
+  'no-docker': 'shared.logtail.issue.noDocker',
+  'docker-denied': 'shared.logtail.issue.dockerDenied',
+  'container-missing': 'shared.logtail.issue.containerMissing',
+  'container-stopped': 'shared.logtail.issue.containerStopped'
 }
+
+/** Getters, so each read is in the language of whoever reads it. */
+export const LOG_ISSUE_HELP: Record<LogTailIssue, string> = Object.defineProperties(
+  {} as Record<LogTailIssue, string>,
+  Object.fromEntries(
+    Object.entries<MessageKey | null>(LOG_ISSUE_HELP_KEY).map(([issue, key]) => [
+      issue,
+      { get: () => (key ? st(key) : ''), enumerable: true }
+    ])
+  )
+)
 
 /** Groups systemd's own tmpfiles ACLs grant read on the journal. */
 const JOURNAL_GROUPS = ['systemd-journal', 'adm', 'wheel']

@@ -18,6 +18,7 @@
  */
 
 import type { SshHop } from './ssh'
+import { st } from './i18n'
 
 /**
  * The SSH details main needs to reach a server, in the shape every other
@@ -468,13 +469,10 @@ const PRIVATE_KEY = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/
  */
 export function certificateBlocks(text: string): { pem: string } | { error: string } {
   if (PRIVATE_KEY.test(text)) {
-    return {
-      error:
-        'That file contains a private key. Only the CA certificate is needed; choose a file with just the certificate.'
-    }
+    return { error: st('shared.httpClient.privateKeyInCa') }
   }
   const blocks = text.match(CERT_BLOCK)
-  if (!blocks) return { error: 'No PEM certificate (-----BEGIN CERTIFICATE-----) was found in that file.' }
+  if (!blocks) return { error: st('shared.httpClient.noCertificate') }
   return { pem: `${blocks.join('\n')}\n` }
 }
 

@@ -1,4 +1,6 @@
+import { ipcMain } from 'electron'
 import {
+  LocalizedError,
   englishT,
   loadTranslator,
   parseLanguagePref,
@@ -27,14 +29,14 @@ export const mt: Translate = (key, vars) => current(key, vars)
 /**
  * Read the setting out of the data blob and, when that changes the language,
  * load the pack and call `onChange` so whatever main has already drawn is drawn
- * again. `system` is the OS's preferred languages, passed in so this file needs
- * nothing from Electron.
+ * again. `system` is the OS's preferred languages, passed in so a test can
+ * choose them. Returns whether a load started, i.e. whether `onChange` is coming.
  */
-export function syncLanguage(data: unknown, system: readonly string[], onChange: () => void): void {
+export function syncLanguage(data: unknown, system: readonly string[], onChange: () => void): boolean {
   const settings = (data as { settings?: { language?: unknown } } | null)?.settings
   pref = parseLanguagePref(settings?.language)
   const want = resolveLocale(pref, system)
-  if (want === loaded) return
+  if (want === loaded) return false
   loaded = want
   void loadTranslator(want).then(
     (t) => {
@@ -48,4 +50,35 @@ export function syncLanguage(data: unknown, system: readonly string[], onChange:
       if (loaded === want) current = englishT
     }
   )
+  return true
+}
+
+const localized = (e: unknown): unknown => (e instanceof LocalizedError ? new Error(mt(e.key, e.vars)) : e)
+
+/**
+ * Say a LocalizedError in the user's language on its way to the renderer.
+ *
+ * Electron hands a renderer only the message of what a handler threw, and a
+ * LocalizedError's message is English, which is what logs and agents read. This
+ * wraps ipcMain.handle the way installIpcDebugTap does, so no handler changes;
+ * every other error, and every result, passes through untouched. Install it
+ * BEFORE the debug tap, so the tap ends up nearer each handler and records the
+ * English.
+ */
+export function installIpcErrorLocalization(): void {
+  const real = ipcMain.handle.bind(ipcMain)
+  ipcMain.handle = ((channel: string, listener: (...args: unknown[]) => unknown): void =>
+    real(channel, ((...args: unknown[]) => {
+      let out: unknown
+      try {
+        out = listener(...args)
+      } catch (e) {
+        throw localized(e)
+      }
+      return out instanceof Promise
+        ? out.catch((e: unknown) => {
+            throw localized(e)
+          })
+        : out
+    }) as never)) as typeof ipcMain.handle
 }

@@ -97,6 +97,8 @@
  * so the read-only assertion can see the commands the frozen maps do not hold.
  */
 
+import { st, type MessageKey, translatedTable } from './i18n'
+
 // ---------------------------------------------------------------------------
 // Status vocabulary
 // ---------------------------------------------------------------------------
@@ -145,17 +147,15 @@ export const DB_ANSWER_STATUSES: DbAnswerStatus[] = [
 
 /** One sentence per status, written for the person deciding whether to act on
  *  the number beside it. */
-export const DB_ANSWER_HELP: Record<DbAnswerStatus, string> = {
-  ok: 'Read successfully. A zero here means zero, not "we could not look".',
-  partial:
-    'The server answered, but this account is only shown part of the picture and is not told so. Treat the numbers as a floor, never as the total.',
-  denied:
-    'This exists and the account OpsMaxx connected as was not allowed to read it. A more privileged account would see more. This is NOT the same as "there is nothing here".',
-  absent: 'The feature this question is about is not enabled on this server, so there is nothing to read.',
-  'not-applicable': 'This question does not apply to the role this server is playing.',
-  unsupported: 'This server version cannot answer this question at all. Treat it as UNKNOWN, never as zero.',
-  error: 'The statement failed. The server’s own words are shown beside it.'
-}
+export const DB_ANSWER_HELP: Record<DbAnswerStatus, string> = translatedTable({
+  ok: 'shared.dbOps.answerHelp.ok',
+  partial: 'shared.dbOps.answerHelp.partial',
+  denied: 'shared.dbOps.answerHelp.denied',
+  absent: 'shared.dbOps.answerHelp.absent',
+  'not-applicable': 'shared.dbOps.answerHelp.notApplicable',
+  unsupported: 'shared.dbOps.answerHelp.unsupported',
+  error: 'shared.dbOps.answerHelp.error'
+})
 
 /**
  * How worried to be.
@@ -320,83 +320,67 @@ export type DbQuestionId =
   | RedisQuestionId
   | MssqlQuestionId
 
-export const DB_QUESTION_LABEL: Record<DbQuestionId, string> = {
-  digests: 'Statements that scan',
-  alwayson: 'Availability groups',
-  backups: 'Backups',
-  logspace: 'Transaction log space',
-  blocking: 'Blocking',
-  overview: 'Server',
-  replication: 'Replication',
-  archiver: 'WAL archiving',
-  autovacuum: 'Autovacuum and wraparound',
-  connections: 'Connections',
-  locks: 'Blocking locks',
-  sizes: 'Size and growth',
-  statements: 'Statement history',
-  binlogs: 'Binary logs',
-  slowlog: 'Slow query log',
-  processlist: 'Running queries',
-  bufferpool: 'InnoDB buffer pool',
-  oplog: 'Oplog window',
-  indexes: 'Index usage',
-  currentop: 'Running operations',
-  asserts: 'Assertions and page faults',
-  memory: 'Memory and eviction',
-  persistence: 'Persistence',
-  clients: 'Clients',
-  keyspace: 'Keyspace',
-  stats: 'Refusals and evictions',
-  cluster: 'Cluster state'
-}
+export const DB_QUESTION_LABEL: Record<DbQuestionId, string> = translatedTable({
+  digests: 'shared.dbOps.question.label.digests',
+  alwayson: 'shared.dbOps.question.label.alwayson',
+  backups: 'shared.dbOps.question.label.backups',
+  logspace: 'shared.dbOps.question.label.logspace',
+  blocking: 'shared.dbOps.question.label.blocking',
+  overview: 'shared.dbOps.question.label.overview',
+  replication: 'shared.dbOps.question.label.replication',
+  archiver: 'shared.dbOps.question.label.archiver',
+  autovacuum: 'shared.dbOps.question.label.autovacuum',
+  connections: 'shared.dbOps.question.label.connections',
+  locks: 'shared.dbOps.question.label.locks',
+  sizes: 'shared.dbOps.question.label.sizes',
+  statements: 'shared.dbOps.question.label.statements',
+  binlogs: 'shared.dbOps.question.label.binlogs',
+  slowlog: 'shared.dbOps.question.label.slowlog',
+  processlist: 'shared.dbOps.question.label.processlist',
+  bufferpool: 'shared.dbOps.question.label.bufferpool',
+  oplog: 'shared.dbOps.question.label.oplog',
+  indexes: 'shared.dbOps.question.label.indexes',
+  currentop: 'shared.dbOps.question.label.currentop',
+  asserts: 'shared.dbOps.question.label.asserts',
+  memory: 'shared.dbOps.question.label.memory',
+  persistence: 'shared.dbOps.question.label.persistence',
+  clients: 'shared.dbOps.question.label.clients',
+  keyspace: 'shared.dbOps.question.label.keyspace',
+  stats: 'shared.dbOps.question.label.stats',
+  cluster: 'shared.dbOps.question.label.cluster'
+})
 
 /** Why this one is on the page. Shown in the UI, so the editorial choice is
  *  visible to the operator rather than only to whoever wrote it. */
-export const DB_QUESTION_WHY: Record<DbQuestionId, string> = {
-  digests:
-    'Which statements read a table without using an index. Not the slow log: that counts statements which crossed a time threshold, and a statement can be fast on today’s data and still be the one that stops working when the table grows. MySQL counts the index-less executions itself, so this is its number rather than a ratio inferred from row counts — a query examining four rows to return two is scanning, and no threshold on time or rows would notice.',
-  alwayson:
-    'Whether every replica is joined, synchronising and caught up. Zero replicas is not zero problems — a server with no availability group returns the same empty list as one whose replicas have all gone, so this reports whether AlwaysOn is configured at all before it reports health.',
-  backups:
-    'When each database was last backed up, full and log, and whether a database in FULL recovery has ever had its log backed up. That last one is the quiet killer: the log grows until the disk fills and SQL Server does not warn anybody. Never backed up reads as never, not as long ago.',
-  logspace:
-    'How full each transaction log is. The same failure one step later — a log nobody truncates does not slow down, it stops the database.',
-  blocking:
-    'Sessions waiting on another session, and the one at the head of the chain. A blocked session is not slow, it is stopped, and the answer is always the head blocker rather than the queue behind it.',
-  overview: 'Which server this is, what role it is playing, and how long it has been up.',
-  replication:
-    'A replica that has stopped is a backup that is not being taken and a read pool serving stale rows. It fails silently.',
-  archiver:
-    'A climbing failed_count is an outage in slow motion: WAL is not reaching the archive, so point-in-time recovery is already broken and pg_wal is filling the disk.',
-  autovacuum:
-    'Transaction-ID wraparound is the one that takes a Postgres database down hard, and it announces itself for weeks first as a rising relfrozenxid age.',
-  connections: 'Running out of connections refuses every new client at once, including the one you would use to fix it.',
-  locks: 'One session holding a lock stalls every session behind it, and none of them look broken on their own.',
-  sizes: 'Where the disk went, and which table is taking it.',
-  statements: 'Which statements actually cost this server its time.',
-  binlogs: 'Binary logs are point-in-time recovery and the only thing a lagging replica can catch up from. They are also a disk that fills.',
-  slowlog: 'Whether the server is even recording slow queries. If it is off, the absence of slow queries means nothing.',
-  processlist: 'What is running right now, and what has been running far too long.',
-  bufferpool: 'A buffer pool that stopped holding the working set turns every read into disk IO.',
-  oplog:
-    'The oplog window is how long a secondary may be down before it needs a full initial sync instead of a catch-up. It is the number that decides whether a maintenance window is safe, and it shrinks as writes speed up without anyone changing anything.',
-  indexes:
-    'An index nothing reads is written on every insert and update to its collection and pays for itself never. The counters reset on restart, so the question is only answerable on a server that has been up a while.',
-  currentop:
-    'What is running right now, and what has been running far too long — with the server’s own replication and journal threads excluded, because they run forever by design.',
-  asserts:
-    'Internal assertions are the server catching itself in a state it did not expect: a corrupt index, a storage error, a bug. They are not failed client commands.',
-  memory:
-    'An instance near its maxmemory under noeviction is a write outage waiting: Redis refuses the write rather than freeing anything, and reads carry on looking healthy while every writer fails.',
-  persistence:
-    'Whether anything on disk would survive a restart, and how much would be lost. A failed background save leaves no current snapshot and says nothing until you need it.',
-  clients:
-    'Running out of client slots refuses every new connection at once, including the one you would use to fix it.',
-  keyspace: 'How many keys there are and how many will ever go away on their own.',
-  stats:
-    'Two counters nothing else on this page records: connections Redis refused outright, and keys it threw away to stay under its memory limit.',
-  cluster: 'A cluster that is not in state ok refuses commands for the slots it cannot serve, which from a client looks like part of the keyspace vanishing.'
-}
+export const DB_QUESTION_WHY: Record<DbQuestionId, string> = translatedTable({
+  digests: 'shared.dbOps.question.why.digests',
+  alwayson: 'shared.dbOps.question.why.alwayson',
+  backups: 'shared.dbOps.question.why.backups',
+  logspace: 'shared.dbOps.question.why.logspace',
+  blocking: 'shared.dbOps.question.why.blocking',
+  overview: 'shared.dbOps.question.why.overview',
+  replication: 'shared.dbOps.question.why.replication',
+  archiver: 'shared.dbOps.question.why.archiver',
+  autovacuum: 'shared.dbOps.question.why.autovacuum',
+  connections: 'shared.dbOps.question.why.connections',
+  locks: 'shared.dbOps.question.why.locks',
+  sizes: 'shared.dbOps.question.why.sizes',
+  statements: 'shared.dbOps.question.why.statements',
+  binlogs: 'shared.dbOps.question.why.binlogs',
+  slowlog: 'shared.dbOps.question.why.slowlog',
+  processlist: 'shared.dbOps.question.why.processlist',
+  bufferpool: 'shared.dbOps.question.why.bufferpool',
+  oplog: 'shared.dbOps.question.why.oplog',
+  indexes: 'shared.dbOps.question.why.indexes',
+  currentop: 'shared.dbOps.question.why.currentop',
+  asserts: 'shared.dbOps.question.why.asserts',
+  memory: 'shared.dbOps.question.why.memory',
+  persistence: 'shared.dbOps.question.why.persistence',
+  clients: 'shared.dbOps.question.why.clients',
+  keyspace: 'shared.dbOps.question.why.keyspace',
+  stats: 'shared.dbOps.question.why.stats',
+  cluster: 'shared.dbOps.question.why.cluster'
+})
 
 // ---------------------------------------------------------------------------
 // Thresholds
@@ -556,20 +540,20 @@ export function bool(v: unknown): boolean | null {
 // ---------------------------------------------------------------------------
 
 export function formatSeconds(s: number | null | undefined): string {
-  if (s === null || s === undefined || !Number.isFinite(s)) return 'unknown'
+  if (s === null || s === undefined || !Number.isFinite(s)) return st('shared.dbOps.format.unknown')
   const n = Math.max(0, Math.round(s))
-  if (n < 60) return `${n}s`
+  if (n < 60) return st('shared.dbOps.format.seconds', { s: n })
   const m = Math.floor(n / 60)
-  if (m < 60) return `${m}m ${n % 60}s`
+  if (m < 60) return st('shared.dbOps.format.minutesSeconds', { m, s: n % 60 })
   const h = Math.floor(m / 60)
-  if (h < 24) return `${h}h ${m % 60}m`
-  return `${Math.floor(h / 24)}d ${h % 24}h`
+  if (h < 24) return st('shared.dbOps.format.hoursMinutes', { h, m: m % 60 })
+  return st('shared.dbOps.format.daysHours', { d: Math.floor(h / 24), h: h % 24 })
 }
 
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB']
 
 export function formatBytes(b: number | null | undefined): string {
-  if (b === null || b === undefined || !Number.isFinite(b)) return 'unknown'
+  if (b === null || b === undefined || !Number.isFinite(b)) return st('shared.dbOps.format.unknown')
   let n = Math.abs(b)
   let i = 0
   while (n >= 1024 && i < UNITS.length - 1) {
@@ -582,7 +566,7 @@ export function formatBytes(b: number | null | undefined): string {
 
 /** A count, grouped. 1500000 -> "1,500,000". */
 export function formatCount(n: number | null | undefined): string {
-  if (n === null || n === undefined || !Number.isFinite(n)) return 'unknown'
+  if (n === null || n === undefined || !Number.isFinite(n)) return st('shared.dbOps.format.unknown')
   return Math.round(n).toLocaleString('en-US')
 }
 
@@ -613,7 +597,7 @@ export interface DbFailure {
  *    the question was aimed at the wrong role, not refused.
  */
 export function classifyPgFailure(code: string | null | undefined, message: string): DbFailure {
-  const detail = (message || '').trim() || 'The statement failed and the server said nothing.'
+  const detail = (message || '').trim() || st('shared.dbOps.failure.statementSilent')
   const c = (code || '').trim()
   if (c === '42501') return { status: 'denied', detail }
   if (c === '42P01' || c === '42883' || c === '3F000') return { status: 'absent', detail }
@@ -650,7 +634,7 @@ export function classifyPgFailure(code: string | null | undefined, message: stri
  *    MariaDB, which spells it `@@expire_logs_days`. `unsupported`, same fallback.
  */
 export function classifyMysqlFailure(errno: number | null | undefined, message: string): DbFailure {
-  const detail = (message || '').trim() || 'The statement failed and the server said nothing.'
+  const detail = (message || '').trim() || st('shared.dbOps.failure.statementSilent')
   switch (errno) {
     case 1227:
     case 1045:
@@ -1308,8 +1292,8 @@ export function judgePgReplication(v: PgReplicationValue): DbVerdict {
     if (v.replayPaused) {
       return {
         level: 'alarm',
-        headline: 'WAL replay is PAUSED on this standby.',
-        because: 'It is still receiving WAL and is not applying it, so it falls further behind every second and will not be promotable.'
+        headline: st('shared.dbOps.pg.replication.replayPaused.headline'),
+        because: st('shared.dbOps.pg.replication.replayPaused.because')
       }
     }
 
@@ -1332,11 +1316,11 @@ export function judgePgReplication(v: PgReplicationValue): DbVerdict {
     if (bytes === 0) {
       return {
         level: 'ok',
-        headline: 'This standby has applied every byte of WAL it has received.',
+        headline: st('shared.dbOps.pg.replication.standbyCurrent.headline'),
         because:
           age === null
-            ? 'pg_last_xact_replay_timestamp() is NULL because no transaction has been replayed since this standby started. That is not lag — the receive and replay positions are identical.'
-            : `Its last replayed transaction committed ${formatSeconds(age)} ago, which measures how idle the PRIMARY is rather than how far behind this standby is. The receive and replay positions are identical.`
+            ? st('shared.dbOps.pg.replication.standbyCurrent.becauseNothingReplayed')
+            : st('shared.dbOps.pg.replication.standbyCurrent.becauseIdlePrimary', { age: formatSeconds(age) })
       }
     }
 
@@ -1344,38 +1328,35 @@ export function judgePgReplication(v: PgReplicationValue): DbVerdict {
       if (v.neverReplayed) {
         return {
           level: 'unknown',
-          headline: 'This standby has not replayed a transaction yet, and its WAL positions could not be read.',
-          because:
-            'pg_last_xact_replay_timestamp() is NULL. That happens on a standby built moments ago and on one whose primary is idle — it is NOT a lag of zero.'
+          headline: st('shared.dbOps.pg.replication.neverReplayed.headline'),
+          because: st('shared.dbOps.pg.replication.neverReplayed.because')
         }
       }
       const s = age ?? 0
       return {
         level: s >= T.replicaLagAlarmSeconds ? 'alarm' : s >= T.replicaLagWatchSeconds ? 'watch' : 'unknown',
-        headline: `This standby last replayed a transaction ${formatSeconds(s)} ago.`,
-        because:
-          'The WAL byte positions could not be read, so this is a timestamp and not a lag: on an idle primary it grows while the standby is perfectly current. Treat it as a hint.'
+        headline: st('shared.dbOps.pg.replication.timestampOnly.headline', { age: formatSeconds(s) }),
+        because: st('shared.dbOps.pg.replication.timestampOnly.because')
       }
     }
 
     // There IS unapplied WAL, so the replay timestamp finally means something.
     const s = age ?? 0
-    const because = `${formatBytes(bytes)} of received WAL is not yet applied.`
+    const because = st('shared.dbOps.pg.replication.unapplied', { bytes: formatBytes(bytes) })
     if (s >= T.replicaLagAlarmSeconds) {
-      return { level: 'alarm', headline: `This standby is ${formatSeconds(s)} behind its primary.`, because }
+      return { level: 'alarm', headline: st('shared.dbOps.pg.replication.standbyBehind', { lag: formatSeconds(s) }), because }
     }
     if (s >= T.replicaLagWatchSeconds) {
-      return { level: 'watch', headline: `This standby is ${formatSeconds(s)} behind its primary.`, because }
+      return { level: 'watch', headline: st('shared.dbOps.pg.replication.standbyBehind', { lag: formatSeconds(s) }), because }
     }
-    return { level: 'ok', headline: `This standby is applying WAL, ${formatBytes(bytes)} behind.`, because }
+    return { level: 'ok', headline: st('shared.dbOps.pg.replication.standbyApplying', { bytes: formatBytes(bytes) }), because }
   }
 
   if (v.replicas.length === 0) {
     return {
       level: 'unknown',
-      headline: 'No standby is connected to this server.',
-      because:
-        'pg_stat_replication is empty. On a server that was never meant to have a replica that is correct; on one that was, it means the replica is gone. OpsMaxx cannot tell which, and will not guess.'
+      headline: st('shared.dbOps.pg.replication.noStandby.headline'),
+      because: st('shared.dbOps.pg.replication.noStandby.because')
     }
   }
 
@@ -1383,9 +1364,8 @@ export function judgePgReplication(v: PgReplicationValue): DbVerdict {
   if (redacted.length === v.replicas.length) {
     return {
       level: 'unknown',
-      headline: `Replication state is hidden from this account (${redacted.length} standby connection${redacted.length === 1 ? '' : 's'} visible, no detail).`,
-      because:
-        'The rows are there and every column that would answer the question came back NULL. Postgres does this rather than raising an error when the role lacks pg_monitor. Grant pg_monitor to read it — do not read this as healthy.'
+      headline: st('shared.dbOps.pg.replication.allHidden.headline', { count: redacted.length }),
+      because: st('shared.dbOps.pg.replication.allHidden.because')
     }
   }
 
@@ -1399,8 +1379,11 @@ export function judgePgReplication(v: PgReplicationValue): DbVerdict {
     const worst = notStreaming[0]
     return {
       level: 'alarm',
-      headline: `Standby ${worst.applicationName ?? worst.clientAddr ?? 'unknown'} is in state "${worst.state}", not streaming.`,
-      because: 'A walsender that is catching up, or stopped, is not keeping a replica current.'
+      headline: st('shared.dbOps.pg.replication.notStreaming.headline', {
+        name: worst.applicationName ?? worst.clientAddr ?? st('shared.dbOps.format.unknown'),
+        state: worst.state ?? ''
+      }),
+      because: st('shared.dbOps.pg.replication.notStreaming.because')
     }
   }
 
@@ -1413,16 +1396,16 @@ export function judgePgReplication(v: PgReplicationValue): DbVerdict {
       worstReplica = r
     }
   }
-  const name = worstReplica?.applicationName ?? worstReplica?.clientAddr ?? 'the standby'
+  const name = worstReplica?.applicationName ?? worstReplica?.clientAddr ?? st('shared.dbOps.pg.replication.theStandby')
   const because =
     worstReplica?.replayLagBytes === null || worstReplica?.replayLagBytes === undefined
       ? undefined
-      : `${formatBytes(worstReplica.replayLagBytes)} of WAL sent but not yet replayed.`
+      : st('shared.dbOps.pg.replication.sentNotReplayed', { bytes: formatBytes(worstReplica.replayLagBytes) })
   if (worstSeconds >= T.replicaLagAlarmSeconds) {
-    return { level: 'alarm', headline: `Replication is ${formatSeconds(worstSeconds)} behind on ${name}.`, because }
+    return { level: 'alarm', headline: st('shared.dbOps.pg.replication.behindOn', { lag: formatSeconds(worstSeconds), name }), because }
   }
   if (worstSeconds >= T.replicaLagWatchSeconds) {
-    return { level: 'watch', headline: `Replication is ${formatSeconds(worstSeconds)} behind on ${name}.`, because }
+    return { level: 'watch', headline: st('shared.dbOps.pg.replication.behindOn', { lag: formatSeconds(worstSeconds), name }), because }
   }
   const n = v.replicas.length
   // SOME redacted, not all. The all-redacted branch above is the easy case; the
@@ -1432,13 +1415,13 @@ export function judgePgReplication(v: PgReplicationValue): DbVerdict {
   if (redacted.length > 0) {
     return {
       level: 'unknown',
-      headline: `${redacted.length} of ${n} standby connections are hidden from this account.`,
-      because: `The ${n - redacted.length} readable one${n - redacted.length === 1 ? ' is' : 's are'} streaming with a worst replay lag of ${formatSeconds(worstSeconds)}. The rest returned every lag column NULL, which Postgres does instead of raising an error when the role lacks pg_monitor — so this page cannot say whether they are current.`
+      headline: st('shared.dbOps.pg.replication.someHidden.headline', { hidden: redacted.length, total: n }),
+      because: st('shared.dbOps.pg.replication.someHidden.because', { count: n - redacted.length, lag: formatSeconds(worstSeconds) })
     }
   }
   return {
     level: 'ok',
-    headline: `${n} standby${n === 1 ? '' : 's'} streaming, worst replay lag ${formatSeconds(worstSeconds)}.`,
+    headline: st('shared.dbOps.pg.replication.streaming', { count: n, lag: formatSeconds(worstSeconds) }),
     because
   }
 }
@@ -1456,9 +1439,8 @@ export function judgePgArchiver(a: PgArchiver): DbVerdict {
   if (a.archiveMode !== 'on' && a.archiveMode !== 'always') {
     return {
       level: 'unknown',
-      headline: `WAL archiving is off (archive_mode = ${a.archiveMode}).`,
-      because:
-        'Nothing is being archived, so this server has no point-in-time recovery. That may be deliberate. It is reported rather than judged because OpsMaxx cannot know your recovery plan.'
+      headline: st('shared.dbOps.pg.archiver.off.headline', { mode: a.archiveMode }),
+      because: st('shared.dbOps.pg.archiver.off.because')
     }
   }
   const failed = a.failedCount ?? 0
@@ -1468,31 +1450,34 @@ export function judgePgArchiver(a: PgArchiver): DbVerdict {
   if (failingNow) {
     return {
       level: 'alarm',
-      headline: `WAL archiving is FAILING — ${formatCount(failed)} failure${failed === 1 ? '' : 's'}, the last ${formatSeconds(failedAge)} ago.`,
+      headline: st('shared.dbOps.pg.archiver.failing.headline', { count: failed, failures: formatCount(failed), age: formatSeconds(failedAge) }),
       because:
-        `Postgres retains every WAL segment it could not archive, so pg_wal grows until the disk fills and the server stops. ` +
-        (a.lastArchivedWal === null
-          ? 'Nothing has ever been archived successfully from this server.'
-          : `The last segment that did archive was ${a.lastArchivedWal}, ${formatSeconds(archivedAge)} ago.`)
+        a.lastArchivedWal === null
+          ? st('shared.dbOps.pg.archiver.failing.becauseNeverArchived')
+          : st('shared.dbOps.pg.archiver.failing.becauseLastArchived', { wal: a.lastArchivedWal, age: formatSeconds(archivedAge) })
     }
   }
   if (failed > 0) {
     return {
       level: 'watch',
-      headline: `Archiving is working now, but has failed ${formatCount(failed)} time${failed === 1 ? '' : 's'} since the counters were reset.`,
-      because: `Last failure ${formatSeconds(failedAge)} ago on ${a.lastFailedWal ?? 'an unnamed segment'}; last success ${formatSeconds(archivedAge)} ago.`
+      headline: st('shared.dbOps.pg.archiver.recovered.headline', { count: failed, failures: formatCount(failed) }),
+      because: st('shared.dbOps.pg.archiver.recovered.because', {
+        failedAge: formatSeconds(failedAge),
+        wal: a.lastFailedWal ?? st('shared.dbOps.pg.archiver.unnamedSegment'),
+        archivedAge: formatSeconds(archivedAge)
+      })
     }
   }
   if ((a.archivedCount ?? 0) === 0) {
     return {
       level: 'unknown',
-      headline: 'Archiving is enabled and nothing has been archived yet.',
-      because: 'No successes and no failures. On a server that has just started that is expected; on a busy one it means WAL is not being handed to the archiver.'
+      headline: st('shared.dbOps.pg.archiver.nothingYet.headline'),
+      because: st('shared.dbOps.pg.archiver.nothingYet.because')
     }
   }
   return {
     level: 'ok',
-    headline: `${formatCount(a.archivedCount)} segments archived, none failed. Last success ${formatSeconds(archivedAge)} ago.`
+    headline: st('shared.dbOps.pg.archiver.ok', { archived: formatCount(a.archivedCount), age: formatSeconds(archivedAge) })
   }
 }
 
@@ -1514,27 +1499,34 @@ export function judgePgVacuum(v: PgVacuumValue): DbVerdict {
   if (worstDb && (worstDb.xidAge ?? 0) >= T.freezeAlarmAbsolute) {
     return {
       level: 'alarm',
-      headline: `Database ${worstDb.name} is ${Math.round((worstDb.wraparoundFraction ?? 0) * 100)}% of the way to transaction-ID wraparound.`,
-      because: `age(datfrozenxid) is ${formatCount(worstDb.xidAge)} of the ${formatCount(PG_WRAPAROUND_XID_LIMIT)} at which Postgres refuses writes. This is cluster-wide: it is not visible in this database's pg_class, and every database in the cluster stops together.`
+      headline: st('shared.dbOps.pg.vacuum.databaseWraparound.headline', {
+        name: worstDb.name,
+        pct: Math.round((worstDb.wraparoundFraction ?? 0) * 100)
+      }),
+      because: st('shared.dbOps.pg.vacuum.databaseWraparound.because', {
+        age: formatCount(worstDb.xidAge),
+        limit: formatCount(PG_WRAPAROUND_XID_LIMIT)
+      })
     }
   }
 
   const withAge = v.tables.filter((t) => t.xidAge !== null)
   if (withAge.length === 0) {
-    return { level: 'unknown', headline: 'No table ages could be read.' }
+    return { level: 'unknown', headline: st('shared.dbOps.pg.vacuum.noAges') }
   }
   const worst = withAge.reduce((a, b) => ((b.xidAge ?? 0) > (a.xidAge ?? 0) ? b : a))
   const age = worst.xidAge ?? 0
   const frac = worst.freezeFraction ?? 0
   // A TOAST relation is named pg_toast.pg_toast_16384, which nobody can act on.
-  const where = worst.relkind === 't' && worst.parent ? `${worst.parent} (TOAST)` : `${worst.schema}.${worst.name}`
+  const where =
+    worst.relkind === 't' && worst.parent ? st('shared.dbOps.pg.vacuum.toastOf', { table: worst.parent }) : `${worst.schema}.${worst.name}`
   // The genuine shutdown alarm, measured against the point Postgres actually
   // stops rather than against the point autovacuum starts.
   if (age >= T.freezeAlarmAbsolute) {
     return {
       level: 'alarm',
-      headline: `${where} is ${Math.round((age / PG_WRAPAROUND_XID_LIMIT) * 100)}% of the way to transaction-ID wraparound.`,
-      because: `age(relfrozenxid) is ${formatCount(age)} of the ${formatCount(PG_WRAPAROUND_XID_LIMIT)} at which Postgres refuses writes. Get a vacuum onto this table in a window you choose rather than one it chooses.`
+      headline: st('shared.dbOps.pg.vacuum.tableWraparound.headline', { where, pct: Math.round((age / PG_WRAPAROUND_XID_LIMIT) * 100) }),
+      because: st('shared.dbOps.pg.vacuum.tableWraparound.because', { age: formatCount(age), limit: formatCount(PG_WRAPAROUND_XID_LIMIT) })
     }
   }
   if (frac >= T.freezeAlarmFraction) {
@@ -1543,15 +1535,19 @@ export function judgePgVacuum(v: PgVacuumValue): DbVerdict {
     // times — 180M of 200M is 8.5% of the way to the number that matters.
     return {
       level: 'alarm',
-      headline: `${where} is ${Math.round(frac * 100)}% of the way to a forced anti-wraparound vacuum.`,
-      because: `age(relfrozenxid) is ${formatCount(age)} against an autovacuum_freeze_max_age of ${formatCount(v.freezeMaxAge)} — ${Math.round((age / PG_WRAPAROUND_XID_LIMIT) * 100)}% of the age at which Postgres refuses writes. At 100% autovacuum forces a freeze whether or not it suits you, and on a large table that is hours of IO.`
+      headline: st('shared.dbOps.pg.vacuum.forcedFreeze.headline', { where, pct: Math.round(frac * 100) }),
+      because: st('shared.dbOps.pg.vacuum.forcedFreeze.because', {
+        age: formatCount(age),
+        maxAge: formatCount(v.freezeMaxAge),
+        pct: Math.round((age / PG_WRAPAROUND_XID_LIMIT) * 100)
+      })
     }
   }
   if (frac >= T.freezeWatchFraction) {
     return {
       level: 'watch',
-      headline: `${where} is ${Math.round(frac * 100)}% of the way to an anti-wraparound vacuum.`,
-      because: `age(relfrozenxid) is ${formatCount(age)} of ${formatCount(v.freezeMaxAge)}. Autovacuum will force a freeze at 100%, and on a large table that is hours of IO.`
+      headline: st('shared.dbOps.pg.vacuum.approachingFreeze.headline', { where, pct: Math.round(frac * 100) }),
+      because: st('shared.dbOps.pg.vacuum.approachingFreeze.because', { age: formatCount(age), maxAge: formatCount(v.freezeMaxAge) })
     }
   }
   const bloated = v.tables.filter(
@@ -1561,17 +1557,21 @@ export function judgePgVacuum(v: PgVacuumValue): DbVerdict {
     const b = bloated[0]
     return {
       level: 'watch',
-      headline: `${b.schema}.${b.name} is carrying ${formatCount(b.deadTuples)} dead rows against ${formatCount(b.liveTuples)} live ones.`,
+      headline: st('shared.dbOps.pg.vacuum.bloated.headline', {
+        table: `${b.schema}.${b.name}`,
+        dead: formatCount(b.deadTuples),
+        live: formatCount(b.liveTuples)
+      }),
       because:
         b.lastAutovacuumAgeSeconds === null
-          ? 'Autovacuum has never run on this table.'
-          : `Last autovacuum ${formatSeconds(b.lastAutovacuumAgeSeconds)} ago, and it is not keeping up.`
+          ? st('shared.dbOps.pg.vacuum.bloated.becauseNever')
+          : st('shared.dbOps.pg.vacuum.bloated.becauseBehind', { age: formatSeconds(b.lastAutovacuumAgeSeconds) })
     }
   }
   return {
     level: 'ok',
-    headline: `Oldest table age is ${Math.round(frac * 100)}% of autovacuum_freeze_max_age (${where}).`,
-    because: `${formatCount(age)} of ${formatCount(v.freezeMaxAge)}.`
+    headline: st('shared.dbOps.pg.vacuum.ok.headline', { pct: Math.round(frac * 100), where }),
+    because: st('shared.dbOps.pg.vacuum.ok.because', { age: formatCount(age), maxAge: formatCount(v.freezeMaxAge) })
   }
 }
 
@@ -1585,35 +1585,39 @@ export function judgePgConnections(v: PgConnectionsValue): DbVerdict {
   const ceiling = v.usableConnections > 0 ? v.usableConnections : v.maxConnections
   const frac = ceiling > 0 ? v.used / ceiling : 0
   const held = v.superuserReserved + v.reserved
-  const shape = `${v.used} of ${v.maxConnections} connections in use`
-  const reservedNote = held > 0
-    ? ` ${held} of those are reserved (superuser_reserved_connections ${v.superuserReserved}, reserved_connections ${v.reserved}), so the ceiling an ordinary client reaches is ${ceiling}.`
-    : ''
+  const usage = { used: v.used, max: v.maxConnections, pct: Math.round(frac * 100) }
 
   if (ceiling > 0 && frac >= T.connectionsAlarmFraction) {
     return {
       level: 'alarm',
-      headline: `${shape} (${Math.round(frac * 100)}%).`,
+      headline: st('shared.dbOps.pg.connections.usage', usage),
       because:
-        'When max_connections is reached every new client is refused, including the psql session you would use to fix it.' + reservedNote
+        held > 0
+          ? st('shared.dbOps.pg.connections.ceiling.becauseReserved', {
+              held,
+              superuser: v.superuserReserved,
+              reserved: v.reserved,
+              ceiling
+            })
+          : st('shared.dbOps.pg.connections.ceiling.because')
     }
   }
   const oldestIdleTx = Math.max(idleTx?.oldestSeconds ?? 0, idleAborted?.oldestSeconds ?? 0)
   if (oldestIdleTx >= T.idleInTransactionAlarmSeconds) {
     return {
       level: 'alarm',
-      headline: `A session has been idle in transaction for ${formatSeconds(oldestIdleTx)}.`,
-      because: 'It holds its locks and pins the oldest snapshot, so vacuum cannot remove any row deleted since it began. This is how a table bloats without anyone writing to it.'
+      headline: st('shared.dbOps.pg.connections.idleInTransaction.headline', { age: formatSeconds(oldestIdleTx) }),
+      because: st('shared.dbOps.pg.connections.idleInTransaction.becauseAlarm')
     }
   }
   if (ceiling > 0 && frac >= T.connectionsWatchFraction) {
-    return { level: 'watch', headline: `${shape} (${Math.round(frac * 100)}%).` }
+    return { level: 'watch', headline: st('shared.dbOps.pg.connections.usage', usage) }
   }
   if (oldestIdleTx >= T.idleInTransactionWatchSeconds) {
     return {
       level: 'watch',
-      headline: `A session has been idle in transaction for ${formatSeconds(oldestIdleTx)}.`,
-      because: 'Idle-in-transaction sessions hold back vacuum for the whole database.'
+      headline: st('shared.dbOps.pg.connections.idleInTransaction.headline', { age: formatSeconds(oldestIdleTx) }),
+      because: st('shared.dbOps.pg.connections.idleInTransaction.becauseWatch')
     }
   }
   // Below every threshold — but if part of the picture came back NULL, this is
@@ -1622,16 +1626,15 @@ export function judgePgConnections(v: PgConnectionsValue): DbVerdict {
   if (v.redactedCount > 0) {
     return {
       level: 'unknown',
-      headline: `${shape} (${Math.round(frac * 100)}%), and ${v.redactedCount} of them cannot be read by this account.`,
-      because:
-        'Their state, query and query_start all came back NULL. Postgres does that rather than raising an error when the role lacks pg_read_all_stats, so an idle-in-transaction session holding back vacuum for the whole database would be invisible here. Grant pg_monitor (or pg_read_all_stats) to answer this.'
+      headline: st('shared.dbOps.pg.connections.redacted.headline', { ...usage, hidden: v.redactedCount }),
+      because: st('shared.dbOps.pg.connections.redacted.because')
     }
   }
-  return { level: 'ok', headline: `${shape} (${Math.round(frac * 100)}%).` }
+  return { level: 'ok', headline: st('shared.dbOps.pg.connections.usage', usage) }
 }
 
 export function judgePgLocks(locks: PgLock[]): DbVerdict {
-  if (locks.length === 0) return { level: 'ok', headline: 'Nothing is waiting on a lock.' }
+  if (locks.length === 0) return { level: 'ok', headline: st('shared.dbOps.pg.locks.none') }
   // BLOCKED sessions only, for the counting. The query now also returns the
   // sessions that are BLOCKING -- the ones an operator can actually act on,
   // which it used to omit -- and those are not themselves waiting. Counting
@@ -1639,7 +1642,7 @@ export function judgePgLocks(locks: PgLock[]): DbVerdict {
   // the third is the one holding the lock.
   const blocked = locks.filter((l) => l.blockedBy.length > 0)
   const roots = locks.filter((l) => l.blockedBy.length === 0)
-  if (blocked.length === 0) return { level: 'ok', headline: 'Nothing is waiting on a lock.' }
+  if (blocked.length === 0) return { level: 'ok', headline: st('shared.dbOps.pg.locks.none') }
   // `?? 0` here was the bug: a role without pg_read_all_stats gets NULL for
   // query_start on a backend it does not own, so a session blocked for two
   // hours rendered as "briefly blocked (0s)" — a watch instead of an alarm.
@@ -1654,23 +1657,31 @@ export function judgePgLocks(locks: PgLock[]): DbVerdict {
   // of including blockers: "waiting on pid 124" is not actionable and
   // "waiting on pid 124, which is running <this>" is.
   const root = roots.find((r) => target.blockedBy.includes(r.pid))
-  const because = `pid ${target.pid} is waiting on ${target.blockedBy.join(', ') || 'another session'}${
-    root ? ` (${root.state}${root.query ? `: ${root.query}` : ''})` : ''
-  }${blockers.length > 1 ? `; ${blockers.length} sessions are blocking in total` : ''}.`
+  const waiting = {
+    pid: target.pid,
+    holder: target.blockedBy.join(', ') || st('shared.dbOps.pg.locks.anotherSession'),
+    // The blocker's own state and query, as the server reported them.
+    root: root ? ` (${root.state}${root.query ? `: ${root.query}` : ''})` : ''
+  }
+  const because =
+    blockers.length > 1
+      ? st('shared.dbOps.pg.locks.waitingOnMany', { ...waiting, blockers: blockers.length })
+      : st('shared.dbOps.pg.locks.waitingOn', waiting)
+  const count = blocked.length
   if (s !== null && s >= T.lockWaitAlarmSeconds) {
-    return { level: 'alarm', headline: `${blocked.length} session${blocked.length === 1 ? ' has' : 's have'} been blocked for up to ${formatSeconds(s)}.`, because }
+    return { level: 'alarm', headline: st('shared.dbOps.pg.locks.blockedUpTo', { count, wait: formatSeconds(s) }), because }
   }
   if (hidden > 0) {
     return {
       level: 'unknown',
-      headline: `${blocked.length} session${blocked.length === 1 ? ' is' : 's are'} blocked, and this account cannot see for how long.`,
-      because: `query_start came back NULL for ${hidden} of them, which is what Postgres returns instead of an error when the role lacks pg_read_all_stats. The wait could be two seconds or two hours. ${because}`
+      headline: st('shared.dbOps.pg.locks.blockedUntimed.headline', { count }),
+      because: st('shared.dbOps.pg.locks.blockedUntimed.because', { hidden, detail: because })
     }
   }
   if (s !== null && s >= T.lockWaitWatchSeconds) {
-    return { level: 'watch', headline: `${blocked.length} session${blocked.length === 1 ? ' is' : 's are'} blocked, the longest for ${formatSeconds(s)}.`, because }
+    return { level: 'watch', headline: st('shared.dbOps.pg.locks.blockedLongest', { count, wait: formatSeconds(s) }), because }
   }
-  return { level: 'watch', headline: `${blocked.length} session${blocked.length === 1 ? ' is' : 's are'} briefly blocked (${formatSeconds(s ?? 0)}).`, because }
+  return { level: 'watch', headline: st('shared.dbOps.pg.locks.blockedBriefly', { count, wait: formatSeconds(s ?? 0) }), because }
 }
 
 export function judgePgSizes(v: PgSizesValue): DbVerdict {
@@ -1678,8 +1689,13 @@ export function judgePgSizes(v: PgSizesValue): DbVerdict {
   const biggest = v.tables[0]
   return {
     level: 'ok',
-    headline: `${formatBytes(total)} across ${v.databases.length} database${v.databases.length === 1 ? '' : 's'}.`,
-    because: biggest ? `Largest table: ${biggest.schema ? `${biggest.schema}.` : ''}${biggest.name} at ${formatBytes(biggest.totalBytes)}.` : undefined
+    headline: st('shared.dbOps.pg.sizes.headline', { count: v.databases.length, bytes: formatBytes(total) }),
+    because: biggest
+      ? st('shared.dbOps.pg.sizes.largest', {
+          table: `${biggest.schema ? `${biggest.schema}.` : ''}${biggest.name}`,
+          bytes: formatBytes(biggest.totalBytes)
+        })
+      : undefined
   }
 }
 
@@ -1687,20 +1703,24 @@ export function judgePgStatements(v: PgStatementsValue): DbVerdict {
   if (v.redactedText) {
     return {
       level: 'unknown',
-      headline: 'pg_stat_statements is installed and this account may not read the statement text.',
-      because: `Every query came back as "${PG_REDACTED_QUERY}". The timings beside them are real; the statements they belong to are not shown. pg_read_all_stats or pg_monitor would show them.`
+      headline: st('shared.dbOps.pg.statements.textHidden.headline'),
+      because: st('shared.dbOps.pg.statements.textHidden.because', { redacted: PG_REDACTED_QUERY })
     }
   }
   if (v.statements.length === 0) {
-    return { level: 'unknown', headline: 'pg_stat_statements is installed and has recorded nothing yet.' }
+    return { level: 'unknown', headline: st('shared.dbOps.pg.statements.empty') }
   }
   const top = v.statements[0]
-  const headline = `${v.statements.length} statements by total time; the top one has cost ${formatSeconds((top.totalExecMs ?? 0) / 1000)} over ${formatCount(top.calls)} calls.`
+  const headline = st('shared.dbOps.pg.statements.top', {
+    total: v.statements.length,
+    cost: formatSeconds((top.totalExecMs ?? 0) / 1000),
+    calls: formatCount(top.calls)
+  })
   if (v.redactedCount > 0) {
     return {
       level: 'unknown',
-      headline: `${headline} ${v.redactedCount} of ${v.statements.length} statement texts are hidden from this account.`,
-      because: `Postgres shows a role its own statements and replaces the rest with "${PG_REDACTED_QUERY}". The timings are real; the statements they belong to are not all shown. pg_read_all_stats or pg_monitor would show them.`
+      headline: st('shared.dbOps.pg.statements.someHidden.headline', { headline, hidden: v.redactedCount, total: v.statements.length }),
+      because: st('shared.dbOps.pg.statements.someHidden.because', { redacted: PG_REDACTED_QUERY })
     }
   }
   return { level: 'ok', headline }
@@ -2112,9 +2132,8 @@ export function judgeMysqlReplication(channels: MysqlReplicationChannel[]): DbVe
   if (channels.length === 0) {
     return {
       level: 'unknown',
-      headline: 'This server is not replicating from anything.',
-      because:
-        'SHOW REPLICA STATUS returned no rows, which is what a source (or a standalone server) returns. If this server is supposed to be a replica, that is the finding.'
+      headline: st('shared.dbOps.mysql.replication.none.headline'),
+      because: st('shared.dbOps.mysql.replication.none.because')
     }
   }
 
@@ -2125,8 +2144,13 @@ export function judgeMysqlReplication(channels: MysqlReplicationChannel[]): DbVe
 }
 
 function channelName(c: MysqlReplicationChannel): string {
-  const from = c.sourceHost ? ` from ${c.sourceHost}` : ''
-  return c.channel && c.channel !== 'default' ? `Channel "${c.channel}"${from}` : `Replication${from}`
+  const host = c.sourceHost
+  if (c.channel && c.channel !== 'default') {
+    return host
+      ? st('shared.dbOps.mysql.channel.namedFrom', { channel: c.channel, host })
+      : st('shared.dbOps.mysql.channel.named', { channel: c.channel })
+  }
+  return host ? st('shared.dbOps.mysql.channel.defaultFrom', { host }) : st('shared.dbOps.mysql.channel.default')
 }
 
 export function judgeMysqlChannel(c: MysqlReplicationChannel): DbVerdict {
@@ -2135,50 +2159,52 @@ export function judgeMysqlChannel(c: MysqlReplicationChannel): DbVerdict {
   const sqlOk = c.sqlRunning === 'Yes'
 
   if (!ioOk || !sqlOk) {
-    const stopped = [!ioOk ? 'IO' : null, !sqlOk ? 'SQL' : null].filter(Boolean).join(' and ')
     // Last_IO_Error reads `error connecting to master 'replicator@db:3306'`.
     // That sentence is shown here AND written into the durable event store.
     const err = redactDbIdentifiers((c.lastIoError || '').trim() || (c.lastSqlError || '').trim())
+    const errnos = { io: c.lastIoErrno ?? 0, sql: c.lastSqlErrno ?? 0 }
     return {
       level: 'alarm',
-      headline: `${name} is BROKEN — the ${stopped} thread${stopped.includes('and') ? 's are' : ' is'} not running.`,
+      headline:
+        !ioOk && !sqlOk
+          ? st('shared.dbOps.mysql.channel.bothThreadsStopped', { name })
+          : st('shared.dbOps.mysql.channel.threadStopped', { name, thread: !ioOk ? 'IO' : 'SQL' }),
       because: err
         ? err
-        : `The server reported no error (Last_IO_Errno ${c.lastIoErrno ?? 0}, Last_SQL_Errno ${c.lastSqlErrno ?? 0}) — a thread that was stopped deliberately looks exactly like this. Nothing is being replicated either way.` +
-          (c.secondsBehind === 0
-            ? ' Note that it is still reporting 0 seconds behind, which is not a measurement.'
-            : '')
+        : c.secondsBehind === 0
+          ? st('shared.dbOps.mysql.channel.noErrorZeroLag', errnos)
+          : st('shared.dbOps.mysql.channel.noError', errnos)
     }
   }
 
   if (c.secondsBehind === null) {
     return {
       level: 'alarm',
-      headline: `${name} is BROKEN — the server would not say how far behind it is.`,
-      because:
-        'Seconds_Behind_Source is NULL. MySQL returns NULL, not a number, whenever it cannot compute the lag — which in practice means replication is not running. It is NOT zero, and it is not "up to date".'
+      headline: st('shared.dbOps.mysql.channel.lagNull.headline', { name }),
+      because: st('shared.dbOps.mysql.channel.lagNull.because')
     }
   }
 
   // A deliberately delayed replica is meant to be behind by exactly this much.
   const delay = c.sqlDelaySeconds ?? 0
   const effective = Math.max(0, c.secondsBehind - delay)
-  const delayNote = delay > 0 ? ` (${formatSeconds(delay)} of that is the configured SQL_Delay)` : ''
+  const lag = { name, lag: formatSeconds(c.secondsBehind), delay: formatSeconds(delay) }
+  const behind = delay > 0 ? st('shared.dbOps.mysql.channel.behindDelayed', lag) : st('shared.dbOps.mysql.channel.behind', lag)
 
   if (effective >= T.replicaLagAlarmSeconds) {
     return {
       level: 'alarm',
-      headline: `${name} is ${formatSeconds(c.secondsBehind)} behind${delayNote}.`,
-      because: 'Reads from this replica are returning rows from that far in the past, and a failover to it would lose everything since.'
+      headline: behind,
+      because: st('shared.dbOps.mysql.channel.behindAlarm')
     }
   }
   if (effective >= T.replicaLagWatchSeconds) {
-    return { level: 'watch', headline: `${name} is ${formatSeconds(c.secondsBehind)} behind${delayNote}.` }
+    return { level: 'watch', headline: behind }
   }
   return {
     level: 'ok',
-    headline: `${name} is running, ${formatSeconds(c.secondsBehind)} behind${delayNote}.`,
-    because: c.ioState ? `IO thread: ${c.ioState}` : undefined
+    headline: delay > 0 ? st('shared.dbOps.mysql.channel.runningDelayed', lag) : st('shared.dbOps.mysql.channel.running', lag),
+    because: c.ioState ? st('shared.dbOps.mysql.channel.ioThread', { state: c.ioState }) : undefined
   }
 }
 
@@ -2186,28 +2212,27 @@ export function judgeMysqlBinlogs(v: MysqlBinlogsValue): DbVerdict {
   if (!v.logBin) {
     return {
       level: 'unknown',
-      headline: 'Binary logging is OFF.',
-      because:
-        'This server cannot be a replication source and has no point-in-time recovery — a restore can only go back to the last full backup. On a standalone server that may be deliberate.'
+      headline: st('shared.dbOps.mysql.binlogs.off.headline'),
+      because: st('shared.dbOps.mysql.binlogs.off.because')
     }
   }
   if (v.expireSeconds === 0) {
     return {
       level: 'watch',
-      headline: `Binary logs never expire, and there are ${v.files.length} of them using ${formatBytes(v.totalBytes)}.`,
-      because: `${v.expireSource} is 0, so nothing removes them and the volume grows until the disk fills. Set an expiry, or purge them from a job with the retention you actually want.`
+      headline: st('shared.dbOps.mysql.binlogs.neverExpire.headline', { files: v.files.length, bytes: formatBytes(v.totalBytes) }),
+      because: st('shared.dbOps.mysql.binlogs.neverExpire.because', { setting: String(v.expireSource) })
     }
   }
   const expiryNote =
     v.expireSeconds === null
-      ? 'No expiry setting could be read.'
-      : `Kept for ${formatSeconds(v.expireSeconds)} (${v.expireSource}).`
+      ? st('shared.dbOps.mysql.binlogs.noExpiry')
+      : st('shared.dbOps.mysql.binlogs.keptFor', { age: formatSeconds(v.expireSeconds), setting: String(v.expireSource) })
   if (v.files.length === 0) {
-    return { level: 'unknown', headline: 'Binary logging is on and no log files are listed.', because: expiryNote }
+    return { level: 'unknown', headline: st('shared.dbOps.mysql.binlogs.noFiles'), because: expiryNote }
   }
   return {
     level: 'ok',
-    headline: `${v.files.length} binary log${v.files.length === 1 ? '' : 's'} using ${formatBytes(v.totalBytes)}.`,
+    headline: st('shared.dbOps.mysql.binlogs.ok', { count: v.files.length, bytes: formatBytes(v.totalBytes) }),
     because: expiryNote
   }
 }
@@ -2216,16 +2241,15 @@ export function judgeMysqlSlowLog(v: MysqlSlowLogValue): DbVerdict {
   if (!v.enabled) {
     return {
       level: 'unknown',
-      headline: 'The slow query log is OFF.',
-      because:
-        'Nothing is being recorded, so "no slow queries" here means "no evidence", not "none happened". This is the first question about slow queries and it has to be answered before the second one means anything.'
+      headline: st('shared.dbOps.mysql.slowlog.off.headline'),
+      because: st('shared.dbOps.mysql.slowlog.off.because')
     }
   }
   if ((v.output ?? '').toUpperCase().includes('NONE')) {
     return {
       level: 'unknown',
-      headline: 'The slow query log is enabled and log_output is NONE, so nothing is written anywhere.',
-      because: `slow_query_log is ON but log_output is "${v.output}".`
+      headline: st('shared.dbOps.mysql.slowlog.outputNone.headline'),
+      because: st('shared.dbOps.mysql.slowlog.outputNone.because', { output: v.output ?? '' })
     }
   }
   const t = v.longQueryTimeSeconds
@@ -2234,19 +2258,23 @@ export function judgeMysqlSlowLog(v: MysqlSlowLogValue): DbVerdict {
   // "unknown slow queries recorded in unknown of uptime" under a green tick.
   const uncounted = v.slowQueries === null || v.uptimeSeconds === null
   const counted = uncounted
-    ? 'SHOW GLOBAL STATUS could not be read, so how much this log has actually recorded is unknown.'
-    : `${formatCount(v.slowQueries)} slow quer${v.slowQueries === 1 ? 'y' : 'ies'} recorded in ${formatSeconds(v.uptimeSeconds)} of uptime.`
+    ? st('shared.dbOps.mysql.slowlog.uncounted')
+    : st('shared.dbOps.mysql.slowlog.counted', {
+        count: v.slowQueries ?? 0,
+        queries: formatCount(v.slowQueries),
+        uptime: formatSeconds(v.uptimeSeconds)
+      })
   if (t !== null && t >= T.slowLogUselessThresholdSeconds) {
     return {
       level: 'watch',
-      headline: `The slow query log is on, but long_query_time is ${t}s.`,
-      because: `Almost nothing takes that long, so the log will stay near-empty and prove nothing. ${counted}`
+      headline: st('shared.dbOps.mysql.slowlog.thresholdTooHigh.headline', { threshold: t }),
+      because: st('shared.dbOps.mysql.slowlog.thresholdTooHigh.because', { counted })
     }
   }
   return {
     level: uncounted ? 'unknown' : 'ok',
-    headline: `Slow query log on at ${t ?? '?'}s, writing to ${v.output ?? 'FILE'}.`,
-    because: `${counted}${v.file ? ` File: ${v.file}` : ''}`
+    headline: st('shared.dbOps.mysql.slowlog.on', { threshold: t ?? '?', output: v.output ?? 'FILE' }),
+    because: v.file ? st('shared.dbOps.mysql.slowlog.withFile', { counted, file: v.file }) : counted
   }
 }
 
@@ -2254,30 +2282,36 @@ export function judgeMysqlConnections(v: MysqlConnectionsValue): DbVerdict {
   const refused = v.connectionErrorsMaxConnections ?? 0
   const used = v.threadsConnected ?? 0
   const frac = v.maxConnections > 0 ? used / v.maxConnections : 0
-  const shape = `${used} of ${v.maxConnections} connections in use (${Math.round(frac * 100)}%)`
+  const usage = { used, max: v.maxConnections, pct: Math.round(frac * 100) }
+  const shape = st('shared.dbOps.mysql.connections.usage', usage)
+  const peak = st('shared.dbOps.mysql.connections.highWater', { peak: formatCount(v.maxUsedConnections) })
 
   if (refused > 0) {
     return {
       level: 'alarm',
-      headline: `${formatCount(refused)} connection${refused === 1 ? ' has' : 's have'} already been REFUSED for hitting max_connections.`,
-      because: `This is not a risk, it is an outage that has happened: Connection_errors_max_connections is ${formatCount(refused)}. ${shape}; the high-water mark is ${formatCount(v.maxUsedConnections)}.`
+      headline: st('shared.dbOps.mysql.connections.refused.headline', { count: refused, refused: formatCount(refused) }),
+      because: st('shared.dbOps.mysql.connections.refused.because', {
+        ...usage,
+        refused: formatCount(refused),
+        peak: formatCount(v.maxUsedConnections)
+      })
     }
   }
   if (v.maxConnections > 0 && frac >= T.connectionsAlarmFraction) {
-    return { level: 'alarm', headline: `${shape}.`, because: `High-water mark ${formatCount(v.maxUsedConnections)}.` }
+    return { level: 'alarm', headline: shape, because: peak }
   }
   if (v.maxConnections > 0 && frac >= T.connectionsWatchFraction) {
-    return { level: 'watch', headline: `${shape}.`, because: `High-water mark ${formatCount(v.maxUsedConnections)}.` }
+    return { level: 'watch', headline: shape, because: peak }
   }
   const highWater = v.maxUsedConnections ?? 0
   if (v.maxConnections > 0 && highWater / v.maxConnections >= T.connectionsAlarmFraction) {
     return {
       level: 'watch',
-      headline: `${shape}, but ${formatCount(highWater)} were in use at the peak.`,
-      because: 'Max_used_connections is a high-water mark since the last restart. It came close once and will again.'
+      headline: st('shared.dbOps.mysql.connections.nearPeak.headline', { ...usage, peak: formatCount(highWater) }),
+      because: st('shared.dbOps.mysql.connections.nearPeak.because')
     }
   }
-  return { level: 'ok', headline: `${shape}.`, because: `High-water mark ${formatCount(v.maxUsedConnections)}.` }
+  return { level: 'ok', headline: shape, because: peak }
 }
 
 /**
@@ -2311,7 +2345,7 @@ export function judgeMysqlProcesslist(v: MysqlProcesslistValue): DbVerdict {
       ? v.threadsConnected - v.visible
       : 0
   const partialNote = hidden > 0
-    ? `This account can see ${v.visible} of ${v.threadsConnected} connections — ${hidden} ${hidden === 1 ? 'is' : 'are'} hidden because it lacks the PROCESS privilege. MySQL does not warn about this.`
+    ? st('shared.dbOps.mysql.processlist.partial', { count: hidden, visible: v.visible ?? 0, total: v.threadsConnected ?? 0 })
     : undefined
 
   const running = v.processes.filter(isClientQuery)
@@ -2321,8 +2355,15 @@ export function judgeMysqlProcesslist(v: MysqlProcesslistValue): DbVerdict {
   if (s >= T.longQueryAlarmSeconds) {
     return {
       level: 'alarm',
-      headline: `A query has been running for ${formatSeconds(s)}.`,
-      because: [`${longest?.user ?? 'unknown'} on ${longest?.db ?? 'no database'}, state "${longest?.state ?? '?'}".`, partialNote]
+      headline: st('shared.dbOps.mysql.processlist.longRunning', { age: formatSeconds(s) }),
+      because: [
+        st('shared.dbOps.mysql.processlist.whoWithState', {
+          user: longest?.user ?? st('shared.dbOps.format.unknown'),
+          db: longest?.db ?? st('shared.dbOps.mysql.processlist.noDatabase'),
+          state: longest?.state ?? '?'
+        }),
+        partialNote
+      ]
         .filter(Boolean)
         .join(' ')
     }
@@ -2330,18 +2371,26 @@ export function judgeMysqlProcesslist(v: MysqlProcesslistValue): DbVerdict {
   if (s >= T.longQueryWatchSeconds) {
     return {
       level: 'watch',
-      headline: `A query has been running for ${formatSeconds(s)}.`,
-      because: [`${longest?.user ?? 'unknown'} on ${longest?.db ?? 'no database'}.`, partialNote].filter(Boolean).join(' ')
+      headline: st('shared.dbOps.mysql.processlist.longRunning', { age: formatSeconds(s) }),
+      because: [
+        st('shared.dbOps.mysql.processlist.who', {
+          user: longest?.user ?? st('shared.dbOps.format.unknown'),
+          db: longest?.db ?? st('shared.dbOps.mysql.processlist.noDatabase')
+        }),
+        partialNote
+      ]
+        .filter(Boolean)
+        .join(' ')
     }
   }
   if (hidden > 0) {
     return {
       level: 'unknown',
-      headline: `${running.length} quer${running.length === 1 ? 'y' : 'ies'} running, but this account cannot see the whole processlist.`,
+      headline: st('shared.dbOps.mysql.processlist.partialHeadline', { count: running.length }),
       because: partialNote
     }
   }
-  return { level: 'ok', headline: `${running.length} quer${running.length === 1 ? 'y' : 'ies'} running, longest ${formatSeconds(s)}.` }
+  return { level: 'ok', headline: st('shared.dbOps.mysql.processlist.ok', { count: running.length, age: formatSeconds(s) }) }
 }
 
 /**
@@ -2355,9 +2404,11 @@ export function judgeMysqlProcesslist(v: MysqlProcesslistValue): DbVerdict {
  * number that is technically correct and operationally wrong.
  */
 export function judgeMysqlBufferPool(v: MysqlBufferPoolValue): DbVerdict {
-  const size = `Pool ${formatBytes(v.sizeBytes)}${v.instances ? ` across ${v.instances} instance${v.instances === 1 ? '' : 's'}` : ''}.`
+  const size = v.instances
+    ? st('shared.dbOps.mysql.bufferpool.poolInstances', { bytes: formatBytes(v.sizeBytes), count: v.instances })
+    : st('shared.dbOps.mysql.bufferpool.pool', { bytes: formatBytes(v.sizeBytes) })
   if (v.hitRate === null) {
-    return { level: 'unknown', headline: 'The buffer pool has served no reads, so there is no hit rate to report.', because: size }
+    return { level: 'unknown', headline: st('shared.dbOps.mysql.bufferpool.noReads'), because: size }
   }
   const pct = `${(v.hitRate * 100).toFixed(2)}%`
   const tooYoung = (v.uptimeSeconds ?? 0) < T.bufferPoolMinUptimeSeconds
@@ -2370,22 +2421,32 @@ export function judgeMysqlBufferPool(v: MysqlBufferPoolValue): DbVerdict {
   if (tooYoung && tooFew) {
     return {
       level: 'unknown',
-      headline: `Buffer pool hit rate is ${pct}, over too small a sample to judge.`,
-      because: `${formatCount(v.readRequests)} read requests in ${formatSeconds(v.uptimeSeconds)} of uptime. Every first read of a cold pool is a miss, so this ratio only means something after ${formatSeconds(T.bufferPoolMinUptimeSeconds)} and ${formatCount(T.bufferPoolMinReadRequests)} requests. ${size}`
+      headline: st('shared.dbOps.mysql.bufferpool.cold.headline', { pct }),
+      because: st('shared.dbOps.mysql.bufferpool.cold.because', {
+        requests: formatCount(v.readRequests),
+        uptime: formatSeconds(v.uptimeSeconds),
+        minUptime: formatSeconds(T.bufferPoolMinUptimeSeconds),
+        minRequests: formatCount(T.bufferPoolMinReadRequests),
+        size
+      })
     }
   }
-  const detail = `${formatCount(v.reads)} disk reads out of ${formatCount(v.readRequests)} requests. ${size}`
+  const detail = st('shared.dbOps.mysql.bufferpool.reads', {
+    reads: formatCount(v.reads),
+    requests: formatCount(v.readRequests),
+    size
+  })
   if (v.hitRate < T.bufferPoolAlarmRate) {
     return {
       level: 'alarm',
-      headline: `Buffer pool hit rate is ${pct} — the working set no longer fits.`,
-      because: `${detail} Every miss is a disk read on the query's critical path.`
+      headline: st('shared.dbOps.mysql.bufferpool.alarm.headline', { pct }),
+      because: st('shared.dbOps.mysql.bufferpool.alarm.because', { detail })
     }
   }
   if (v.hitRate < T.bufferPoolWatchRate) {
-    return { level: 'watch', headline: `Buffer pool hit rate is ${pct}.`, because: detail }
+    return { level: 'watch', headline: st('shared.dbOps.mysql.bufferpool.hitRate', { pct }), because: detail }
   }
-  return { level: 'ok', headline: `Buffer pool hit rate is ${pct}.`, because: detail }
+  return { level: 'ok', headline: st('shared.dbOps.mysql.bufferpool.hitRate', { pct }), because: detail }
 }
 
 export function judgeMysqlSizes(v: MysqlSizesValue): DbVerdict {
@@ -2394,26 +2455,29 @@ export function judgeMysqlSizes(v: MysqlSizesValue): DbVerdict {
   // against, so it is disclosed instead of guessed at. A 500 GB server read by
   // an account with SELECT on one schema answers "32 KB across 1 table" with no
   // error and no warning.
-  const scope =
-    ' information_schema.TABLES lists only tables this account has some privilege on, and MySQL does not say when it has filtered the list — treat this as a floor, not a total.'
+  const scope = st('shared.dbOps.mysql.sizes.scope')
   if (v.tables.length === 0) {
     return {
       level: 'unknown',
-      headline: 'No user tables were listed.',
-      because: `That is either an empty server or an account with no privileges on anything.${scope}`
+      headline: st('shared.dbOps.mysql.sizes.empty.headline'),
+      because: `${st('shared.dbOps.mysql.sizes.empty.because')} ${scope}`
     }
   }
   const biggest = v.tables[0]
   const fragmented = v.tables.filter((t) => (t.freeBytes ?? 0) > 1_000_000_000)
   return {
     level: 'ok',
-    headline: `${formatBytes(v.totalBytes)} across ${v.tables.length} table${v.tables.length === 1 ? '' : 's'}.`,
-    because:
-      `Largest: ${biggest.schema}.${biggest.name} at ${formatBytes((biggest.dataBytes ?? 0) + (biggest.indexBytes ?? 0))}.` +
-      (fragmented.length > 0
-        ? ` ${fragmented.length} table${fragmented.length === 1 ? ' has' : 's have'} over 1 GB of DATA_FREE — space allocated on disk and not in use.`
-        : '') +
+    headline: st('shared.dbOps.mysql.sizes.headline', { count: v.tables.length, bytes: formatBytes(v.totalBytes) }),
+    because: [
+      st('shared.dbOps.mysql.sizes.largest', {
+        table: `${biggest.schema}.${biggest.name}`,
+        bytes: formatBytes((biggest.dataBytes ?? 0) + (biggest.indexBytes ?? 0))
+      }),
+      fragmented.length > 0 ? st('shared.dbOps.mysql.sizes.fragmented', { count: fragmented.length }) : null,
       scope
+    ]
+      .filter(Boolean)
+      .join(' ')
   }
 }
 
@@ -2963,7 +3027,7 @@ export function isMongoEpoch(ms: number | null): boolean {
  *  * 18 AuthenticationFailed — `denied`.
  */
 export function classifyMongoFailure(code: number | null | undefined, codeName: string | null | undefined, message: string): DbFailure {
-  const detail = redactMongoCommandEcho((message || '').trim()) || 'The command failed and the server said nothing.'
+  const detail = redactMongoCommandEcho((message || '').trim()) || st('shared.dbOps.failure.commandSilent')
   const name = (codeName || '').trim()
   switch (code) {
     case 13:
@@ -3279,8 +3343,8 @@ export function judgeMongoReplication(v: MongoReplicationValue): DbVerdict {
   if (v.members.length === 0) {
     return {
       level: 'unknown',
-      headline: 'This server reported no replica-set members.',
-      because: 'replSetGetStatus answered without a members array. That is not a healthy set and it is not a standalone — a standalone raises code 76 instead.'
+      headline: st('shared.dbOps.mongo.replication.noMembers.headline'),
+      because: st('shared.dbOps.mongo.replication.noMembers.because')
     }
   }
 
@@ -3288,22 +3352,26 @@ export function judgeMongoReplication(v: MongoReplicationValue): DbVerdict {
   if (broken.length > 0) {
     const worst = broken[0]
     const stale = broken.filter((m) => m.optimeIsEpoch)
+    const list = broken.map((m) => st('shared.dbOps.mongo.replication.memberState', { name: m.name, state: m.stateStr })).join(', ')
     return {
       level: 'alarm',
-      headline: `${broken.length === 1 ? worst.name : `${broken.length} members`} ${broken.length === 1 ? 'is' : 'are'} not carrying the set — ${broken.map((m) => `${m.name} is ${m.stateStr}`).join(', ')}.`,
+      headline:
+        broken.length === 1
+          ? st('shared.dbOps.mongo.replication.brokenOne', { name: worst.name, list })
+          : st('shared.dbOps.mongo.replication.brokenMany', { members: broken.length, list }),
       because:
         (worst.heartbeatMessage ? `${worst.heartbeatMessage} ` : '') +
         (stale.length > 0
-          ? 'The optime reported for it is the Unix epoch, which is what a member that cannot be reached reports — it is not a position and any lag computed from it is arithmetic on a placeholder.'
-          : 'Nothing is being replicated to it, and it does not count toward a majority.')
+          ? st('shared.dbOps.mongo.replication.brokenEpoch')
+          : st('shared.dbOps.mongo.replication.brokenNotReplicating'))
     }
   }
 
   if (!v.members.some((m) => m.state === 1)) {
     return {
       level: 'alarm',
-      headline: 'This replica set has no PRIMARY.',
-      because: 'Every member is reachable and none of them is accepting writes, so every write to this set is being refused right now. A set in this state is usually mid-election, and one that stays in it has lost its majority.'
+      headline: st('shared.dbOps.mongo.replication.noPrimary.headline'),
+      because: st('shared.dbOps.mongo.replication.noPrimary.because')
     }
   }
 
@@ -3311,8 +3379,8 @@ export function judgeMongoReplication(v: MongoReplicationValue): DbVerdict {
   if (voting !== null && v.healthyCount < voting) {
     return {
       level: 'alarm',
-      headline: `Only ${v.healthyCount} of the ${voting} members a majority needs are healthy.`,
-      because: 'The set cannot acknowledge a majority write or elect a new primary. One more failure and it is read-only.'
+      headline: st('shared.dbOps.mongo.replication.noMajority.headline', { healthy: v.healthyCount, voting }),
+      because: st('shared.dbOps.mongo.replication.noMajority.because')
     }
   }
 
@@ -3322,16 +3390,19 @@ export function judgeMongoReplication(v: MongoReplicationValue): DbVerdict {
   if (worst && behind >= T.replicaLagAlarmSeconds) {
     return {
       level: 'alarm',
-      headline: `${worst.name} is ${formatSeconds(behind)} behind the primary.`,
-      because: 'Reads from it return rows from that far in the past, and an election that promoted it would lose everything since.'
+      headline: st('shared.dbOps.mongo.replication.behind.headline', { name: worst.name, lag: formatSeconds(behind) }),
+      because: st('shared.dbOps.mongo.replication.behind.because')
     }
   }
   if (worst && behind >= T.replicaLagWatchSeconds) {
-    return { level: 'watch', headline: `${worst.name} is ${formatSeconds(behind)} behind the primary.` }
+    return { level: 'watch', headline: st('shared.dbOps.mongo.replication.behind.headline', { name: worst.name, lag: formatSeconds(behind) }) }
   }
+  const healthy = worst
+    ? st('shared.dbOps.mongo.replication.allHealthyLag', { members: v.members.length, lag: formatSeconds(behind) })
+    : st('shared.dbOps.mongo.replication.allHealthy', { members: v.members.length })
   return {
     level: 'ok',
-    headline: `${v.setName ? `Set ${v.setName}: ` : ''}${v.members.length} members, all healthy${worst ? `, worst lag ${formatSeconds(behind)}` : ''}.`,
+    headline: v.setName ? st('shared.dbOps.mongo.replication.setPrefix', { set: v.setName, headline: healthy }) : healthy,
     because: v.members.map((m) => `${m.name} ${m.stateStr}`).join(', ')
   }
 }
@@ -3340,61 +3411,63 @@ export function judgeMongoOplog(v: MongoOplogValue): DbVerdict {
   if (!v.present) {
     return {
       level: 'unknown',
-      headline: 'This server keeps no oplog.',
-      because: 'local.oplog.rs does not exist, which is what a mongod started without --replSet looks like. There is nothing for a secondary to catch up from and nothing to measure — this is not a window of zero.'
+      headline: st('shared.dbOps.mongo.oplog.absent.headline'),
+      because: st('shared.dbOps.mongo.oplog.absent.because')
     }
   }
   if (v.windowSeconds === null) {
     return {
       level: 'unknown',
-      headline: 'The oplog window could not be measured.',
-      because: 'The first or last oplog entry did not come back, so there is no interval to report. An unmeasured window is not a short one.'
+      headline: st('shared.dbOps.mongo.oplog.unmeasured.headline'),
+      because: st('shared.dbOps.mongo.oplog.unmeasured.because')
     }
   }
 
   const window = formatSeconds(v.windowSeconds)
-  const fill = v.maxSizeBytes && v.sizeBytes !== null ? ` It holds ${formatCount(v.count)} entries in ${formatBytes(v.sizeBytes)}, against a configured maximum of ${formatBytes(v.maxSizeBytes)}.` : ''
+  const fill =
+    v.maxSizeBytes && v.sizeBytes !== null
+      ? ` ${st('shared.dbOps.mongo.oplog.fill', { entries: formatCount(v.count), bytes: formatBytes(v.sizeBytes), max: formatBytes(v.maxSizeBytes) })}`
+      : ''
 
   // The distinction the whole question exists for. Both fixtures report a small
   // number; only one of them is a small window.
   if (v.neverRolled === true) {
     return {
       level: 'unknown',
-      headline: `The oplog covers ${window}, which is everything since this member started ${formatSeconds(v.uptimeSeconds)} ago.`,
-      because:
-        'It has not yet had to discard an entry, so this is a FLOOR and not a measurement — the window will keep growing until the oplog fills for the first time. Ask again once the member has been up longer than the window you need to survive.' +
-        fill
+      headline: st('shared.dbOps.mongo.oplog.neverRolled.headline', { window, uptime: formatSeconds(v.uptimeSeconds) }),
+      because: st('shared.dbOps.mongo.oplog.neverRolled.because') + fill
     }
   }
 
   if (v.windowSeconds < T.oplogWindowAlarmSeconds) {
     return {
       level: 'alarm',
-      headline: `The oplog covers only ${window}.`,
-      because:
-        `A secondary that falls further behind than that needs a full initial sync, not a catch-up, and so does one that is stopped for maintenance for longer. The oplog is rolling: this member has been up ${formatSeconds(v.uptimeSeconds)} and the oldest entry is ${window} old, so entries are being discarded.` +
-        fill
+      headline: st('shared.dbOps.mongo.oplog.short.headline', { window }),
+      because: st('shared.dbOps.mongo.oplog.short.because', { uptime: formatSeconds(v.uptimeSeconds), window }) + fill
     }
   }
   if (v.windowSeconds < T.oplogWindowWatchSeconds) {
     return {
       level: 'watch',
-      headline: `The oplog covers ${window}.`,
-      because: `Below a day is less room than most maintenance needs. This is a real measurement — the oplog is rolling, so it is not going to grow.${fill}`
+      headline: st('shared.dbOps.mongo.oplog.covers', { window }),
+      because: st('shared.dbOps.mongo.oplog.belowADay') + fill
     }
   }
-  return { level: 'ok', headline: `The oplog covers ${window}.`, because: `A secondary may be down for that long and still catch up.${fill}` }
+  return { level: 'ok', headline: st('shared.dbOps.mongo.oplog.covers', { window }), because: st('shared.dbOps.mongo.oplog.ok') + fill }
 }
 
 export function judgeMongoIndexes(v: MongoIndexesValue): DbVerdict {
   if (v.indexes.length === 0) {
     return {
       level: 'unknown',
-      headline: v.unreadable.length > 0 ? `Index usage could not be read for ${v.unreadable.length} collection(s).` : 'No index statistics were returned.',
+      headline:
+        v.unreadable.length > 0
+          ? st('shared.dbOps.mongo.indexes.unreadable.headline', { collections: v.unreadable.length })
+          : st('shared.dbOps.mongo.indexes.noStats'),
       because:
         v.unreadable.length > 0
-          ? `$indexStats was refused on ${v.unreadable.join(', ')}. A role with read on a database is granted $collStats and refused $indexStats on the same collection, so sizes working here is not evidence that this would.`
-          : 'There were no collections to ask about.'
+          ? st('shared.dbOps.mongo.indexes.unreadable.because', { list: v.unreadable.join(', ') })
+          : st('shared.dbOps.mongo.indexes.noCollections')
     }
   }
 
@@ -3410,25 +3483,39 @@ export function judgeMongoIndexes(v: MongoIndexesValue): DbVerdict {
   if (age !== null && age < T.indexUnusedMinCounterAgeSeconds) {
     return {
       level: 'unknown',
-      headline: `${unused.length} of the ${droppable.length} droppable indexes have not been used, but the counters are only ${formatSeconds(age)} old.`,
-      because: `$indexStats counts accesses since the server last started, so on a freshly restarted server every index looks unused. Nothing here can be called an unused index until the counters have been running longer than ${formatSeconds(T.indexUnusedMinCounterAgeSeconds)} — including a weekly report that only touches them on Sundays.`
+      headline: st('shared.dbOps.mongo.indexes.countersYoung.headline', {
+        unused: unused.length,
+        droppable: droppable.length,
+        age: formatSeconds(age)
+      }),
+      because: st('shared.dbOps.mongo.indexes.countersYoung.because', { minAge: formatSeconds(T.indexUnusedMinCounterAgeSeconds) })
     }
   }
 
   if (unused.length === 0) {
     return {
       level: 'ok',
-      headline: `All ${droppable.length} droppable indexes have been used${age !== null ? ` in the ${formatSeconds(age)} the counters have been running` : ''}.`
+      headline:
+        age !== null
+          ? st('shared.dbOps.mongo.indexes.allUsedFor', { droppable: droppable.length, age: formatSeconds(age) })
+          : st('shared.dbOps.mongo.indexes.allUsed', { droppable: droppable.length })
     }
   }
   const bytes = unused.reduce((a, i) => a + (i.sizeBytes ?? 0), 0)
+  const vars = { unused: unused.length, droppable: droppable.length, age: formatSeconds(age), bytes: formatBytes(bytes) }
+  const unusedKey: MessageKey =
+    age !== null
+      ? bytes > 0 ? 'shared.dbOps.mongo.indexes.unused.ageBytes' : 'shared.dbOps.mongo.indexes.unused.age'
+      : bytes > 0 ? 'shared.dbOps.mongo.indexes.unused.bytes' : 'shared.dbOps.mongo.indexes.unused.plain'
   return {
     level: 'watch',
-    headline: `${unused.length} of the ${droppable.length} droppable indexes have had no reads${age !== null ? ` in ${formatSeconds(age)}` : ''}${bytes > 0 ? `, holding ${formatBytes(bytes)}` : ''}.`,
-    because: `${unused
-      .slice(0, 6)
-      .map((i) => `${i.collection}.${i.name}`)
-      .join(', ')}. Each one is written on every insert and update to its collection and read by nothing. Confirm against the application before dropping any of them — a counter is not a query plan, and an index that serves one nightly report reads exactly like this.`
+    headline: st(unusedKey, vars),
+    because: st('shared.dbOps.mongo.indexes.unused.because', {
+      list: unused
+        .slice(0, 6)
+        .map((i) => `${i.collection}.${i.name}`)
+        .join(', ')
+    })
   }
 }
 
@@ -3436,108 +3523,123 @@ export function judgeMongoConnections(v: MongoConnectionsValue): DbVerdict {
   if (v.rejected !== null && v.rejected > 0) {
     return {
       level: 'alarm',
-      headline: `${formatCount(v.rejected)} connections have already been refused.`,
-      because: 'The server hit its ceiling and turned clients away. That number only ever goes up, so it may be from an incident that is over — but it did happen.'
+      headline: st('shared.dbOps.mongo.connections.rejected.headline', { rejected: formatCount(v.rejected) }),
+      because: st('shared.dbOps.mongo.connections.rejected.because')
     }
   }
   if (v.current === null || v.ceiling === null || v.ceiling <= 0) {
     return {
       level: 'unknown',
-      headline: 'The connection ceiling could not be read.',
-      because: 'serverStatus does not state a maximum directly; it is current + available, and one of those did not come back. A count with no ceiling cannot be judged.'
+      headline: st('shared.dbOps.mongo.connections.noCeiling.headline'),
+      because: st('shared.dbOps.mongo.connections.noCeiling.because')
     }
   }
   const used = v.current / v.ceiling
-  const sentence = `${formatCount(v.current)} of ${formatCount(v.ceiling)} connections in use.`
+  const sentence = st('shared.dbOps.mongo.connections.usage', { current: formatCount(v.current), ceiling: formatCount(v.ceiling) })
   if (used >= T.connectionsAlarmFraction) {
-    return { level: 'alarm', headline: sentence, because: 'The next client to connect will very likely be refused, including whichever one you would use to fix this.' }
+    return { level: 'alarm', headline: sentence, because: st('shared.dbOps.mongo.connections.nearCeiling') }
   }
   if (used >= T.connectionsWatchFraction) return { level: 'watch', headline: sentence }
-  return { level: 'ok', headline: sentence, because: v.active !== null ? `${formatCount(v.active)} of them are running an operation.` : undefined }
+  return {
+    level: 'ok',
+    headline: sentence,
+    because: v.active !== null ? st('shared.dbOps.mongo.connections.active', { active: formatCount(v.active) }) : undefined
+  }
 }
 
 export function judgeMongoCurrentOp(v: MongoCurrentOpValue): DbVerdict {
   const client = v.operations.filter(isMongoClientOp)
-  const partial = v.ownOpsOnly
-    ? ' This account may not read other users’ operations, so this is only what THIS connection is doing — never treat it as the whole server.'
-    : ''
   const longest = client.reduce<MongoOperation | null>((a, b) => (a === null || (b.secondsRunning ?? 0) > (a.secondsRunning ?? 0) ? b : a), null)
   const seconds = longest?.secondsRunning ?? 0
 
   if (v.ownOpsOnly) {
     return {
       level: 'unknown',
-      headline: `${client.length} operation(s) visible, and only this connection's.`,
-      because: `$currentOp was refused with allUsers: true and answered with allUsers: false.${partial}`
+      headline: st('shared.dbOps.mongo.currentop.ownOnly.headline', { ops: client.length }),
+      because: st('shared.dbOps.mongo.currentop.ownOnly.because')
     }
   }
   if (client.length === 0) {
     return {
       level: 'ok',
-      headline: 'Nothing is running but the server’s own threads.',
-      because: `${v.operations.length - client.length} internal operations were excluded — the journal flusher, the checkpointer and the replication oplog tail, which is a cursor that runs for the member's entire uptime by design.`
+      headline: st('shared.dbOps.mongo.currentop.idle.headline'),
+      because: st('shared.dbOps.mongo.currentop.idle.because', { internal: v.operations.length - client.length })
     }
   }
   if (seconds >= T.longQueryAlarmSeconds) {
     return {
       level: 'alarm',
-      headline: `An operation has been running for ${formatSeconds(seconds)} on ${longest?.ns ?? 'an unknown namespace'}.`,
-      because: `${longest?.op ?? 'op'}${longest?.planSummary ? `, ${longest.planSummary}` : ''}. There is no control here to kill it: see the refusal at the top of this file.${partial}`
+      headline: st('shared.dbOps.mongo.currentop.longRunning', {
+        age: formatSeconds(seconds),
+        ns: longest?.ns ?? st('shared.dbOps.mongo.currentop.unknownNamespace')
+      }),
+      because: st('shared.dbOps.mongo.currentop.noKill', {
+        op: `${longest?.op ?? 'op'}${longest?.planSummary ? `, ${longest.planSummary}` : ''}`
+      })
     }
   }
   if (seconds >= T.longQueryWatchSeconds) {
-    return { level: 'watch', headline: `An operation has been running for ${formatSeconds(seconds)} on ${longest?.ns ?? 'an unknown namespace'}.` }
+    return {
+      level: 'watch',
+      headline: st('shared.dbOps.mongo.currentop.longRunning', {
+        age: formatSeconds(seconds),
+        ns: longest?.ns ?? st('shared.dbOps.mongo.currentop.unknownNamespace')
+      })
+    }
   }
-  return { level: 'ok', headline: `${client.length} client operation(s) running, longest ${formatSeconds(seconds)}.` }
+  return { level: 'ok', headline: st('shared.dbOps.mongo.currentop.ok', { ops: client.length, age: formatSeconds(seconds) }) }
 }
 
 export function judgeMongoSizes(v: MongoSizesValue): DbVerdict {
   const total = v.totalBytes
   const biggest = v.collections[0]
-  const tail = biggest ? ` Largest collection: ${biggest.name} at ${formatBytes(biggest.storageBytes)}.` : ''
+  const tail = biggest
+    ? ` ${st('shared.dbOps.mongo.sizes.largest', { name: biggest.name, bytes: formatBytes(biggest.storageBytes) })}`
+    : ''
   if (v.databasesFiltered) {
     return {
       level: 'unknown',
-      headline: `${formatBytes(total)} across ${v.databases.length} database(s) — and that is a floor, not a total.`,
-      because:
-        'listDatabases came back without admin and without local, which every mongod has. The server silently answered with only the databases this account is authorized on, with ok: 1 and no warning. A more privileged account would see more.' + tail
+      headline: st('shared.dbOps.mongo.sizes.filtered.headline', { bytes: formatBytes(total), databases: v.databases.length }),
+      because: st('shared.dbOps.mongo.sizes.filtered.because') + tail
     }
   }
   return {
     level: 'ok',
-    headline: `${formatBytes(total)} across ${v.databases.length} database(s).`,
+    headline: st('shared.dbOps.mongo.sizes.ok', { bytes: formatBytes(total), databases: v.databases.length }),
     because: tail || undefined
   }
 }
 
 export function judgeMongoAsserts(v: MongoAssertsValue): DbVerdict {
   const rate = (n: number | null): string =>
-    n !== null && v.uptimeSeconds ? ` (${(n / (v.uptimeSeconds / 3600)).toFixed(1)}/hour)` : ''
+    n !== null && v.uptimeSeconds ? ` ${st('shared.dbOps.mongo.asserts.perHour', { rate: (n / (v.uptimeSeconds / 3600)).toFixed(1) })}` : ''
   if ((v.regular ?? 0) > 0 || (v.msg ?? 0) > 0) {
     return {
       level: 'alarm',
-      headline: `${formatCount((v.regular ?? 0) + (v.msg ?? 0))} internal assertions have fired${rate((v.regular ?? 0) + (v.msg ?? 0))}.`,
-      because:
-        'Regular and msg assertions are the server catching itself in a state it did not expect — a corrupt index, a storage-engine error, a bug. They are not failed client commands; those are counted separately as user assertions and are normal.'
+      headline: st('shared.dbOps.mongo.asserts.fired.headline', {
+        asserts: formatCount((v.regular ?? 0) + (v.msg ?? 0)),
+        rate: rate((v.regular ?? 0) + (v.msg ?? 0))
+      }),
+      because: st('shared.dbOps.mongo.asserts.fired.because')
     }
   }
   if ((v.rollovers ?? 0) > 0) {
     return {
       level: 'watch',
-      headline: `The assertion counters have rolled over ${formatCount(v.rollovers)} time(s).`,
-      because: 'They roll at 2^30, so the numbers beside them have restarted from zero and the totals below are not totals.'
+      headline: st('shared.dbOps.mongo.asserts.rolledOver.headline', { rollovers: formatCount(v.rollovers) }),
+      because: st('shared.dbOps.mongo.asserts.rolledOver.because')
     }
   }
   const faults = v.pageFaultsReported
-    ? ` Page faults: ${formatCount(v.pageFaults)}${rate(v.pageFaults)}.`
-    : ' Page faults are not reported on this platform — serverStatus says so itself, in extra_info.note, and that is different from a count of zero.'
+    ? ` ${st('shared.dbOps.mongo.asserts.pageFaults', { faults: formatCount(v.pageFaults), rate: rate(v.pageFaults) })}`
+    : ` ${st('shared.dbOps.mongo.asserts.pageFaultsUnreported')}`
   return {
     level: 'ok',
-    headline: `No internal assertions${v.user !== null ? `, ${formatCount(v.user)} user assertions` : ''}.`,
-    because:
-      (v.user !== null && v.user > 0
-        ? 'User assertions are failed client commands — a duplicate key, a bad query — and a healthy server has plenty.'
-        : '') + faults
+    headline:
+      v.user !== null
+        ? st('shared.dbOps.mongo.asserts.noneWithUser', { user: formatCount(v.user) })
+        : st('shared.dbOps.mongo.asserts.none'),
+    because: (v.user !== null && v.user > 0 ? st('shared.dbOps.mongo.asserts.userNormal') : '') + faults
   }
 }
 
@@ -4130,7 +4232,7 @@ export function parseRedisConfig(reply: unknown): Record<string, string> {
  *    correct: nothing here can be answered yet.
  */
 export function classifyRedisFailure(message: string): DbFailure {
-  const detail = (message || '').trim() || 'The command failed and the server said nothing.'
+  const detail = (message || '').trim() || st('shared.dbOps.failure.commandSilent')
   if (/^NOPERM\b/.test(detail)) return { status: 'denied', detail }
   if (/^(NOAUTH|WRONGPASS)\b/.test(detail)) return { status: 'denied', detail }
   if (/cluster support disabled/i.test(detail)) return { status: 'absent', detail }
@@ -4362,159 +4464,199 @@ export function judgeRedisMemory(v: RedisMemoryValue): DbVerdict {
   if (!v.maxmemoryReported) {
     return {
       level: 'unknown',
-      headline: `Using ${formatBytes(v.usedBytes)}, against a limit this server did not report.`,
-      because:
-        'There was no maxmemory line in INFO memory at all. That is NOT the same as maxmemory being zero — an absent field means this build or version does not say, and the usage above cannot be judged against anything.'
+      headline: st('shared.dbOps.redis.memory.noLimitReported.headline', { used: formatBytes(v.usedBytes) }),
+      because: st('shared.dbOps.redis.memory.noLimitReported.because')
     }
   }
   if (v.maxmemoryBytes === 0) {
     return {
       level: 'watch',
-      headline: `Using ${formatBytes(v.usedBytes)} with NO memory limit set.`,
-      because:
-        'maxmemory is 0, which Redis means as unlimited — this is a real answer and not a missing one. Nothing stops this instance growing until the machine runs out and the kernel picks a process to kill, and the kernel usually picks the largest one. On a replica of a bounded master it may be deliberate; on a master it is the outage that has not happened yet.'
+      headline: st('shared.dbOps.redis.memory.unlimited.headline', { used: formatBytes(v.usedBytes) }),
+      because: st('shared.dbOps.redis.memory.unlimited.because')
     }
   }
   if (v.usedFraction === null) {
-    return { level: 'unknown', headline: 'Memory usage could not be measured.', because: 'used_memory did not come back, so there is nothing to compare with the limit.' }
+    return {
+      level: 'unknown',
+      headline: st('shared.dbOps.redis.memory.unmeasured.headline'),
+      because: st('shared.dbOps.redis.memory.unmeasured.because')
+    }
   }
 
   const pct = `${(v.usedFraction * 100).toFixed(1)}%`
-  const sentence = `${formatBytes(v.usedBytes)} of ${formatBytes(v.maxmemoryBytes)} — ${pct} — under ${v.policy ?? 'an unreported'} policy.`
+  const sentence = v.policy !== null
+    ? st('shared.dbOps.redis.memory.usage', { used: formatBytes(v.usedBytes), max: formatBytes(v.maxmemoryBytes), pct, policy: v.policy })
+    : st('shared.dbOps.redis.memory.usageNoPolicy', { used: formatBytes(v.usedBytes), max: formatBytes(v.maxmemoryBytes), pct })
   const noEviction = v.policy === 'noeviction'
 
   if (noEviction && v.usedFraction >= T.redisMemoryAlarmFraction) {
     return {
       level: 'alarm',
       headline: sentence,
-      because:
-        'With noeviction, Redis does not free anything to make room — it refuses the write. At this fill level the next write that needs memory comes back as OOM command not allowed, and every writing client fails at once while reads carry on looking healthy.'
+      because: st('shared.dbOps.redis.memory.noEvictionFull')
     }
   }
   if (v.usedFraction >= 1) {
-    return { level: 'alarm', headline: sentence, because: 'It is over its own limit. Redis permits this when a single command allocates past the line, which is why the number can exceed 100%.' }
+    return { level: 'alarm', headline: sentence, because: st('shared.dbOps.redis.memory.overLimit') }
   }
   if (v.usedFraction >= T.redisMemoryAlarmFraction) {
-    return { level: 'alarm', headline: sentence, because: `Keys are being evicted under ${v.policy} to stay under the limit, so data is being dropped to make room.` }
+    return { level: 'alarm', headline: sentence, because: st('shared.dbOps.redis.memory.evicting', { policy: String(v.policy) }) }
   }
   if (v.usedFraction >= T.redisMemoryWatchFraction) {
-    return { level: 'watch', headline: sentence, because: noEviction ? 'With noeviction, reaching the limit refuses writes rather than freeing anything.' : undefined }
+    return { level: 'watch', headline: sentence, because: noEviction ? st('shared.dbOps.redis.memory.noEvictionNear') : undefined }
   }
   return {
     level: 'ok',
     headline: sentence,
     because: v.fragmentationRatio !== null && v.fragmentationRatio > T.redisFragmentationWatchRatio
-      ? `Fragmentation ratio ${v.fragmentationRatio.toFixed(2)}: the process holds that much more from the OS than it is using.`
+      ? st('shared.dbOps.redis.memory.fragmentation', { ratio: v.fragmentationRatio.toFixed(2) })
       : undefined
   }
 }
 
 export function judgeRedisPersistence(v: RedisPersistenceValue): DbVerdict {
   if (v.loading === true) {
-    return { level: 'unknown', headline: 'This instance is still loading its dataset.', because: 'Nothing else on this page is a steady-state measurement until it has finished.' }
+    return {
+      level: 'unknown',
+      headline: st('shared.dbOps.redis.persistence.loading.headline'),
+      because: st('shared.dbOps.redis.persistence.loading.because')
+    }
   }
   if (v.rdbLastBgsaveStatus !== null && v.rdbLastBgsaveStatus !== 'ok') {
     return {
       level: 'alarm',
-      headline: `The last RDB save FAILED (rdb_last_bgsave_status: ${v.rdbLastBgsaveStatus}).`,
-      because: 'There is no current snapshot on disk. A restart from here loses everything written since the last save that did work, and the usual cause is that the fork could not get memory.'
+      headline: st('shared.dbOps.redis.persistence.rdbFailed.headline', { status: v.rdbLastBgsaveStatus }),
+      because: st('shared.dbOps.redis.persistence.rdbFailed.because')
     }
   }
   if (v.aofEnabled === true && v.aofLastWriteStatus !== null && v.aofLastWriteStatus !== 'ok') {
     return {
       level: 'alarm',
-      headline: `The append-only file is not being written (aof_last_write_status: ${v.aofLastWriteStatus}).`,
-      because: 'AOF is on and the last write to it failed, so the durability this instance is configured for is not happening. Usually a full disk.'
+      headline: st('shared.dbOps.redis.persistence.aofFailed.headline', { status: v.aofLastWriteStatus }),
+      because: st('shared.dbOps.redis.persistence.aofFailed.because')
     }
   }
   if (v.aofEnabled === false && v.rdbLastSaveAgeSeconds === null) {
-    return { level: 'unknown', headline: 'Persistence state could not be read.', because: 'Neither an AOF nor an RDB save time came back.' }
+    return {
+      level: 'unknown',
+      headline: st('shared.dbOps.redis.persistence.unreadable.headline'),
+      because: st('shared.dbOps.redis.persistence.unreadable.because')
+    }
   }
   if (v.aofEnabled === false) {
     const age = v.rdbLastSaveAgeSeconds ?? 0
     const pending = v.rdbChangesSinceLastSave ?? 0
-    const sentence = `AOF is off; the last RDB save was ${formatSeconds(age)} ago with ${formatCount(pending)} changes since.`
+    const sentence = st('shared.dbOps.redis.persistence.rdbOnly', { age: formatSeconds(age), changes: formatCount(pending) })
     if (pending > 0 && age >= T.redisRdbStaleAlarmSeconds) {
-      return { level: 'alarm', headline: sentence, because: 'Everything written in that window exists only in memory. A restart, an OOM kill or a crash loses all of it.' }
+      return { level: 'alarm', headline: sentence, because: st('shared.dbOps.redis.persistence.rdbStaleAlarm') }
     }
     if (pending > 0 && age >= T.redisRdbStaleWatchSeconds) {
-      return { level: 'watch', headline: sentence, because: 'That is how much data a restart would lose.' }
+      return { level: 'watch', headline: sentence, because: st('shared.dbOps.redis.persistence.rdbStaleWatch') }
     }
     return { level: 'ok', headline: sentence }
   }
   if (v.aofRewriteFailures !== null && v.aofRewriteFailures > 0) {
     return {
       level: 'watch',
-      headline: `${formatCount(v.aofRewriteFailures)} consecutive AOF rewrites have failed.`,
-      because: 'The file is still being written, so nothing is lost yet, but it is not being compacted and it will keep growing.'
+      headline: st('shared.dbOps.redis.persistence.rewriteFailed.headline', { failures: formatCount(v.aofRewriteFailures) }),
+      because: st('shared.dbOps.redis.persistence.rewriteFailed.because')
     }
   }
   return {
     level: 'ok',
-    headline: `AOF is on and its last write was ${v.aofLastWriteStatus ?? 'not reported'}.`,
-    because: v.rdbLastSaveAgeSeconds !== null ? `The last RDB save was ${formatSeconds(v.rdbLastSaveAgeSeconds)} ago.` : undefined
+    headline:
+      v.aofLastWriteStatus !== null
+        ? st('shared.dbOps.redis.persistence.aofOn', { status: v.aofLastWriteStatus })
+        : st('shared.dbOps.redis.persistence.aofOnUnreported'),
+    because:
+      v.rdbLastSaveAgeSeconds !== null
+        ? st('shared.dbOps.redis.persistence.lastRdbSave', { age: formatSeconds(v.rdbLastSaveAgeSeconds) })
+        : undefined
   }
 }
 
 export function judgeRedisReplication(v: RedisReplicationValue): DbVerdict {
   if (v.role === 'slave' || v.role === 'replica') {
     if (v.masterLinkStatus !== 'up') {
+      const status = v.masterLinkStatus ?? st('shared.dbOps.redis.notReported')
       return {
         level: 'alarm',
-        headline: `This replica has LOST its master${v.linkDownSeconds !== null ? `, ${formatSeconds(v.linkDownSeconds)} ago` : ''} (master_link_status: ${v.masterLinkStatus ?? 'not reported'}).`,
+        headline:
+          v.linkDownSeconds !== null
+            ? st('shared.dbOps.redis.replication.lostMaster.headlineAgo', { age: formatSeconds(v.linkDownSeconds), status })
+            : st('shared.dbOps.redis.replication.lostMaster.headline', { status }),
         because: v.masterLastIoSentinel
-          ? 'It is serving whatever it had when the link dropped, and every write since then is missing. Redis reports master_last_io_seconds_ago as -1 here, which is its way of saying it has no measurement at all — it is not "zero seconds ago".'
-          : 'It is serving whatever it had when the link dropped, and every write since then is missing.'
+          ? st('shared.dbOps.redis.replication.lostMaster.becauseSentinel')
+          : st('shared.dbOps.redis.replication.lostMaster.because')
       }
     }
     if (v.syncInProgress === true) {
-      return { level: 'watch', headline: 'This replica is mid-resynchronisation with its master.', because: 'Its dataset is incomplete until the sync finishes, so reads from it are not trustworthy yet.' }
+      return {
+        level: 'watch',
+        headline: st('shared.dbOps.redis.replication.resyncing.headline'),
+        because: st('shared.dbOps.redis.replication.resyncing.because')
+      }
     }
     const io = v.masterLastIoSeconds
-    const sentence = `Replicating from ${v.masterHost ?? 'its master'}, last heard from ${io === null ? 'an unreported time' : formatSeconds(io)} ago.`
-    if (io !== null && io >= T.replicaLagAlarmSeconds) return { level: 'alarm', headline: sentence, because: 'A link that is nominally up and silent for that long is a link that is about to be declared down.' }
+    const sentence = st('shared.dbOps.redis.replication.replicating', {
+      master: v.masterHost ?? st('shared.dbOps.redis.replication.itsMaster'),
+      age: io === null ? st('shared.dbOps.redis.replication.unreportedTime') : formatSeconds(io)
+    })
+    if (io !== null && io >= T.replicaLagAlarmSeconds) {
+      return { level: 'alarm', headline: sentence, because: st('shared.dbOps.redis.replication.silentLink') }
+    }
     if (io !== null && io >= T.replicaLagWatchSeconds) return { level: 'watch', headline: sentence }
     return {
       level: 'ok',
       headline: sentence,
-      because: v.replicaReplOffset !== null ? `At offset ${formatCount(v.replicaReplOffset)}. Whether that is level with the master cannot be told from here — this instance only reports its own offset.` : undefined
+      because:
+        v.replicaReplOffset !== null
+          ? st('shared.dbOps.redis.replication.atOffset', { offset: formatCount(v.replicaReplOffset) })
+          : undefined
     }
   }
 
   const count = v.connectedReplicas
   if (count === null) {
-    return { level: 'unknown', headline: 'The replication role could not be read.', because: 'INFO replication did not report connected_slaves.' }
+    return {
+      level: 'unknown',
+      headline: st('shared.dbOps.redis.replication.roleUnreadable.headline'),
+      because: st('shared.dbOps.redis.replication.roleUnreadable.because')
+    }
   }
   if (count === 0) {
     // The trap this question is written around. It cannot be resolved from INFO
     // and is therefore not guessed at.
     return {
       level: 'unknown',
-      headline: 'This is a master with no replicas connected.',
-      because:
-        'Whether that is correct cannot be answered from INFO. A standalone Redis reports exactly this line and is completely healthy; so does a master whose only replica died a minute ago, and the two are identical strings. OpsMaxx does not read a Sentinel or a cluster configuration, so it does not know which this is — and calling it healthy would be a guess in the hour it matters.'
+      headline: st('shared.dbOps.redis.replication.noReplicas.headline'),
+      because: st('shared.dbOps.redis.replication.noReplicas.because')
     }
   }
   const offline = v.replicas.filter((r) => r.state !== 'online')
   if (offline.length > 0) {
     return {
       level: 'alarm',
-      headline: `${offline.length} of ${count} replicas are not online (${offline.map((r) => r.state ?? 'no state').join(', ')}).`,
-      because: 'A replica in any state other than online is not receiving the stream, whatever its offset says.'
+      headline: st('shared.dbOps.redis.replication.offline.headline', {
+        offline: offline.length,
+        total: count,
+        states: offline.map((r) => r.state ?? st('shared.dbOps.redis.replication.noState')).join(', ')
+      }),
+      because: st('shared.dbOps.redis.replication.offline.because')
     }
   }
   const laggiest = v.replicas.reduce<RedisReplicaLink | null>((a, b) => (a === null || (b.lagSeconds ?? 0) > (a.lagSeconds ?? 0) ? b : a), null)
   const lag = laggiest?.lagSeconds ?? 0
   if (lag >= T.replicaLagWatchSeconds) {
-    return { level: 'watch', headline: `${count} replicas connected, worst ${formatSeconds(lag)} behind.` }
+    return { level: 'watch', headline: st('shared.dbOps.redis.replication.lagging', { replicas: count, lag: formatSeconds(lag) }) }
   }
   const gaps = v.replicas
     .map((r) => (v.masterReplOffset !== null && r.offsetBytes !== null ? v.masterReplOffset - r.offsetBytes : null))
     .filter((n): n is number => n !== null)
   return {
     level: 'ok',
-    headline: `${count} replica(s) connected and online.`,
-    because: gaps.length > 0 ? `Furthest behind by ${formatBytes(Math.max(...gaps))} of replication stream.` : undefined
+    headline: st('shared.dbOps.redis.replication.ok', { replicas: count }),
+    because: gaps.length > 0 ? st('shared.dbOps.redis.replication.furthestBehind', { bytes: formatBytes(Math.max(...gaps)) }) : undefined
   }
 }
 
@@ -4523,69 +4665,77 @@ export function judgeRedisSlowlog(v: RedisSlowlogValue): DbVerdict {
   if (threshold === null) {
     return {
       level: 'unknown',
-      headline: `${formatCount(v.length)} entries in the slow log, recorded above a threshold this account could not read.`,
-      because: 'Without slowlog-log-slower-than the log cannot be interpreted: an empty log means "nothing was slow" at 10 ms and means nothing at all at 10 seconds.'
+      headline: st('shared.dbOps.redis.slowlog.noThreshold.headline', { entries: formatCount(v.length) }),
+      because: st('shared.dbOps.redis.slowlog.noThreshold.because')
     }
   }
   if (threshold < 0) {
     return {
       level: 'unknown',
-      headline: 'The slow log is switched OFF (slowlog-log-slower-than is negative).',
-      because: 'Nothing is being recorded, so the log being empty says nothing about whether this server has slow commands. Redis has no other record of them.'
+      headline: st('shared.dbOps.redis.slowlog.off.headline'),
+      because: st('shared.dbOps.redis.slowlog.off.because')
     }
   }
   if (threshold === 0) {
     return {
       level: 'unknown',
-      headline: 'The slow log records EVERY command (slowlog-log-slower-than is 0).',
-      because:
-        'A log of everything cannot tell you what is slow, and it costs memory and time on every command. It also fills with this panel’s own reads: the entries below will largely be the INFO calls that produced this page.'
+      headline: st('shared.dbOps.redis.slowlog.everything.headline'),
+      because: st('shared.dbOps.redis.slowlog.everything.because')
     }
   }
 
   const slowest = v.entries[0]
   const full = v.maxLength !== null && v.length !== null && v.length >= v.maxLength
-  const rolled = full ? ` The log is at its maximum of ${formatCount(v.maxLength)} entries, so older ones have already been discarded.` : ''
+  const rolled = full ? ` ${st('shared.dbOps.redis.slowlog.rolled', { max: formatCount(v.maxLength) })}` : ''
   const thresholdMs = threshold / 1000
+  const held = st('shared.dbOps.redis.slowlog.held', { entries: formatCount(v.length) }) + rolled
 
   if (v.entries.length === 0) {
     return {
       level: 'ok',
-      headline: `Nothing has taken longer than ${thresholdMs.toFixed(0)} ms since the log was last reset.`,
-      because: `${formatCount(v.length)} entries are held.${rolled}`
+      headline: st('shared.dbOps.redis.slowlog.empty', { threshold: thresholdMs.toFixed(0) }),
+      because: held
     }
   }
   const micros = slowest.microseconds ?? 0
-  const sentence = `Slowest recorded command: ${slowest.command || 'unknown'} at ${(micros / 1000).toFixed(0)} ms, against a ${thresholdMs.toFixed(0)} ms threshold.`
+  const sentence = st('shared.dbOps.redis.slowlog.slowest', {
+    command: slowest.command || st('shared.dbOps.format.unknown'),
+    ms: (micros / 1000).toFixed(0),
+    threshold: thresholdMs.toFixed(0)
+  })
   if (micros >= T.redisSlowCommandAlarmMicroseconds) {
     return {
       level: 'alarm',
       headline: sentence,
-      because: `Redis runs commands one at a time, so every other client on this instance waited for that. ${formatCount(v.length)} entries are held.${rolled}`
+      because: st('shared.dbOps.redis.slowlog.blockedEveryone', { held })
     }
   }
   if (micros >= T.redisSlowCommandWatchMicroseconds) {
-    return { level: 'watch', headline: sentence, because: `${formatCount(v.length)} entries are held.${rolled}` }
+    return { level: 'watch', headline: sentence, because: held }
   }
-  return { level: 'ok', headline: sentence, because: `${formatCount(v.length)} entries are held.${rolled}` }
+  return { level: 'ok', headline: sentence, because: held }
 }
 
 export function judgeRedisClients(v: RedisClientsValue): DbVerdict {
-  const blocked = v.blocked !== null && v.blocked > 0 ? ` ${formatCount(v.blocked)} of them are blocked on a command like BLPOP, which is normal for a queue consumer and not a stall.` : ''
+  const blocked =
+    v.blocked !== null && v.blocked > 0 ? ` ${st('shared.dbOps.redis.clients.blocked', { blocked: formatCount(v.blocked) })}` : ''
   if (!v.maxclientsReported) {
     return {
       level: 'unknown',
-      headline: `${formatCount(v.connected)} clients connected, against a ceiling this server did not report.`,
-      because:
-        `INFO clients has no maxclients line at all here — Redis did not add it until 6.0, and this is the field the whole question compares against. An absent ceiling is not an unlimited one and it is not zero.${blocked}`
+      headline: st('shared.dbOps.redis.clients.noCeiling.headline', { connected: formatCount(v.connected) }),
+      because: st('shared.dbOps.redis.clients.noCeiling.because') + blocked
     }
   }
   if (v.usedFraction === null) {
-    return { level: 'unknown', headline: 'The client count could not be read.', because: 'connected_clients did not come back.' }
+    return {
+      level: 'unknown',
+      headline: st('shared.dbOps.redis.clients.unreadable.headline'),
+      because: st('shared.dbOps.redis.clients.unreadable.because')
+    }
   }
-  const sentence = `${formatCount(v.connected)} of ${formatCount(v.maxclients)} clients connected.`
+  const sentence = st('shared.dbOps.redis.clients.usage', { connected: formatCount(v.connected), max: formatCount(v.maxclients) })
   if (v.usedFraction >= T.connectionsAlarmFraction) {
-    return { level: 'alarm', headline: sentence, because: `At the ceiling Redis refuses new connections outright, and the refusals are counted in INFO stats as rejected_connections.${blocked}` }
+    return { level: 'alarm', headline: sentence, because: st('shared.dbOps.redis.clients.atCeiling') + blocked }
   }
   if (v.usedFraction >= T.connectionsWatchFraction) return { level: 'watch', headline: sentence, because: blocked || undefined }
   return { level: 'ok', headline: sentence, because: blocked || undefined }
@@ -4593,30 +4743,38 @@ export function judgeRedisClients(v: RedisClientsValue): DbVerdict {
 
 export function judgeRedisKeyspace(v: RedisKeyspaceValue, policy: string | null): DbVerdict {
   if (v.totalKeys === null) {
-    return { level: 'unknown', headline: 'The keyspace could not be read.', because: 'INFO keyspace did not come back at all.' }
+    return {
+      level: 'unknown',
+      headline: st('shared.dbOps.redis.keyspace.unreadable.headline'),
+      because: st('shared.dbOps.redis.keyspace.unreadable.because')
+    }
   }
   if (v.totalKeys === 0) {
     return {
       level: 'ok',
-      headline: 'This instance holds no keys.',
-      because: 'INFO keyspace omits a database entirely when it is empty, so a bare section here genuinely does mean zero — unlike an absent field anywhere else on this page.'
+      headline: st('shared.dbOps.redis.keyspace.empty.headline'),
+      because: st('shared.dbOps.redis.keyspace.empty.because')
     }
   }
   const withoutTtl = v.totalKeys - (v.totalExpires ?? 0)
-  const sentence = `${formatCount(v.totalKeys)} keys across ${v.databases.length} database(s), ${formatCount(v.totalExpires)} of them with an expiry.`
+  const sentence = st('shared.dbOps.redis.keyspace.summary', {
+    keys: formatCount(v.totalKeys),
+    databases: v.databases.length,
+    expiring: formatCount(v.totalExpires)
+  })
   // The combination that fills an instance: keys that never expire under a
   // policy that never evicts.
   if (policy === 'noeviction' && withoutTtl > 0 && (v.totalExpires ?? 0) / v.totalKeys < T.redisNoTtlWatchFraction) {
     return {
       level: 'watch',
       headline: sentence,
-      because: `${formatCount(withoutTtl)} keys have no TTL and the policy is noeviction, so nothing will ever remove them. That combination is what takes an instance to its memory limit and then refuses every write.`
+      because: st('shared.dbOps.redis.keyspace.noTtl', { keys: formatCount(withoutTtl) })
     }
   }
   return {
     level: 'ok',
     headline: sentence,
-    because: v.selectedDbKeys !== null ? `The database this connection is pointed at holds ${formatCount(v.selectedDbKeys)}.` : undefined
+    because: v.selectedDbKeys !== null ? st('shared.dbOps.redis.keyspace.selectedDb', { keys: formatCount(v.selectedDbKeys) }) : undefined
   }
 }
 
@@ -4624,58 +4782,69 @@ export function judgeRedisStats(v: RedisStatsValue): DbVerdict {
   if (v.rejectedConnections !== null && v.rejectedConnections > 0) {
     return {
       level: 'alarm',
-      headline: `${formatCount(v.rejectedConnections)} connections have been REFUSED because maxclients was reached.`,
-      because: 'Every one of those was a client that could not talk to Redis at all. The counter only rises, so it may be from an incident that has passed — but it did happen, and nothing else on this page records it.'
+      headline: st('shared.dbOps.redis.stats.refused.headline', { refused: formatCount(v.rejectedConnections) }),
+      because: st('shared.dbOps.redis.stats.refused.because')
     }
   }
   if (v.evictedKeys !== null && v.evictedKeys > 0) {
     return {
       level: 'watch',
-      headline: `${formatCount(v.evictedKeys)} keys have been evicted to stay under the memory limit.`,
-      because: 'Data that was written was thrown away to make room. For a cache that is the design; for anything treated as a store it is silent data loss.'
+      headline: st('shared.dbOps.redis.stats.evicted.headline', { evicted: formatCount(v.evictedKeys) }),
+      because: st('shared.dbOps.redis.stats.evicted.because')
     }
   }
   if (v.rejectedConnections === null && v.evictedKeys === null) {
-    return { level: 'unknown', headline: 'Neither the rejected-connection nor the eviction counter was reported.', because: 'INFO stats did not carry them, so nothing here can be said about either.' }
+    return {
+      level: 'unknown',
+      headline: st('shared.dbOps.redis.stats.unreported.headline'),
+      because: st('shared.dbOps.redis.stats.unreported.because')
+    }
   }
   return {
     level: 'ok',
-    headline: 'No connections refused and no keys evicted.',
+    headline: st('shared.dbOps.redis.stats.ok'),
     because:
-      (v.hitRate !== null ? `Keyspace hit rate ${(v.hitRate * 100).toFixed(1)}%. ` : '') +
-      (v.expiredKeys !== null ? `${formatCount(v.expiredKeys)} keys have expired normally, which is not eviction.` : '')
+      (v.hitRate !== null ? `${st('shared.dbOps.redis.stats.hitRate', { pct: (v.hitRate * 100).toFixed(1) })} ` : '') +
+      (v.expiredKeys !== null ? st('shared.dbOps.redis.stats.expired', { expired: formatCount(v.expiredKeys) }) : '')
   }
 }
 
 export function judgeRedisCluster(v: RedisClusterValue): DbVerdict {
   if (v.enabled === null) {
-    return { level: 'unknown', headline: 'Whether this instance is in a cluster could not be read.', because: 'INFO cluster did not report cluster_enabled.' }
+    return {
+      level: 'unknown',
+      headline: st('shared.dbOps.redis.cluster.unreadable.headline'),
+      because: st('shared.dbOps.redis.cluster.unreadable.because')
+    }
   }
   if (v.enabled === false) {
     return {
       level: 'ok',
-      headline: 'Cluster mode is off.',
-      because: 'CLUSTER INFO on this instance answers "ERR This instance has cluster support disabled", which is a fact rather than a failure. Nothing about slots or cluster state applies.'
+      headline: st('shared.dbOps.redis.cluster.off.headline'),
+      because: st('shared.dbOps.redis.cluster.off.because')
     }
   }
   if (v.state !== null && v.state !== 'ok') {
     return {
       level: 'alarm',
-      headline: `The cluster state is ${v.state}.`,
-      because: 'While the state is not ok the cluster refuses commands for the slots it cannot serve, which from a client looks like part of the keyspace disappearing.'
+      headline: st('shared.dbOps.redis.cluster.state.headline', { state: v.state }),
+      because: st('shared.dbOps.redis.cluster.state.because')
     }
   }
   if (v.slotsAssigned !== null && v.slotsAssigned < 16384) {
     return {
       level: 'alarm',
-      headline: `Only ${formatCount(v.slotsAssigned)} of 16384 hash slots are assigned.`,
-      because: 'Every key that hashes into an unassigned slot is unreachable. The cluster is incomplete, whatever cluster_state says.'
+      headline: st('shared.dbOps.redis.cluster.slots.headline', { assigned: formatCount(v.slotsAssigned) }),
+      because: st('shared.dbOps.redis.cluster.slots.because')
     }
   }
   return {
     level: 'ok',
-    headline: `Cluster state ok across ${formatCount(v.knownNodes)} known nodes.`,
-    because: v.slotsFail !== null || v.slotsPfail !== null ? `${formatCount(v.slotsFail)} slots failed, ${formatCount(v.slotsPfail)} possibly failed.` : undefined
+    headline: st('shared.dbOps.redis.cluster.ok.headline', { nodes: formatCount(v.knownNodes) }),
+    because:
+      v.slotsFail !== null || v.slotsPfail !== null
+        ? st('shared.dbOps.redis.cluster.ok.because', { failed: formatCount(v.slotsFail), pfailed: formatCount(v.slotsPfail) })
+        : undefined
   }
 }
 
@@ -5069,14 +5238,14 @@ function defaultUnansweredHeadline(id: DbQuestionId, status: DbAnswerStatus): st
   const label = DB_QUESTION_LABEL[id]
   switch (status) {
     case 'denied':
-      return `${label}: this account is not permitted to read it.`
+      return st('shared.dbOps.unanswered.denied', { label })
     case 'absent':
-      return `${label}: not enabled on this server.`
+      return st('shared.dbOps.unanswered.absent', { label })
     case 'unsupported':
-      return `${label}: this server version cannot answer it.`
+      return st('shared.dbOps.unanswered.unsupported', { label })
     case 'not-applicable':
-      return `${label}: does not apply to this server.`
+      return st('shared.dbOps.unanswered.notApplicable', { label })
     default:
-      return `${label}: could not be read.`
+      return st('shared.dbOps.unanswered.unreadable', { label })
   }
 }

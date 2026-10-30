@@ -6,7 +6,6 @@ import { Trans } from '../../lib/Trans'
 import type { MessageKey } from '../../../../shared/i18n'
 import { jobApprovalFor, planJob } from '../../../../shared/jobs'
 import {
-  COMPOSE_ENV_DISCLOSURE,
   COMPOSE_REFUSALS,
   lintComposeConfig,
   planComposeServiceRestart,
@@ -786,7 +785,7 @@ export function ComposePanel({
                     (config?.ok === true &&
                       config.config.services.some((s) => s.environment.length > 0))) && (
                     <div className="faint" style={{ fontSize: 11 }}>
-                      {COMPOSE_ENV_DISCLOSURE}
+                      {t('shared.compose.envDisclosure')}
                     </div>
                   )}
 

@@ -4,9 +4,9 @@ import { useT } from '../../lib/i18n'
 import { Trans } from '../../lib/Trans'
 import type { MessageKey } from '../../../../shared/i18n'
 import {
-  CRED_PROXY_LOOPBACK_NOTE,
+  CRED_PROXY_LOOPBACK_NOTE_KEY,
   CRED_PROXY_TOKEN_HEADER,
-  CRED_PROXY_TOKEN_NOTE,
+  CRED_PROXY_TOKEN_NOTE_KEY,
   CRED_PROXY_TOKEN_STATE_NOTE,
   credProxyTokenState,
   type CredProxyToken,
@@ -282,7 +282,7 @@ export function CredProxyPanel(): React.JSX.Element {
             {status?.address
               ? t('settings.credProxy.port.listening', { address: status.address })
               : t('settings.credProxy.port.notListening')}{' '}
-            {CRED_PROXY_LOOPBACK_NOTE}
+            {t(CRED_PROXY_LOOPBACK_NOTE_KEY)}
           </div>
         </div>
         <input
@@ -325,7 +325,7 @@ export function CredProxyPanel(): React.JSX.Element {
               values={{ header: CRED_PROXY_TOKEN_HEADER }}
               components={{ code: <code /> }}
             />{' '}
-            {CRED_PROXY_TOKEN_NOTE}
+            {t(CRED_PROXY_TOKEN_NOTE_KEY)}
             <br />
             {t('settings.credProxy.tokens.perCaller')}
           </div>

@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { DebugStatus } from '../../../../shared/debug'
 import type { AutoStartSettings, AutoStartState } from '../../../../shared/autostart'
-import { ACCESS_WRITE_OPT_IN_NOTE } from '../../../../shared/access'
 import { UnlockVaultButton } from '../common/UnlockVaultButton'
 import {
   Sliders,
@@ -25,7 +24,6 @@ import type { SettingsSection } from '../../store/nav'
 import { useVault } from '../../store/vault'
 import { useVaultPrompt } from '../../store/vaultPrompt'
 import { clsx, duration } from '../../lib/format'
-import { JOB_DETACHED_SETTING_NOTE } from '../../../../shared/jobs'
 import { bridgeOn, bridgeHas } from '../../lib/bridge'
 import { ShortcutManager } from './ShortcutManager'
 import { BackupPanel } from './BackupPanel'
@@ -1386,7 +1384,7 @@ export function Settings(): React.JSX.Element {
                   connection, and apt and dpkg do not survive that". */}
               <SettingSwitch
                 label={t('settingsPage.ssh.jobsDetached.title')}
-                desc={JOB_DETACHED_SETTING_NOTE}
+                desc={t('shared.jobs.detachedSettingNote')}
                 checked={settings.jobsDetached !== false}
                 onChange={(v) => setSettings({ jobsDetached: v })}
               />
@@ -1461,7 +1459,7 @@ export function Settings(): React.JSX.Element {
                   the screen that refuses without naming it also told them. */}
               <SettingSwitch
                 label={t('settingsPage.security.accessWrite.title')}
-                desc={ACCESS_WRITE_OPT_IN_NOTE}
+                desc={t('shared.access.write.optInNote')}
                 checked={settings.accessWriteEnabled}
                 onChange={(v) => setSettings({ accessWriteEnabled: v })}
               />

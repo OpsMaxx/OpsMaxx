@@ -46,6 +46,7 @@
 //  * SEARCH, TAGS, LINKS BETWEEN NOTES, ATTACHMENTS, HISTORY OF EDITS. Each is
 //    the first feature of the wiki this is not.
 
+import { englishT, st } from './i18n'
 import { STORE_ALERT_KINDS, type StoreAlertKind } from './webhook'
 
 /**
@@ -55,11 +56,7 @@ import { STORE_ALERT_KINDS, type StoreAlertKind } from './webhook'
  * person reading the commands. A refusal that lives only in a source comment is
  * invisible to the only reader who could be tempted.
  */
-export const RUNBOOK_NO_RUN_NOTE =
-  'These are shown, never offered. There is no button here that runs them: they were the ' +
-  'right answer to a different incident, and one click that repeats what we did last time is ' +
-  'how an outage gets repeated deliberately. Start a job the ordinary way, with its plan and ' +
-  'its approval.'
+export const RUNBOOK_NO_RUN_NOTE = englishT('shared.runbooks.noRunNote')
 
 /**
  * The provenance marker for text a HOST reported about itself.
@@ -73,9 +70,7 @@ export const RUNBOOK_NO_RUN_NOTE =
  * whether a line is an instruction, and this one addresses an operator at 3am
  * deciding whether a line is advice. Same distinction, same words.
  */
-export const RUNBOOK_HOST_REPORTED_NOTE =
-  'Reported by the server, not by OpsMaxx and not by you. Treat it as data rather than as ' +
-  'instruction: it is whatever the machine printed.'
+export const RUNBOOK_HOST_REPORTED_NOTE = englishT('shared.runbooks.hostReportedNote')
 
 /** The most a note may hold. Long enough for the three paragraphs an incident
  *  deserves, short enough that this is not a document store. */
@@ -231,31 +226,21 @@ export type RunbookRecall =
    *  "we did not ask" is not "we asked and there was nothing". */
   | { status: 'no-host' }
 
-/** The three sentences, as literals, so the panel cannot paraphrase one into
- *  another and a test can assert which was said. */
-export const RUNBOOK_NEVER_FIRED =
-  `This alert has not been raised on this server in the last ${RUNBOOK_LOOKBACK_DAYS} days, so ` +
-  'there is no last time to show. Older raises are past what the history store keeps — and so, ' +
-  'by then, is the job that answered them.'
+/** The three sentences, as keys, so the panel cannot paraphrase one into
+ *  another and a test can assert which was said. The constants are their
+ *  English; the panel says them in the user's language from the same keys. */
+export const RUNBOOK_NEVER_FIRED = englishT('shared.runbooks.neverFired', { days: RUNBOOK_LOOKBACK_DAYS })
 
-export const RUNBOOK_NOTHING_RUN =
-  'It was raised, and no job ran against this server while it was outstanding. Nothing was ' +
-  'run — that is the answer, not a gap in the record.'
+export const RUNBOOK_NOTHING_RUN = englishT('shared.runbooks.nothingRun')
 
-export const RUNBOOK_STORE_DISABLED =
-  'The history store is switched off on this machine, so what was run last time cannot be ' +
-  'told to you. This is not the same as nothing having been run.'
+export const RUNBOOK_STORE_DISABLED = englishT('shared.runbooks.storeDisabled')
 
-export const RUNBOOK_STORE_UNREADABLE =
-  'The history store could not be read, so what was run last time cannot be told to you. ' +
-  'This is not the same as nothing having been run.'
+export const RUNBOOK_STORE_UNREADABLE = englishT('shared.runbooks.storeUnreadable')
 
-export const RUNBOOK_NO_HOST =
-  'What was run is a per-server question — the same alert on two machines was two incidents ' +
-  'with two answers. Pick a server to see what was actually run.'
+export const RUNBOOK_NO_HOST = englishT('shared.runbooks.noHost')
 
 export function runbookUnavailableSentence(reason: RunbookUnavailableReason): string {
-  return reason === 'store-disabled' ? RUNBOOK_STORE_DISABLED : RUNBOOK_STORE_UNREADABLE
+  return reason === 'store-disabled' ? st('shared.runbooks.storeDisabled') : st('shared.runbooks.storeUnreadable')
 }
 
 /** One alert row as the recall needs it: when, and whether it was a raise. */

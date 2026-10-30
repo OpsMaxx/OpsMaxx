@@ -21,6 +21,8 @@
 // `<none>`. Age computed from completionTime is therefore null for exactly the
 // jobs most worth noticing, so it comes from startTime.
 
+import { st } from './i18n'
+
 export type PodPhase = 'Succeeded' | 'Failed' | 'Running' | 'Pending' | 'Unknown'
 
 export interface StalePod {
@@ -142,8 +144,10 @@ export function staleFindings(
       ageDays: age === null ? null : Math.floor(age / DAY),
       because:
         j.failed > 0
-          ? `${j.name} failed and is still on the cluster${j.completedAt === null ? ' (a failed job records no completion time, so this is measured from when it started)' : ''}.`
-          : `${j.name} completed and is still on the cluster.`
+          ? j.completedAt === null
+            ? st('shared.k8sStale.jobFailedNoCompletion', { name: j.name })
+            : st('shared.k8sStale.jobFailed', { name: j.name })
+          : st('shared.k8sStale.jobCompleted', { name: j.name })
     })
   }
 
@@ -162,8 +166,10 @@ export function staleFindings(
         // An evicted pod is `Failed` too, and the difference matters: it did
         // not crash, the node pushed it off.
         p.reason === 'Evicted'
-          ? `${p.name} was evicted — the node it was on ran short and pushed it off — and the record is still here.`
-          : `${p.name} is ${p.phase} and is still here, owned by ${p.ownerKind || 'nothing'}.`
+          ? st('shared.k8sStale.podEvicted', { name: p.name })
+          : p.ownerKind
+            ? st('shared.k8sStale.podFinished', { name: p.name, phase: p.phase, owner: p.ownerKind })
+            : st('shared.k8sStale.podFinishedUnowned', { name: p.name, phase: p.phase })
     })
   }
   return out.sort((a, b) => (b.ageDays ?? -1) - (a.ageDays ?? -1))

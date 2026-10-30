@@ -5,7 +5,7 @@ import { toast } from '../../store/toast'
 import { useT } from '../../lib/i18n'
 import type { Translate } from '../../../../shared/i18n'
 import {
-  MACHINE_GRANT_MEANING,
+  machineGrantMeaning,
   machineGrantView,
   type GrantDestination,
   type MachineGrant,
@@ -122,7 +122,7 @@ export function MachineGrants(): React.JSX.Element {
 
   return (
     <div>
-      <div className="s-desc">{MACHINE_GRANT_MEANING}</div>
+      <div className="s-desc">{machineGrantMeaning()}</div>
       {rows.map((row) => (
         <div className="setting-row" key={row.id}>
           <div className="s-info">

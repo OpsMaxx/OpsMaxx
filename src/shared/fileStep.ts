@@ -1,3 +1,4 @@
+import { st } from './i18n'
 import type { JobSpec, JobStep } from './jobs'
 
 // Item 34c: the third typed step kind, and the one with real bytes in it.
@@ -45,29 +46,29 @@ export type FileStepCheck = { ok: true } | { ok: false; reason: string }
 
 export function checkFilePush(path: string, content: string): FileStepCheck {
   const p = path.trim()
-  if (p === '') return { ok: false, reason: 'Give the full path of the file to write.' }
+  if (p === '') return { ok: false, reason: st('shared.fileStep.noPath') }
   if (!p.startsWith('/')) {
-    return { ok: false, reason: 'The path must be absolute. A relative path means a different file depending on which directory the step happens to start in.' }
+    return { ok: false, reason: st('shared.fileStep.relative') }
   }
   // Checked on the literal text rather than after a normalise, because the
   // string that reaches the host is this one.
-  if (p.includes('..')) return { ok: false, reason: 'The path may not contain "..".' }
+  if (p.includes('..')) return { ok: false, reason: st('shared.fileStep.traversal') }
   if (/[\s'"$`;|&<>()*?[\]{}]/.test(p)) {
-    return { ok: false, reason: 'The path may not contain spaces, quotes or shell characters. This text is used on a server as root.' }
+    return { ok: false, reason: st('shared.fileStep.shellChars') }
   }
-  if (p.length > 512) return { ok: false, reason: 'That path is longer than any real one.' }
+  if (p.length > 512) return { ok: false, reason: st('shared.fileStep.tooLong') }
   for (const rx of REFUSED_PATHS) {
     if (rx.test(p)) {
       return {
         ok: false,
-        reason: `OpsMaxx will not write ${p} from here. Files that decide who can log in, or that hold a private key, are changed through the key and access screen — which stages the change, verifies it over a fresh session and puts it back if that fails. A file push has none of that.`
+        reason: st('shared.fileStep.refusedPath', { path: p })
       }
     }
   }
   const bytes = Buffer.byteLength(content, 'utf8')
-  if (bytes === 0) return { ok: false, reason: 'The file is empty. Writing an empty file over a real one is almost always a mistake; if it is not, delete the file instead.' }
+  if (bytes === 0) return { ok: false, reason: st('shared.fileStep.empty') }
   if (bytes > FILE_PUSH_MAX_BYTES) {
-    return { ok: false, reason: `That file is ${Math.round(bytes / 1024)} KB, and anything over ${FILE_PUSH_MAX_BYTES / 1024} KB is more than anybody reads before agreeing to it.` }
+    return { ok: false, reason: st('shared.fileStep.tooBig', { kb: Math.round(bytes / 1024), max: FILE_PUSH_MAX_BYTES / 1024 }) }
   }
   return { ok: true }
 }

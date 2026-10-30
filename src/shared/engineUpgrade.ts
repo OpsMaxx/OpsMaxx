@@ -13,6 +13,7 @@ import {
   type EnginePrecheck,
   type EngineUpgradeRefusal
 } from './enginePrecheck'
+import { st } from './i18n'
 
 export interface EngineUpgradePlan {
   ok: boolean
@@ -49,27 +50,19 @@ export function planEngineUpgrade(
 
   const caveats: string[] = []
   if (precheck.liveRestore === true) {
-    caveats.push(
-      'This daemon reports live-restore ON, so containers are configured to keep running across a daemon restart. That is what the daemon says about itself; nothing here has watched it happen.'
-    )
+    caveats.push(st('shared.engineUpgrade.liveRestoreOn'))
   } else if (precheck.liveRestore === false) {
     caveats.push(
       precheck.running === null
-        ? 'This daemon reports live-restore OFF: restarting it stops every container on this server, and the upgrade restarts it.'
-        : `This daemon reports live-restore OFF: restarting it stops all ${precheck.running} running container(s) on this server, and the upgrade restarts it.`
+        ? st('shared.engineUpgrade.liveRestoreOff')
+        : st('shared.engineUpgrade.liveRestoreOffCount', { count: precheck.running })
     )
   } else {
     // Not `false`. A daemon that could not be asked has not said anything.
-    caveats.push(
-      'The daemon did not say whether live-restore is on, so whether this stops every container on the server is unknown rather than no.'
-    )
+    caveats.push(st('shared.engineUpgrade.liveRestoreUnknown'))
   }
-  caveats.push(
-    'All four of Docker’s packages are upgraded together. Upgrading only the daemon leaves a CLI and a container runtime from the previous release beside it.'
-  )
-  caveats.push(
-    'This upgrades from whichever repository the server is configured with. It does not add one, and it does not pin a version.'
-  )
+  caveats.push(st('shared.engineUpgrade.allPackages'))
+  caveats.push(st('shared.engineUpgrade.configuredRepo'))
 
   return {
     ok: true,

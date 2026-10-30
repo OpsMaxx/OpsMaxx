@@ -34,15 +34,7 @@ import { openSettings } from '../../store/nav'
 import { clsx } from '../../lib/format'
 import type { StoredAlertRow, StoreAlertKind } from '../../../../shared/webhook'
 import { STORE_ALERT_KINDS } from '../../../../shared/webhook'
-import {
-  RUNBOOK_HOST_REPORTED_NOTE,
-  RUNBOOK_NEVER_FIRED,
-  RUNBOOK_NOTHING_RUN,
-  RUNBOOK_NO_HOST,
-  RUNBOOK_NO_RUN_NOTE,
-  runbookUnavailableSentence,
-  type RunbookView
-} from '../../../../shared/runbooks'
+import { RUNBOOK_LOOKBACK_DAYS, runbookUnavailableSentence, type RunbookView } from '../../../../shared/runbooks'
 import { useT, t as currentT } from '../../lib/i18n'
 import { Trans } from '../../lib/Trans'
 import type { MessageKey } from '../../../../shared/i18n'
@@ -286,7 +278,7 @@ function RunbookBody({
 
       <div className="alerts-subhead">{t('monitor.alerts.runbook.whatWasRun')}</div>
       <div className="s-desc" data-testid="runbook-no-run">
-        {RUNBOOK_NO_RUN_NOTE}
+        {t('shared.runbooks.noRunNote')}
       </div>
       <RunbookRecallBody view={view} />
     </>
@@ -301,7 +293,7 @@ function RunbookRecallBody({ view }: { view: RunbookView }): React.JSX.Element {
   if (r.status === 'no-host') {
     return (
       <div className="alerts-quiet-line" data-testid="runbook-no-host">
-        {RUNBOOK_NO_HOST}
+        {t('shared.runbooks.noHost')}
       </div>
     )
   }
@@ -315,14 +307,14 @@ function RunbookRecallBody({ view }: { view: RunbookView }): React.JSX.Element {
   if (r.status === 'never-fired') {
     return (
       <div className="alerts-quiet-line" data-testid="runbook-never-fired">
-        {RUNBOOK_NEVER_FIRED}
+        {t('shared.runbooks.neverFired', { days: RUNBOOK_LOOKBACK_DAYS })}
       </div>
     )
   }
   if (r.status === 'nothing-run') {
     return (
       <div className="alerts-quiet-line" data-testid="runbook-nothing-run">
-        {RUNBOOK_NOTHING_RUN}
+        {t('shared.runbooks.nothingRun')}
       </div>
     )
   }
@@ -357,7 +349,7 @@ function RunbookRecallBody({ view }: { view: RunbookView }): React.JSX.Element {
                               same voice — the note is yours and this is not. */}
                           {c.hostReported ? (
                             <span data-testid="runbook-host-reported">
-                              <b>{RUNBOOK_HOST_REPORTED_NOTE}</b> {c.hostReported}
+                              <b>{t('shared.runbooks.hostReportedNote')}</b> {c.hostReported}
                             </span>
                           ) : null}
                         </td>

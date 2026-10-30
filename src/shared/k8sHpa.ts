@@ -19,6 +19,8 @@
 // The pair that separates them is `currentUtilization`: absent means
 // unmeasured, and a literal `0` means measured at zero.
 
+import { st } from './i18n'
+
 export interface K8sHpa {
   namespace: string
   name: string
@@ -98,7 +100,10 @@ export function judgeHpas(hpas: K8sHpa[]): HpaFinding[] {
           namespace: h.namespace,
           name: h.name,
           verdict: 'unmeasured',
-          because: `${where} has no utilisation reading, so it cannot scale ${h.target} at all — it is holding at ${h.currentReplicas ?? 'an unknown number of'} replicas whatever the load. Usually the metrics API is not serving.`
+          because:
+            h.currentReplicas === null
+              ? st('shared.k8sHpa.unmeasuredUnknownReplicas', { hpa: where, target: h.target })
+              : st('shared.k8sHpa.unmeasured', { hpa: where, target: h.target, replicas: h.currentReplicas })
         }
       }
       // At the ceiling AND under load is the one worth saying: the autoscaler
@@ -113,7 +118,12 @@ export function judgeHpas(hpas: K8sHpa[]): HpaFinding[] {
           namespace: h.namespace,
           name: h.name,
           verdict: 'at-ceiling',
-          because: `${where} is at its maximum of ${h.maxReplicas} and still at ${h.currentUtilization}% against a target of ${h.targetUtilization}%. It has nothing left to do.`
+          because: st('shared.k8sHpa.atCeiling', {
+            hpa: where,
+            max: h.maxReplicas,
+            current: h.currentUtilization,
+            target: h.targetUtilization
+          })
         }
       }
       // min === max is an autoscaler that cannot autoscale. Not broken, but
@@ -123,7 +133,7 @@ export function judgeHpas(hpas: K8sHpa[]): HpaFinding[] {
           namespace: h.namespace,
           name: h.name,
           verdict: 'pinned',
-          because: `${where} has its minimum and maximum both at ${h.minReplicas}, so it can never scale anything.`
+          because: st('shared.k8sHpa.pinned', { hpa: where, replicas: h.minReplicas })
         }
       }
       return null

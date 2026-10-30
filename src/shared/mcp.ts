@@ -5,6 +5,8 @@
 // Group for the target server, and every capability that group grants is one
 // of ALLOW / ASK / DENY rather than a blanket yes/no.
 
+import { st, type MessageKey, type Translate, englishT } from './i18n'
+
 export type PermissionValue = 'allow' | 'ask' | 'deny'
 
 /**
@@ -34,12 +36,33 @@ export type PermissionValue = 'allow' | 'ask' | 'deny'
  */
 export type SessionMode = 'readOnly' | 'ask' | 'auto' | 'bypass' | 'custom'
 
+// Keys rather than text: this table is read at import, and a label resolved
+// then would be English forever. Each one is read when it is shown.
+const PROFILE_LABEL_KEY: Record<SessionMode, MessageKey> = {
+  readOnly: 'shared.mcp.mode.readOnly.label',
+  ask: 'shared.mcp.mode.ask.label',
+  auto: 'shared.mcp.mode.auto.label',
+  bypass: 'shared.mcp.mode.bypass.label',
+  custom: 'ai.modePicker.custom'
+}
+
+const profile = (id: SessionMode, shortcut: string) => ({
+  id,
+  get label() {
+    return st(PROFILE_LABEL_KEY[id])
+  },
+  get detail() {
+    return st(`shared.mcp.mode.${id}.detail`)
+  },
+  shortcut
+})
+
 export const SESSION_MODES: { id: SessionMode; label: string; detail: string; shortcut: string }[] = [
-  { id: 'readOnly', label: 'Read only', detail: 'Look around, never change anything', shortcut: '1' },
-  { id: 'ask', label: 'Ask first', detail: 'Approve every change before it runs', shortcut: '2' },
-  { id: 'auto', label: 'Auto', detail: 'Routine work runs; sudo and risky actions ask', shortcut: '3' },
-  { id: 'bypass', label: 'Bypass permissions', detail: 'No prompts or blocks, except on Protected targets', shortcut: '4' },
-  { id: 'custom', label: 'Custom', detail: 'Use an access group, exactly as written', shortcut: '5' }
+  profile('readOnly', '1'),
+  profile('ask', '2'),
+  profile('auto', '3'),
+  profile('bypass', '4'),
+  profile('custom', '5')
 ]
 
 /** The profile a picker offers first. */
@@ -65,9 +88,10 @@ export function sessionModeOf(session: { mode?: SessionMode } | null | undefined
   return session?.mode ?? 'custom'
 }
 
-export function sessionModeLabel(mode: SessionMode | undefined, groupName?: string | null): string {
-  const label = SESSION_MODES.find((m) => m.id === (mode ?? DEFAULT_SESSION_MODE))?.label ?? 'Auto'
-  return mode === 'custom' && groupName ? `${label} · ${groupName}` : label
+/** `t` is for a caller that stores or sends the label on: pass englishT. */
+export function sessionModeLabel(mode: SessionMode | undefined, groupName?: string | null, t: Translate = st): string {
+  const label = t(PROFILE_LABEL_KEY[mode ?? DEFAULT_SESSION_MODE] ?? PROFILE_LABEL_KEY.auto)
+  return mode === 'custom' && groupName ? t('shared.mcp.modeWithGroup', { profile: label, group: groupName }) : label
 }
 
 /**
@@ -75,15 +99,20 @@ export function sessionModeLabel(mode: SessionMode | undefined, groupName?: stri
  * so the group editor, the card sentence and the docs cannot drift from what
  * policyEngine.ts actually upgrades.
  */
-export const RISKY_ACTIONS: string[] = [
-  'destructive or elevated commands (rm -rf, mkfs, reboot, package installs, service restarts) — a destructive one also asks with the switch off unless Write files is Allow, and stopping or removing containers unless Container control is Allow',
-  'commands whose program is computed at run time (these also ask with the switch off, unless Sudo is Allow), and unshare -r',
-  'database writes and schema changes',
-  'opening, defining or deleting SSH tunnels',
-  'changing or removing saved servers',
-  'starting a VPN, or stopping one other sessions depend on',
-  'starting, cancelling or re-running CI/CD pipelines'
+const RISKY_ACTION_KEYS: MessageKey[] = [
+  'shared.mcp.riskyAction.destructiveCommands',
+  'shared.mcp.riskyAction.computedCommands',
+  'shared.mcp.riskyAction.databaseWrites',
+  'shared.mcp.riskyAction.sshTunnels',
+  'shared.mcp.riskyAction.savedServers',
+  'shared.mcp.riskyAction.vpn',
+  'shared.mcp.riskyAction.ciPipelines'
 ]
+
+export const RISKY_ACTIONS: string[] = Object.defineProperties(
+  [] as string[],
+  Object.fromEntries(RISKY_ACTION_KEYS.map((k, i) => [i, { get: () => st(k), enumerable: true }]))
+)
 
 /** The sentence every tool that can ask uses about when it asks. */
 export const CONDITIONAL_ASK =
@@ -119,80 +148,38 @@ export type AiCapability =
 // metrics: it meant CPU and memory when the user granted it, and it now also
 // returns a service and port inventory of the host. Nobody was asked again.
 //
-// So a `detail` that merely restates its label is a bug. Each one below names
-// what an agent can actually obtain, and any tool added under an existing
-// capability has to be reflected here in the same change.
+// So a `detail` that merely restates its label is a bug. Each one (en.json,
+// shared.mcp.capability.<id>.detail) names what an agent can actually obtain,
+// and any tool added under an existing capability has to be reflected there in
+// the same change.
+const capability = (id: AiCapability): { id: AiCapability; label: string; detail: string } => ({
+  id,
+  get label() {
+    return st(`shared.mcp.capability.${id}.label`)
+  },
+  get detail() {
+    return st(`shared.mcp.capability.${id}.detail`)
+  }
+})
+
 export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string }[] = [
-  {
-    id: 'viewServer',
-    label: 'View server',
-    detail:
-      'Lets an agent see that this server exists and read the permissions it has on it. Hostnames, usernames and keys are never disclosed.'
-  },
-  {
-    id: 'terminal',
-    label: 'Execute terminal commands',
-    detail:
-      'Runs shell commands over SSH. Unrestricted privilege-escalation shells (sudo -i, su, sudo bash) are refused ' +
-      'whatever this is set to, in every mode but Bypass. While the group\'s Confirm risky actions is on, a ' +
-      'destructive, elevated or run-time-computed command still asks even when this is allow. It also governs pod_command, one command run inside a Kubernetes container, which is checked against the same command rules and asked for on every call even when this is allow (only the Bypass profile skips it).'
-  },
-  {
-    id: 'readFiles',
-    label: 'Read files',
-    detail: 'Reads file contents and lists directories. The path rules below can widen or narrow this per path.'
-  },
-  {
-    id: 'writeFiles',
-    label: 'Write files',
-    // Rename, delete and mkdir ride on this too, so it says so: a grant that
-    // reads narrower than what it buys is the bug manageServers' label had.
-    detail:
-      'Creates, overwrites, renames and deletes files, and creates directories. The path rules below can widen or narrow this per path.'
-  },
-  {
-    id: 'sftpDownload',
-    label: 'SFTP download',
-    detail:
-      'The transport underneath reading. Applied on top of the path rules, so denying it blocks every path regardless of what they say.'
-  },
-  {
-    id: 'sftpUpload',
-    label: 'SFTP upload',
-    detail: 'The transport underneath writing. Denying it blocks every path regardless of what the rules say.'
-  },
-  {
-    id: 'sshTunnel',
-    label: 'SSH tunnels',
-    // Defining one is named separately from opening one on purpose. A tunnel an
-    // agent writes outlives the session that wrote it and is started by whoever
-    // presses Start next, so "opens a forward" no longer covers what this
-    // grants. The remote case is spelled out because it is the one that puts a
-    // listener somewhere other than the user's own machine.
-    detail:
-      'Lists tunnels, defines and removes them, and opens or closes a forward. A local forward ' +
-      'and a SOCKS proxy listen on this machine; a remote forward listens on the SERVER, where a ' +
-      'non-loopback address publishes the port to that server’s network. Defining one does not ' +
-      'start it. While the group\'s Confirm risky actions is on, defining, removing and opening ' +
-      'all ask even when this is allow.'
-  },
-  {
-    id: 'databaseAccess',
-    label: 'Database access',
-    detail: 'Lists databases and runs queries against them through the server.'
-  },
-  {
-    id: 'sudo',
-    label: 'Sudo / privilege escalation',
-    detail:
-      'Commands beginning with sudo, checked on top of Execute terminal commands. Path rules still apply — sudo does not waive them.'
-  },
-  {
-    id: 'serverMetrics',
-    label: 'Server metrics, services & ports',
-    detail:
-      'CPU, memory, disk and uptime — and also every failed systemd unit and every listening port with the process that owns it. That is a service and port inventory of the server, not only its capacity.'
-  },
+  capability('viewServer'),
+  capability('terminal'),
+  capability('readFiles'),
+  // Rename, delete and mkdir ride on this too, so it says so: a grant that
+  // reads narrower than what it buys is the bug manageServers' label had.
+  capability('writeFiles'),
+  capability('sftpDownload'),
+  capability('sftpUpload'),
+  // Defining one is named separately from opening one on purpose. A tunnel an
+  // agent writes outlives the session that wrote it and is started by whoever
+  // presses Start next, so "opens a forward" no longer covers what this
+  // grants. The remote case is spelled out because it is the one that puts a
+  // listener somewhere other than the user's own machine.
+  capability('sshTunnel'),
+  capability('databaseAccess'),
+  capability('sudo'),
+  capability('serverMetrics'),
   // Its own capability, NOT a widening of Server metrics, and that was decided
   // rather than defaulted. "How many unpatched security updates, and which
   // distribution and kernel" is a vulnerability report about the host and is
@@ -202,12 +189,7 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
   // standard it set is that the grid must describe what is actually taken. A
   // new capability backfills to DENY for every existing group, which is the
   // correct default here.
-  {
-    id: 'hostFacts',
-    label: 'Host inventory & pending security updates',
-    detail:
-      'Distribution and version, CPU model, architecture, virtualisation type, package manager, how many updates are pending, how many of those are SECURITY updates, and whether the server is waiting on a reboot. That is a patch-status report: it tells an agent which of your servers are unpatched and against what.'
-  },
+  capability('hostFacts'),
   // Its own capability again, and this one is not reachable by an agent AT ALL
   // — which is why the detail says so rather than leaving a reader to assume
   // the grid's usual meaning. Roadmap item 31 settled that deliberately: a
@@ -225,12 +207,7 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
   //
   // 'ask' collects nothing. The sweep is unattended and hourly, with nobody at
   // the screen to answer, so anything short of 'allow' means do not read them.
-  {
-    id: 'firewallRules',
-    label: 'Firewall rules: the addresses and ports this server accepts',
-    detail:
-      'The rule lines themselves, as ufw, firewalld, nft or iptables print them — every address, port and protocol named in them, capped and stripped of control characters on the server. That is an inventory of what this server is exposed on and to whom, which is the thing an attacker would otherwise have to scan for. No agent can read it whatever this is set to: it is not behind any MCP tool. Setting it to allow lets OpsMaxx COLLECT the rules for this server, for a person to read in Security posture; anything else and they are never asked for.'
-  },
+  capability('firewallRules'),
   // Item 36b, and the same argument one step further. Firewall rules say what
   // this server is exposed on; sudoers says who can become root on it and
   // whether they need a password to do it. That is the shortest description of
@@ -238,100 +215,43 @@ export const AI_CAPABILITIES: { id: AiCapability; label: string; detail: string 
   // person, never for an agent.
   //
   // 'ask' collects nothing here for the same reason: the sweep is unattended.
-  {
-    id: 'sudoersRead',
-    label: 'Sudoers: who can become root on this server',
-    detail:
-      'The rules in /etc/sudoers and /etc/sudoers.d — which accounts and groups may run which commands as root, and which of them need no password. OpsMaxx reads it to replace a guess it makes today, that anyone in wheel or sudo has root, which is wrong in both directions. It is also the shortest description of how to take this machine, so it is asked for separately and never by an agent: no MCP tool exposes it whatever this is set to. Setting it to allow lets OpsMaxx COLLECT it for a person to read in Keys and access; anything else and it is never asked for.'
-  },
-  {
-    id: 'manageServers',
-    label: 'Add, change and remove servers and databases in the workspace',
-    // Says all three, because it grants all three. It used to say only "Adds a
-    // new server", which was true when add_server was the whole of this
-    // capability and became the most misleading sentence in this file the
-    // moment update_server and remove_server joined it: an administrator
-    // reading it would have believed they had granted strictly less than they
-    // had. Deleting is called out separately because it is the one that
-    // destroys something, and because while the group's Confirm risky actions is
-    // on it asks even when this is set to allow.
-    //
-    // The scope of a change approval is spelled out rather than left as "one
-    // approval is one change", which stopped being true when repeat edits to a
-    // server the operator had just approved were folded into that first yes. A
-    // sentence that understates what a yes buys is the same bug as a label that
-    // understates what a grant buys. Databases joined it for the same reason
-    // the server tools share it: it is the permission to edit OpsMaxx's own
-    // connection list, and a second switch for the same act would be one an
-    // administrator could leave open while believing they had shut it.
-    detail:
-      'Adds a server to the workspace, changes a saved one — including where it points, which ' +
-      'account it uses and which other saved server it jumps through — and removes one. It does ' +
-      'not grant any access to the servers it manages. While the group\'s Confirm risky actions ' +
-      'is on, adding is the only part allow makes silent: changing and removing an existing ' +
-      'connection still ask. When a change asks, approving it covers further changes to that same ' +
-      'server for the rest of that agent session and nothing else; each removal is asked for on ' +
-      'its own. With Confirm risky actions off, allow is a standing permission to repoint or ' +
-      'delete what is already saved. The same applies to saved database connections, including ' +
-      'which saved server a database is reached through; querying a database is Database access, ' +
-      'not this.'
-  },
-  {
-    id: 'vpnControl',
-    label: 'VPN & reverse proxies',
-    // Says what it grants and what it does not. It used to say "and starts
-    // or stops them", which promised something no value of this setting
-    // delivers: an frp reverse proxy makes a port on the user's own machine
-    // reachable from the internet, so set_vpn refuses one and no access group
-    // can permit it -- only a session the human has put in Bypass mode. A permission UI that offers a power the
-    // code refuses is how an operator ends up believing they granted less
-    // than they did, or more.
-    detail:
-      'Lists VPN profiles and reverse proxies, and starts or stops the VPNs. While the group\'s ' +
-      'Confirm risky actions is on, starting a VPN, or stopping one live sessions depend on, asks ' +
-      'even when this is allow. Reverse proxies are refused to an agent whatever this is set to; ' +
-      'only a session you have put in Bypass mode can start or stop one.'
-  },
-  {
-    id: 'containers',
-    label: 'Containers and Kubernetes: what is running, and their logs',
-    detail:
-      'Lists containers with their image, state, ports, uptime and compose project, and reads container logs. The logs are the part to weigh: an application writes its own connection strings, tokens and customer records to stdout, and this returns them as the container emitted them. It reads only — starting and stopping is a separate permission. It also covers the Kubernetes cluster a server\'s kubeconfig reaches: pods, workloads, nodes, events, pod logs, Helm releases, and which secrets exist and who is bound to what (names only, never a secret\'s value — but together a map of how to escalate).'
-  },
-  {
-    id: 'containerControl',
-    label: 'Containers and Kubernetes: start, stop, restart and drain',
-    detail:
-      'Restarts, stops and starts containers, and brings compose projects up and down. Stopping a container is an outage for whatever it serves, so this is separate from reading the list: an agent that may see what is running does not thereby get to stop it. In Kubernetes it covers a rolling restart of one workload and cordoning, uncordoning or draining one node; each is asked for on every call even when this is allow (only the Bypass profile skips it), and a drain refuses whenever its own preflight finds a blocker.'
-  },
-  {
-    id: 'backupRead',
-    label: 'Backups: whether they are running and when they last succeeded',
-    detail:
-      'Reads the backup destinations and how each is doing — the last successful run, how late it is, and any alarm raised against it. It names destinations and their kind, never their credentials. Running a backup and restoring one are not here at any setting: a run outlives the approval that started it, and a restore overwrites data.'
-  },
-  {
-    id: 'fleetRead',
-    label: 'Fleet: read across many servers at once',
-    detail:
-      'Answers questions over everything already collected rather than one host at a time — the inventory, search across it, drift, alerts and the running process list. One call can return data from every server in the workspace, so the reach is the workspace and not the server this is set on.'
-  },
+  capability('sudoersRead'),
+  // Says all three, because it grants all three. It used to say only "Adds a
+  // new server", which was true when add_server was the whole of this
+  // capability and became the most misleading sentence in this file the
+  // moment update_server and remove_server joined it: an administrator
+  // reading it would have believed they had granted strictly less than they
+  // had. Deleting is called out separately because it is the one that
+  // destroys something, and because while the group's Confirm risky actions is
+  // on it asks even when this is set to allow.
+  //
+  // The scope of a change approval is spelled out rather than left as "one
+  // approval is one change", which stopped being true when repeat edits to a
+  // server the operator had just approved were folded into that first yes. A
+  // sentence that understates what a yes buys is the same bug as a label that
+  // understates what a grant buys. Databases joined it for the same reason
+  // the server tools share it: it is the permission to edit OpsMaxx's own
+  // connection list, and a second switch for the same act would be one an
+  // administrator could leave open while believing they had shut it.
+  capability('manageServers'),
+  // Says what it grants and what it does not. It used to say "and starts
+  // or stops them", which promised something no value of this setting
+  // delivers: an frp reverse proxy makes a port on the user's own machine
+  // reachable from the internet, so set_vpn refuses one and no access group
+  // can permit it -- only a session the human has put in Bypass mode. A permission UI that offers a power the
+  // code refuses is how an operator ends up believing they granted less
+  // than they did, or more.
+  capability('vpnControl'),
+  capability('containers'),
+  capability('containerControl'),
+  capability('backupRead'),
+  capability('fleetRead'),
   // The first two capabilities in this grid that are not about a server the
   // user administers at all. A CI connection is a base URL and a token for
   // somebody else's build infrastructure, so neither of these is bounded by
   // anything OpsMaxx can see, and both are seeded DENY on every built-in group.
-  {
-    id: 'ciRead',
-    label: 'CI/CD: pipelines, runs and build output',
-    detail:
-      'Lists the CI connections, the pipelines on them and their recent runs, and reads the output a run produced. The output is the part to weigh, the same way container logs are: a build prints whatever its steps echo — access tokens, deploy keys, the contents of a test fixture — and this returns it as the runner recorded it. It is also written by whoever opened the merge request that ran it, so it is the least trustworthy text the bridge can hand an agent.'
-  },
-  {
-    id: 'ciTrigger',
-    label: 'CI/CD: start, cancel and re-run pipelines',
-    detail:
-      'Starts a pipeline run on the CI server, cancels one, or re-runs it. What that run then does is defined on the provider and not here: OpsMaxx cannot read the pipeline definition before it starts, and cannot see what it deploys or where. Stopping AI access takes away the agent\'s cancel along with everything else, so a run already accepted is then yours to stop — from the Stop button on that run in CI/CD, or in the provider. While the group\'s Confirm risky actions is on, starting, cancelling and re-running ask even when this is allow, and one approval never covers the next call; with it off in Auto mode, or in a Bypass session, a build starts unasked — except on a Protected workspace, and Ask first always asks.'
-  }
+  capability('ciRead'),
+  capability('ciTrigger')
 ]
 
 export type AiCapabilityPolicy = Record<AiCapability, PermissionValue>
@@ -466,7 +386,8 @@ export function resolveDefaultSessionGroup(
   // does, and this function is the single authority for the grant.
   const wanted = config?.defaultSessionGroupId?.trim() || fallbackGroupId
   const found = wanted ? groups.find((g) => g.id === wanted) : undefined
-  return found ? { id: found.id, name: found.name } : { id: null, name: 'No AI Access' }
+  // The name is stored with the grant, so it is English whoever is looking.
+  return found ? { id: found.id, name: found.name } : { id: null, name: englishT('ai.connect.noAccess') }
 }
 
 export interface WorkspaceRef {

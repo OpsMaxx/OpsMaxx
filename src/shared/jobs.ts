@@ -15,6 +15,7 @@ import {
   confirmationFor,
   verifyApproval
 } from './broadcast'
+import { englishT, st, type MessageKey } from './i18n'
 
 // The vocabulary of a job — roadmap item B1.
 //
@@ -202,18 +203,26 @@ export function isJobHostLive(state: string): boolean {
  */
 export type JobHostOutcome = BroadcastHostOutcome | 'abandoned' | 'orphaned' | 'unhealthy'
 
-export const JOB_OUTCOME_LABEL: Record<JobHostOutcome, string> = {
-  ok: 'ok',
-  nonzero: 'non-zero exit',
-  'missing-command': 'command not on this server',
-  'permission-denied': 'permission denied',
-  timeout: 'timed out',
-  unreachable: 'unreachable',
-  cancelled: 'not run',
-  abandoned: 'abandoned when OpsMaxx stopped',
-  orphaned: 'ended without recording an exit status',
-  unhealthy: 'restarted, and came back with something broken'
+const JOB_OUTCOME_LABEL_KEY: Record<JobHostOutcome, MessageKey> = {
+  ok: 'shared.jobs.outcome.ok',
+  nonzero: 'shared.jobs.outcome.nonzero',
+  'missing-command': 'shared.jobs.outcome.missingCommand',
+  'permission-denied': 'shared.jobs.outcome.permissionDenied',
+  timeout: 'shared.jobs.outcome.timeout',
+  unreachable: 'shared.jobs.outcome.unreachable',
+  cancelled: 'shared.jobs.outcome.cancelled',
+  abandoned: 'shared.jobs.outcome.abandoned',
+  orphaned: 'shared.jobs.outcome.orphaned',
+  unhealthy: 'shared.jobs.outcome.unhealthy'
 }
+
+// Read when shown, not at import, so the label follows the language.
+export const JOB_OUTCOME_LABEL: Record<JobHostOutcome, string> = Object.defineProperties(
+  {} as Record<JobHostOutcome, string>,
+  Object.fromEntries(
+    Object.entries(JOB_OUTCOME_LABEL_KEY).map(([outcome, k]) => [outcome, { get: () => st(k), enumerable: true }])
+  )
+)
 
 /**
  * The error text a host carries when the app stopped underneath it.
@@ -487,7 +496,7 @@ export function planJob(spec: JobSpec, targets: JobTargetRef[]): JobPlan {
     // See tests/jobStages.test.ts.
     if (step.reboot === true && risk !== 'destructive') {
       risk = 'destructive'
-      const why = 'a step in this job restarts the machine'
+      const why = st('shared.jobs.plan.restartsMachine')
       if (!reasons.includes(why)) reasons.push(why)
     }
   }
@@ -1220,13 +1229,8 @@ export const JOB_INSTANCE_NOTE =
  * no cap on it and what is done instead; a promise the wrapper does not keep is
  * worse than the fact it was hiding.
  */
-export const JOB_DETACHED_SETTING_NOTE =
-  'Detached jobs write one directory per step under your own state directory on each server — five ' +
-  'small marker files, plus the job’s own output, which is as large as the command makes it — so ' +
-  'a job survives the connection dropping. Nothing is installed and nothing runs after the job, ' +
-  'and the directory is removed as soon as OpsMaxx has read the exit status, or swept seven ' +
-  'days later if it never gets back. With this off, jobs run on the attached path: closing the ' +
-  'lid mid-upgrade sends SIGHUP to the remote command, and apt and dpkg do not ignore it.'
+// English. A screen shows the key through t() instead, in the reader's language.
+export const JOB_DETACHED_SETTING_NOTE = englishT('shared.jobs.detachedSettingNote')
 
 /**
  * Why the remote `out` file has no size cap, when everything else here does.

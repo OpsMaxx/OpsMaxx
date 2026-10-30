@@ -519,7 +519,7 @@ export function CronEditPanel({ servers }: { servers: Server[] }): React.JSX.Ele
                       : t('operations.cron.noNextRun')
                     : e.schedule}
                 </span>
-                <span className="faint cron-desc">{e.description ?? ''}</span>
+                <span className="faint cron-desc">{e.description ? (describeSchedule(e.schedule) ?? e.description) : ''}</span>
                 <span
                   className="mono grow cron-cmd"
                   title={e.input === undefined ? e.command : `${e.command}\n\nstdin:\n${e.input}`}

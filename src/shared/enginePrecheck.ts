@@ -38,6 +38,7 @@
 // is the live-restore flag, which was measured.
 
 import type { PackageManager } from './hostFacts'
+import { st, type MessageKey } from './i18n'
 
 /**
  * The packages Docker's own repository ships, in the order they depend.
@@ -55,14 +56,17 @@ export const ENGINE_PACKAGES: readonly string[] = [
 
 export type EngineUpgradeRefusal = 'no-repo' | 'not-installed' | 'unchecked'
 
-export const ENGINE_REFUSAL_HELP: Record<EngineUpgradeRefusal, string> = {
-  'no-repo':
-    'Docker publishes no repository for this package manager, so there are no docker-ce packages to upgrade. Whatever engine this server runs came from somewhere else, and upgrading it is that source’s business.',
-  'not-installed':
-    'Read what the precheck listed and confirm docker-ce is actually installed. If this server runs an engine from somewhere else — Debian’s docker.io, or a distribution package — installing docker-ce would put a SECOND, conflicting engine on the machine rather than upgrading the one that is there, and nothing in this build can tell those two cases apart from the package manager’s output.',
-  unchecked:
-    'Nothing has been read from this server yet. Run the precheck first: what is installed and whether the daemon keeps containers running across a restart are both facts about this host, and neither can be assumed.'
+const REFUSAL_HELP_KEY: Record<EngineUpgradeRefusal, MessageKey> = {
+  'no-repo': 'shared.enginePrecheck.refusal.noRepo',
+  'not-installed': 'shared.enginePrecheck.refusal.notInstalled',
+  unchecked: 'shared.enginePrecheck.refusal.unchecked'
 }
+
+/** Each read translates, so the help is in whatever language is current when shown. */
+export const ENGINE_REFUSAL_HELP: Readonly<Record<EngineUpgradeRefusal, string>> = Object.defineProperties(
+  {} as Record<EngineUpgradeRefusal, string>,
+  Object.fromEntries(Object.entries(REFUSAL_HELP_KEY).map(([r, k]) => [r, { get: () => st(k), enumerable: true }]))
+)
 
 /** Managers Docker publishes a repository for. Alpine's `docker` package and
  *  Arch's come from their own distributions and are not these four. */

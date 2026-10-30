@@ -207,28 +207,20 @@ export type K8sFailure =
   | 'no-shell'
   | 'unknown'
 
-export const K8S_FAILURE_HELP: Record<K8sFailure, string> = {
+export const K8S_FAILURE_HELP: Record<K8sFailure, string> = translatedTable({
   // Says where we looked, because we now look. The old wording — "or not on the
   // PATH an SSH session gets" — described a limitation that resolveBinary
   // removed, so it sent people to check a PATH that had already been searched.
-  'not-installed':
-    'No kubectl on this server. Looked on PATH and in /usr/bin, /usr/local/bin, /snap/bin, /opt/homebrew/bin, /usr/sbin, plus the k3s, rke2 and microk8s wrappers. If it lives somewhere else, a symlink into /usr/local/bin is the usual fix.',
-  'no-kubeconfig':
-    'kubectl is installed but found no kubeconfig. It looks in $KUBECONFIG then ~/.kube/config, and an SSH session may not have the same environment as a login shell.',
-  'no-cluster':
-    'kubectl has a config but the cluster is not answering — the API server may be down, or the context may point somewhere unreachable from this server.',
-  forbidden:
-    'This account is authenticated but its RBAC does not allow listing these resources. That is a different problem from there being none, and the roles it needs are named in the raw error below.',
-  unauthorized:
-    'The cluster rejected these credentials. A token or client certificate has most likely expired.',
-  'no-metrics':
-    'kubectl top needs a Metrics API in the cluster — metrics-server, or whatever your provider ships — and nothing is answering on it. This is not "zero usage": there is no source to ask. If metrics-server was installed in the last minute or two it may simply not have scraped yet.',
-  'no-previous':
-    'This container has no previous instance, which means it has not restarted. There is nothing to read, and that is good news about this pod rather than a failed read.',
-  'no-shell':
-    'This container has no shell. That is the normal state of a distroless or scratch image and is not a broken pod — there is simply no /bin/sh inside it to run a command with, so nothing this app can send will run there. A debug sidecar (kubectl debug) is the usual way in, and it is not something this panel does.',
-  unknown: 'kubectl returned an error that could not be classified. The raw message is below.'
-}
+  'not-installed': 'shared.kubernetes.failure.notInstalled',
+  'no-kubeconfig': 'shared.kubernetes.failure.noKubeconfig',
+  'no-cluster': 'shared.kubernetes.failure.noCluster',
+  forbidden: 'shared.kubernetes.failure.forbidden',
+  unauthorized: 'shared.kubernetes.failure.unauthorized',
+  'no-metrics': 'shared.kubernetes.failure.noMetrics',
+  'no-previous': 'shared.kubernetes.failure.noPrevious',
+  'no-shell': 'shared.kubernetes.failure.noShell',
+  unknown: 'shared.kubernetes.failure.unknown'
+})
 
 /**
  * Why there is no sudo retry here, unlike Docker.
@@ -313,6 +305,7 @@ export function classifyK8sFailure(stderr: string, exitCode: number | null): K8s
 }
 
 import { resolveBinary } from './docker'
+import { st, type MessageKey, translatedTable } from './i18n'
 
 // Names are echoed into a shell command, so they are validated rather than
 // escaped — the same rule the log tailer and the docker module follow.
@@ -1479,7 +1472,7 @@ const PROD_RE = /(^|[-_./:])(prod|production|prd|live)([-_./:]|$)/i
  * cases where a restart stops being routine.
  */
 export function planK8sRollout(target: K8sRolloutTarget): K8sRolloutPlan {
-  const reasons: string[] = ['replaces every running pod of this workload']
+  const reasons: string[] = [st('shared.kubernetes.rollout.replacesPods')]
   const caveats: string[] = []
   let risk: BroadcastRisk = 'elevated'
   let type = false
@@ -1491,18 +1484,14 @@ export function planK8sRollout(target: K8sRolloutTarget): K8sRolloutPlan {
     // intended, and how you take a quorum down when it was the wrong row.
     risk = 'destructive'
     type = true
-    reasons.push(
-      'a StatefulSet holds state — its pods restart one at a time, in order, which is how a database quorum gets rolled'
-    )
+    reasons.push(st('shared.kubernetes.rollout.statefulSet'))
   }
   if (target.strategy === 'Recreate') {
     // Not a rolling update at all: every pod is stopped before any replacement
     // is started. This workload is down for the length of the restart.
     risk = 'destructive'
     type = true
-    reasons.push(
-      'the Recreate strategy stops every pod before starting any — this workload is fully down until the new pods are Ready'
-    )
+    reasons.push(st('shared.kubernetes.rollout.recreate'))
   }
   if (target.kind !== 'statefulset' && target.strategy !== 'Recreate' && (target.desired ?? 2) <= 1) {
     // One replica has no second pod to serve traffic. The default rolling
@@ -1510,20 +1499,16 @@ export function planK8sRollout(target: K8sRolloutTarget): K8sRolloutPlan {
     // downtime — but it depends on the replacement being schedulable, and a
     // ReadWriteOnce volume, a host port or a full node all make it not.
     type = true
-    reasons.push(
-      'one replica — the replacement is started first, but if it cannot be scheduled (a ReadWriteOnce volume, a server port, a full node) this workload stays down until it can'
-    )
+    reasons.push(st('shared.kubernetes.rollout.oneReplica'))
   }
   if ((target.desired ?? 0) >= K8S_TYPE_ABOVE_REPLICAS) {
     type = true
-    reasons.push(
-      `${target.desired} replicas restart from this one click, which is a real load spike on whatever they connect to`
-    )
+    reasons.push(st('shared.kubernetes.rollout.manyReplicas', { count: target.desired ?? 0 }))
   }
   const prodHit = [target.namespace, target.context ?? ''].find((v) => v && PROD_RE.test(v))
   if (prodHit) {
     type = true
-    reasons.push(`"${prodHit}" reads as production`)
+    reasons.push(st('shared.kubernetes.readsAsProduction', { name: prodHit }))
   }
 
   if (target.strategy === 'OnDelete') {
@@ -1531,14 +1516,10 @@ export function planK8sRollout(target: K8sRolloutTarget): K8sRolloutPlan {
     // updated when deleted by hand. kubectl refuses this outright on some
     // versions and silently succeeds on others, and both leave an operator
     // believing they restarted something they did not.
-    caveats.push(
-      'this workload updates OnDelete: the restart marks the template but replaces no pod until each one is deleted by hand — kubectl may refuse it outright'
-    )
+    caveats.push(st('shared.kubernetes.rollout.onDelete'))
   }
   if (target.strategy === null) {
-    caveats.push(
-      'the update strategy was not read, so how disruptive this is could not be judged — the confirmation below assumes the routine case'
-    )
+    caveats.push(st('shared.kubernetes.rollout.strategyUnread'))
   }
 
   return {
@@ -1811,36 +1792,28 @@ export function planK8sCordon(target: K8sCordonTarget): K8sCordonPlan {
   const prodHit = [target.node, target.context ?? ''].find((v) => v && PROD_RE.test(v))
 
   if (target.action === 'cordon') {
-    reasons.push('the scheduler stops placing new pods on this node')
+    reasons.push(st('shared.kubernetes.cordon.stopsScheduling'))
     reasons.push(
       target.podCount === null
-        ? 'pods already running here keep running — a cordon evicts nothing'
-        : `the ${target.podCount} pod(s) already running here keep running — a cordon evicts nothing`
+        ? st('shared.kubernetes.cordon.podsKeepRunning')
+        : st('shared.kubernetes.cordon.podsKeepRunningCount', { count: target.podCount })
     )
-    caveats.push(
-      'a cordon has no expiry: the node stays unschedulable until somebody uncordons it, and a rollout that needs to reschedule here will sit Pending instead'
-    )
+    caveats.push(st('shared.kubernetes.cordon.noExpiry'))
   } else {
-    reasons.push('the scheduler starts placing new pods on this node again')
-    caveats.push(
-      'a node is usually cordoned because somebody is working on it — reboot, reimage, or taking it out of the fleet — and that reason is not recorded anywhere this app can read'
-    )
+    reasons.push(st('shared.kubernetes.cordon.resumesScheduling'))
+    caveats.push(st('shared.kubernetes.cordon.reasonUnrecorded'))
   }
   if (prodHit) {
-    reasons.push(`"${prodHit}" reads as production`)
+    reasons.push(st('shared.kubernetes.readsAsProduction', { name: prodHit }))
   }
 
   // Only for a cordon: uncordoning the last node RESTORES the cluster, and
   // putting friction in front of the recovery is how an outage gets longer.
   const last = target.action === 'cordon' && target.schedulableNodes === 1
   if (last) {
-    reasons.push(
-      'this is the only schedulable node left, so nothing in the cluster will be able to start anywhere'
-    )
+    reasons.push(st('shared.kubernetes.cordon.lastNode'))
   } else if (target.action === 'cordon' && target.schedulableNodes === null) {
-    caveats.push(
-      'how many other schedulable nodes the cluster has was not read, so whether this leaves anywhere for pods to run could not be checked'
-    )
+    caveats.push(st('shared.kubernetes.cordon.nodeCountUnread'))
   }
 
   return {
@@ -2249,6 +2222,16 @@ function pdbCovers(pdb: K8sPdb, pod: K8sDrainPod): boolean {
   return keys.every((k) => pod.labels[k] === pdb.matchLabels[k])
 }
 
+/** What each preflight read leaves unknown when it does not answer. Keyed by
+ *  read so the plan can say it again in the renderer's language: the
+ *  assessment itself is made in main, where `meaning` is English. */
+const DRAIN_UNKNOWN: Record<K8sDrainUnchecked['read'], MessageKey> = {
+  node: 'shared.kubernetes.drain.unknown.node',
+  pods: 'shared.kubernetes.drain.unknown.pods',
+  pdbs: 'shared.kubernetes.drain.unknown.pdbs',
+  endpoints: 'shared.kubernetes.drain.unknown.endpoints'
+}
+
 const DAEMONSET_KINDS = /^DaemonSet$/
 const FINISHED_PHASES = /^(Succeeded|Failed)$/
 
@@ -2272,32 +2255,15 @@ export function assessK8sDrain(
   const unchecked: K8sDrainUnchecked[] = []
   const push = (
     read: K8sDrainUnchecked['read'],
-    r: { ok: false; reason: K8sFailure; detail: string },
-    meaning: string
+    r: { ok: false; reason: K8sFailure; detail: string }
   ): void => {
-    unchecked.push({ read, reason: r.reason, detail: r.detail, meaning })
+    unchecked.push({ read, reason: r.reason, detail: r.detail, meaning: st(DRAIN_UNKNOWN[read]) })
   }
 
-  if (!input.nodeState.ok) {
-    push('node', input.nodeState, 'whether this node exists, and whether it is already cordoned')
-  }
-  if (!input.pods.ok) {
-    push('pods', input.pods, 'what is running on this node at all')
-  }
-  if (!input.pdbs.ok) {
-    push(
-      'pdbs',
-      input.pdbs,
-      'whether a PodDisruptionBudget would reject these evictions — an empty budget list from a denied read looks exactly like a cluster that has none'
-    )
-  }
-  if (!input.endpoints.ok) {
-    push(
-      'endpoints',
-      input.endpoints,
-      'whether any of these pods is the last Ready endpoint behind a Service'
-    )
-  }
+  if (!input.nodeState.ok) push('node', input.nodeState)
+  if (!input.pods.ok) push('pods', input.pods)
+  if (!input.pdbs.ok) push('pdbs', input.pdbs)
+  if (!input.endpoints.ok) push('endpoints', input.endpoints)
 
   const allPods = input.pods.ok ? input.pods.items : []
   const daemonSetPods = allPods.filter((p) => DAEMONSET_KINDS.test(p.ownerKind))
@@ -2600,30 +2566,33 @@ export const K8S_DRAIN_PHRASE = 'DRAIN'
  */
 export function planK8sDrain(assessment: K8sDrainAssessment): K8sDrainPlan {
   const refusals = [
-    ...assessment.unchecked.map(
-      (u) =>
-        `the ${u.read} read did not answer (${u.reason}: ${u.detail}), so nobody can say ${u.meaning}`
+    ...assessment.unchecked.map((u) =>
+      st('shared.kubernetes.drain.readUnanswered', {
+        read: u.read,
+        reason: u.reason,
+        detail: u.detail,
+        meaning: st(DRAIN_UNKNOWN[u.read])
+      })
     ),
     ...assessment.blockers.map((b) => `${b.namespace}/${b.subject}: ${b.detail}`)
   ]
   const reasons = [
-    `every pod on ${assessment.node} that a controller owns is evicted and rescheduled elsewhere`,
-    `${assessment.evictable.length} pod(s) move; ${assessment.daemonSetPods.length} DaemonSet pod(s) are left where they are`
+    st('shared.kubernetes.drain.evicts', { node: assessment.node }),
+    st('shared.kubernetes.drain.moves', {
+      count: assessment.evictable.length,
+      daemonSets: assessment.daemonSetPods.length
+    })
   ]
   const caveats: string[] = [
-    'a drain cordons the node first and does not uncordon it afterwards — the node stays out of the fleet until somebody puts it back',
+    st('shared.kubernetes.drain.staysCordoned'),
     // The recorded behaviour, and the reason the result type carries `partial`.
-    'a drain that fails has still evicted whatever it got through before it stopped; it is not all-or-nothing'
+    st('shared.kubernetes.drain.notAtomic')
   ]
   if (assessment.mirrorPods.length > 0) {
-    caveats.push(
-      `${assessment.mirrorPods.length} static pod(s) here cannot be evicted at all — the kubelet keeps running them from disk, whatever the API server says`
-    )
+    caveats.push(st('shared.kubernetes.drain.staticPods', { count: assessment.mirrorPods.length }))
   }
   if (assessment.nodeState?.ready === 'False' || assessment.nodeState?.ready === 'Unknown') {
-    caveats.push(
-      'this node is not Ready, so its kubelet may never confirm the deletions and the drain can sit on pods that are already gone'
-    )
+    caveats.push(st('shared.kubernetes.drain.notReady'))
   }
 
   return {

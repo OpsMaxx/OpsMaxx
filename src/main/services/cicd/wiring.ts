@@ -33,6 +33,7 @@ import type { HttpResult } from '../../../shared/httpClient'
 import { randomUUID } from 'node:crypto'
 import { vaultList, vaultSave } from '../vault'
 import { VAULT_LOCKED } from '../../../shared/vault'
+import { LocalizedError } from '../../../shared/i18n'
 import type { VaultEntry } from '../../../shared/vault'
 import type {
   CicdCapacity,
@@ -128,7 +129,7 @@ export function getConnection(id: string): CicdConnection | null {
 
 function requireConnection(id: string): CicdConnection {
   const c = getConnection(id)
-  if (!c) throw new Error(`No CI/CD connection is configured with that id.`)
+  if (!c) throw new LocalizedError('main.cicd.noConnection')
   return c
 }
 
@@ -347,9 +348,7 @@ export async function rerunRun(
   // Jenkins has no re-run: a build is started again from its job, with the same
   // parameters if the caller supplies them. GitLab retries a pipeline, which is
   // a different endpoint per subject. Rather than fake a shared verb, say so.
-  throw new Error(
-    `Re-running a finished run is a ${c.provider === 'jenkins' ? 'Jenkins' : 'GitLab'} concept this module does not expose yet. Start a new run instead.`
-  )
+  throw new LocalizedError('main.cicd.rerunUnsupported', { provider: c.provider === 'jenkins' ? 'Jenkins' : 'GitLab' })
 }
 
 /**
@@ -390,9 +389,7 @@ export async function getQueue(
 ): Promise<{ items: CicdQueueItem[]; capacity: CicdCapacity }> {
   const c = requireConnection(connectionId)
   if (c.provider !== 'jenkins') {
-    throw new Error(
-      `${c.provider} has no build queue OpsMaxx can read, so there is nothing to show here. This view is Jenkins-only.`
-    )
+    throw new LocalizedError('main.cicd.noQueue', { provider: c.provider })
   }
   const http = makeCicdHttp(c, resolveSecret(c))
   // Sequential, not parallel: one connection, one credential, and the poller
@@ -409,9 +406,7 @@ export async function getPipelineConfig(
   const c = requireConnection(connectionId)
   const adapter = createCicdAdapter(c, resolveSecret(c))
   if (!adapter.getConfig) {
-    throw new Error(
-      `Reading a pipeline's definition is not implemented for ${c.provider} yet, so there is nothing to show here.`
-    )
+    throw new LocalizedError('main.cicd.noConfig', { provider: c.provider })
   }
   return adapter.getConfig(pipelineRef)
 }
@@ -445,7 +440,7 @@ export async function setJobEnabled(
 ): Promise<CicdTriggerResult> {
   const c = requireConnection(connectionId)
   if (c.provider !== 'jenkins') {
-    throw new Error(`Enabling and disabling a job is Jenkins-only; ${c.provider} has no equivalent.`)
+    throw new LocalizedError('main.cicd.enableJenkinsOnly', { provider: c.provider })
   }
   const result = await setJenkinsJobEnabled(makeCicdHttp(c, resolveSecret(c)), pipelineRef, enabled)
   // Go back and look. Jenkins answers this with a 302 and no body, so the only
@@ -466,7 +461,7 @@ export async function cancelQueueItem(
 ): Promise<CicdTriggerResult> {
   const c = requireConnection(connectionId)
   if (c.provider !== 'jenkins') {
-    throw new Error(`Cancelling a queued item is Jenkins-only; ${c.provider} has no build queue.`)
+    throw new LocalizedError('main.cicd.cancelQueueJenkinsOnly', { provider: c.provider })
   }
   return cancelJenkinsQueueItem(makeCicdHttp(c, resolveSecret(c)), itemId)
 }
@@ -545,7 +540,7 @@ export async function deleteSecrets(vaultEntryId: string): Promise<void> {
   const remaining = listed.entries.filter((e) => e.id !== vaultEntryId)
   if (remaining.length === listed.entries.length) return
   const saved = vaultSave(remaining)
-  if (!saved.ok) throw new Error(saved.error ?? 'The vault refused the change.')
+  if (!saved.ok) throw saved.error ? new Error(saved.error) : new LocalizedError('main.cicd.vaultRefused')
 }
 
 
@@ -570,7 +565,7 @@ export async function getRun(
  * lives in main rather than beside the form.
  */
 export async function createSecret(label: string, token: string): Promise<string> {
-  if (!token) throw new Error('No token was supplied.')
+  if (!token) throw new LocalizedError('main.cicd.noToken')
   const listed = vaultList()
   if (!listed.ok || !listed.entries) {
     // `vaultList`'s own refusal, marker and all, rather than a sentence of our
@@ -581,7 +576,7 @@ export async function createSecret(label: string, token: string): Promise<string
     // A vault WRITE genuinely needs the vault fully open, unlike a resolve:
     // saving a token is a person doing something, and `vaultList` is the read
     // path that says so.
-    throw new Error(listed.error ?? 'The vault is locked. Unlock it to save this connection.')
+    throw listed.error ? new Error(listed.error) : new LocalizedError('main.cicd.vaultLocked')
   }
   const now = new Date().toISOString()
   const entry: VaultEntry = {
@@ -598,7 +593,7 @@ export async function createSecret(label: string, token: string): Promise<string
     updatedAt: now
   }
   const saved = vaultSave([...listed.entries, entry])
-  if (!saved.ok) throw new Error(saved.error ?? 'The vault refused the change.')
+  if (!saved.ok) throw saved.error ? new Error(saved.error) : new LocalizedError('main.cicd.vaultRefused')
   return entry.id
 }
 

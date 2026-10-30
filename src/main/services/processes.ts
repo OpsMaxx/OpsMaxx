@@ -25,6 +25,8 @@ import type {
 import { Supervisor } from './vpn/supervisor'
 import type { SupervisedSpec, SupervisorExit, SupervisorHandle } from './vpn/supervisor'
 import { atomicWriteFileSync } from './atomicWrite'
+import { LocalizedError } from '../../shared/i18n'
+import { mt } from './locale'
 
 // The main-process half of roadmap item 1 — pm2-style supervision of the
 // user's own long-lived local processes.
@@ -139,7 +141,7 @@ export class ProcessService {
     const problem = processDraftProblem(draft)
     if (problem) throw new Error(problem)
     if (this.processes.length >= MAX_PROCESSES) {
-      throw new Error(`That is already ${MAX_PROCESSES} processes, which is the limit.`)
+      throw new LocalizedError('main.processes.limit', { max: MAX_PROCESSES })
     }
     // Narrowed by the same function that narrows the file, so a field the
     // renderer invents is dropped rather than stored.
@@ -148,7 +150,7 @@ export class ProcessService {
       id: this.deps.newId(),
       createdAt: new Date(this.deps.now()).toISOString()
     })
-    if (!p) throw new Error('That is not a process.')
+    if (!p) throw new LocalizedError('main.processes.notAProcess')
     this.processes = [...this.processes, p]
     this.save()
     return toProcessView(p)
@@ -184,7 +186,7 @@ export class ProcessService {
       env = resolved.env
       secrets = resolved.secrets
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e)
+      const message = e instanceof LocalizedError ? mt(e.key, e.vars) : e instanceof Error ? e.message : String(e)
       this.setRuntime(id, { state: 'failed', error: message })
       return this.statusOf(id)
     }
@@ -330,10 +332,9 @@ export class ProcessService {
         ...(v.fieldKey ? { fieldKey: v.fieldKey } : {})
       })
       if (!got.ok) {
-        throw new Error(
-          got.reason === 'vault-locked'
-            ? `The vault is locked, so ${v.key} could not be read. Unlock it and start this again.`
-            : `The vault entry for ${v.key} is missing, so this was not started.`
+        throw new LocalizedError(
+          got.reason === 'vault-locked' ? 'main.processes.vaultLocked' : 'main.processes.vaultEntryMissing',
+          { key: v.key }
         )
       }
       env[v.key] = got.value

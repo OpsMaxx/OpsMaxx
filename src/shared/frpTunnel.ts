@@ -22,6 +22,7 @@
 // answer is a list of gaps and NO URL AT ALL. `frpPublishReadiness` has no
 // third state on purpose.
 
+import { st } from './i18n'
 import type { FrpProxy, FrpPublicHost, FrpSpec, VpnProfile } from './vpn'
 
 // ------------------------------------------------------------------ readiness
@@ -73,9 +74,7 @@ export function frpPublishReadiness(profiles: VpnProfile[]): FrpPublishReadiness
       gaps: [
         {
           code: 'no-host',
-          message:
-            'A public URL needs an frp server you control, with a domain pointed at it. ' +
-            'Set that up once and this stops being a question.'
+          message: st('shared.frpTunnel.noHost')
         }
       ]
     }
@@ -87,13 +86,13 @@ export function frpPublishReadiness(profiles: VpnProfile[]): FrpPublishReadiness
   if (!host || !host.baseDomain.trim()) {
     gaps.push({
       code: 'no-domain',
-      message: `"${profile.name}" has no domain. frp routes a public name to this machine, but the name has to be one you own and have pointed at the server.`
+      message: st('shared.frpTunnel.noDomain', { name: profile.name })
     })
   }
   if (!spec.serverAddr.trim()) {
     gaps.push({
       code: 'no-server',
-      message: `"${profile.name}" has no frp server address, so there is nothing for that name to resolve to.`
+      message: st('shared.frpTunnel.noServer', { name: profile.name })
     })
   }
   if (gaps.length > 0 || !host) return { ready: false, gaps }
@@ -223,9 +222,9 @@ export function describeExposure(input: {
   return {
     local,
     url,
-    sentence: `Anything answering on ${local} on this machine becomes reachable at ${url}.`,
-    audience: 'Anyone who has that address can reach it. Nothing asks them for a password first.',
-    route: `Traffic arrives through ${input.serverAddr}:${input.serverPort}, the frp server you set up.`
+    sentence: st('shared.frpTunnel.exposureSentence', { local, url }),
+    audience: st('shared.frpTunnel.exposureAudience'),
+    route: st('shared.frpTunnel.exposureRoute', { server: `${input.serverAddr}:${input.serverPort}` })
   }
 }
 
@@ -252,8 +251,8 @@ export function publicHostFrom(input: {
 /** The DNS record the operator has to create, spelled out so it can be copied
  *  rather than reconstructed from prose. One line, one time. */
 export function delegationRecord(baseDomain: string, serverAddr: string): string {
-  const domain = baseDomain.trim().replace(/^\*\./, '') || '<your domain>'
-  return `*.${domain}  →  ${serverAddr.trim() || '<your frp server>'}`
+  const domain = baseDomain.trim().replace(/^\*\./, '') || st('shared.frpTunnel.yourDomain')
+  return `*.${domain}  →  ${serverAddr.trim() || st('shared.frpTunnel.yourServer')}`
 }
 
 /** A domain that could plausibly be delegated. Deliberately shape-only: this

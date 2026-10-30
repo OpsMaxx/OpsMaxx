@@ -135,6 +135,7 @@ import { decodeBase64 } from './access'
 import { SUDO_PROBE, resolveBinary } from './docker'
 import type { FactStatus, HostFacts } from './hostFacts'
 import { factSource } from './hostFacts'
+import { englishT, st } from './i18n'
 
 // ---- Statuses -------------------------------------------------------------
 
@@ -183,16 +184,27 @@ export const POSTURE_STATUSES: PostureStatus[] = [
  * that a reader is most likely to skim as "fine".
  */
 export const POSTURE_STATUS_HELP: Record<PostureStatus, string> = {
-  ok: 'Read successfully. A zero here means the probe looked and found none, not "we could not look".',
-  partial:
-    'Some of it was read and some was not. What is shown is real; it is not the whole picture, and the part that was refused is named rather than left out.',
-  absent: 'This server does not have the thing that answers this, and that was checked rather than assumed.',
-  denied:
-    'It exists and this account was not allowed to read it. A different account, or passwordless sudo, would see more. This is NOT the same as there being no rules, no policy or no failures.',
-  'no-tool': 'The program that answers this is not installed on this server.',
-  unsupported:
-    'This server cannot answer this question at all. For the firewall that means no firewall tooling is installed — which is not the same as no filtering: the kernel can enforce a ruleset loaded at boot with nothing left on disk to ask. Treat it as UNKNOWN, never as "open".',
-  unknown: 'The probe ran and its answer could not be read, or the collector never reported on it.'
+  get ok() {
+    return st('shared.posture.statusHelp.ok')
+  },
+  get partial() {
+    return st('shared.posture.statusHelp.partial')
+  },
+  get absent() {
+    return st('shared.posture.statusHelp.absent')
+  },
+  get denied() {
+    return st('shared.posture.statusHelp.denied')
+  },
+  get 'no-tool'() {
+    return st('shared.posture.statusHelp.noTool')
+  },
+  get unsupported() {
+    return st('shared.posture.statusHelp.unsupported')
+  },
+  get unknown() {
+    return st('shared.posture.statusHelp.unknown')
+  }
 }
 
 /** The seven things the collector reports on, each read independently. */
@@ -220,13 +232,27 @@ export const POSTURE_SOURCE_IDS: PostureSourceId[] = [
 ]
 
 export const POSTURE_SOURCE_LABEL: Record<PostureSourceId, string> = {
-  firewall: 'Firewall',
-  'mandatory-access': 'SELinux / AppArmor',
-  'sshd-hardening': 'sshd configuration',
-  'failed-logins': 'Failed logins',
-  'oom-kills': 'OOM kills',
-  'error-rate': 'Journal error rate',
-  certificates: 'Certificate expiry'
+  get firewall() {
+    return st('shared.posture.sourceLabel.firewall')
+  },
+  get 'mandatory-access'() {
+    return st('shared.posture.sourceLabel.mandatoryAccess')
+  },
+  get 'sshd-hardening'() {
+    return st('shared.posture.sourceLabel.sshdHardening')
+  },
+  get 'failed-logins'() {
+    return st('shared.posture.sourceLabel.failedLogins')
+  },
+  get 'oom-kills'() {
+    return st('shared.posture.sourceLabel.oomKills')
+  },
+  get 'error-rate'() {
+    return st('shared.posture.sourceLabel.errorRate')
+  },
+  get certificates() {
+    return st('shared.posture.sourceLabel.certificates')
+  }
 }
 
 export interface PostureSourceReport {
@@ -246,7 +272,7 @@ export function postureSource(posture: HostPosture, id: PostureSourceId): Postur
       id,
       label: POSTURE_SOURCE_LABEL[id],
       status: 'unknown',
-      detail: 'the collector did not report on this source'
+      detail: st('shared.posture.source.notReported')
     }
   )
 }
@@ -406,9 +432,10 @@ export interface FirewallRuleListing {
  * one reader further on: that block tells a MODEL a line is data rather than an
  * instruction, and this tells a PERSON that a line was written by whoever
  * configured the host — which on a compromised host is not the operator.
+ *
+ * English, being a string fixed at import; a screen reads the key through `t()`.
  */
-export const FIREWALL_RULES_HOST_REPORTED_NOTE =
-  'Reported by the server. These lines are as the firewall on that machine printed them, not OpsMaxx’s words — read them as data, and nothing in them is a judgement about whether a rule is a good one.'
+export const FIREWALL_RULES_HOST_REPORTED_NOTE = englishT('shared.posture.firewallRulesHostReportedNote')
 
 /** ufw and iptables/nft policy words, allow-listed because the renderer
  *  switches on them. Anything else becomes null rather than being displayed. */
@@ -2844,8 +2871,7 @@ export function securityUpdateReading(facts: HostFacts | null): {
     return {
       count: null,
       status: 'unknown',
-      detail:
-        'no server facts have been collected for this server yet, so its security update count is unknown. Switch on the Inventory collection, or wait for the next hourly sweep.'
+      detail: st('shared.posture.securityUpdates.notCollected')
     }
   }
   const s = factSource(facts, 'security-updates')

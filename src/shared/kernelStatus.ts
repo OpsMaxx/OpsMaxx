@@ -74,6 +74,8 @@
 // list and, when it matches NONE of them, that is reported as such rather than
 // assumed to be the oldest or the newest.
 
+import { st } from './i18n'
+
 export const KERNEL_MARKERS = {
   running: '===SP-KERNEL-RUNNING===',
   boot: '===SP-KERNEL-BOOT===',
@@ -271,7 +273,7 @@ export function kernelReport(s: KernelStatus, rebootRequired: boolean | null): K
   const base = { running: s.running, newest }
 
   if (s.running === null) {
-    return { ...base, verdict: 'unknown', detail: 'The running kernel could not be read.' }
+    return { ...base, verdict: 'unknown', detail: st('shared.kernelStatus.unreadable') }
   }
   if (rebootRequired === true) {
     return {
@@ -279,15 +281,15 @@ export function kernelReport(s: KernelStatus, rebootRequired: boolean | null): K
       verdict: 'reboot-needed',
       detail:
         newest !== null && compareKernelVersions(s.running, newest) < 0
-          ? `This host is running ${s.running}, ${newest} is installed, and its package manager has recorded that a restart is required.`
-          : `This host is running ${s.running} and its package manager has recorded that a restart is required. The reason is not a newer kernel — nothing newer than the running one is installed.`
+          ? st('shared.kernelStatus.rebootNewer', { running: s.running, newest })
+          : st('shared.kernelStatus.rebootOther', { running: s.running })
     }
   }
   if (s.family === null) {
     return {
       ...base,
       verdict: 'unknown',
-      detail: `This host is running ${s.running}. Neither dpkg nor rpm answered, so its installed kernels are unknown rather than absent.`
+      detail: st('shared.kernelStatus.noPackageManager', { running: s.running })
     }
   }
   // The running kernel should be one of the installed ones. When it is not, say
@@ -298,7 +300,7 @@ export function kernelReport(s: KernelStatus, rebootRequired: boolean | null): K
     return {
       ...base,
       verdict: 'unknown',
-      detail: `This host is running ${s.running}, which is not among the kernels its package manager reports installed (${s.installed.join(', ')}). That usually means the kernel came from somewhere the package manager does not know about, and whether a newer one is waiting cannot be answered from here.`
+      detail: st('shared.kernelStatus.notInstalled', { running: s.running, installed: s.installed.join(', ') })
     }
   }
   if (newest === null) {
@@ -307,19 +309,19 @@ export function kernelReport(s: KernelStatus, rebootRequired: boolean | null): K
       verdict: 'unknown',
       // Not "up to date": nothing was read, and an all-clear from a failed read
       // is the one answer that must never appear.
-      detail: `This host is running ${s.running}. Its installed kernel packages could not be read, so whether a newer one is waiting is unknown rather than no.`
+      detail: st('shared.kernelStatus.packagesUnreadable', { running: s.running })
     }
   }
   if (compareKernelVersions(s.running, newest) < 0) {
     return {
       ...base,
       verdict: 'newer-installed',
-      detail: `This host is running ${s.running} but ${newest} is installed. It will not be used until the next reboot, and the package manager has not recorded a restart as required.`
+      detail: st('shared.kernelStatus.newerInstalled', { running: s.running, newest })
     }
   }
   return {
     ...base,
     verdict: 'current',
-    detail: `This host is running ${s.running}, which is the newest kernel installed on it.`
+    detail: st('shared.kernelStatus.current', { running: s.running })
   }
 }

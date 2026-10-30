@@ -5,7 +5,7 @@ import { app } from 'electron'
 import { AddyError } from './sidecar'
 import { MAX_REQUEST_BYTES, relayError, type RelayClient } from './relay'
 import { CLIPBOARD_KIND } from './clipboard'
-import { LEGACY_MAIL_REASON, isLegacyMail, openMail, sealMail, type MailDeps, type OpenedMail } from './mail'
+import { isLegacyMail, openMail, sealMail, type MailDeps, type OpenedMail } from './mail'
 
 /**
  * Sending a file to another of your own devices.
@@ -151,18 +151,21 @@ export async function sendFile(
     // Refused rather than attempted. Sealing to a key that is not on the
     // roster is sealing to somebody who was removed, and the relay would
     // happily carry it.
-    throw new AddyError('not-paired', 'that device is not on this account')
+    throw new AddyError('not-paired', { key: 'main.addy.notOnAccount' })
   }
 
   const info = statSync(path)
   if (!info.isFile()) {
-    throw new AddyError('config-invalid', 'only a file can be sent, not a folder')
+    throw new AddyError('config-invalid', { key: 'main.addy.transfer.notAFile' })
   }
   if (info.size > MAX_TRANSFER_BYTES) {
-    throw new AddyError(
-      'too-large',
-      `that file is ${(info.size / 1024 / 1024).toFixed(1)} MB and the limit is ${(MAX_TRANSFER_BYTES / 1024 / 1024).toFixed(1)} MB. Use a file-transfer tool for something that size.`
-    )
+    throw new AddyError('too-large', {
+      key: 'main.addy.transfer.tooLarge',
+      vars: {
+        size: (info.size / 1024 / 1024).toFixed(1),
+        limit: (MAX_TRANSFER_BYTES / 1024 / 1024).toFixed(1)
+      }
+    })
   }
 
   const bytes = readFileSync(path)
@@ -208,7 +211,7 @@ export async function sendFile(
     // The bytes are already on the relay and now nothing will ever point at
     // them. Deleted, or every refused notice — a full mailbox above all —
     // leaves up to 6 MB counted against the account's quota for good.
-    const err = await relayError(resp, 'the relay would not carry the notice')
+    const err = await relayError(resp, 'main.addy.relay.failed.notice')
     await deps.relay.deleteObject(objectName(id)).catch(() => undefined)
     throw err
   }
@@ -234,7 +237,7 @@ export interface ArrivedFile {
  */
 export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
   const resp = await deps.relay.request('GET', '/v1/mail')
-  if (!resp.ok) throw await relayError(resp, 'collecting mail')
+  if (!resp.ok) throw await relayError(resp, 'main.addy.relay.failed.collectingMail')
   const { messages } = (await resp.json()) as {
     messages: { id: number; fromDevice: string; kind: string; sealed: string }[]
   }
@@ -389,10 +392,10 @@ export async function collectFiles(deps: TransferDeps): Promise<ArrivedFile[]> {
   if (legacy > 0 && arrived.length === 0) {
     // Said, because otherwise the file simply never arrives. Thrown only once
     // the notices are acknowledged, so it is said once rather than every pass.
-    throw new AddyError(
-      'config-invalid',
-      `${legacy === 1 ? 'A file' : `${legacy} files`} sent to this device ${legacy === 1 ? 'was' : 'were'} refused. ${LEGACY_MAIL_REASON}`
-    )
+    throw new AddyError('config-invalid', {
+      key: 'main.addy.transfer.legacyRefused',
+      vars: { count: legacy }
+    })
   }
   return arrived
 }

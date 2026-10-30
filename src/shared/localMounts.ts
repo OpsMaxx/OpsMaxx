@@ -7,6 +7,8 @@
  * docs/10-internal/reverse-mount-spike.md.
  */
 
+import { st, type Translate } from './i18n'
+
 /**
  * A share as this machine saves it.
  *
@@ -99,14 +101,14 @@ export function normalizeMountpoint(mp: string): string {
 /** Why a mount point cannot be used, or null if it can. */
 export function mountpointProblem(mp: string): string | null {
   const t = mp.trim()
-  if (!t) return 'Choose where to mount it on the server.'
-  if (t !== mp) return 'The mount point starts or ends with a space.'
+  if (!t) return st('shared.localMounts.mountpoint.empty')
+  if (t !== mp) return st('shared.localMounts.mountpoint.padded')
   // eslint-disable-next-line no-control-regex
-  if (/[\x00-\x1f\x7f]/.test(mp)) return 'The mount point has a control character in it.'
-  if (mp.length > 1024) return 'The mount point is too long.'
+  if (/[\x00-\x1f\x7f]/.test(mp)) return st('shared.localMounts.mountpoint.controlChar')
+  if (mp.length > 1024) return st('shared.localMounts.mountpoint.tooLong')
   const n = normalizeMountpoint(mp)
-  if (n === '/' || n === '~') return 'Mount into a folder of its own, not over the root or your home folder.'
-  if (n.split('/').includes('..')) return 'The mount point cannot contain "..".'
+  if (n === '/' || n === '~') return st('shared.localMounts.mountpoint.rootOrHome')
+  if (n.split('/').includes('..')) return st('shared.localMounts.mountpoint.traversal')
   return null
 }
 
@@ -126,53 +128,68 @@ export const MOUNT_EXIT = {
  * known cases are matched on the script's own exit codes first, because those
  * are ours, and on sshfs and fusermount wording only after.
  */
-export function explainMountFailure(code: number | null, stderr: string, username: string): MountReply {
+export function explainMountFailure(
+  code: number | null,
+  stderr: string,
+  username: string,
+  // Main runs this for the panel; it can pass its own `mt`.
+  t: Translate = st
+): MountReply {
   const said = stderr.trim().slice(0, 400)
   switch (code) {
     case MOUNT_EXIT.noSshfs:
       return {
         ok: false,
-        error: 'sshfs is not installed on this server.',
-        fix: 'Install it on the server: sudo apt install sshfs (Debian, Ubuntu) or sudo dnf install fuse-sshfs (Fedora, RHEL).'
+        error: t('shared.localMounts.failure.noSshfs'),
+        fix: t('shared.localMounts.failure.noSshfsFix', {
+          apt: 'sudo apt install sshfs',
+          dnf: 'sudo dnf install fuse-sshfs'
+        })
       }
     case MOUNT_EXIT.noFuse:
       return {
         ok: false,
-        error: '/dev/fuse is not available on this server.',
-        fix: 'Containers usually lack it. On a full machine, load the module with sudo modprobe fuse.'
+        error: t('shared.localMounts.failure.noFuse'),
+        fix: t('shared.localMounts.failure.noFuseFix', { command: 'sudo modprobe fuse' })
       }
     case MOUNT_EXIT.fuseDenied:
       return {
         ok: false,
-        error: `${username || 'This account'} is not allowed to use /dev/fuse on this server.`,
+        error: username
+          ? t('shared.localMounts.failure.fuseDenied', { user: username })
+          : t('shared.localMounts.failure.fuseDeniedNoUser'),
         // Distribution-specific: Ubuntu and Debian have no fuse group and leave
         // /dev/fuse open to everyone. And group membership is read when the
         // connection authenticates, which the pool keeps alive across tabs.
-        fix:
-          `Where /dev/fuse belongs to a fuse group (some older or hardened systems; not Ubuntu or Debian), add the account ` +
-          `on the server: sudo usermod -aG fuse ${username || '<user>'}. Then press Retry: it opens a new connection, ` +
-          `which is what picks up the new group.`
+        fix: t('shared.localMounts.failure.fuseDeniedFix', { command: `sudo usermod -aG fuse ${username || '<user>'}` })
       }
     case MOUNT_EXIT.notEmpty:
       return {
         ok: false,
-        error: 'The mount point already has files in it.',
-        fix: 'Mounting over them would hide them. Choose an empty or new folder.'
+        error: t('shared.localMounts.failure.notEmpty'),
+        fix: t('shared.localMounts.failure.notEmptyFix')
       }
     case MOUNT_EXIT.mkdirFailed:
-      return { ok: false, error: `Could not create the mount point on the server. ${said}`.trim() }
+      return { ok: false, error: t('shared.localMounts.failure.mkdir', { said }).trim() }
   }
   if (/operation not permitted|permission denied/i.test(said) && /fuse|mount/i.test(said)) {
     return {
       ok: false,
-      error: 'The server refused the FUSE mount.',
-      fix: 'This is what happens inside most containers, which cannot mount filesystems.'
+      error: t('shared.localMounts.failure.refused'),
+      fix: t('shared.localMounts.failure.refusedFix')
     }
   }
   if (/modprobe fuse|fuse: device not found/i.test(said)) {
-    return { ok: false, error: '/dev/fuse is not available on this server.', fix: 'Containers usually lack it.' }
+    return { ok: false, error: t('shared.localMounts.failure.noFuse'), fix: t('shared.localMounts.failure.noDevice') }
   }
-  return { ok: false, error: said || `sshfs stopped with code ${code ?? 'unknown'}.` }
+  if (said) return { ok: false, error: said }
+  return {
+    ok: false,
+    error:
+      code === null
+        ? t('shared.localMounts.failure.stoppedNoCode')
+        : t('shared.localMounts.failure.stopped', { code })
+  }
 }
 
 /**
@@ -209,7 +226,7 @@ export function sharesProblem(shares: LocalShare[]): { shareId: string; message:
     const p = mountpointProblem(s.mountpoint)
     if (p) return { shareId: s.id, message: p }
     const key = normalizeMountpoint(s.mountpoint)
-    if (seen.has(key)) return { shareId: s.id, message: `Two folders are shared at ${key}.` }
+    if (seen.has(key)) return { shareId: s.id, message: st('shared.localMounts.duplicate', { mountpoint: key }) }
     seen.add(key)
   }
   return null

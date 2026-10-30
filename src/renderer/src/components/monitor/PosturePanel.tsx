@@ -6,9 +6,9 @@ import { SweepProgress } from './SweepProgress'
 import { clsx, duration } from '../../lib/format'
 import {
   CERT_EXPIRY_DAYS,
-  FIREWALL_RULES_HOST_REPORTED_NOTE,
   OOM_WINDOW_HOURS,
   POSTURE_SOURCE_IDS,
+  POSTURE_SOURCE_LABEL,
   POSTURE_STATUS_HELP,
   SSHD_DIRECTIVES,
   isCertificateExpiringSoon,
@@ -525,7 +525,7 @@ function FirewallRules({ posture }: { posture: HostPosture }): React.JSX.Element
   }
   return (
     <>
-      <b>{FIREWALL_RULES_HOST_REPORTED_NOTE}</b>
+      <b>{t('shared.posture.firewallRulesHostReportedNote')}</b>
       {fw.ruleLines.map((listing) => (
         <div key={listing.from} data-rule-listing={listing.from} style={{ marginTop: 6 }}>
           <div className="faint">
@@ -1112,7 +1112,7 @@ export function PosturePanel({
                 .filter(({ s }) => s.status === 'denied' && s.detail)
                 .map(({ row, s }) => (
                   <div key={`${row.serverId}-${s.id}`} className="faint" style={{ marginTop: 4 }}>
-                    {row.serverName} · {s.label}: {s.detail}
+                    {row.serverName} · {POSTURE_SOURCE_LABEL[s.id]}: {s.detail}
                   </div>
                 ))
             )}

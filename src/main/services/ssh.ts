@@ -6,8 +6,10 @@ import { homedir } from 'node:os'
 import { WebContents, app } from 'electron'
 import type { SshCloseInfo, SshConnectConfig, SshHop, SshStatus, SshStatusPhase } from '../../shared/ssh'
 import type { CloudTarget } from '../../shared/cloud'
+import { LocalizedError } from '../../shared/i18n'
 import { agentForHop } from '../../shared/sshAgent'
 import { debugRecord } from './debugLog'
+import { mt } from './locale'
 import { askedWithoutWindow, verifyHostKey } from './knownhosts'
 import { storedCredential } from './credentialLink'
 import { resolveSecrets } from './credentialResolver'
@@ -151,22 +153,18 @@ export function readCertificateFile(hop: SshHop): string {
   const named = hop.certificatePath?.replace(/^"(.*)"$/, '$1').trim()
   const path = named || (keyPath ? `${keyPath}-cert.pub` : '')
   if (!path) {
-    throw new Error(
-      'No certificate file is configured for this connection. Edit the server and select the certificate (the *-cert.pub file your CA issued).'
-    )
+    throw new LocalizedError('main.ssh.noCertificate')
   }
   const resolved = path.replace(/^~(?=$|[\\/])/, homedir())
   if (!existsSync(resolved)) {
-    throw new Error(
-      named
-        ? `Certificate not found: ${resolved}`
-        : `No certificate was found next to the key, at ${resolved}. Edit the server and select the certificate file.`
-    )
+    throw new LocalizedError(named ? 'main.ssh.certificateNotFound' : 'main.ssh.certificateNotNextToKey', {
+      path: resolved
+    })
   }
   try {
     return readFileSync(resolved, 'utf8')
   } catch (err) {
-    throw new Error(`Could not read certificate ${resolved}: ${(err as Error).message}`)
+    throw new LocalizedError('main.ssh.certificateUnreadable', { path: resolved, detail: (err as Error).message })
   }
 }
 
@@ -180,28 +178,24 @@ export function readCertificateFile(hop: SshHop): string {
  */
 function readKeyFile(path: string, hop: SshHop): string {
   if (!existsSync(path)) {
-    throw new Error(`Private key not found: ${path}`)
+    throw new LocalizedError('main.ssh.keyNotFound', { path })
   }
 
   let key: string
   try {
     key = readFileSync(path, 'utf8')
   } catch (err) {
-    throw new Error(`Could not read private key ${path}: ${(err as Error).message}`)
+    throw new LocalizedError('main.ssh.keyUnreadable', { path, detail: (err as Error).message })
   }
 
   if (key.startsWith('PuTTY-User-Key-File')) {
-    throw new Error(
-      `${path} is a PuTTY .ppk key, which is not supported. Convert it in PuTTYgen with Conversions → Export OpenSSH key, then select the converted file.`
-    )
+    throw new LocalizedError('main.ssh.keyIsPpk', { path })
   }
   if (/^ssh-(rsa|ed25519|dss)\s|^ecdsa-sha2-/.test(key.trim())) {
-    throw new Error(
-      `${path} is a public key, not a private key. Select the matching private key file (the one without the .pub suffix).`
-    )
+    throw new LocalizedError('main.ssh.keyIsPublic', { path })
   }
   if (!/-----BEGIN [^-]*PRIVATE KEY-----/.test(key)) {
-    throw new Error(`${path} does not look like a private key file.`)
+    throw new LocalizedError('main.ssh.keyNotPrivate', { path })
   }
   if (isEncryptedPrivateKey(key.slice(0, 512)) && !hop.passphrase) {
     throw new Error(
@@ -275,9 +269,7 @@ function authFor(hop: SshHop): Partial<ConnectConfig> {
         // needs a signer we do not have for a handle. Say which of the two
         // things is unsupported rather than letting certificateKey throw
         // about a key it could not parse.
-        throw new Error(
-          'This connection uses an OpenSSH certificate over a hardware-backed (FIDO2) key, which OpsMaxx cannot sign. Set the connection to use an SSH agent instead.'
-        )
+        throw new LocalizedError('main.ssh.certificateOverFido')
       }
       const key = certificateKey(certKeyFile, cert, hop.passphrase)
       return { authHandler: certificateAuthHandler(hop.username, key) as never }
@@ -709,9 +701,12 @@ function hopLabel(hop: SshHop & { serverId?: string }): string {
 function atHop(err: unknown, hop: SshHop & { serverId?: string }, index: number, count: number): SshChainError {
   const e = (err instanceof Error ? err : new Error(String(err))) as SshChainError
   if (e.hopIndex !== undefined) return e
-  const labelled: SshChainError = new Error(
-    `Jump host ${index + 1} of ${count} — ${hopLabel(hop)} — could not be reached: ${e.message}`
-  )
+  const labelled: SshChainError = new LocalizedError('main.ssh.jumpHostUnreachable', {
+    index: index + 1,
+    count,
+    hop: hopLabel(hop),
+    detail: e.message
+  })
   labelled.hopIndex = index
   labelled.hopServerId = hop.serverId
   return labelled
@@ -742,11 +737,13 @@ function hopForward(
         reject(err)
         return
       }
-      const failure: SshChainError = new Error(
-        `Jump host ${via.index + 1} of ${via.count} — ${hopLabel(via.hop)} — authenticated, but could not ` +
-          `open a connection onwards to ${target.host}:${target.port || 22}: ${err.message}. ` +
-          'That is the jump host reaching the next address, not the next address refusing to authenticate.'
-      )
+      const failure: SshChainError = new LocalizedError('main.ssh.jumpHostCannotForward', {
+        index: via.index + 1,
+        count: via.count,
+        hop: hopLabel(via.hop),
+        target: `${target.host}:${target.port || 22}`,
+        detail: err.message
+      })
       failure.hopIndex = via.index
       failure.hopServerId = via.hop.serverId
       reject(failure)
@@ -847,7 +844,7 @@ async function openChainOverVpn(
   const started = await vpnStart(vpnId)
   if (!started.ok) {
     // The VPN's own message, not a connect timeout twenty seconds later.
-    throw new Error(started.error ?? 'The VPN for this server could not be started.')
+    throw started.error ? new Error(started.error) : new LocalizedError('main.ssh.vpnNotStarted')
   }
   assertVpnCarriesTraffic(vpnStatus(vpnId), cfg)
 
@@ -1361,10 +1358,7 @@ function recordCloudLifecycle(provider: string, serverName: string | undefined, 
  */
 function assertNoJumpChain(cfg: { hops?: SshHop[] }): void {
   if (cfg.hops?.length) {
-    throw new Error(
-      'A cloud server cannot also be reached through jump hosts: the provider returns a ' +
-        'local tunnel or an address of its own, which a bastion cannot carry. Remove the jump chain.'
-    )
+    throw new LocalizedError('main.ssh.cloudWithJumpHosts')
   }
 }
 
@@ -1423,15 +1417,10 @@ function assertVpnCarriesTraffic(
 ): void {
   if (!vs || vs.state === 'connected') return
   if (vs.state === 'authenticating') {
-    throw new Error(
-      `${cfg.serverName ?? cfg.host} is reached through a VPN that has not been authorised yet. ` +
-        'Open VPN and authorise the node — nothing can route through it until you do.'
-    )
+    throw new LocalizedError('main.ssh.vpnNotAuthorised', { server: cfg.serverName ?? cfg.host })
   }
-  throw new Error(
-    `${cfg.serverName ?? cfg.host} is reached through a VPN that is not connected ` +
-      `(${vs.state}). ${vs.error ?? 'Open VPN to see why.'}`
-  )
+  const vars = { server: cfg.serverName ?? cfg.host, state: vs.state, detail: vs.error ?? '' }
+  throw new LocalizedError(vs.error ? 'main.ssh.vpnNotConnected' : 'main.ssh.vpnNotConnectedNoDetail', vars)
 }
 
 async function vpnDial(
@@ -1442,7 +1431,7 @@ async function vpnDial(
 
   const started = await vpnStart(vpnId)
   if (!started.ok) {
-    throw new Error(started.error ?? 'The VPN for this server could not be started.')
+    throw started.error ? new Error(started.error) : new LocalizedError('main.ssh.vpnNotStarted')
   }
   assertVpnCarriesTraffic(vpnStatus(vpnId), cfg)
 
@@ -1754,7 +1743,11 @@ export async function sshConnect(wc: WebContents, cfg: SshConnectConfig): Promis
       })
     })
   } catch (err) {
-    status(wc, sessionId, 'error', { message: err instanceof Error ? err.message : String(err) })
+    // The tab says ours in the user's language; ssh2's and the server's own words pass through, and
+    // only those are what the connection-error classifier reads.
+    const message =
+      err instanceof LocalizedError ? mt(err.key, err.vars) : err instanceof Error ? err.message : String(err)
+    status(wc, sessionId, 'error', { message })
     cleanup(sessionId)
   }
 }
@@ -1781,15 +1774,15 @@ export function sshClose(sessionId: string): void {
  */
 export async function sshPasteImage(sessionId: string, png: unknown): Promise<string> {
   const s = sessions.get(sessionId)
-  if (!s?.stream || !s.conn) throw new Error('This terminal is not connected.')
-  if (s.container) throw new Error('Images cannot be pasted into a container shell: it cannot see files on the host.')
-  if (!isPastableImage(png)) throw new Error('The clipboard image is not a PNG, or is larger than 20 MB.')
+  if (!s?.stream || !s.conn) throw new LocalizedError('main.ssh.pasteNotConnected')
+  if (s.container) throw new LocalizedError('main.ssh.pasteIntoContainer')
+  if (!isPastableImage(png)) throw new LocalizedError('main.ssh.pasteNotPng')
   const client = s.conn.client
   const path = await uploadPastedImage(client, png)
   if (sessions.get(sessionId) !== s) {
     // Closed while uploading: its cleanup has already run without this one.
     void removePastedImages(client, [path])
-    throw new Error('The terminal closed before the image was copied.')
+    throw new LocalizedError('main.ssh.pasteClosed')
   }
   ;(s.pastedImages ??= []).push(path)
   return path

@@ -21,6 +21,7 @@ import {
   type MultipartRow,
   type Row
 } from './apiModel'
+import { st } from './i18n'
 
 /** Deliberately loose: the importer validates what it reads, field by field. */
 export interface OpenApi3Doc {
@@ -242,7 +243,7 @@ export function requestsFromOpenApi(
   for (const [path, itemIn] of Object.entries(isObj(doc.paths) ? doc.paths : {})) {
     const pathItem = deref(doc, itemIn)
     if (!isObj(pathItem)) {
-      skipped.push({ method: '*', path, reason: 'The path item is an external reference, or not an object.' })
+      skipped.push({ method: '*', path, reason: st('shared.apiOpenApi.badPathItem') })
       continue
     }
     const shared = Array.isArray(pathItem.parameters) ? pathItem.parameters : []
@@ -251,7 +252,7 @@ export function requestsFromOpenApi(
       const op = deref(doc, pathItem[method])
       const METHOD = method.toUpperCase()
       if (!isObj(op)) {
-        skipped.push({ method: METHOD, path, reason: 'The operation is not an object.' })
+        skipped.push({ method: METHOD, path, reason: st('shared.apiOpenApi.badOperation') })
         continue
       }
       const key = `${METHOD} ${path}`

@@ -36,6 +36,7 @@
 // unrecognised command does not get a soothing paraphrase, and a missing reason
 // is printed as a missing reason.
 
+import { englishT, st, type Translate } from './i18n'
 import type { AiCapability, ContentPreview } from './mcp'
 
 /**
@@ -91,8 +92,18 @@ export function riskPosition(level: string): { ordinal: number; of: number } | n
 /** "HIGH — 3 of 3", or a sentence saying the word is not on the scale. */
 export function formatRiskLabel(level: string): string {
   const pos = riskPosition(level)
-  if (!pos) return `${level.toUpperCase() || 'UNLABELLED'} — not on OpsMaxx's ${APPROVAL_RISK_SCALE.length}-level scale`
-  return `${level.toUpperCase()} — ${pos.ordinal} of ${pos.of}`
+  if (!pos) {
+    return st('shared.approvalRisk.riskLabel.offScale', {
+      level: level.toUpperCase() || st('shared.approvalRisk.riskLabel.unlabelled'),
+      size: APPROVAL_RISK_SCALE.length
+    })
+  }
+  return st('shared.approvalRisk.riskLabel.onScale', { level: levelWord(level), ordinal: pos.ordinal, of: pos.of })
+}
+
+/** "HIGH", in the reader's language. Only for a level riskPosition placed. */
+function levelWord(level: string): string {
+  return st(`shared.approvalRisk.level.${level as ApprovalRiskLevel}`)
 }
 
 /**
@@ -125,14 +136,19 @@ export function productionHint(s: ApprovalSubject): string | null {
  * read, which names none -- the workspace. Never "null" and never blank: an
  * operator reading "act on" followed by nothing cannot tell what a yes reaches.
  */
-export function approvalTarget(r: { serverName: string | null; workspaceName?: string }): string {
-  return r.serverName ?? `the ${r.workspaceName ?? 'unnamed'} workspace`
+export function approvalTarget(r: { serverName: string | null; workspaceName?: string }, t: Translate = st): string {
+  return (
+    r.serverName ??
+    t('shared.approvalRisk.workspaceTarget', {
+      workspace: r.workspaceName ?? t('shared.approvalRisk.unnamedWorkspace')
+    })
+  )
 }
 
 /** The Where line: "Workspace / Server", or the workspace alone and said to be whole. */
 export function approvalWhere(r: { serverName: string | null; workspaceName: string }): string {
   return r.serverName === null
-    ? `Workspace: ${r.workspaceName} — the whole workspace, no single server`
+    ? st('shared.approvalRisk.whereWorkspace', { workspace: r.workspaceName })
     : `${r.workspaceName} / ${r.serverName}`
 }
 
@@ -158,22 +174,22 @@ export function riskReasons(s: ApprovalSubject): string[] {
 
   // The bridge scores execute_command high on exactly this test and medium
   // otherwise, so this pair covers the whole of its shell-command rule.
-  if (/\bsudo\b/.test(action)) out.push('the command runs as root, through sudo')
+  if (/\bsudo\b/.test(action)) out.push(st('shared.approvalRisk.reason.sudo'))
   else if (s.capability === 'terminal' || s.capability === 'sudo')
-    out.push('it runs a shell command of the agent’s own composition on the host')
+    out.push(st('shared.approvalRisk.reason.shell'))
 
   if (s.capability === 'writeFiles')
-    out.push('it overwrites a file on the host, and the previous contents are not kept anywhere')
+    out.push(st('shared.approvalRisk.reason.writeFiles'))
   if (s.capability === 'databaseAccess')
     out.push(
       high
-        ? 'the statement was not classified as a read, so OpsMaxx is treating it as one that changes data'
-        : 'it reads from a database through the host'
+        ? st('shared.approvalRisk.reason.databaseWrite')
+        : st('shared.approvalRisk.reason.databaseRead')
     )
   if (s.capability === 'hostFacts')
-    out.push('it returns which security updates the host is missing, which is what the host is unpatched against')
+    out.push(st('shared.approvalRisk.reason.hostFacts'))
   if (s.capability === 'serverMetrics')
-    out.push('it returns the host’s listening ports and failed services, not only its CPU and memory')
+    out.push(st('shared.approvalRisk.reason.serverMetrics'))
   // Four verbs now, not two. `starts` alone was enough while set_tunnel was the
   // only tool here; "Define" and "Remove" would both have fallen to its else
   // branch and told the reader a tunnel was being closed when one was being
@@ -181,18 +197,18 @@ export function riskReasons(s: ApprovalSubject): string[] {
   if (s.capability === 'sshTunnel')
     out.push(
       /^define\b/i.test(action)
-        ? 'it writes a tunnel into OpsMaxx that outlives this session, and whoever presses Start next starts it'
+        ? st('shared.approvalRisk.reason.tunnelDefine')
         : /^remove\b/i.test(action)
-          ? 'it deletes a saved tunnel, and anything that expected that port loses it'
+          ? st('shared.approvalRisk.reason.tunnelRemove')
           : starts
-            ? 'it opens a network path between this machine and a port on the server'
-            : 'it closes a tunnel that other things may still be using'
+            ? st('shared.approvalRisk.reason.tunnelOpen')
+            : st('shared.approvalRisk.reason.tunnelClose')
     )
   if (s.capability === 'vpnControl')
     out.push(
       starts
-        ? 'it changes which network your later SSH and database sessions travel over'
-        : 'it stops a VPN that other sessions may depend on'
+        ? st('shared.approvalRisk.reason.vpnStart')
+        : st('shared.approvalRisk.reason.vpnStop')
     )
   // Same problem, same fix: this capability grew two verbs that destroy or
   // rewrite rather than add, and a single sentence about "writes ... and stores
@@ -200,14 +216,14 @@ export function riskReasons(s: ApprovalSubject): string[] {
   if (s.capability === 'manageServers')
     out.push(
       /^remove\b/i.test(action)
-        ? 'it deletes a saved connection and its stored credential, and OpsMaxx keeps no copy to put back'
+        ? st('shared.approvalRisk.reason.serverRemove')
         : /^(change|update)\b/i.test(action)
-          ? 'it rewrites a saved connection — where it points, which account it uses, or what it jumps through'
-          : 'it writes to OpsMaxx’s own connection list and stores a credential there'
+          ? st('shared.approvalRisk.reason.serverChange')
+          : st('shared.approvalRisk.reason.serverAdd')
     )
 
   const prod = productionHint(s)
-  if (prod) out.push(`"${prod}" reads as production`)
+  if (prod) out.push(st('shared.approvalRisk.reason.production', { name: prod }))
   return out
 }
 
@@ -254,7 +270,6 @@ export function explainRisk(s: ApprovalSubject): RiskExplanation {
   const fromBridge = typeof s.riskReason === 'string' ? s.riskReason.trim() : ''
   const reasons = fromBridge ? [fromBridge] : riskReasons(s)
   const position = riskPosition(s.risk)
-  const word = position ? s.risk.toUpperCase() : 'This'
   return {
     level: s.risk,
     position,
@@ -264,10 +279,12 @@ export function explainRisk(s: ApprovalSubject): RiskExplanation {
     reasonKnown: reasons.length > 0,
     reasonSource: fromBridge ? 'bridge' : reasons.length ? 'derived' : 'none',
     sentence: reasons.length
-      ? `${word} because: ${reasons.join('; ')}.`
+      ? position
+        ? st('shared.approvalRisk.because', { level: levelWord(s.risk), reasons: reasons.join('; ') })
+        : st('shared.approvalRisk.thisBecause', { reasons: reasons.join('; ') })
       : position
-        ? `OpsMaxx did not record why this scored ${s.risk.toUpperCase()}, and cannot derive it from the request. Judge it from the command below, not from the word.`
-        : `OpsMaxx does not recognise the risk word "${s.risk}" and cannot place it on its own scale. Treat this as unscored, not as safe.`
+        ? st('shared.approvalRisk.unrecorded', { level: levelWord(s.risk) })
+        : st('shared.approvalRisk.unrecognised', { risk: s.risk })
   }
 }
 
@@ -384,8 +401,7 @@ export function sanitizeAgentIntent(raw: unknown): string | null {
  * that most deserved a second look. Saying "I cannot describe this" is itself a
  * risk signal, so it renders as loudly as any other line here.
  */
-export const NO_CONSEQUENCE_TEXT =
-  'OpsMaxx cannot describe what this command does. It matched none of the shapes OpsMaxx knows, so the command itself is the only evidence there is.'
+export const NO_CONSEQUENCE_TEXT = englishT('shared.approvalRisk.noConsequence')
 
 export interface Consequence {
   /** Always a sentence. NO_CONSEQUENCE_TEXT when `known` is false. */
@@ -409,68 +425,68 @@ const COMMAND_SHAPES: CommandShape[] = [
       const unit = m[2]
       switch (m[1].toLowerCase()) {
         case 'restart':
-          return `Restarts ${unit} on ${host}. Every connection it is serving right now is dropped, and it comes back only if the unit starts cleanly — if it does not, the service stays down and nothing here starts it again.`
+          return st('shared.approvalRisk.consequence.restart', { unit, host })
         case 'stop':
-          return `Stops ${unit} on ${host} and leaves it stopped. Nothing in OpsMaxx starts it again.`
+          return st('shared.approvalRisk.consequence.stop', { unit, host })
         case 'start':
-          return `Starts ${unit} on ${host}. If it is already running this changes nothing.`
+          return st('shared.approvalRisk.consequence.start', { unit, host })
         case 'reload':
-          return `Makes ${unit} re-read its configuration on ${host}. Existing connections are kept — but a configuration it cannot parse can still take it down.`
+          return st('shared.approvalRisk.consequence.reload', { unit, host })
         default:
-          return `Changes whether ${unit} starts at boot on ${host}. It does not start or stop the service right now, so the host looks unchanged until it next reboots.`
+          return st('shared.approvalRisk.consequence.bootSetting', { unit, host })
       }
     }
   },
   {
     match: /(^|[\s;&|])rm\s/,
-    say: (_m, host) => `Deletes files on ${host}. There is no recycle bin over SSH — what this removes is gone.`
+    say: (_m, host) => st('shared.approvalRisk.consequence.rm', { host })
   },
   {
     match: /(^|[\s;&|])(reboot|poweroff|halt|shutdown)\b|\binit\s+[06]\b/,
     say: (_m, host) =>
-      `Takes ${host} down. Every SSH session, tunnel and service on it stops, and whether it comes back is up to the machine, not to OpsMaxx.`
+      st('shared.approvalRisk.consequence.shutdown', { host })
   },
   {
     match: /(^|[\s;&|])(kill|pkill|killall)\s/,
     say: (_m, host) =>
-      `Signals running processes on ${host}. Whatever they were part-way through is lost, and a supervised process may be restarted immediately while an unsupervised one will not be.`
+      st('shared.approvalRisk.consequence.kill', { host })
   },
   {
     match: /\b(apt|apt-get|dnf|yum|zypper|pacman|apk)\s+(?:-\S+\s+)*(install|remove|purge|upgrade|update|autoremove|dist-upgrade)\b/i,
     say: (_m, host) =>
-      `Changes the installed packages on ${host}. A package manager restarts the services it touches as a side effect, so the blast radius is wider than the package named.`
+      st('shared.approvalRisk.consequence.packages', { host })
   },
   {
     match: /\b(ufw|iptables|ip6tables|nft|firewall-cmd)\b/i,
     say: (_m, host) =>
-      `Changes what ${host} accepts network traffic on. A firewall edit made over SSH can lock this very connection out of the host, and recovering from that needs console access.`
+      st('shared.approvalRisk.consequence.firewall', { host })
   },
   {
     match: /\b(chmod|chown|chgrp)\s/,
-    say: (_m, host) => `Changes who can read, write or run those paths on ${host}.`
+    say: (_m, host) => st('shared.approvalRisk.consequence.permissions', { host })
   },
   {
     match: /\b(useradd|adduser|userdel|deluser|usermod|passwd|visudo)\b/,
-    say: (_m, host) => `Changes who can log in to ${host}, or what they can do once they are in.`
+    say: (_m, host) => st('shared.approvalRisk.consequence.accounts', { host })
   },
   {
     match: /\b(mkfs(\.\w+)?|fdisk|parted|wipefs)\b|\bdd\s+.*\bof=/,
     say: (_m, host) =>
-      `Writes to a disk or partition on ${host} directly, underneath the filesystem. Whatever is on it is destroyed and no backup OpsMaxx knows about is taken first.`
+      st('shared.approvalRisk.consequence.disk', { host })
   },
   {
     match: /\bcrontab\b|\/etc\/cron/,
     say: (_m, host) =>
-      `Changes what ${host} runs on a schedule. A scheduled job edited here runs unattended later, when nobody is watching this screen.`
+      st('shared.approvalRisk.consequence.schedule', { host })
   },
   {
     match: /\bdocker\s+(rm|stop|kill|prune)\b|\bdocker(-|\s+)compose\s+down\b/i,
-    say: (_m, host) => `Stops or removes containers on ${host}. Anything not on a named volume goes with them.`
+    say: (_m, host) => st('shared.approvalRisk.consequence.containers', { host })
   },
   {
     match: /\bkubectl\s+delete\b/i,
     say: (_m, host) =>
-      `Deletes objects from the Kubernetes cluster ${host} talks to. A controller may recreate some of them and will not recreate others; kubectl does not tell you which before it runs.`
+      st('shared.approvalRisk.consequence.kubectlDelete', { host })
   }
 ]
 
@@ -492,11 +508,14 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
     for (const shape of COMMAND_SHAPES) {
       const m = action.match(shape.match)
       if (m) {
-        const root = /\bsudo\b/.test(action) ? ' It runs as root.' : ''
-        return { text: `${shape.say(m, host)}${root}`, known: true }
+        const text = shape.say(m, host)
+        return {
+          text: /\bsudo\b/.test(action) ? st('shared.approvalRisk.consequence.asRoot', { text }) : text,
+          known: true
+        }
       }
     }
-    return { text: NO_CONSEQUENCE_TEXT, known: false }
+    return { text: st('shared.approvalRisk.noConsequence'), known: false }
   }
 
   const path = action.replace(/^(read|write|list)\s+/, '').replace(/\s+\(\d+ bytes\)$/, '')
@@ -506,63 +525,63 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
     case 'readFiles':
       return {
         text: /^list\s/.test(action)
-          ? `Lists what is in ${path} on ${host}. Nothing on the host changes; what the agent learns is the filenames.`
-          : `Reads ${path} from ${host} and hands the contents to the agent. Nothing on the host changes — what changes is that the contents have left it.`,
+          ? st('shared.approvalRisk.consequence.list', { path, host })
+          : st('shared.approvalRisk.consequence.read', { path, host }),
         known: true
       }
     case 'writeFiles':
     case 'sftpUpload':
       return {
-        text: `Overwrites ${path} on ${host}. The previous contents are not kept anywhere OpsMaxx can restore them from.`,
+        text: st('shared.approvalRisk.consequence.overwrite', { path, host }),
         known: true
       }
     case 'sftpDownload':
-      return { text: `Copies ${path} off ${host} to this machine.`, known: true }
+      return { text: st('shared.approvalRisk.consequence.download', { path, host }), known: true }
     case 'databaseAccess':
       return {
-        text: `Runs this statement against a database on ${host}. OpsMaxx does not dry-run it first, and a statement that changes rows cannot be undone from here.`,
+        text: st('shared.approvalRisk.consequence.database', { host }),
         known: true
       }
     case 'serverMetrics':
       return {
-        text: `Returns ${host}’s CPU, memory, disk and uptime — and every failed service and listening port with the process behind it, which is a service inventory of the host.`,
+        text: st('shared.approvalRisk.consequence.serverMetrics', { host }),
         known: true
       }
     case 'hostFacts':
       return {
-        text: `Returns ${host}’s distribution, kernel and how many security updates it is waiting on. That tells the agent what this host is unpatched against.`,
+        text: st('shared.approvalRisk.consequence.hostFacts', { host }),
         known: true
       }
     case 'sshTunnel':
       return {
         text: /^define\b/i.test(action)
-          ? `Saves a tunnel in OpsMaxx. It does NOT start it — starting is a separate approval — but it stays in the Tunnels view afterwards, and whoever presses Start next starts what the agent wrote.`
+          ? st('shared.approvalRisk.consequence.tunnelDefine')
           : /^remove\b/i.test(action)
-            ? `Deletes that saved tunnel. If it is running it is stopped first, and anything using it loses its connection.`
+            ? st('shared.approvalRisk.consequence.tunnelRemove')
             : starts
-              ? `Opens a tunnel between this machine and a port on ${host}. It stays open until somebody closes it.`
-              : `Closes that tunnel. Anything currently using it loses its connection.`,
+              ? st('shared.approvalRisk.consequence.tunnelOpen', { host })
+              : st('shared.approvalRisk.consequence.tunnelClose'),
         known: true
       }
     case 'vpnControl':
       return {
         text: starts
-          ? `Starts a VPN profile. Your later SSH and database sessions travel over it until it is stopped.`
-          : `Stops a VPN profile. Sessions that reach their host through it drop.`,
+          ? st('shared.approvalRisk.consequence.vpnStart')
+          : st('shared.approvalRisk.consequence.vpnStop'),
         known: true
       }
     case 'manageServers':
       return {
         text: /^remove\b/i.test(action)
-          ? `Deletes this connection from OpsMaxx and its stored credential with it. OpsMaxx keeps no copy, so putting it back means typing the credential again. It does not touch the machine itself.`
+          ? st('shared.approvalRisk.consequence.serverRemove')
           : /^(change|update)\b/i.test(action)
-            ? `Rewrites a saved connection in OpsMaxx — where it points, which account it uses, or which saved server it jumps through. Later calls that name it, from this agent or anyone else, go wherever it now points.`
-            : `Adds a server to OpsMaxx’s own connection list and stores a credential for it. It does not give the agent any access to the server it adds.`,
+            ? st('shared.approvalRisk.consequence.serverChange')
+            : st('shared.approvalRisk.consequence.serverAdd'),
         known: true
       }
     case 'viewServer':
       return {
-        text: `Lets the agent see that ${host} exists and read what it is permitted to do there. No hostname, username or key is disclosed.`,
+        text: st('shared.approvalRisk.consequence.viewServer', { host }),
         known: true
       }
     // The host IS named here, unlike vpnControl and manageServers above. A VPN
@@ -578,17 +597,17 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
     case 'ciTrigger':
       return {
         text: /^cancel\b/i.test(action)
-          ? `Cancels a run on ${host}. A pipeline stopped part-way has finished some of its steps and not the rest, and OpsMaxx cannot tell you which — a half-applied deploy is not the same as one that never ran.`
-          : `Starts a run on ${host}. It executes whatever that pipeline's definition says, with whatever credentials the CI server holds — OpsMaxx has not read the definition and cannot tell you what it deploys or where. Once the provider accepts the run, no agent permission can stop it: STOP ALL AI ACCESS takes away the agent's cancel along with everything else, and stopping the run is then yours to do — from this run in CI/CD, or in the provider.`,
+          ? st('shared.approvalRisk.consequence.ciCancel', { host })
+          : st('shared.approvalRisk.consequence.ciStart', { host }),
         known: true
       }
     case 'ciRead':
       return {
-        text: `Reads pipeline state and build output from ${host} and hands it to the agent. Nothing on the CI server changes. The output is written by whoever opened the change that ran it, so it is text a stranger wrote arriving in the agent's context.`,
+        text: st('shared.approvalRisk.consequence.ciRead', { host }),
         known: true
       }
     default:
-      return { text: NO_CONSEQUENCE_TEXT, known: false }
+      return { text: st('shared.approvalRisk.noConsequence'), known: false }
   }
 }
 
@@ -603,31 +622,31 @@ function describeWorkspaceConsequence(s: ApprovalSubject): Consequence {
   switch (s.action) {
     case 'fleet_inventory':
       return {
-        text: `Returns every server in ${ws} with its OS, pending updates and how many of them are security updates — what each host is unpatched against. It reads what OpsMaxx already collected and connects to nothing.`,
+        text: st('shared.approvalRisk.consequence.fleetInventory', { workspace: ws }),
         known: true
       }
     case 'fleet_drift':
       return {
-        text: `Names every server in ${ws} whose watched configuration has changed since it was last reviewed. Read together, that is a list of the workspace’s weakest hosts. It reads what OpsMaxx already collected and connects to nothing.`,
+        text: st('shared.approvalRisk.consequence.fleetDrift', { workspace: ws }),
         known: true
       }
     case 'list_alerts':
       return {
-        text: `Returns the alerts OpsMaxx has already raised for servers in ${ws}. Nothing changes; it reads history already recorded.`,
+        text: st('shared.approvalRisk.consequence.listAlerts', { workspace: ws }),
         known: true
       }
     case 'backup_status':
       return {
-        text: `Lists every backup destination configured on this machine and whether each is running on schedule — machine-wide, not only ${ws}. Destinations are named; their credentials are not.`,
+        text: st('shared.approvalRisk.consequence.backupStatus', { workspace: ws }),
         known: true
       }
     case 'list_ci_connections':
       return {
-        text: `Lists the names and providers of the CI/CD connections in ${ws}. Not their URLs or tokens, and nothing about the pipelines on them.`,
+        text: st('shared.approvalRisk.consequence.ciConnections', { workspace: ws }),
         known: true
       }
     default:
-      return { text: NO_CONSEQUENCE_TEXT, known: false }
+      return { text: st('shared.approvalRisk.noConsequence'), known: false }
   }
 }
 
@@ -640,8 +659,8 @@ function describeWorkspaceConsequence(s: ApprovalSubject): Consequence {
  */
 export function describeDenial(s: ApprovalSubject): string {
   return s.serverName === null
-    ? `Denying tells the agent this action was rejected. It stays connected and can do something else — nothing is read from ${approvalTarget(s)}.`
-    : `Denying tells the agent this action was rejected. It stays connected and can do something else — nothing runs on ${s.serverName}.`
+    ? st('shared.approvalRisk.denial.workspace', { target: approvalTarget(s) })
+    : st('shared.approvalRisk.denial.server', { server: s.serverName })
 }
 
 // ---------------------------------------------------------------------------

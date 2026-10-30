@@ -1,3 +1,4 @@
+import { st } from './i18n'
 import { STORE_ALERT_KINDS, type StoreAlertKind } from './webhook'
 
 // Item 44's maintenance window.
@@ -46,21 +47,21 @@ export const MAX_WINDOW_HOURS = 24
 
 export function checkMaintenanceWindow(w: MaintenanceWindow, now = Date.now()): WindowCheck {
   if (w.serverIds.length === 0) {
-    return { ok: false, reason: 'Choose the servers this window covers. A window over nothing silences nothing.' }
+    return { ok: false, reason: st('shared.maintenance.noServers') }
   }
-  if (!Number.isFinite(w.until)) return { ok: false, reason: 'That is not a time.' }
+  if (!Number.isFinite(w.until)) return { ok: false, reason: st('shared.maintenance.notATime') }
   if (w.until <= now) {
-    return { ok: false, reason: 'That time has already passed, so the window would end before it began.' }
+    return { ok: false, reason: st('shared.maintenance.inThePast') }
   }
   const hours = (w.until - now) / 3_600_000
   if (hours > MAX_WINDOW_HOURS) {
     return {
       ok: false,
-      reason: `A window can run for at most ${MAX_WINDOW_HOURS} hours. A longer silence is one nobody remembers setting — open another when this one ends.`
+      reason: st('shared.maintenance.tooLong', { max: MAX_WINDOW_HOURS })
     }
   }
   if (w.note.trim() === '') {
-    return { ok: false, reason: 'Say what the window is for. Somebody reading the alert log in three weeks will want to know why it went quiet.' }
+    return { ok: false, reason: st('shared.maintenance.noNote') }
   }
   return { ok: true }
 }
@@ -92,10 +93,7 @@ export function maintenanceSnoozes(w: MaintenanceWindow, now = Date.now()): Plan
 /** What the operator is told they are about to do, before they do it. */
 export function describeMaintenanceWindow(w: MaintenanceWindow, serverNames: string[], now = Date.now()): string {
   const hours = Math.round(((w.until - now) / 3_600_000) * 10) / 10
-  return (
-    `${serverNames.length} server(s) — ${serverNames.join(', ')} — stop announcing alerts for ${hours}h. ` +
-    'They keep being sampled and their chips stay up; what stops is the notifications. Webhook endpoints still receive everything.'
-  )
+  return st('shared.maintenance.describe', { count: serverNames.length, names: serverNames.join(', '), hours })
 }
 
 // ---------------------------------------------------------------------------
@@ -163,11 +161,11 @@ export function activeMaintenance(
 /** "1h 47m", "12m", "under a minute" — how long is left, for the banner. */
 export function remainingText(until: number, now = Date.now()): string {
   const ms = until - now
-  if (ms <= 0) return 'ending now'
+  if (ms <= 0) return st('shared.maintenance.endingNow')
   const mins = Math.floor(ms / 60_000)
-  if (mins < 1) return 'under a minute'
+  if (mins < 1) return st('shared.maintenance.underAMinute')
   const h = Math.floor(mins / 60)
   const m = mins % 60
-  if (h === 0) return `${m}m`
-  return m === 0 ? `${h}h` : `${h}h ${m}m`
+  if (h === 0) return st('shared.maintenance.minutes', { m })
+  return m === 0 ? st('shared.maintenance.hours', { h }) : st('shared.maintenance.hoursMinutes', { h, m })
 }

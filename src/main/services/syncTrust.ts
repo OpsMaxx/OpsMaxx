@@ -4,6 +4,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { atomicWriteFileSync } from './atomicWrite'
 import { askInWindow } from './promptWindow'
+import { mt } from './locale'
+import { LocalizedError } from '../../shared/i18n'
 import { getSecret } from './secrets'
 import { hasOwnCredential, storedCredential } from './credentialLink'
 import { vaultEntriesForResolve } from './vault'
@@ -510,21 +512,19 @@ export function clearHostKeyMark(id: string): void {
 
 /** A held record was used by something with no person to ask, or the person
  *  said no. The message is what the caller shows. */
-export class SyncHeldError extends Error {
+export class SyncHeldError extends LocalizedError {
   constructor(name: string) {
-    super(
-      `"${name}" was changed on another of your devices, and its saved credential is not used on this one ` +
-        'until you confirm the change. Confirm it in Sync & devices, or use it from this window to be asked.'
-    )
+    super('main.syncTrust.held', { name })
     this.name = 'SyncHeldError'
   }
 }
 
 function describeChange(fields: string[], arrived: boolean): string {
-  if (arrived) return 'It arrived from another of your devices and has not been confirmed on this one.'
+  if (arrived) return mt('main.syncTrust.changeArrived')
   const names = [...new Set(fields.map((f) => LABEL[f] ?? f))]
-  const list = names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
-  return `Its ${list} ${names.length === 1 ? 'was' : 'were'} changed on another of your devices.`
+  return names.length === 1
+    ? mt('main.syncTrust.changedOne', { field: names[0] })
+    : mt('main.syncTrust.changedMany', { fields: names.slice(0, -1).join(', '), last: names[names.length - 1] })
 }
 
 /**
@@ -535,7 +535,7 @@ function describeChange(fields: string[], arrived: boolean): string {
 function signsInWith(entryId: string | undefined): string {
   if (!entryId) return ''
   const entry = vaultEntriesForResolve()?.find((e) => e.id === entryId)
-  return entry ? ` It signs in with your vault entry "${entry.name}".` : ' It signs in with an entry from your vault.'
+  return ` ${entry ? mt('main.syncTrust.signsInWithEntry', { name: entry.name }) : mt('main.syncTrust.signsInWithVault')}`
 }
 
 const asking = new Map<string, Promise<boolean>>()
@@ -561,14 +561,14 @@ export function askToUse(
   if (inFlight) return inFlight
   const p = askInWindow({
     type: 'warning',
-    title: 'Confirm a change from another device',
-    message: `Use "${name}" on this device?`,
-    detail:
-      `${describeChange(fields, read().marks[key]?.arrived === true)}\n\nIt now points at ${destination}.` +
-      `${signsInWith(now.credential)}\n\n` +
-      'OpsMaxx does not send its saved credential anywhere new until you confirm it here. ' +
-      'If you did not make this change, choose Deny and check the devices listed in Sync & devices.',
-    buttons: ['Allow', 'Deny'],
+    title: mt('main.syncTrust.confirmTitle'),
+    message: mt('main.syncTrust.confirmMessage', { name }),
+    detail: mt('main.syncTrust.confirmDetail', {
+      change: describeChange(fields, read().marks[key]?.arrived === true),
+      destination,
+      signsIn: signsInWith(now.credential)
+    }),
+    buttons: [mt('main.syncTrust.allow'), mt('main.syncTrust.deny')],
     defaultId: 1,
     cancelId: 1
   })

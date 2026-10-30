@@ -34,7 +34,7 @@ import { VpnProfileForm, type VpnFormFocus } from './VpnProfileForm'
 import { NgrokSetup } from './NgrokSetup'
 import { VpnLogDrawer } from './VpnLogDrawer'
 import { t as tr, useT } from '../../lib/i18n'
-import type { MessageKey } from '../../../../shared/i18n'
+import { englishT, type MessageKey } from '../../../../shared/i18n'
 
 const KIND_LABEL: Record<VpnKind, string> = {
   wireguard: 'WireGuard',
@@ -140,9 +140,12 @@ function openExternal(url: string): void {
   window.open(url, '_blank', 'noopener,noreferrer')
 }
 
-/** The generic sentence `internal` carries. Matched, not guessed: it is the one
- *  message in VPN_ERROR_MESSAGE that describes nothing. */
-const INTERNAL_PREFIX = 'Something went wrong inside OpsMaxx.'
+const NO_DETAIL = { detail: '' }
+/** The sentence main opens a failure with for `code`, without its detail. Main
+ *  sends it in English (an agent reads the same result); the catalog holds it
+ *  under one key, so the English is what the text is matched against and the
+ *  user's language is what is shown. */
+const opening = (code: VpnErrorCode): MessageKey => `main.vpn.error.${code}`
 
 /** The first sentence of a message from main.
  *
@@ -157,12 +160,19 @@ const INTERNAL_PREFIX = 'Something went wrong inside OpsMaxx.'
  *  failing because its management socket path was too long produced the toast
  *  "Something went wrong inside OpsMaxx." and an empty log drawer — a
  *  message with no fact in it, in front of the one detail that explained the
- *  failure. When the sentence is that one, the detail IS the headline. */
-export function headline(text: string): string {
+ *  failure. When the sentence is that one, the detail IS the headline.
+ *
+ *  With `code`, a message that opens with that code's sentence is answered with
+ *  the sentence in the user's language. */
+export function headline(text: string, code?: VpnErrorCode): string {
   const trimmed = text.trim()
-  if (trimmed.startsWith(INTERNAL_PREFIX)) {
-    const rest = trimmed.slice(INTERNAL_PREFIX.length).trim()
-    if (rest !== '') return headline(rest)
+  for (const said of [englishT(opening('internal'), NO_DETAIL), tr(opening('internal'), NO_DETAIL)]) {
+    if (!trimmed.startsWith(said)) continue
+    const rest = trimmed.slice(said.length).trim()
+    return rest !== '' ? headline(rest) : tr(opening('internal'), NO_DETAIL)
+  }
+  if (code && trimmed.startsWith(englishT(opening(code), NO_DETAIL))) {
+    return tr(opening(code), NO_DETAIL)
   }
   const end = trimmed.indexOf('. ')
   return end === -1 ? trimmed : trimmed.slice(0, end + 1)
@@ -458,7 +468,7 @@ export function useVpnProfiles(): VpnProfiles {
     toast(
       tr('vpn.profiles.errorToast', {
         name: p?.name ?? tr('vpn.profiles.unnamed'),
-        message: headline(error)
+        message: headline(error, code)
       }),
       'error',
       action

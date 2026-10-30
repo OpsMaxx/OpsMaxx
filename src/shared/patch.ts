@@ -19,6 +19,7 @@ import {
   type TopologyDatabase,
   type TopologyServer
 } from './topology'
+import { englishT, st, type MessageKey, type Translate } from './i18n'
 
 // Patch and update management — roadmap item 17.
 //
@@ -62,11 +63,7 @@ import {
 //
 // So: this module reports, plans, stages and — when a human confirms a specific
 // target list at a specific moment — applies. It never decides.
-export const PATCH_NO_AUTOMATION_NOTE =
-  'OpsMaxx does not patch on a schedule and will not add one. It is a desktop app that gets ' +
-  'closed, it cannot answer a dpkg conffile prompt, and it does not know what your servers do. ' +
-  'Reporting what is pending and letting you choose is the honest version of this; for genuinely ' +
-  'unattended patching use unattended-upgrades or dnf-automatic on the server itself.'
+export const PATCH_NO_AUTOMATION_NOTE = englishT('shared.patch.noAutomationNote')
 
 // ===========================================================================
 // THE HONESTY REQUIREMENT THIS INHERITS FROM ITEM C
@@ -82,10 +79,7 @@ export const PATCH_NO_AUTOMATION_NOTE =
 // every total and from every all-clear, and is never treated as a zero. The
 // vocabulary is `lib/inventory.ts`'s, deliberately: `unsupported` renders as
 // "cannot be answered", never as a dash and never as a number.
-export const PATCH_SECURITY_SCOPE_NOTE =
-  'Security counts cover the servers whose distribution publishes them. Arch and Alpine have no ' +
-  'security channel at all, and dnf cannot answer where the repositories omit updateinfo — those ' +
-  'servers are excluded from the totals below rather than counted as zero.'
+export const PATCH_SECURITY_SCOPE_NOTE = englishT('shared.patch.securityScopeNote')
 
 // ---------------------------------------------------------------------------
 // Package managers
@@ -153,11 +147,7 @@ export function patchCommandFor(
         // asked for, presented as the narrower one.
         return {
           ok: false,
-          reason:
-            'apt has no single command that installs only security updates. Every recipe that ' +
-            'claims to filters a package list and then installs its dependencies too, which is ' +
-            'a wider change than the one you asked for. Run the full upgrade, or use ' +
-            'unattended-upgrades on the server, which is built for exactly this.'
+          reason: st('shared.patch.command.aptSecurityRefused')
         }
       }
       return {
@@ -166,9 +156,7 @@ export function patchCommandFor(
           `${sudo}env DEBIAN_FRONTEND=noninteractive apt-get update && ` +
           `${sudo}env DEBIAN_FRONTEND=noninteractive apt-get -y ` +
           '-o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade',
-        detail:
-          'apt-get update, then apt-get upgrade with the non-interactive frontend and your ' +
-          'existing config files kept. Never dist-upgrade: nothing is removed.'
+        detail: st('shared.patch.command.aptDetail')
       }
     case 'dnf':
     case 'yum': {
@@ -177,16 +165,13 @@ export function patchCommandFor(
         return {
           ok: true,
           command: `${sudo}${bin} -y --security upgrade`,
-          detail:
-            `${bin} --security upgrade. On a server whose repositories publish no updateinfo this ` +
-            'installs nothing and says so — which is why the count for such a server reads "cannot ' +
-            'be answered" rather than 0.'
+          detail: st('shared.patch.command.dnfSecurityDetail', { bin })
         }
       }
       return {
         ok: true,
         command: `${sudo}${bin} -y upgrade`,
-        detail: `${bin} upgrade. Nothing is removed and no obsoletes are processed.`
+        detail: st('shared.patch.command.dnfDetail', { bin })
       }
     }
     case 'zypper':
@@ -194,47 +179,37 @@ export function patchCommandFor(
         return {
           ok: true,
           command: `${sudo}zypper --non-interactive patch --category security`,
-          detail:
-            'zypper patch --category security. SUSE models patches as first-class objects, so ' +
-            'this really is the security subset rather than a filtered package list.'
+          detail: st('shared.patch.command.zypperSecurityDetail')
         }
       }
       return {
         ok: true,
         command: `${sudo}zypper --non-interactive update`,
-        detail: 'zypper update. Nothing is removed; use zypper dup by hand for a distribution jump.'
+        detail: st('shared.patch.command.zypperDetail')
       }
     case 'pacman':
       if (scope === 'security') {
         return {
           ok: false,
-          reason:
-            'Arch has no security channel, so there is no security-only upgrade to run. This is ' +
-            'the same fact the inventory reports as "cannot be answered" for this server: it is ' +
-            'not a permission problem and not a missing tool.'
+          reason: st('shared.patch.command.pacmanSecurityRefused')
         }
       }
       return {
         ok: true,
         command: `${sudo}pacman -Syu --noconfirm`,
-        detail:
-          'pacman -Syu. Arch is a rolling release, so this is a full system upgrade by ' +
-          'definition — there is no smaller thing to ask for.'
+        detail: st('shared.patch.command.pacmanDetail')
       }
     case 'apk':
       if (scope === 'security') {
         return {
           ok: false,
-          reason:
-            'Alpine tracks security fixes per package rather than as a channel, so apk has no ' +
-            'security-only upgrade. The inventory reports this server as "cannot be answered" for ' +
-            'the same reason.'
+          reason: st('shared.patch.command.apkSecurityRefused')
         }
       }
       return {
         ok: true,
         command: `${sudo}apk upgrade`,
-        detail: 'apk upgrade against the repositories already configured on the server.'
+        detail: st('shared.patch.command.apkDetail')
       }
   }
 }
@@ -457,16 +432,26 @@ export const JOB_REBOOTING_NOTE =
  */
 export type PatchGap = Exclude<FactStatus, 'ok'> | 'not-collected' | 'probe-failed'
 
-export const PATCH_GAP_LABEL: Record<PatchGap, string> = {
-  absent: 'not on this server',
-  denied: 'not permitted',
-  'no-tool': 'no tool for it',
-  'stale-metadata': 'from a stale cache',
-  unsupported: 'cannot be answered',
-  unknown: 'unknown',
-  'not-collected': 'not collected yet',
-  'probe-failed': 'collection failed'
+const PATCH_GAP_KEYS: Record<PatchGap, MessageKey> = {
+  absent: 'lib.inventory.gap.absent',
+  denied: 'lib.inventory.gap.denied',
+  'no-tool': 'lib.inventory.gap.noTool',
+  'stale-metadata': 'lib.inventory.gap.staleMetadata',
+  unsupported: 'lib.inventory.gap.unsupported',
+  unknown: 'lib.inventory.gap.unknown',
+  'not-collected': 'lib.inventory.gap.notCollected',
+  'probe-failed': 'lib.inventory.gap.probeFailed'
 }
+
+// The inventory's own keys, so the overlap is one string per language rather
+// than two kept equal by hand. A getter per entry: read at render time, in the
+// language of the moment.
+export const PATCH_GAP_LABEL: Record<PatchGap, string> = Object.defineProperties(
+  {} as Record<PatchGap, string>,
+  Object.fromEntries(
+    Object.entries(PATCH_GAP_KEYS).map(([gap, k]) => [gap, { get: () => st(k), enumerable: true }])
+  )
+)
 
 /** A number, or a named reason there is none. Never a dash and never a zero. */
 export interface PatchCount {
@@ -524,9 +509,9 @@ export type PatchWorkState = 'yes' | 'no' | 'unknown'
 function gapHelp(gap: PatchGap, detail?: string): string {
   const base =
     gap === 'not-collected'
-      ? 'Host facts have not been collected for this server yet. They are collected about once an hour.'
+      ? st('shared.patch.gapHelp.notCollected')
       : gap === 'probe-failed'
-        ? 'The facts probe ran on this server and did not complete.'
+        ? st('shared.patch.gapHelp.probeFailed')
         : FACT_STATUS_HELP[gap]
   return detail ? `${detail}. ${base}` : base
 }
@@ -654,32 +639,27 @@ export function summarisePatch(rows: PatchHostRow[]): PatchSummary {
   s.allClear = rows.length > 0 && nothingPending && unanswered === 0
 
   if (rows.length === 0) {
-    s.allClearNote = 'No servers in this workspace.'
+    s.allClearNote = st('shared.patch.summary.noServers')
   } else if (s.allClear) {
-    s.allClearNote = 'Every server answered, and every server is up to date.'
+    s.allClearNote = st('shared.patch.summary.allClear')
   } else if (nothingPending) {
     const parts: string[] = []
     if (s.securityUnanswerable > 0) {
-      parts.push(
-        `${s.securityUnanswerable} ${s.securityUnanswerable === 1 ? 'server cannot' : 'servers cannot'} ` +
-          'report a security count at all'
-      )
+      parts.push(st('shared.patch.summary.securityUnanswerable', { count: s.securityUnanswerable }))
     }
-    if (s.securityUnknown > 0) parts.push(`${s.securityUnknown} security ${s.securityUnknown === 1 ? 'count' : 'counts'} could not be read`)
-    if (s.pendingUnknown > 0) parts.push(`${s.pendingUnknown} update ${s.pendingUnknown === 1 ? 'count' : 'counts'} could not be read`)
-    if (s.rebootUnknown > 0) parts.push(`${s.rebootUnknown} ${s.rebootUnknown === 1 ? 'host' : 'hosts'} cannot say whether a reboot is owed`)
+    if (s.securityUnknown > 0) parts.push(st('shared.patch.summary.securityUnknown', { count: s.securityUnknown }))
+    if (s.pendingUnknown > 0) parts.push(st('shared.patch.summary.pendingUnknown', { count: s.pendingUnknown }))
+    if (s.rebootUnknown > 0) parts.push(st('shared.patch.summary.rebootUnknown', { count: s.rebootUnknown }))
     // NOT "all clear". The counts that came back are zero and the ones that did
     // not are not zero — they are absent, and an estate is not clear because
     // the hosts that could answer had nothing to say.
-    s.allClearNote =
-      `Nothing is pending on the servers that answered, but ${parts.join(', ')}. That is not an ` +
-      'all-clear: those servers are unknown, not clean.'
+    s.allClearNote = st('shared.patch.summary.notAllClear', { unanswered: parts.join(', ') })
   } else {
     const bits: string[] = []
-    if (s.securityTotal > 0) bits.push(`${s.securityTotal} security`)
-    if (s.pendingTotal > 0) bits.push(`${s.pendingTotal} pending`)
-    if (s.rebootsOwed > 0) bits.push(`${s.rebootsOwed} awaiting a reboot`)
-    s.allClearNote = `${bits.join(', ')}. ${PATCH_SECURITY_SCOPE_NOTE}`
+    if (s.securityTotal > 0) bits.push(st('shared.patch.summary.security', { count: s.securityTotal }))
+    if (s.pendingTotal > 0) bits.push(st('shared.patch.summary.pending', { count: s.pendingTotal }))
+    if (s.rebootsOwed > 0) bits.push(st('shared.patch.summary.awaitingReboot', { count: s.rebootsOwed }))
+    s.allClearNote = `${bits.join(', ')}. ${st('shared.patch.securityScopeNote')}`
   }
   return s
 }
@@ -834,9 +814,7 @@ export function planPatch(req: PatchPlanRequest): PatchPlan {
       if (block !== null) blocks.push(block)
     }
     if (h.packageManager === null) {
-      const reason =
-        'OpsMaxx has not identified a package manager on this server, so it cannot know what ' +
-        'command would update it. Nothing is guessed.'
+      const reason = st('shared.patch.plan.noPackageManager')
       excluded.push({ serverId: h.serverId, serverName: h.serverName, reason })
       hosts.push({
         serverId: h.serverId,
@@ -945,14 +923,21 @@ export function blockSummary(plan: PatchPlan): string | null {
   const parts: string[] = []
   if (jump.length > 0) {
     parts.push(
-      `${jump.map((b) => b.serverName).join(', ')} ${jump.length === 1 ? 'is a jump host' : 'are jump hosts'} ` +
-        `for ${[...new Set(jump.flatMap((b) => dependentsOf(plan.topology, b.serverId).map((d) => d.name)))].join(', ')}`
+      st('shared.patch.block.jumpHosts', {
+        count: jump.length,
+        hosts: jump.map((b) => b.serverName).join(', '),
+        dependents: [
+          ...new Set(jump.flatMap((b) => dependentsOf(plan.topology, b.serverId).map((d) => d.name)))
+        ].join(', ')
+      })
     )
   }
   if (db.length > 0) {
-    parts.push(`${[...new Set(db.map((b) => b.serverName))].join(', ')} would restart together with a shared database`)
+    parts.push(
+      st('shared.patch.block.sharedDatabase', { hosts: [...new Set(db.map((b) => b.serverName))].join(', ') })
+    )
   }
-  return `This run will not restart ${parts.join('; ')}.`
+  return st('shared.patch.block.summary', { parts: parts.join('; ') })
 }
 
 // ---------------------------------------------------------------------------
@@ -1132,13 +1117,22 @@ export const GATE_POLL_MS = 5_000
  * the switch. Two paraphrases of one setting is how a person concludes there
  * are two settings.
  */
-export const GATE_SAMPLER_SETTING = 'Check servers in the background'
+export const GATE_SAMPLER_SETTING = englishT('settingsPage.monitoring.background.title')
 
-/** Where that switch is, in the words the app uses for the place. */
-export const GATE_SAMPLER_NOTE =
-  `The health data this gate reads comes from the fleet sampler — ${GATE_SAMPLER_SETTING}, ` +
-  'under Settings → Monitoring. With that switch off nothing ever samples the estate, so no ' +
-  'observation is ever newer than the wave and the gate can only ever time out.'
+function samplerNote(t: Translate): string {
+  return t('shared.patch.gateSamplerNote', {
+    setting: t('settingsPage.monitoring.background.title'),
+    section: t('nav.settings.monitoring')
+  })
+}
+
+/** Where that switch is, in the words the app uses for the place. English, for
+ *  the run's own messages; `gateSamplerNote()` is the same for a screen. */
+export const GATE_SAMPLER_NOTE = samplerNote(englishT)
+
+export function gateSamplerNote(): string {
+  return samplerNote(st)
+}
 
 /**
  * What the row says when the gate never got a fresh answer in time.

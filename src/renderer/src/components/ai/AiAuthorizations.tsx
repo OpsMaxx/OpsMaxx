@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { englishT } from '../../../../shared/i18n'
 import { Check, X } from 'lucide-react'
 import type { AccessGroup, SessionMode } from '../../../../shared/mcp'
 import { SESSION_MODES, sessionModeLabel } from '../../../../shared/mcp'
@@ -96,7 +97,7 @@ export function AiAuthorizations(): React.JSX.Element {
     try {
       const result = await window.opsmaxx?.aiMcp.approveAuthorization(id, {
         groupId: group?.id ?? null,
-        groupName: group?.name ?? sessionModeLabel(profile ?? 'custom'),
+        groupName: group?.name ?? sessionModeLabel(profile ?? 'custom', undefined, englishT),
         workspaces: chosen.map((w) => ({ id: w.id, name: w.name })),
         mode: profile ?? 'custom'
       })

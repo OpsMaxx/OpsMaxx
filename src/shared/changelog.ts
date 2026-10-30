@@ -48,6 +48,8 @@
 // then say what state it is in — never describe a capability from the switch
 // that requests it.
 
+import { englishT, st, type MessageKey, translatedTable } from './i18n'
+
 export const CHANGELOG_SOURCES = ['local-shell', 'approvals', 'agent-audit', 'history'] as const
 export type ChangeLogSource = (typeof CHANGELOG_SOURCES)[number]
 
@@ -235,34 +237,27 @@ export interface ChangeLogCoverage {
 /** What each source is a record OF. Shown whatever state it is in, because
  *  "history: unreadable" without this sentence does not tell an operator what
  *  they are missing. */
-export const CHANGELOG_SOURCE_LABEL: Record<ChangeLogSource, string> = {
-  'local-shell': 'Shells on this machine',
-  approvals: 'What you confirmed',
-  'agent-audit': 'What an agent did',
-  history: 'Alerts, jobs and the store'
-}
+export const CHANGELOG_SOURCE_LABEL: Record<ChangeLogSource, string> = translatedTable({
+  'local-shell': 'shared.changelog.sourceLabel.localShell',
+  approvals: 'shared.changelog.sourceLabel.approvals',
+  'agent-audit': 'shared.changelog.sourceLabel.agentAudit',
+  history: 'shared.changelog.sourceLabel.history'
+})
 
-export const CHANGELOG_SOURCE_SCOPE: Record<ChangeLogSource, string> = {
-  'local-shell':
-    'which shells started and how they exited — never keystrokes, and never what a shell printed.',
-  approvals:
-    'what a human was asked before a job or a broadcast ran, and what they answered, with the commands as they were confirmed.',
-  'agent-audit':
-    'what an agent did through the MCP bridge. This is the one source here that is not yours, and it is shown so the timeline is not missing the half you did not do.',
-  history:
-    'alerts raised and resolved, jobs, and what the durable store did about its own retention. Job output is deliberately not read.'
-}
+export const CHANGELOG_SOURCE_SCOPE: Record<ChangeLogSource, string> = translatedTable({
+  'local-shell': 'shared.changelog.sourceScope.localShell',
+  approvals: 'shared.changelog.sourceScope.approvals',
+  'agent-audit': 'shared.changelog.sourceScope.agentAudit',
+  history: 'shared.changelog.sourceScope.history'
+})
 
-const STATE_COPY: Record<ChangeLogSourceState, string> = {
-  read: 'Read in full for this window.',
-  off: 'Not read: the change log is switched off, so this source was not opened.',
-  absent:
-    'Nothing to read yet — this record does not exist on this machine. That is not the same as a quiet week, and it is shown rather than left as an empty stretch of timeline.',
-  unreadable: 'Could NOT be read, so anything it holds is missing from the timeline below.',
-  truncated:
-    'Only the most recent part was read. Older entries exist and are NOT in the timeline below.',
-  partial:
-    'Read, except for lines that would not parse. Those were skipped; everything either side of them is here.'
+const STATE_COPY: Record<ChangeLogSourceState, MessageKey> = {
+  read: 'shared.changelog.state.read',
+  off: 'shared.changelog.state.off',
+  absent: 'shared.changelog.state.absent',
+  unreadable: 'shared.changelog.state.unreadable',
+  truncated: 'shared.changelog.state.truncated',
+  partial: 'shared.changelog.state.partial'
 }
 
 /**
@@ -274,19 +269,22 @@ const STATE_COPY: Record<ChangeLogSourceState, string> = {
  * requests it instead of from what actually happened.
  */
 export function changeLogCoverageText(row: ChangeLogCoverage): string {
-  const parts = [`${CHANGELOG_SOURCE_LABEL[row.source]} — ${CHANGELOG_SOURCE_SCOPE[row.source]}`]
-  parts.push(STATE_COPY[row.state])
+  const parts = [
+    st('shared.changelog.coverage.source', {
+      label: CHANGELOG_SOURCE_LABEL[row.source],
+      scope: CHANGELOG_SOURCE_SCOPE[row.source]
+    })
+  ]
+  parts.push(st(STATE_COPY[row.state]))
   if (row.state === 'unreadable' && row.error) parts.push(row.error)
   if (row.skipped !== undefined && row.skipped > 0) {
-    parts.push(`${row.skipped} unreadable ${row.skipped === 1 ? 'line was' : 'lines were'} skipped.`)
+    parts.push(st('shared.changelog.coverage.skipped', { count: row.skipped }))
   }
   if (row.bytesUnread !== undefined && row.bytesUnread > 0) {
-    parts.push(`${row.bytesUnread} older bytes were not read.`)
+    parts.push(st('shared.changelog.coverage.bytesUnread', { bytes: row.bytesUnread }))
   }
   if (row.rowsDropped !== undefined && row.rowsDropped > 0) {
-    parts.push(
-      `${row.rowsDropped} older ${row.rowsDropped === 1 ? 'entry was' : 'entries were'} past this page's budget for one source.`
-    )
+    parts.push(st('shared.changelog.coverage.rowsDropped', { count: row.rowsDropped }))
   }
   return parts.join(' ')
 }
@@ -300,16 +298,14 @@ export function changeLogCoverageText(row: ChangeLogCoverage): string {
  * agent's actions, of local shells, or of approvals would break the guarantees
  * those three exist to provide, so this switch deliberately cannot.
  */
-export const CHANGELOG_SWITCH_ON =
-  'The change log reads four records that already exist and merges them into one timeline. ' +
-  'It stores nothing of its own and writes nothing.'
+export const CHANGELOG_SWITCH_ON_KEY: MessageKey = 'shared.changelog.switchOn'
+export const CHANGELOG_SWITCH_OFF_KEY: MessageKey = 'shared.changelog.switchOff'
 
-export const CHANGELOG_SWITCH_OFF =
-  'The change log is off, so nothing is read and no timeline is assembled. ' +
-  'This does NOT stop anything being recorded: the agent audit log, the local session log, ' +
-  'the approval log and the durable store all go on writing exactly as before, because each ' +
-  'is relied on by something other than this view. Switching this off removes the timeline, ' +
-  'not the records behind it.'
+/** English, fixed at import. A screen renders `t(CHANGELOG_SWITCH_ON_KEY)`. */
+export const CHANGELOG_SWITCH_ON = englishT(CHANGELOG_SWITCH_ON_KEY)
+
+/** English, fixed at import. A screen renders `t(CHANGELOG_SWITCH_OFF_KEY)`. */
+export const CHANGELOG_SWITCH_OFF = englishT(CHANGELOG_SWITCH_OFF_KEY)
 
 // ---------------------------------------------------------------------------
 // The page, and the bridge that carries it

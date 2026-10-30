@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 
 import { toDiagnose } from '../src/main/services/vpn/drivers/wireguard'
 import type { VpnDiagnoseCheck, VpnDiagnoseResult } from '../src/shared/vpn'
+import en from '../src/shared/locales/en.json'
 
 // The parent's half of the connectivity checklist.
 //
@@ -124,11 +125,13 @@ describe('a driver that cannot be probed', () => {
     const mgr = src('../src/main/services/vpn/manager.ts')
     expect(mgr).toContain('if (!driver.diagnose)')
     expect(mgr).toContain('unsupported')
-    expect(mgr).toContain('measures a different route')
+    expect(mgr).toContain("mt('main.vpn.diagnose.notProbeable')")
+    expect(en['main.vpn.diagnose.notProbeable']).toContain('measures a different route')
   })
 
   it('says a stopped profile was not asked, rather than blaming the far side', () => {
     const mgr = src('../src/main/services/vpn/manager.ts')
-    expect(mgr).toContain('is not running, so nothing was sent')
+    expect(mgr).toContain("mt('main.vpn.diagnose.notRunning')")
+    expect(en['main.vpn.diagnose.notRunning']).toContain('is not running, so nothing was sent')
   })
 })

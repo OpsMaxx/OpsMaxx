@@ -11,9 +11,8 @@ import { SweepEmpty } from './SweepEmpty'
 import { clsx } from '../../lib/format'
 import { sshHopsFor, sshTargetFor } from '../../lib/ssh'
 import {
-  GATE_SAMPLER_NOTE,
+  gateSamplerNote,
   PATCH_GAP_LABEL,
-  PATCH_NO_AUTOMATION_NOTE,
   blockSummary,
   buildPatchRow,
   planIsBlocked,
@@ -458,7 +457,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
               misleading by its absence. The caveats that qualify a NUMBER —
               "these servers are not in the count above" — stay on the page
               unconditionally, below. */}
-          <p data-testid="patch-no-automation">{PATCH_NO_AUTOMATION_NOTE}</p>
+          <p data-testid="patch-no-automation">{t('shared.patch.noAutomationNote')}</p>
         </>
       }
       actions={
@@ -745,7 +744,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
                 disabled={running}
               />
             </label>
-            <label title={gateUsable ? undefined : GATE_SAMPLER_NOTE}>
+            <label title={gateUsable ? undefined : gateSamplerNote()}>
               <input
                 type="checkbox"
                 checked={gateOn}
@@ -772,7 +771,7 @@ export function PatchPanel({ servers }: { servers: Server[] }): React.JSX.Elemen
             <>
               <div className="panel-note is-unknown" data-testid="patch-gate-unavailable">
                 <AlertTriangle size={12} />{' '}
-                {t('monitor.patch.plan.gateUnavailable', { note: GATE_SAMPLER_NOTE })}
+                {t('monitor.patch.plan.gateUnavailable', { note: gateSamplerNote() })}
               </div>
               {/* "turn the sampler on first" is advice the reader then has to
                   act on by hand, in a screen they are mid-way through

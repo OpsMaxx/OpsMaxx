@@ -11,6 +11,8 @@
 // and answers the question kubeadm will refuse on: is any node too far behind
 // the API server, and is any node AHEAD of it.
 
+import { st } from './i18n'
+
 export interface ParsedVersion {
   major: number
   minor: number
@@ -91,8 +93,11 @@ export function assessNodeSkew(
         minorsBehind: null,
         because:
           server === null
-            ? 'The API server did not report a version this could read, so no node can be judged against it.'
-            : `${n.name} reported a version this could not read (${n.kubeletVersion ?? 'nothing'}), so its skew is unknown rather than fine.`
+            ? st('shared.k8sSkew.serverUnreadable')
+            : st('shared.k8sSkew.nodeUnreadable', {
+                node: n.name,
+                version: n.kubeletVersion ?? st('shared.k8sSkew.nothing')
+              })
       }
     }
     // Major is part of the comparison rather than assumed to be 1. It has been
@@ -104,7 +109,7 @@ export function assessNodeSkew(
         version: n.kubeletVersion,
         verdict: 'ahead',
         minorsBehind: behind,
-        because: `${n.name} is NEWER than the API server (${n.kubeletVersion} against ${serverVersion}). That is not supported in any version of the skew policy, and usually means a control-plane upgrade stopped halfway.`
+        because: st('shared.k8sSkew.ahead', { node: n.name, version: n.kubeletVersion ?? '', server: serverVersion ?? '' })
       }
     }
     if (behind > KUBELET_SKEW_MINORS) {
@@ -113,18 +118,18 @@ export function assessNodeSkew(
         version: n.kubeletVersion,
         verdict: 'unsupported',
         minorsBehind: behind,
-        because: `${n.name} is ${behind} minor versions behind the API server, which is outside the supported window of ${KUBELET_SKEW_MINORS}. An upgrade will refuse to proceed from here.`
+        because: st('shared.k8sSkew.unsupported', { node: n.name, behind, window: KUBELET_SKEW_MINORS })
       }
     }
     if (behind === 0) {
-      return { node: n.name, version: n.kubeletVersion, verdict: 'ok', minorsBehind: 0, because: `${n.name} matches the API server.` }
+      return { node: n.name, version: n.kubeletVersion, verdict: 'ok', minorsBehind: 0, because: st('shared.k8sSkew.matches', { node: n.name }) }
     }
     return {
       node: n.name,
       version: n.kubeletVersion,
       verdict: behind === 1 ? 'ok' : 'behind',
       minorsBehind: behind,
-      because: `${n.name} is ${behind} minor version(s) behind the API server.`
+      because: st('shared.k8sSkew.behind', { node: n.name, behind })
     }
   })
 }
@@ -162,10 +167,10 @@ export function pdbHeadroom(
     blocksDrain: p.disruptionsAllowed === 0,
     because:
       p.disruptionsAllowed === null
-        ? `${p.namespace}/${p.name} did not report how many disruptions it allows, so whether it would block a drain is unknown.`
+        ? st('shared.k8sSkew.pdbUnknown', { pdb: `${p.namespace}/${p.name}` })
         : p.disruptionsAllowed === 0
-          ? `${p.namespace}/${p.name} allows no disruptions right now, so draining a node running its pods will wait rather than proceed.`
-          : `${p.namespace}/${p.name} allows ${p.disruptionsAllowed}.`
+          ? st('shared.k8sSkew.pdbBlocks', { pdb: `${p.namespace}/${p.name}` })
+          : st('shared.k8sSkew.pdbAllows', { pdb: `${p.namespace}/${p.name}`, allowed: p.disruptionsAllowed })
   }))
 }
 
@@ -185,17 +190,17 @@ export function summariseUpgradeReadiness(
     budgets === null ? -1 : budgets.filter((b) => b.allowed === null).length
 
   const problems: string[] = []
-  if (ahead > 0) problems.push(`${ahead} node(s) newer than the API server`)
-  if (unsupported > 0) problems.push(`${unsupported} node(s) outside the skew window`)
-  if (blocking > 0) problems.push(`${blocking} budget(s) allowing no disruptions`)
+  if (ahead > 0) problems.push(st('shared.k8sSkew.problem.ahead', { count: ahead }))
+  if (unsupported > 0) problems.push(st('shared.k8sSkew.problem.unsupported', { count: unsupported }))
+  if (blocking > 0) problems.push(st('shared.k8sSkew.problem.blocking', { count: blocking }))
   // Carried into the headline rather than dropped, for the reason the stale
   // account summary carries its unknowns: a readiness number that improves as
   // the cluster gets harder to read is pointing the wrong way.
-  if (unknown > 0) problems.push(`${unknown} node(s) whose version could not be read`)
-  if (unreadable === -1) problems.push('the disruption budgets could not be read at all')
-  else if (unreadable > 0) problems.push(`${unreadable} budget(s) that could not be read`)
+  if (unknown > 0) problems.push(st('shared.k8sSkew.problem.unknown', { count: unknown }))
+  if (unreadable === -1) problems.push(st('shared.k8sSkew.problem.budgetsUnread'))
+  else if (unreadable > 0) problems.push(st('shared.k8sSkew.problem.budgetsUnreadable', { count: unreadable }))
 
   return problems.length === 0
-    ? { ready: true, headline: 'Every node is inside the skew window and no budget would block a drain.' }
-    : { ready: false, headline: `Not ready: ${problems.join(', ')}.` }
+    ? { ready: true, headline: st('shared.k8sSkew.ready') }
+    : { ready: false, headline: st('shared.k8sSkew.notReady', { problems: problems.join(', ') }) }
 }

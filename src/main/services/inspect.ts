@@ -14,6 +14,7 @@ import type {
   InspectTrustStore
 } from '../../shared/inspect'
 import { INSPECT_DEFAULT_PASSTHROUGH, formatFingerprint } from '../../shared/inspect'
+import { LocalizedError } from '../../shared/i18n'
 import { randomBytes } from 'node:crypto'
 import { askNetdOnce } from './vpn/drivers/wireguard'
 import { resolveBundled } from './vpn/binaries'
@@ -248,7 +249,7 @@ async function mintCa(): Promise<InspectCaInfo> {
   }>('inspect.ca.generate', { commonName: 'OpsMaxx Traffic Inspector', validDays: 365 })
 
   if (typeof res?.certPem !== 'string' || typeof res?.keyPem !== 'string') {
-    throw new Error('The sidecar did not return a certificate authority.')
+    throw new LocalizedError('main.inspect.noCa')
   }
   // Sealed with the OS keychain, or not persisted at all. `secrets.ts` refuses
   // to write plaintext, and a root CA key in a plaintext file next to the
@@ -314,12 +315,12 @@ async function trustContext(): Promise<TrustContext> {
 
 function send<T>(method: string, params?: unknown): Promise<T> {
   const current = run
-  if (!current) return Promise.reject(new Error('The traffic inspector is not running.'))
+  if (!current) return Promise.reject(new LocalizedError('main.inspect.notRunning'))
   const id = String(++current.seq)
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => {
       current.pending.delete(id)
-      reject(new Error(`The traffic inspector did not answer ${method} in time.`))
+      reject(new LocalizedError('main.inspect.requestTimedOut', { method }))
     }, inspectTuning.requestTimeoutMs)
     current.pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timer })
     current.handle.write(`${JSON.stringify({ id, method, params })}\n`)
@@ -351,7 +352,7 @@ function onLine(text: string): void {
     run?.pending.delete(msg.id)
     clearTimeout(pending.timer)
     if (msg.ok) pending.resolve(msg.result)
-    else pending.reject(new Error(msg.error?.message ?? 'The traffic inspector reported an error.'))
+    else pending.reject(msg.error?.message ? new Error(msg.error.message) : new LocalizedError('main.inspect.reportedError'))
     return
   }
 
@@ -471,12 +472,12 @@ async function doStart(opts: InspectStartOptions): Promise<InspectStatus> {
   const info = await inspectCa()
   const key = caKey()
   if (!key) {
-    throw new Error('The certificate authority key is unavailable. Regenerate the certificate to continue.')
+    throw new LocalizedError('main.inspect.caKeyUnavailable')
   }
 
   const engine = await resolveBundled('opsmaxx-netd')
   if (engine.available === false) {
-    throw new Error(engine.reason ?? 'The OpsMaxx network sidecar is not available in this build.')
+    throw engine.reason ? new Error(engine.reason) : new LocalizedError('main.inspect.sidecarMissing')
   }
 
   const spillDir = join(app.getPath('userData'), 'inspect-capture')
@@ -514,7 +515,7 @@ async function doStart(opts: InspectStartOptions): Promise<InspectStatus> {
     redact: [key],
     readiness: async (h) => {
       await new Promise<void>((resolve, reject) => {
-        const timer = setTimeout(() => reject(new Error('The sidecar did not answer.')), inspectTuning.readinessTimeoutMs)
+        const timer = setTimeout(() => reject(new LocalizedError('main.inspect.sidecarSilent')), inspectTuning.readinessTimeoutMs)
         const off = h.onLog((l) => {
           if (l.stream === 'stdout' && l.text.includes('"ok":true')) {
             clearTimeout(timer)
@@ -590,7 +591,7 @@ async function doStart(opts: InspectStartOptions): Promise<InspectStatus> {
     const engaged = await engageSystemProxy(run.bindHost, run.bindPort, platformNow())
     if (!engaged.ok) {
       await stopInspect({ silent: true }).catch(() => undefined)
-      throw new Error(engaged.message ?? 'The system proxy settings could not be changed.')
+      throw engaged.message ? new Error(engaged.message) : new LocalizedError('main.inspect.proxyNotChanged')
     }
     run.systemProxyEngaged = true
   }
@@ -628,7 +629,7 @@ export async function stopInspect(
 
   for (const [, p] of current.pending) {
     clearTimeout(p.timer)
-    p.reject(new Error('The traffic inspector stopped.'))
+    p.reject(new LocalizedError('main.inspect.stopped'))
   }
   current.pending.clear()
 

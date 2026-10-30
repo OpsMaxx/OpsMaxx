@@ -1,4 +1,5 @@
 import type { JobSpec, JobStep } from './jobs'
+import { st } from './i18n'
 
 // Item 34d: the fourth typed step kind.
 //
@@ -49,29 +50,29 @@ export interface UserStepInput {
 
 export function checkUserStep(i: UserStepInput): UserStepCheck {
   const user = i.user.trim()
-  if (user === '') return { ok: false, reason: 'Name the account.' }
+  if (user === '') return { ok: false, reason: st('shared.userStep.noUser') }
   if (!USER_RE.test(user)) {
     return {
       ok: false,
-      reason: 'A user name may only be lower-case letters, digits, underscore and hyphen, and may not start with a digit or hyphen. This text runs as root.'
+      reason: st('shared.userStep.badUser')
     }
   }
   if (PROTECTED_USERS.includes(user)) {
     return {
       ok: false,
-      reason: `OpsMaxx will not change ${user}. Locking or deleting it can take away the only way back into a server, and no confirmation makes that recoverable from here.`
+      reason: st('shared.userStep.protectedUser', { user })
     }
   }
   if (i.action === 'add-group') {
     const g = (i.group ?? '').trim()
-    if (!GROUP_RE.test(g)) return { ok: false, reason: 'Name the group, in the same character set as a user name.' }
+    if (!GROUP_RE.test(g)) return { ok: false, reason: st('shared.userStep.badGroup') }
   }
   if (i.action === 'set-expiry') {
     const e = (i.expiry ?? '').trim()
     // Empty clears it, which is a real thing to want. Anything else has to be
     // the one format `chage -E` takes without ambiguity.
     if (e !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(e)) {
-      return { ok: false, reason: 'The expiry date must be YYYY-MM-DD, or empty to remove the expiry.' }
+      return { ok: false, reason: st('shared.userStep.badExpiry') }
     }
   }
   return { ok: true }

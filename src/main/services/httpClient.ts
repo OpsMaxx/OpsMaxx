@@ -27,6 +27,7 @@ import {
   type HttpSshTarget
 } from '../../shared/httpClient'
 import { asSocket, closeDial, dial, startTls, type DialResult } from './netTransport'
+import { mt } from './locale'
 
 /**
  * Executes the HTTP client's requests.
@@ -650,11 +651,11 @@ export async function trackedHttpRequest(
   const id: unknown = spec?.requestId
   if (id === undefined) return httpRequest(spec, ctx)
   if (typeof id !== 'string' || id.length === 0 || id.length > 64) {
-    return { ok: false, error: 'A request id is a string of 1 to 64 characters.' }
+    return { ok: false, error: mt('main.httpClient.badRequestId') }
   }
   const key = `${senderId}:${id}`
   if (inFlight.has(key)) {
-    return { ok: false, error: 'A request with this id is already in flight.' }
+    return { ok: false, error: mt('main.httpClient.requestInFlight') }
   }
   const controller = new AbortController()
   inFlight.set(key, controller)
@@ -703,7 +704,7 @@ export async function saveResponse(
 ): Promise<string | null> {
   if (!(bytes instanceof ArrayBuffer)) throw new Error('A response to save is bytes.')
   const defaultPath = join(app.getPath('downloads'), safeFileName(suggestedName))
-  const options = { title: 'Save response', defaultPath }
+  const options = { title: mt('main.httpClient.saveResponseTitle'), defaultPath }
   const chosen = await (win ? dialog.showSaveDialog(win, options) : dialog.showSaveDialog(options))
   if (chosen.canceled || !chosen.filePath) return null
   writeFileSync(chosen.filePath, Buffer.from(bytes))
@@ -748,10 +749,10 @@ const mib = (n: number): number => Math.round(n / (1024 * 1024))
 export async function chooseBodyFile(
   win: BrowserWindow | null
 ): Promise<{ name: string; bytes: ArrayBuffer } | { error: string } | null> {
-  const path = await pickFile(win, 'Choose a file to send')
+  const path = await pickFile(win, mt('main.httpClient.chooseBodyTitle'))
   if (!path) return null
   const data = await readCapped(path, MAX_BODY_FILE_BYTES)
-  if (!data) return { error: `That file is larger than ${mib(MAX_BODY_FILE_BYTES)} MiB, the most a request body can be.` }
+  if (!data) return { error: mt('main.httpClient.bodyTooLarge', { mib: mib(MAX_BODY_FILE_BYTES) }) }
   return {
     name: basename(path),
     bytes: data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer
@@ -766,14 +767,14 @@ export async function chooseBodyFile(
 export async function chooseSpecFile(
   win: BrowserWindow | null
 ): Promise<{ name: string; text: string } | { error: string } | null> {
-  const path = await pickFile(win, 'Choose an OpenAPI description', [
+  const path = await pickFile(win, mt('main.httpClient.chooseSpecTitle'), [
     { name: 'OpenAPI', extensions: ['json', 'yaml', 'yml'] },
-    { name: 'All files', extensions: ['*'] }
+    { name: mt('main.httpClient.allFiles'), extensions: ['*'] }
   ])
   if (!path) return null
   const data = await readCapped(path, MAX_SPEC_FILE_BYTES)
   if (!data) {
-    return { error: `That file is larger than ${mib(MAX_SPEC_FILE_BYTES)} MiB. An OpenAPI description this large is almost certainly not one.` }
+    return { error: mt('main.httpClient.specTooLarge', { mib: mib(MAX_SPEC_FILE_BYTES) }) }
   }
   return { name: basename(path), text: data.toString('utf8') }
 }
@@ -782,13 +783,13 @@ export async function chooseSpecFile(
 export async function chooseCaFile(
   win: BrowserWindow | null
 ): Promise<{ pem: string } | { error: string } | null> {
-  const path = await pickFile(win, 'Choose a CA certificate', [
-    { name: 'Certificates', extensions: ['pem', 'crt', 'cer'] },
-    { name: 'All files', extensions: ['*'] }
+  const path = await pickFile(win, mt('main.httpClient.chooseCaTitle'), [
+    { name: mt('main.httpClient.certificates'), extensions: ['pem', 'crt', 'cer'] },
+    { name: mt('main.httpClient.allFiles'), extensions: ['*'] }
   ])
   if (!path) return null
   const data = await readCapped(path, MAX_CA_BYTES)
-  if (!data) return { error: `That file is larger than ${mib(MAX_CA_BYTES)} MiB, which no CA bundle is.` }
+  if (!data) return { error: mt('main.httpClient.caTooLarge', { mib: mib(MAX_CA_BYTES) }) }
   return certificateBlocks(data.toString('utf8'))
 }
 

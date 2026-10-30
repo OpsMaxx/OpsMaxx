@@ -16,6 +16,8 @@
 // So the sentence worth printing next to a BOUND volume is not its status --
 // which is `Bound`, and fine -- but what deleting its claim would do to it.
 
+import { st } from './i18n'
+
 /**
  * The read the parser below is written against.
  *
@@ -123,11 +125,11 @@ export function reclaimFate(pv: K8sPv): string {
 
 export function pvVerdict(pv: K8sPv): PvVerdict {
   if (pv.phase === null) {
-    return { level: 'unknown', because: `${pv.name} reported a phase this build does not know.` }
+    return { level: 'unknown', because: st('shared.k8sPv.unknownPhase', { name: pv.name }) }
   }
   const by: Record<PvPhase, () => PvVerdict> = {
-    Bound: () => ({ level: 'ok', because: `${pv.name} is bound to ${pv.claim}.` }),
-    Available: () => ({ level: 'ok', because: `${pv.name} is free for a claim to take.` }),
+    Bound: () => ({ level: 'ok', because: st('shared.k8sPv.bound', { name: pv.name, claim: pv.claim }) }),
+    Available: () => ({ level: 'ok', because: st('shared.k8sPv.available', { name: pv.name }) }),
     // Held, not broken -- so `watch`, not `alarm`. A Retain volume ends up here
     // by design, and it stays here: the deleted claim's uid is still on it, so
     // it will not bind to a new claim of the same name either.
@@ -135,14 +137,17 @@ export function pvVerdict(pv: K8sPv): PvVerdict {
       level: 'watch',
       because:
         pv.reclaim === 'Retain'
-          ? `${pv.name} still holds ${pv.capacity} for ${pv.claim}, which no longer exists, and will not rebind on its own.`
-          : `${pv.name} was released from ${pv.claim} and its ${pv.reclaim} policy has not finished.`
+          ? st('shared.k8sPv.retained', { name: pv.name, capacity: pv.capacity, claim: pv.claim })
+          : st('shared.k8sPv.released', { name: pv.name, claim: pv.claim, policy: pv.reclaim })
     }),
     Failed: () => ({
       level: 'alarm',
-      because: `${pv.name} failed to reclaim${pv.reason === '' ? '' : `: ${pv.reason}`}. Whether the data is still there was not determined.`
+      because:
+        pv.reason === ''
+          ? st('shared.k8sPv.failed', { name: pv.name })
+          : st('shared.k8sPv.failedBecause', { name: pv.name, reason: pv.reason })
     }),
-    Pending: () => ({ level: 'watch', because: `${pv.name} is not usable yet.` })
+    Pending: () => ({ level: 'watch', because: st('shared.k8sPv.pending', { name: pv.name }) })
   }
   return by[pv.phase]()
 }

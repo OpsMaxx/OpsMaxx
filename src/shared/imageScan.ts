@@ -30,6 +30,8 @@
 //     Trivy also warns `Using severities from other vendors for some
 //     vulnerabilities` -- the severities are not all the distribution's own.
 
+import { englishT, st } from './i18n'
+
 export type ScanSeverity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'UNKNOWN'
 
 export const SCAN_SEVERITIES: readonly ScanSeverity[] = [
@@ -43,8 +45,7 @@ export const SCAN_SEVERITIES: readonly ScanSeverity[] = [
 const SEVERITY = new Set<string>(SCAN_SEVERITIES)
 
 /** Named in the roadmap row, never measured, therefore never parsed. */
-export const SCANNER_UNMEASURED =
-  'Only trivy is read. `grype` and `docker scout cves` print something different and neither was measured against a real image, so this build does not claim to understand them rather than guessing at their output.'
+export const SCANNER_UNMEASURED = englishT('shared.imageScan.scannerUnmeasured')
 
 /**
  * The read.
@@ -173,7 +174,7 @@ export function summariseScan(
       // NOT `ok`. No scanner is not a clean image, and this build will not
       // install one to find out.
       level: 'unknown',
-      headline: 'No vulnerability scanner on this server, so nothing was checked. Nothing here installs one.'
+      headline: st('shared.imageScan.noScanner')
     }
   }
   if (reading === null || reading.failure !== null) {
@@ -186,8 +187,8 @@ export function summariseScan(
       level: 'unknown',
       headline:
         reading?.failure === null || reading?.failure === undefined
-          ? 'The scan did not run.'
-          : `The scan did not run: ${reading.failure}`
+          ? st('shared.imageScan.didNotRun')
+          : st('shared.imageScan.didNotRunBecause', { failure: reading.failure })
     }
   }
 
@@ -213,8 +214,8 @@ export function summariseScan(
       level: 'alarm',
       headline:
         total === 0
-          ? 'This image runs an OS the distribution no longer supports. It reports no vulnerabilities because nobody is issuing advisories for it any more, which is not the same as having none.'
-          : `This image runs an OS the distribution no longer supports, so the ${total} finding(s) below are a floor rather than a total: no more advisories are being issued for it.`
+          ? st('shared.imageScan.endOfSupportNone')
+          : st('shared.imageScan.endOfSupport', { total })
     }
   }
   if (badTotal === 0) {
@@ -227,8 +228,8 @@ export function summariseScan(
       level: total === 0 ? 'ok' : 'watch',
       headline:
         total === 0
-          ? 'The scanner found nothing.'
-          : `${total} finding(s), none of them critical or high; ${fixable} have a fix.`
+          ? st('shared.imageScan.clean')
+          : st('shared.imageScan.lowOnly', { total, fixable })
     }
   }
   return {
@@ -240,7 +241,7 @@ export function summariseScan(
     level: 'alarm',
     headline:
       badFixable === 0
-        ? `${badTotal} critical or high finding(s), and NONE of them has a fixed version yet — upgrading the packages in this image will not clear them. The fix is a newer base image or waiting for the distribution.`
-        : `${badTotal} critical or high finding(s), ${badFixable} of which have a fix available.`
+        ? st('shared.imageScan.badUnfixable', { count: badTotal })
+        : st('shared.imageScan.badFixable', { count: badTotal, fixable: badFixable })
   }
 }

@@ -115,3 +115,48 @@ export async function loadTranslator(locale: Locale): Promise<Translate> {
 }
 
 export const englishT: Translate = (key, vars) => translate('en', en, key, vars)
+
+// The translator shared code speaks through. A shared function runs in both
+// processes: in the renderer it is drawing a screen, in main it is answering an
+// agent, writing a log line or filling a webhook. The renderer points this at
+// the user's language; main never does, so everything main says stays English
+// without each caller having to choose. Text a renderer sends ON — to main, to a
+// host, into saved data — uses englishT explicitly instead.
+let shared: Translate = englishT
+
+export const st: Translate = (key, vars) => shared(key, vars)
+
+export function setSharedTranslator(t: Translate): void {
+  shared = t
+}
+
+/**
+ * A lookup table whose values are read through st() each time, for a table
+ * built at import, where calling st() would fix the language for good. Callers
+ * keep indexing it as before (`TABLE[id]`) and get the screen's language in the
+ * renderer and English in main.
+ */
+export function translatedTable<K extends string>(keys: Record<K, MessageKey>): Record<K, string> {
+  return Object.defineProperties(
+    {} as Record<K, string>,
+    Object.fromEntries(Object.entries<MessageKey>(keys).map(([k, key]) => [k, { get: () => st(key), enumerable: true }]))
+  )
+}
+
+/**
+ * A failure main can tell the user about in their own language.
+ *
+ * `message` is English, because that is what logs, agents and webhooks read.
+ * Electron hands a renderer only the message of an error a handler threw, so
+ * main's IPC wrapper (`handle` in src/main/index.ts) says it again in the
+ * user's language on the way out, from the key and values carried here. Do not
+ * use it for text the renderer matches on; match on a code instead.
+ */
+export class LocalizedError extends Error {
+  constructor(
+    readonly key: MessageKey,
+    readonly vars?: Vars
+  ) {
+    super(englishT(key, vars))
+  }
+}

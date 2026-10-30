@@ -13,6 +13,8 @@ import { tmpdir } from 'node:os'
 import { randomBytes, scrypt, createCipheriv, createDecipheriv } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { atomicWriteFileSync } from './atomicWrite'
+import { LocalizedError } from '../../shared/i18n'
+import { mt } from './locale'
 import { loadData, saveData } from './store'
 import {
   exportSecrets,
@@ -212,15 +214,15 @@ export async function buildBundle(
 
 export async function backupExport(password: string): Promise<BackupResult> {
   if (password.length < MIN_PASSPHRASE) {
-    return { ok: false, error: `Backup passphrase must be at least ${MIN_PASSPHRASE} characters.` }
+    return { ok: false, error: mt('main.backup.passphraseTooShort', { min: MIN_PASSPHRASE }) }
   }
 
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const stamp = new Date().toISOString().slice(0, 10)
   const chosen = await dialog.showSaveDialog(win, {
-    title: 'Save OpsMaxx backup',
+    title: mt('main.backup.saveDialogTitle'),
     defaultPath: join(app.getPath('downloads'), `opsmaxx-backup-${stamp}.spbackup`),
-    filters: [{ name: 'OpsMaxx backup', extensions: ['spbackup'] }]
+    filters: [{ name: mt('main.backup.fileFilter'), extensions: ['spbackup'] }]
   })
   if (chosen.canceled || !chosen.filePath) return { ok: false, cancelled: true }
 
@@ -229,7 +231,7 @@ export async function backupExport(password: string): Promise<BackupResult> {
     writeFileSync(chosen.filePath, bytes, { mode: 0o600 })
     return { ok: true, path: chosen.filePath, summary }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: shown(err) }
   }
 }
 
@@ -241,9 +243,9 @@ async function decryptBundle(bytes: Buffer, password: string): Promise<BackupPay
     // A truncated upload, a text-mode transfer that mangled the file, or an
     // object that was never ours. All three are "not a OpsMaxx backup", and
     // saying so beats a JSON parser's offset.
-    throw new Error('That file is not a OpsMaxx backup.')
+    throw new LocalizedError('main.backup.notABackup')
   }
-  if (envelope.magic !== MAGIC) throw new Error('That file is not a OpsMaxx backup.')
+  if (envelope.magic !== MAGIC) throw new LocalizedError('main.backup.notABackup')
   const key = await derive(password, Buffer.from(envelope.salt, 'base64'), envelope.kdfParams ?? LEGACY_KDF)
   const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(envelope.iv, 'base64'))
   decipher.setAuthTag(Buffer.from(envelope.tag, 'base64'))
@@ -265,9 +267,9 @@ export async function backupInspect(password: string, path?: string): Promise<Ba
   let file = path
   if (!file) {
     const chosen = await dialog.showOpenDialog(win, {
-      title: 'Open OpsMaxx backup',
+      title: mt('main.backup.openDialogTitle'),
       properties: ['openFile'],
-      filters: [{ name: 'OpsMaxx backup', extensions: ['spbackup'] }]
+      filters: [{ name: mt('main.backup.fileFilter'), extensions: ['spbackup'] }]
     })
     if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, cancelled: true }
     file = chosen.filePaths[0]
@@ -280,9 +282,7 @@ export async function backupInspect(password: string, path?: string): Promise<Ba
     return {
       ok: false,
       path: file,
-      error: message.includes('OpsMaxx backup')
-        ? message
-        : 'Could not decrypt the backup — check the passphrase.'
+      error: message.includes('OpsMaxx backup') ? shown(err) : mt('main.backup.decryptFailed')
     }
   }
 }
@@ -306,9 +306,7 @@ export async function backupImport(
     const message = err instanceof Error ? err.message : String(err)
     return {
       ok: false,
-      error: message.includes('OpsMaxx backup')
-        ? message
-        : 'Could not decrypt the backup — check the passphrase.'
+      error: message.includes('OpsMaxx backup') ? shown(err) : mt('main.backup.decryptFailed')
     }
   }
 
@@ -347,8 +345,7 @@ export async function backupImport(
     if (!sealed) {
       return {
         ok: false,
-        error:
-          'Restored settings, but this system has no available secure storage, so credentials could not be saved.'
+        error: mt('main.backup.noSecureStorage')
       }
     }
     return { ok: true, path, summary }
@@ -359,7 +356,7 @@ export async function backupImport(
     const message = err instanceof Error ? err.message : String(err)
     return {
       ok: false,
-      error: `The backup decrypted, but restoring it failed partway through (${message}), so some settings may be the restored ones and some the previous ones.`
+      error: mt('main.backup.restorePartial', { detail: message })
     }
   }
 }
@@ -662,7 +659,7 @@ export function deleteAllData(closeHistory?: () => void): BackupResult {
   step('the HTTP request history', () => clearHttpHistory())
 
   if (failed.length > 0) {
-    return { ok: false, error: `Some of it could not be deleted: ${failed.join('; ')}` }
+    return { ok: false, error: mt('main.backup.deletePartial', { detail: failed.join('; ') }) }
   }
   return { ok: true }
 }
@@ -839,6 +836,16 @@ export async function verifyBundle(bytes: Buffer, password: string): Promise<Bac
         : `The bundle at the destination did not decrypt — ${message}`
     }
   }
+}
+
+/**
+ * An error for a result only the backup screen reads: ours in the user's
+ * language, anything else as it was said. Run reports are kept, so they use
+ * the English `message` instead.
+ */
+function shown(err: unknown): string {
+  if (err instanceof LocalizedError) return mt(err.key, err.vars)
+  return err instanceof Error ? err.message : String(err)
 }
 
 function fail(report: BackupRunReport, stage: BackupStage, err: unknown): BackupRunReport {
@@ -1043,7 +1050,7 @@ export async function listRemoteBackups(
   try {
     target = await openTarget(dest, deps)
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: shown(err) }
   }
   try {
     const all = withNameTimes(await target.list())
@@ -1052,7 +1059,7 @@ export async function listRemoteBackups(
       .sort((a, b) => b.modified - a.modified)
     return { ok: true, generations: ours }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: shown(err) }
   } finally {
     await target.close().catch(() => undefined)
   }
@@ -1082,25 +1089,25 @@ export async function inspectRemoteBackup(
   deps: TargetDeps = {}
 ): Promise<BackupResult> {
   if (backupObjectTime(name) === null) {
-    return { ok: false, error: `“${name}” is not a OpsMaxx backup name.` }
+    return { ok: false, error: mt('main.backup.notABackupName', { name }) }
   }
   let target: BackupTarget
   try {
     target = await openTarget(dest, deps)
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: shown(err) }
   }
   try {
     const bytes = await target.get(name)
     const verification = await verifyBundle(bytes, password)
     if (!verification.ok || !verification.summary) {
-      return { ok: false, error: verification.error ?? 'The bundle did not open.' }
+      return { ok: false, error: verification.error ?? mt('main.backup.bundleDidNotOpen') }
     }
     const staged = stagingPath(name)
     writeFileSync(staged, bytes, { mode: 0o600 })
     return { ok: true, path: staged, summary: verification.summary }
   } catch (err) {
-    return { ok: false, error: err instanceof Error ? err.message : String(err) }
+    return { ok: false, error: shown(err) }
   } finally {
     await target.close().catch(() => undefined)
   }

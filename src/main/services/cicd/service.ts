@@ -19,6 +19,7 @@ import { createJenkinsAdapter } from './jenkins'
 import { resolveVaultField } from '../credentialResolver'
 import { fieldsOf, heldFields, SyncHeldError } from '../syncTrust'
 import { httpRequest } from '../httpClient'
+import { LocalizedError } from '../../../shared/i18n'
 import { getCachedServer, type CachedServer } from '../mcpDataCache'
 import { preparedSshTarget } from '../vpn/transport'
 import type { HttpRequestSpec, HttpResult, HttpVia } from '../../../shared/httpClient'
@@ -67,9 +68,7 @@ export function resolveSecret(connection: CicdConnection): string {
   if (fields && heldFields('cicd', connection.id, fields).length > 0) throw new SyncHeldError(connection.name)
   const secret = resolveVaultField({ vaultEntryId: connection.vaultEntryId, slot: 'password' })
   if (secret === null) {
-    throw new Error(
-      `"${connection.name}" points at a vault entry that no longer holds a credential. Re-attach its API token.`
-    )
+    throw new LocalizedError('main.cicd.noCredential', { name: connection.name })
   }
   return secret
 }
@@ -87,9 +86,7 @@ export function authHeaders(connection: CicdConnection, secret: string): Record<
       // Jenkins authenticates as a user: the token alone is not a credential.
       const username = connection.username?.trim()
       if (!username) {
-        throw new Error(
-          `"${connection.name}" needs the Jenkins username the API token belongs to — a token on its own does not authenticate.`
-        )
+        throw new LocalizedError('main.cicd.jenkinsUsername', { name: connection.name })
       }
       const basic = Buffer.from(`${username}:${secret}`, 'utf8').toString('base64')
       return { Authorization: `Basic ${basic}` }
@@ -135,9 +132,7 @@ export function viaForConnection(
         // read: the server it routes through is gone" is a different sentence
         // from "Jenkins is unreachable", and only one sends the user anywhere
         // useful.
-        throw new Error(
-          `"${connection.name}" routes through a saved server that no longer exists. Pick another route for it.`
-        )
+        throw new LocalizedError('main.cicd.routeGone', { name: connection.name })
       }
       return {
         kind: 'server',
@@ -272,9 +267,7 @@ export function makeCicdHttp(
       // Named for what it is rather than blamed on the provider. This is only
       // reachable when a handle was tampered with, so it should read as a
       // refusal by OpsMaxx, not as the CI server behaving oddly.
-      throw new Error(
-        'Refused: that pipeline or run handle would address something outside this CI server\'s API. Handles are passed back exactly as they were given.'
-      )
+      throw new LocalizedError('main.cicd.handleOutsideApi')
     }
     const result = await request(
       {

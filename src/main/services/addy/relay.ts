@@ -1,5 +1,6 @@
 import { createHash, X509Certificate } from 'node:crypto'
 import type { TLSSocket } from 'node:tls'
+import type { MessageKey, Vars } from '../../../shared/i18n'
 import { AddyError, type AddySidecar } from './sidecar'
 
 /**
@@ -51,7 +52,7 @@ export class RelayPinMismatch extends AddyError {
     readonly seen: string,
     readonly webpki: boolean
   ) {
-    super('relay-unreachable', 'the relay presented a different TLS key on this connection than the one this device signed in to. Nothing was sent.')
+    super('relay-unreachable', { key: 'main.addy.relay.pinMismatch' })
   }
 }
 
@@ -150,22 +151,22 @@ export async function relayFetch(
     // A relay that cannot be reached is the commonest failure by a wide
     // margin -- a laptop on a train, a box being restarted -- and it has its
     // own code so a caller can retry rather than alarm.
-    throw new AddyError(
-      'relay-unreachable',
-      `could not reach ${new URL(url).origin}: ${whyFetchFailed(err)}`
-    )
+    throw new AddyError('relay-unreachable', {
+      key: 'main.addy.relay.unreachable',
+      vars: { origin: new URL(url).origin, detail: whyFetchFailed(err) }
+    })
   }
   if (resp.status === 426) {
-    throw new AddyError(
-      'version-mismatch',
-      `${new URL(url).origin} speaks a different addy protocol version than this copy of OpsMaxx (${ADDY_PROTOCOL}). Update OpsMaxx, or ask whoever runs the relay to update it.`
-    )
+    throw new AddyError('version-mismatch', {
+      key: 'main.addy.relay.versionMismatch',
+      vars: { origin: new URL(url).origin, protocol: ADDY_PROTOCOL }
+    })
   }
   if (resp.status === 413) {
-    throw new AddyError(
-      'too-large',
-      `that is too large for the relay, which accepts at most ${MAX_REQUEST_BYTES / 1024 / 1024} MB in one request.`
-    )
+    throw new AddyError('too-large', {
+      key: 'main.addy.relay.tooLarge',
+      vars: { limit: MAX_REQUEST_BYTES / 1024 / 1024 }
+    })
   }
   return resp
 }
@@ -228,7 +229,7 @@ async function sessionGone(resp: Response): Promise<boolean> {
  */
 export class DeviceRemovedError extends AddyError {
   constructor(
-    message: string,
+    message: string | { key: MessageKey; vars?: Vars },
     /** Base64 of the whole chain, exactly as GET /v1/roster returns it. */
     readonly chain: string
   ) {
@@ -247,10 +248,10 @@ export class DeviceRemovedError extends AddyError {
 export function comparePin(known: string | undefined, seen: ServerPin, baseURL: string): boolean {
   if (!known || known === seen.spki) return false
   if (!seen.webpki) {
-    throw new AddyError(
-      'relay-unreachable',
-      `the relay at ${baseURL} is presenting a different TLS key than the one this device recorded when it joined, and its certificate is not one a public authority vouches for. Either it was replaced, or something is between you and it. Nothing was sent.`
-    )
+    throw new AddyError('relay-unreachable', {
+      key: 'main.addy.relay.pinChangedUnvouched',
+      vars: { baseURL }
+    })
   }
   return true
 }
@@ -386,7 +387,7 @@ export class RelayClient {
           const webpki = socket.authorized
           socket.end()
           if (!der || der.length === 0) {
-            reject(new AddyError('relay-unreachable', 'the relay presented no certificate.'))
+            reject(new AddyError('relay-unreachable', { key: 'main.addy.relay.noCertificate' }))
             return
           }
           const spki = new X509Certificate(der).publicKey.export({ type: 'spki', format: 'der' })
@@ -395,6 +396,8 @@ export class RelayClient {
       )
       socket.setTimeout(10_000, () => {
         socket.destroy()
+        // English on purpose: the joiner's screen recognises it by its words
+        // (`joinerFailure`).
         reject(new AddyError('relay-unreachable', `${this.cfg.baseURL} did not answer in time.`))
       })
       socket.on('error', (e: Error) =>
@@ -441,7 +444,7 @@ export class RelayClient {
     if (!challenge.ok) throw await loginError(challenge, this.cfg.baseURL)
     const { nonce } = (await challenge.json()) as { nonce?: string }
     if (!nonce) {
-      throw new AddyError('relay-unreachable', 'the relay issued no login challenge.')
+      throw new AddyError('relay-unreachable', { key: 'main.addy.relay.noChallenge' })
     }
 
     const signed = await this.addyd.send<{
@@ -463,7 +466,7 @@ export class RelayClient {
     }, spki)
     if (!resp.ok) throw await loginError(resp, this.cfg.baseURL)
     const { token } = (await resp.json()) as { token?: string }
-    if (!token) throw new AddyError('relay-unreachable', 'the relay issued no token.')
+    if (!token) throw new AddyError('relay-unreachable', { key: 'main.addy.relay.noToken' })
 
     this.cfg = { ...this.cfg, token }
     this.pin = spki
@@ -594,10 +597,13 @@ export class RelayClient {
     if (payload && payload.length > MAX_REQUEST_BYTES) {
       // Refused here, unsigned and unsent: the relay would answer 413 after
       // reading 8 MiB of it, and nothing about a second attempt would differ.
-      throw new AddyError(
-        'too-large',
-        `that is too large for the relay, which accepts at most ${MAX_REQUEST_BYTES / 1024 / 1024} MB in one request (this one is ${(payload.length / 1024 / 1024).toFixed(1)} MB).`
-      )
+      throw new AddyError('too-large', {
+        key: 'main.addy.relay.tooLargeSized',
+        vars: {
+          limit: MAX_REQUEST_BYTES / 1024 / 1024,
+          size: (payload.length / 1024 / 1024).toFixed(1)
+        }
+      })
     }
     const { nonce, signature } = await this.signed(method, path, payload)
 
@@ -620,10 +626,10 @@ export class RelayClient {
       // The relay was panicked or reset. Not a transport failure and not an
       // auth failure: a client that retried either way would loop against a
       // box somebody deliberately took out of service.
-      throw new AddyError(
-        'relay-unreachable',
-        `this relay was reset or panicked at ${resp.headers.get('x-addy-reonboard')} and is not serving until an operator has re-checked its devices`
-      )
+      throw new AddyError('relay-unreachable', {
+        key: 'main.addy.relay.reonboarding',
+        vars: { since: resp.headers.get('x-addy-reonboard') ?? '' }
+      })
     }
     return resp
   }
@@ -632,7 +638,7 @@ export class RelayClient {
   async getObject(name: string, epoch: number): Promise<{ body: Buffer; etag: string } | null> {
     const resp = await this.request('GET', `/v1/obj/${encodeURIComponent(name)}?epoch=${epoch}`)
     if (resp.status === 404) return null
-    if (!resp.ok) throw await relayError(resp, `reading ${name}`)
+    if (!resp.ok) throw await relayError(resp, 'main.addy.relay.failed.reading', { name })
     const json = (await resp.json()) as { body: string; etag: string }
     return { body: Buffer.from(json.body, 'base64'), etag: json.etag }
   }
@@ -662,9 +668,9 @@ export class RelayClient {
       // the remedy is a conflict chooser rather than a retry — and its own
       // CODE, so the sync engine asks the code rather than matching words in
       // a message somebody might reasonably reword.
-      throw new AddyError('conflict', `${name} was written by another device first`)
+      throw new AddyError('conflict', { key: 'main.addy.relay.writtenFirst', vars: { name } })
     }
-    if (!resp.ok) throw await relayError(resp, `writing ${name}`)
+    if (!resp.ok) throw await relayError(resp, 'main.addy.relay.failed.writing', { name })
     return resp.headers.get('etag') ?? ''
   }
 
@@ -677,7 +683,7 @@ export class RelayClient {
     const q = epoch === undefined ? '' : `?epoch=${epoch}`
     const resp = await this.request('DELETE', `/v1/obj/${encodeURIComponent(name)}${q}`)
     if (resp.status === 404 || resp.ok) return
-    throw await relayError(resp, `deleting ${name}`)
+    throw await relayError(resp, 'main.addy.relay.failed.deleting', { name })
   }
 
   /**
@@ -696,7 +702,7 @@ export class RelayClient {
       counter,
       body: sealed.toString('base64')
     })
-    if (!resp.ok) throw await relayError(resp, `keeping a conflict copy of ${name}`)
+    if (!resp.ok) throw await relayError(resp, 'main.addy.relay.failed.keepingCopy', { name })
   }
 
   /**
@@ -708,14 +714,14 @@ export class RelayClient {
    */
   async appendRoster(seq: number, entry: string): Promise<void> {
     const resp = await this.request('POST', '/v1/roster', { seq, entry })
-    if (!resp.ok) throw await relayError(resp, 'adding the device to the roster')
+    if (!resp.ok) throw await relayError(resp, 'main.addy.relay.failed.addingDevice')
   }
 
   /** The roster, as bytes. Verification happens in the sidecar, under keys the
    *  caller holds -- never against anything this response contains. */
   async roster(from = 0): Promise<string> {
     const resp = await this.request('GET', `/v1/roster?from=${from}`)
-    if (!resp.ok) throw await relayError(resp, 'reading the roster')
+    if (!resp.ok) throw await relayError(resp, 'main.addy.relay.failed.readingRoster')
     return ((await resp.json()) as { chain: string }).chain
   }
 }
@@ -728,7 +734,7 @@ export class RelayClient {
  * quota and why, reached the panel as "internal: 507" and the explanation was
  * thrown away. The relay's own sentence is kept in every case.
  */
-export async function relayError(resp: Response, what: string): Promise<AddyError> {
+export async function relayError(resp: Response, what: MessageKey, vars?: Vars): Promise<AddyError> {
   const detail = (await relayDetail(resp)) || resp.statusText
   const code =
     resp.status === 401 || resp.status === 403
@@ -740,7 +746,7 @@ export async function relayError(resp: Response, what: string): Promise<AddyErro
           : resp.status >= 500
             ? 'relay-unreachable'
             : 'internal'
-  return new AddyError(code, `${what}: ${resp.status} ${detail}`)
+  return new AddyError(code, { key: what, vars: { ...vars, status: resp.status, detail } })
 }
 
 /**
@@ -758,18 +764,17 @@ async function loginError(resp: Response, baseURL: string): Promise<AddyError> {
       .json()
       .then((b: { roster?: { chain?: unknown } }) => b.roster?.chain, () => undefined)
     if (typeof chain === 'string' && chain !== '') {
-      return new DeviceRemovedError(`${baseURL} says this device was removed from the account.`, chain)
+      return new DeviceRemovedError({ key: 'main.addy.relay.deviceRemoved', vars: { baseURL } }, chain)
     }
   }
   if (resp.status === 401 || resp.status === 403) {
-    return new AddyError(
-      'not-paired',
-      `${baseURL} refused this device's sign-in${detail ? ` (${detail})` : ''}. ` +
-        'If this device was removed from the account on another machine, that is why; otherwise pair it again.'
-    )
+    return new AddyError('not-paired', {
+      key: detail ? 'main.addy.relay.signInRefusedBecause' : 'main.addy.relay.signInRefused',
+      vars: { baseURL, detail }
+    })
   }
-  return new AddyError(
-    resp.status >= 500 ? 'relay-unreachable' : 'internal',
-    `${baseURL} could not sign this device in: ${resp.status}${detail ? ` ${detail}` : ''}`
-  )
+  return new AddyError(resp.status >= 500 ? 'relay-unreachable' : 'internal', {
+    key: detail ? 'main.addy.relay.signInFailedBecause' : 'main.addy.relay.signInFailed',
+    vars: { baseURL, status: resp.status, detail }
+  })
 }

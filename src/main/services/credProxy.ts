@@ -26,6 +26,7 @@ import type {
 import { appendLogLine } from './logAppend'
 import { redactOutput } from './secretRedaction'
 import { atomicWriteFileSync } from './atomicWrite'
+import { mt } from './locale'
 
 // The API credential proxy — roadmap item 7, main-process half.
 //
@@ -260,10 +261,13 @@ export class CredProxy {
       name?: unknown
     }
     if (typeof inj.kind === 'string') {
-      const v = validateInjection({
-        kind: inj.kind as never,
-        name: typeof inj.name === 'string' ? inj.name : ''
-      })
+      const v = validateInjection(
+        {
+          kind: inj.kind as never,
+          name: typeof inj.name === 'string' ? inj.name : ''
+        },
+        mt
+      )
       if (!v.ok) return { ok: false, error: v.error }
     }
     const rule = sanitiseRule(withId)

@@ -13,6 +13,8 @@
  *     GraphQL client feel like one.
  */
 
+import { st } from './i18n'
+
 export interface GraphQlRequest {
   query: string
   /** Parsed from the variables editor. Absent when the editor is empty. */
@@ -58,7 +60,7 @@ export function parseVariables(text: string): VariablesResult {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { ok: false, error: 'Variables must be a JSON object, like { "id": 1 }.' }
+    return { ok: false, error: st('shared.graphql.variablesNotObject') }
   }
   return { ok: true, variables: parsed as Record<string, unknown> }
 }
@@ -96,8 +98,8 @@ export function readGraphQlResponse(
       ok: false,
       parseError:
         status >= 200 && status < 300
-          ? 'The endpoint answered with something that is not JSON. It may not be a GraphQL endpoint.'
-          : `The endpoint answered ${status} with something that is not JSON.`
+          ? st('shared.graphql.notJson')
+          : st('shared.graphql.notJsonStatus', { status })
     }
   }
 
@@ -105,7 +107,7 @@ export function readGraphQlResponse(
   // `[1,2]` would otherwise be accepted as a response with neither `data` nor
   // `errors` and reported as a clean success.
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { ok: false, parseError: 'A GraphQL response is a JSON object.' }
+    return { ok: false, parseError: st('shared.graphql.notObject') }
   }
 
   const response = parsed as GraphQlResponse

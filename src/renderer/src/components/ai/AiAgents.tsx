@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { englishT } from '../../../../shared/i18n'
 import { Plus, Copy, Eye, EyeOff, Ban, Octagon, Trash2, TriangleAlert } from 'lucide-react'
 import { toast } from '../../store/toast'
 import { useApp } from '../../store/app'
@@ -167,7 +168,7 @@ function CreateSessionForm({
         workspaces: selected.map((w) => ({ id: w.id, name: w.name })),
         // A predefined profile uses no group; only Custom is given one.
         groupId: custom ? (group?.id ?? null) : null,
-        groupName: custom ? (group?.name ?? 'No AI Access') : sessionModeLabel(chosen),
+        groupName: custom ? (group?.name ?? 'No AI Access') : sessionModeLabel(chosen, undefined, englishT),
         ttlMinutes: ttl === 0 ? null : ttl,
         mode: chosen
       })

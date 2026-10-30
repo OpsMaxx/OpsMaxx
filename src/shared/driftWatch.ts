@@ -35,6 +35,7 @@
 //     summary.
 
 import { DRIFT_RULE_ORDER, type DriftRuleId, type DriftWatch } from './drift'
+import { st, type MessageKey } from './i18n'
 
 /**
  * Every character a watched path may contain.
@@ -92,19 +93,16 @@ export type DriftWatchRefusal =
   | 'unknown-rule'
   | 'duplicate'
 
-export const DRIFT_WATCH_REFUSAL_HELP: Record<DriftWatchRefusal, string> = {
-  'not-absolute': 'A watched path has to be absolute.',
-  'outside-etc':
-    'Only paths under /etc can be watched. This read runs on every server once an hour with no further approval, and /etc is the one tree where “configuration that should match across a role” is a safe default.',
-  traversal: 'A watched path cannot contain “..”.',
-  'bad-characters':
-    'A watched path may contain only letters, digits, dot, dash, underscore and slash. The path is embedded in the collector script, and anything else could change what that script runs.',
-  'too-long': 'That path is longer than any real configuration file’s.',
-  'credential-store':
-    'That path is, or looks like, a credential store. Its contents would be carried back and diffed hourly on every server, and no redaction pattern catches every secret format.',
-  'no-rules': 'A watch with no rules would compare nothing.',
-  'unknown-rule': 'That comparison rule does not exist in this build.',
-  duplicate: 'A watch for that path already exists.'
+const REFUSAL_HELP_KEY: Record<DriftWatchRefusal, MessageKey> = {
+  'not-absolute': 'shared.driftWatch.refusal.notAbsolute',
+  'outside-etc': 'shared.driftWatch.refusal.outsideEtc',
+  traversal: 'shared.driftWatch.refusal.traversal',
+  'bad-characters': 'shared.driftWatch.refusal.badCharacters',
+  'too-long': 'shared.driftWatch.refusal.tooLong',
+  'credential-store': 'shared.driftWatch.refusal.credentialStore',
+  'no-rules': 'shared.driftWatch.refusal.noRules',
+  'unknown-rule': 'shared.driftWatch.refusal.unknownRule',
+  duplicate: 'shared.driftWatch.refusal.duplicate'
 }
 
 /** As long as any path this could sensibly watch. */
@@ -149,7 +147,7 @@ export function checkDriftWatch(
   const no = (reason: DriftWatchRefusal): DriftWatchCheck => ({
     ok: false,
     reason,
-    detail: DRIFT_WATCH_REFUSAL_HELP[reason]
+    detail: st(REFUSAL_HELP_KEY[reason])
   })
 
   if (!path.startsWith('/')) return no('not-absolute')
@@ -176,9 +174,7 @@ export function checkDriftWatch(
       // up in a regex.
       comment: /^[#;/!%-]{1,2}$/.test(proposal.comment) ? proposal.comment : '#',
       rules: DRIFT_RULE_ORDER.filter((r) => proposal.rules.includes(r)),
-      note:
-        'Added by an operator. This file is read on every server in this workspace once an hour, ' +
-        'as the connecting account and never with sudo.'
+      note: st('shared.driftWatch.operatorNote')
     }
   }
 }
@@ -197,12 +193,7 @@ export function driftWatchPhrase(path: string): string {
 
 /** What the operator is actually asserting, said out loud before they type. */
 export function driftWatchApprovalSentence(path: string): string {
-  return (
-    `Typing this adds ${path} to a read that runs on every server in this workspace once an hour. ` +
-    'Its contents are carried back, redacted, hashed and compared. Confirm it is configuration ' +
-    'and not a credential store: nothing here can tell the difference for a file it has never seen, ' +
-    'and no redaction pattern catches every secret format.'
-  )
+  return st('shared.driftWatch.approvalSentence', { path })
 }
 
 export function verifyDriftWatchApproval(path: string, typed: string): boolean {

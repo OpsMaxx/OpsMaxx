@@ -29,6 +29,8 @@
  * process that can open the vault ever sees the credential.
  */
 
+import { englishT } from './i18n'
+
 /**
  * `vault:<entryId>#<field>`.
  *
@@ -67,11 +69,11 @@ export class VaultUnavailableError extends Error {
   }
 }
 
-export const VAULT_LOCKED_MESSAGE =
-  'This request uses a value from the vault, and the vault is locked — unlock it to send.'
+// English, because they are matched by their text; the response pane shows
+// them in the user's language from the same keys.
+export const VAULT_LOCKED_MESSAGE = englishT('shared.apiSecrets.vaultLocked')
 
-export const VAULT_ENTRY_GONE_MESSAGE =
-  'This request uses a vault entry that no longer exists. Point the variable at another entry, or remove it.'
+export const VAULT_ENTRY_GONE_MESSAGE = englishT('shared.apiSecrets.vaultEntryGone')
 
 /** What `resolveSecrets` needs from the vault: one lookup, no more. */
 export interface SecretLookup {

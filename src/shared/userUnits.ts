@@ -32,6 +32,7 @@
 // is wrong, and only the second question separates them.
 
 import { resolveBinary } from './docker'
+import { englishT, st } from './i18n'
 
 export const USER_UNIT_MARKERS = {
   linger: '===OPSMAXX-LINGER===',
@@ -148,7 +149,7 @@ export function parseUserUnits(output: string, exitCode: number | null): UserUni
   const linger = parseLinger(lingerPart)
 
   if (/no systemctl/i.test(text) || /command not found/i.test(unitsPart)) {
-    return { status: 'no-tool', linger, units: [], detail: 'This server has no systemctl.' }
+    return { status: 'no-tool', linger, units: [], detail: englishT('shared.userUnits.noSystemctl') }
   }
   if (NOT_SYSTEMD.some((re) => re.test(unitsPart))) {
     return {
@@ -193,18 +194,18 @@ export function summariseUserUnits(r: UserUnitsReading): {
   level: 'ok' | 'watch' | 'alarm' | 'unknown'
   headline: string
 } {
-  if (r.status === 'no-tool' || r.status === 'unsupported') {
-    return { level: 'unknown', headline: r.detail ?? 'This server does not run systemd.' }
+  if (r.status === 'no-tool') return { level: 'unknown', headline: st('shared.userUnits.noSystemctl') }
+  if (r.status === 'unsupported') {
+    return { level: 'unknown', headline: r.detail ?? st('shared.userUnits.noSystemd') }
   }
   if (r.status === 'no-bus') {
     return {
       level: 'unknown',
-      headline:
-        'Could not reach this account’s user manager. That usually means the account is not lingering and has no open session — run `loginctl enable-linger` on the server for it to supervise anything while you are away.'
+      headline: st('shared.userUnits.noBus')
     }
   }
-  if (r.status === 'denied') return { level: 'unknown', headline: 'Not allowed to read the user manager.' }
-  if (r.status === 'unknown') return { level: 'unknown', headline: r.detail ?? 'No answer.' }
+  if (r.status === 'denied') return { level: 'unknown', headline: st('shared.userUnits.denied') }
+  if (r.status === 'unknown') return { level: 'unknown', headline: r.detail ?? st('shared.userUnits.noAnswer') }
 
   const failed = r.units.filter((u) => u.active === 'failed')
   const running = r.units.filter((u) => u.sub === 'running')
@@ -212,18 +213,18 @@ export function summariseUserUnits(r: UserUnitsReading): {
   if (r.linger === 'not-lingering' && running.length > 0) {
     return {
       level: 'alarm',
-      headline: `${running.length} service(s) are running, but this account is not lingering — they stop when your last session ends. Run \`loginctl enable-linger\` on the server to keep them.`
+      headline: st('shared.userUnits.notLingering', { count: running.length })
     }
   }
   if (failed.length > 0) {
-    return { level: 'alarm', headline: `${failed.length} user service(s) have failed` }
+    return { level: 'alarm', headline: st('shared.userUnits.failed', { count: failed.length }) }
   }
   if (running.length === 0) {
-    return { level: 'ok', headline: 'No user services are running' }
+    return { level: 'ok', headline: st('shared.userUnits.noneRunning') }
   }
   return {
     level: 'ok',
-    headline: `${running.length} user service(s) running, supervised by the server`
+    headline: st('shared.userUnits.running', { count: running.length })
   }
 }
 
@@ -304,22 +305,20 @@ export function checkUnitDraft(d: UnitDraft): UnitDraftRefusal {
   if (!UNIT_NAME_RE.test(d.name)) {
     return {
       ok: false,
-      reason:
-        'The unit name must look like `worker.service` — letters, digits, dot, dash, underscore or @, and it has to end in .service.'
+      reason: st('shared.userUnits.badName')
     }
   }
   if (!EXEC_START_RE.test(d.execStart)) {
     return {
       ok: false,
-      reason:
-        'ExecStart has to be an absolute path with plain arguments. systemd does not run it through a shell, so a pipe or a semicolon here would not do what it looks like it does.'
+      reason: st('shared.userUnits.badExecStart')
     }
   }
   if (d.description.includes('\n')) {
-    return { ok: false, reason: 'The description has to be one line.' }
+    return { ok: false, reason: st('shared.userUnits.multilineDescription') }
   }
   if (d.workingDirectory !== undefined && !d.workingDirectory.startsWith('/')) {
-    return { ok: false, reason: 'The working directory has to be an absolute path.' }
+    return { ok: false, reason: st('shared.userUnits.relativeWorkingDirectory') }
   }
   return { ok: true }
 }

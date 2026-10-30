@@ -5,6 +5,8 @@ import { rename, rm } from 'node:fs/promises'
 import type { Client, SFTPWrapper, FileEntry, Stats } from 'ssh2'
 import { acquire, release, type PooledConnection } from './ssh'
 import { reserveLocalFile, safeLocalName, tempName } from './transferName'
+import { LocalizedError } from '../../shared/i18n'
+import { mt } from './locale'
 import type {
   SftpDownloadSummary,
   SftpEntry,
@@ -197,7 +199,8 @@ interface Transfer {
 // than allowed to take over the slot Cancel looks in.
 const running = new Map<string, Transfer>()
 
-const BUSY: SftpResult<never> = { ok: false, error: 'A transfer is already running here.' }
+// Upload and download only: both are the Files view's, so their results are said in its language.
+const busy = (): SftpResult<never> => ({ ok: false, error: mt('main.sftp.transferBusy') })
 
 // Registered synchronously, before any await, so two calls cannot both see an
 // empty slot.
@@ -225,8 +228,6 @@ function finish(key: string, t: Transfer): void {
   t.ch?.end()
 }
 
-const SESSION_LIMIT =
-  'The server refused another SFTP channel (session limit). Close another Files tab or terminal on this server and try again.'
 
 /**
  * A channel of this transfer's own, on the server's existing connection.
@@ -251,7 +252,7 @@ async function channelFor(conn: Conn, t: Transfer): Promise<SFTPWrapper> {
         return c
       },
       (err) => {
-        throw /channel open failure/i.test(msg(err)) ? new Error(SESSION_LIMIT) : err
+        throw /channel open failure/i.test(msg(err)) ? new LocalizedError('main.sftp.sessionLimit') : err
       }
     ),
     t.stop
@@ -272,12 +273,12 @@ const isMissing = (err: unknown): boolean => (err as { code?: number } | null)?.
  * The swap could not be completed or undone, so files are sitting under
  * temporary names. `keep` is every one of them: none may be cleaned up.
  */
-class Stranded extends Error {
+class Stranded extends LocalizedError {
   constructor(
-    message: string,
+    vars: { target: string; old: string; tmp: string },
     readonly keep: string[]
   ) {
-    super(message)
+    super('main.sftp.stranded', vars)
   }
 }
 
@@ -318,10 +319,7 @@ async function replace(sftp: SFTPWrapper, tmp: string, target: string, name: str
   if (!hadOld) throw into
   const back = await call((cb) => sftp.rename(old, target, cb))
   if (!back) throw into
-  throw new Stranded(
-    `the upload could not be renamed over ${target}, and the old file could not be put back — the old file is at ${old} and the upload at ${tmp}`,
-    [tmp, old]
-  )
+  throw new Stranded({ target, old, tmp }, [tmp, old])
 }
 
 // Remove a remote file this transfer created, giving up after a few seconds:
@@ -387,7 +385,7 @@ async function planUpload(ch: SFTPWrapper, path: string, inPlace: boolean): Prom
       existing = st
       break
     }
-    if (hops === 40) throw new Error('too many levels of symbolic links')
+    if (hops === 40) throw new LocalizedError('main.sftp.symlinkLoop')
     const [lerr, link] = await ask<string>((cb) => ch.readlink(target, cb))
     if (lerr) throw lerr
     target = posix.resolve(posix.dirname(target), link)
@@ -441,12 +439,12 @@ export async function sftpUpload(
   inPlace: string[] = []
 ): Promise<SftpResult<SftpUploadSummary>> {
   const conn = conns.get(key)
-  if (!conn) return { ok: false, error: 'not connected' }
+  if (!conn) return { ok: false, error: mt('main.sftp.notConnected') }
   // Every path below is resolved with posix.resolve, which falls back to THIS
   // machine's working directory for a relative one. The view always sends the
   // absolute directory it lists, so anything else is refused.
-  if (!posix.isAbsolute(remoteDir)) return { ok: false, error: `${remoteDir} is not an absolute path on the server.` }
-  if (running.has(key)) return BUSY
+  if (!posix.isAbsolute(remoteDir)) return { ok: false, error: mt('main.sftp.notAbsolute', { path: remoteDir }) }
+  if (running.has(key)) return busy()
   const t = begin(key)
 
   const uploaded: string[] = []
@@ -467,7 +465,7 @@ export async function sftpUpload(
       try {
         // Directories would need a recursive walk; refuse them explicitly rather
         // than failing later with an opaque EISDIR.
-        if (statSync(local).isDirectory()) throw new Error('folders cannot be uploaded yet')
+        if (statSync(local).isDirectory()) throw new LocalizedError('main.sftp.foldersNotUploadable')
         planning = planUpload(ch, remoteJoin(remoteDir, name), inPlace.includes(name))
         plan = await Promise.race([planning, t.stop])
         if (plan.needs) {
@@ -516,11 +514,11 @@ export async function sftpUpload(
             )
         }
         if (t.cancelled) break
-        failed.push({ name, error: msg(err) })
+        failed.push({ name, error: shown(err) })
       }
     }
   } catch (err) {
-    if (!t.cancelled) return { ok: false, error: msg(err) }
+    if (!t.cancelled) return { ok: false, error: shown(err) }
   } finally {
     finish(key, t)
   }
@@ -555,8 +553,8 @@ export async function sftpDownload(
   localDir: string
 ): Promise<SftpResult<SftpDownloadSummary>> {
   const conn = conns.get(key)
-  if (!conn) return { ok: false, error: 'not connected' }
-  if (running.has(key)) return BUSY
+  if (!conn) return { ok: false, error: mt('main.sftp.notConnected') }
+  if (running.has(key)) return busy()
   const t = begin(key)
 
   const saved: string[] = []
@@ -569,7 +567,7 @@ export async function sftpDownload(
       const remoteName = posix.basename(remotePaths[i])
       const name = safeLocalName(remoteName)
       if (!name) {
-        failed.push({ name: remoteName, error: 'that name cannot be saved on this machine' })
+        failed.push({ name: remoteName, error: mt('main.sftp.nameNotSavable') })
         continue
       }
       let target: string | undefined
@@ -604,11 +602,11 @@ export async function sftpDownload(
           void get?.then(again, again)
         }
         if (t.cancelled) break
-        failed.push({ name: remoteName, error: msg(err) })
+        failed.push({ name: remoteName, error: shown(err) })
       }
     }
   } catch (err) {
-    if (!t.cancelled) return { ok: false, error: msg(err) }
+    if (!t.cancelled) return { ok: false, error: shown(err) }
   } finally {
     finish(key, t)
   }
@@ -668,4 +666,9 @@ function op(key: string, run: (sftp: SFTPWrapper, done: (err?: Error | null) => 
 
 function msg(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/** msg for a result only the Files view reads: ours in the user's language, the server's as it said it. */
+function shown(err: unknown): string {
+  return err instanceof LocalizedError ? mt(err.key, err.vars) : msg(err)
 }

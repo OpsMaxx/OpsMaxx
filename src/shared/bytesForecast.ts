@@ -20,6 +20,8 @@
 // be withholding the useful half. So a reading can carry a rate with no
 // crossing, and the two are separate fields rather than one nullable date.
 
+import { englishT, st, type MessageKey } from './i18n'
+
 export interface BytesPoint {
   ts: number
   /** Bytes. Structurally the history store's `SeriesPoint.v`. */
@@ -41,19 +43,23 @@ export type BytesRefusal =
   | 'already-past'
   | 'beyond-horizon'
 
-export const BYTES_REFUSAL_WORDS: Record<BytesRefusal, string> = {
-  'no-data': 'nothing has been recorded for it',
-  stale: 'the last reading is too old to extrapolate from',
-  'too-few-points': 'too few readings yet',
-  'window-too-short': 'the readings cover too short a stretch to have a rate',
-  flat: 'it is not growing enough to call it growth',
-  shrinking: 'it is getting smaller',
-  noisy: 'the readings scatter too far from any line',
-  'step-change': 'the growth is one jump rather than a trend, so something was loaded at once',
-  'no-ceiling': 'nothing has said how big is too big for it',
-  'already-past': 'it is already at or over the size it was given',
-  'beyond-horizon': 'the rate is real but the crossing is beyond the horizon this will predict'
+const REFUSAL_KEY: Record<BytesRefusal, MessageKey> = {
+  'no-data': 'shared.bytesForecast.refusal.noData',
+  stale: 'shared.bytesForecast.refusal.stale',
+  'too-few-points': 'shared.bytesForecast.refusal.tooFewPoints',
+  'window-too-short': 'shared.bytesForecast.refusal.windowTooShort',
+  flat: 'shared.bytesForecast.refusal.flat',
+  shrinking: 'shared.bytesForecast.refusal.shrinking',
+  noisy: 'shared.bytesForecast.refusal.noisy',
+  'step-change': 'shared.bytesForecast.refusal.stepChange',
+  'no-ceiling': 'shared.bytesForecast.refusal.noCeiling',
+  'already-past': 'shared.bytesForecast.refusal.alreadyPast',
+  'beyond-horizon': 'shared.bytesForecast.refusal.beyondHorizon'
 }
+
+export const BYTES_REFUSAL_WORDS = Object.fromEntries(
+  Object.entries(REFUSAL_KEY).map(([r, k]) => [r, englishT(k)])
+) as Record<BytesRefusal, string>
 
 const HOUR_MS = 3_600_000
 const DAY_MS = 86_400_000
@@ -289,13 +295,19 @@ export function formatBytes(n: number): string {
  * whether anybody set a ceiling, and it is the number somebody acts on.
  */
 export function bytesHeadline(name: string, r: BytesReading): string {
-  const size = r.latest === null ? '' : ` It is ${formatBytes(r.latest)} now.`
+  const size = r.latest === null ? '' : ` ${st('shared.bytesForecast.sizeNow', { size: formatBytes(r.latest) })}`
   if (r.perDay === null) {
-    return `No growth reading for ${name}: ${BYTES_REFUSAL_WORDS[r.refusal ?? 'no-data']}.${size}`
+    return `${st('shared.bytesForecast.noReading', { name, why: st(REFUSAL_KEY[r.refusal ?? 'no-data']) })}${size}`
   }
-  const rate = `${name} is growing ${formatBytes(r.perDay)} a day (${r.confidence} confidence, from ${Math.round((r.to - r.from) / DAY_MS)} days of readings).`
+  const rate = st('shared.bytesForecast.rate', {
+    name,
+    perDay: formatBytes(r.perDay),
+    // A reading with a rate always has a confidence; see `forecastBytes`.
+    confidence: st(`shared.fleetForecast.confidence.${r.confidence ?? 'low'}`),
+    days: Math.round((r.to - r.from) / DAY_MS)
+  })
   if (r.refusal === null && r.days !== null) {
-    return `${rate} At that rate it reaches its ceiling in ${Math.floor(r.days)} day(s).${size}`
+    return `${rate} ${st('shared.bytesForecast.reachesCeiling', { days: Math.floor(r.days) })}${size}`
   }
-  return `${rate} No crossing date: ${BYTES_REFUSAL_WORDS[r.refusal ?? 'no-ceiling']}.${size}`
+  return `${rate} ${st('shared.bytesForecast.noCrossing', { why: st(REFUSAL_KEY[r.refusal ?? 'no-ceiling']) })}${size}`
 }

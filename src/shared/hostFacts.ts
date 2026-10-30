@@ -66,6 +66,7 @@
 // anything about Docker — that `ssh host cmd` gets a non-login PATH of roughly
 // /usr/bin:/bin, and that `sudo -n` is the only escalation that cannot prompt.
 import { SUDO_PROBE, resolveBinary } from './docker'
+import { st } from './i18n'
 
 // ---- Statuses -------------------------------------------------------------
 
@@ -119,15 +120,27 @@ export const FACT_STATUSES: FactStatus[] = [
  * "zero".
  */
 export const FACT_STATUS_HELP: Record<FactStatus, string> = {
-  ok: 'Read successfully. A zero here means zero, not "we could not look".',
-  absent: 'This server does not have the file or flag that answers this, so there is nothing to read.',
-  denied: 'It exists and this account was not allowed to read it. A different account might see more.',
-  'no-tool': 'The program that answers this is not installed on this server.',
-  'stale-metadata':
-    'The answer was read from a package cache that has not been refreshed recently, so it describes the estate as it was then, not now. OpsMaxx never refreshes it, because that is a network operation and on some package managers it can break the server.',
-  unsupported:
-    'This server cannot answer this question at all — not because of a permission or a missing tool, but because the distribution does not publish the data. Treat it as UNKNOWN, never as zero.',
-  unknown: 'The probe ran and its answer could not be read, or the collector never reported on it.'
+  get ok() {
+    return st('shared.hostFacts.statusHelp.ok')
+  },
+  get absent() {
+    return st('shared.hostFacts.statusHelp.absent')
+  },
+  get denied() {
+    return st('shared.hostFacts.statusHelp.denied')
+  },
+  get 'no-tool'() {
+    return st('shared.hostFacts.statusHelp.noTool')
+  },
+  get 'stale-metadata'() {
+    return st('shared.hostFacts.statusHelp.staleMetadata')
+  },
+  get unsupported() {
+    return st('shared.hostFacts.statusHelp.unsupported')
+  },
+  get unknown() {
+    return st('shared.hostFacts.statusHelp.unknown')
+  }
 }
 
 /** The nine things the collector reports on, each read independently. */
@@ -155,15 +168,33 @@ export const FACT_SOURCE_IDS: FactSourceId[] = [
 ]
 
 export const FACT_SOURCE_LABEL: Record<FactSourceId, string> = {
-  'os-release': 'Distribution',
-  architecture: 'Architecture',
-  cpu: 'CPU model',
-  virtualisation: 'Virtualisation',
-  'package-manager': 'Package manager',
-  updates: 'Pending updates',
-  'security-updates': 'Security updates',
-  'reboot-required': 'Reboot required',
-  'package-metadata': 'Package metadata age'
+  get 'os-release'() {
+    return st('shared.hostFacts.sourceLabel.osRelease')
+  },
+  get architecture() {
+    return st('shared.hostFacts.sourceLabel.architecture')
+  },
+  get cpu() {
+    return st('shared.hostFacts.sourceLabel.cpu')
+  },
+  get virtualisation() {
+    return st('shared.hostFacts.sourceLabel.virtualisation')
+  },
+  get 'package-manager'() {
+    return st('shared.hostFacts.sourceLabel.packageManager')
+  },
+  get updates() {
+    return st('shared.hostFacts.sourceLabel.updates')
+  },
+  get 'security-updates'() {
+    return st('shared.hostFacts.sourceLabel.securityUpdates')
+  },
+  get 'reboot-required'() {
+    return st('shared.hostFacts.sourceLabel.rebootRequired')
+  },
+  get 'package-metadata'() {
+    return st('shared.hostFacts.sourceLabel.packageMetadata')
+  }
 }
 
 export interface FactSourceReport {
@@ -367,7 +398,7 @@ export function factSource(facts: HostFacts, id: FactSourceId): FactSourceReport
       id,
       label: FACT_SOURCE_LABEL[id],
       status: 'unknown',
-      detail: 'the collector did not report on this source'
+      detail: st('shared.hostFacts.source.notReported')
     }
   )
 }

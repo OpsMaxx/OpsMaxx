@@ -77,6 +77,8 @@
 // address it matched on and says to correct the host or port if the two are not
 // the same box, so the operator can see the reasoning rather than guess at it.
 
+import { st } from './i18n'
+
 /** A hop as either half of the app spells it: the renderer's `Hop` and main's
  *  `CachedHop` are structurally this, plus fields nothing here reads. */
 export interface TopologyHop {
@@ -189,7 +191,7 @@ function hopWhere(h: TopologyHop): string {
   const host = (h.host ?? '').trim()
   const user = (h.username ?? '').trim()
   const port = typeof h.port === 'number' && h.port > 0 && h.port !== 22 ? `:${h.port}` : ''
-  if (host === '') return h.label?.trim() || 'an unnamed hop'
+  if (host === '') return h.label?.trim() || st('shared.topology.unnamedHop')
   return `${user ? `${user}@` : ''}${host}${port}`
 }
 
@@ -270,7 +272,7 @@ export function buildTopology(
           where:
             via === null
               ? hopWhere(hop)
-              : `${hopWhere(hop)} (saved server ${via}, which is not in this list)`
+              : st('shared.topology.hopViaMissing', { hop: hopWhere(hop), via })
         })
         continue
       }
@@ -350,12 +352,9 @@ export function unmatchedHopNote(topo: Topology): string | null {
   const n = topo.unmatchedHops.length
   if (n === 0) return null
   const names = [...new Set(topo.unmatchedHops.map((h) => h.serverName))]
-  const who = names.length <= 3 ? names.join(', ') : `${names.slice(0, 3).join(', ')} and others`
-  return (
-    `${n} ${n === 1 ? 'hop is' : 'hops are'} not backed by a saved server (on ${who}), so the ` +
-    'reboot checks below cannot see them. Two servers can share a bastion that OpsMaxx has ' +
-    'never been told about; if one of the servers below is that machine, nothing here will say so.'
-  )
+  const who =
+    names.length <= 3 ? names.join(', ') : st('shared.topology.andOthers', { names: names.slice(0, 3).join(', ') })
+  return st('shared.topology.unmatchedHops', { count: n, who })
 }
 
 // ---------------------------------------------------------------------------
@@ -399,23 +398,18 @@ export function rebootBlockFor(topo: Topology, serverId: string): RebootBlock | 
   const addressNote =
     byAddress.length === 0
       ? ''
-      : ` ${byAddress.map((d) => d.name).join(', ')} ${byAddress.length === 1 ? 'names' : 'name'} ` +
-        `that hop by the address ${addresses.join(', ')} rather than by a saved-server reference; ` +
-        `${name} is the saved server at that address. The same machine reached under two names is ` +
-        'exactly the case a serverId-only check cannot see, so it is refused here rather than ' +
-        'counted as an unmatched hop. If they are genuinely different machines, correct the server ' +
-        'or port on one of them.'
+      : ` ${st('shared.topology.byAddress', {
+          count: byAddress.length,
+          names: byAddress.map((d) => d.name).join(', '),
+          addresses: addresses.join(', '),
+          name
+        })}`
 
   return {
     kind: 'jump-host',
     serverId,
     serverName: name,
-    reason:
-      `${name} is the jump host ${deps.length === 1 ? 'that' : 'that'} ${via} ` +
-      `${deps.length === 1 ? 'connects' : 'connect'} through. Restarting it drops those ` +
-      'connections — including the ones this job is using to watch its own work — so this run ' +
-      'will not do it. Reboot it on its own, deliberately, with nothing else in flight.' +
-      addressNote
+    reason: st('shared.topology.jumpHost', { count: deps.length, name, via }) + addressNote
   }
 }
 
@@ -454,7 +448,10 @@ export function sameWaveDatabaseBlocks(topo: Topology, waveServerIds: string[]):
   for (const list of byKey.values()) {
     const hosts = [...new Map(list.map((l) => [l.serverId, l])).values()]
     if (hosts.length < 2) continue
-    const names = hosts.map((h) => h.serverName).join(' and ')
+    const names = st('shared.topology.pair', {
+      first: hosts.slice(0, -1).map((h) => h.serverName).join(' and '),
+      last: hosts[hosts.length - 1].serverName
+    })
     for (const h of hosts) {
       if (seen.has(h.serverId)) continue
       seen.add(h.serverId)
@@ -462,11 +459,7 @@ export function sameWaveDatabaseBlocks(topo: Topology, waveServerIds: string[]):
         kind: 'same-wave-database',
         serverId: h.serverId,
         serverName: h.serverName,
-        reason:
-          `${names} both carry a saved ${list[0].dbName} database, and this wave would restart ` +
-          'them together. OpsMaxx does not know whether they replicate — it only knows you ' +
-          'saved the same database on both — so it will not restart them in the same wave. Put ' +
-          'them in different waves.'
+        reason: st('shared.topology.sameWaveDatabase', { names, db: list[0].dbName })
       })
     }
   }

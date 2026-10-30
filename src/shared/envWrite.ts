@@ -57,6 +57,8 @@
 // passwords. Double quotes with all three escapes can carry everything, and
 // that is what `escapeEnvValue` emits: `\` first, then `"`, then `$`.
 
+import { englishT } from './i18n'
+
 /** `.env` names as compose accepts them. The leading digit is excluded because
  *  a POSIX environment variable may not start with one. */
 const ENV_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/
@@ -165,5 +167,4 @@ export function applyEnvWrite(fileText: string, plan: EnvWritePlan, value: strin
 /** The sentence the UI puts on screen. The operator is choosing a vault entry
  *  for a name whose current value this app has never read, and saying so is the
  *  difference between a deliberate trade and a missing feature. */
-export const ENV_WRITE_DISCLOSURE =
-  'OpsMaxx has never read this file’s values and does not read them to make this change: it writes the value you pick from the vault over the line with this name, or adds the line if there is none. It cannot tell you whether the value is already the same one.'
+export const ENV_WRITE_DISCLOSURE = englishT('shared.envWrite.disclosure')

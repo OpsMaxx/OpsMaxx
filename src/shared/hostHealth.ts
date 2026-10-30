@@ -1,4 +1,5 @@
 import type { HostMetrics, PortListener, ServiceUnit } from './ssh'
+import { st } from './i18n'
 
 // Turning a fleet of raw metric samples into the answer to one question:
 // is anything broken, where, and what is it.
@@ -289,20 +290,18 @@ export function splitListeners(listeners: PortListener[]): ListenerGroups {
   }
 }
 
-function plural(n: number, one: string, many = `${one}s`): string {
-  return n === 1 ? one : many
-}
+const servers = (count: number): string => st('shared.hostHealth.servers', { count })
 
 /** "4 failed services on 3 hosts", or null when nothing has failed. */
 export function failureLine(h: FleetHealth): string | null {
   if (h.failedUnits === 0) return null
-  return `${h.failedUnits} failed ${plural(h.failedUnits, 'service')} on ${h.failingHosts} ${plural(h.failingHosts, 'server')}`
+  return st('shared.hostHealth.failures', { count: h.failedUnits, servers: servers(h.failingHosts) })
 }
 
 /** "2 hosts low on disk", or null when none is. */
 export function diskLine(h: FleetHealth): string | null {
   if (h.diskHosts === 0) return null
-  return `${h.diskHosts} ${plural(h.diskHosts, 'server')} low on disk`
+  return st('shared.hostHealth.lowDisk', { count: h.diskHosts })
 }
 
 /**
@@ -313,7 +312,7 @@ export function diskLine(h: FleetHealth): string | null {
 export function unreachableLine(h: FleetHealth): string | null {
   if (h.unreachable.length === 0) return null
   const n = h.unreachable.length
-  return `${n} ${plural(n, 'server')} could not be checked`
+  return st('shared.hostHealth.unreachable', { count: n })
 }
 
 /**
@@ -329,10 +328,10 @@ export function coverageLine(h: FleetHealth): string {
   const reporting = h.attention.length + h.rest.length
   const parts = [
     reporting === h.totalServers
-      ? `${reporting} ${plural(reporting, 'server')} reporting`
-      : `${reporting} of ${h.totalServers} ${plural(h.totalServers, 'server')} reporting`
+      ? st('shared.hostHealth.reportingAll', { servers: servers(reporting) })
+      : st('shared.hostHealth.reportingSome', { reporting, servers: servers(h.totalServers) })
   ]
-  if (h.blind > 0) parts.push(`${h.blind} cannot list services`)
-  if (h.portBlind > 0) parts.push(`${h.portBlind} cannot list ports`)
+  if (h.blind > 0) parts.push(st('shared.hostHealth.cannotListServices', { count: h.blind }))
+  if (h.portBlind > 0) parts.push(st('shared.hostHealth.cannotListPorts', { count: h.portBlind }))
   return parts.join(' · ')
 }

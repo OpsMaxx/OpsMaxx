@@ -177,7 +177,8 @@ describe('which account the desktop signs in as', () => {
   // The refusal names the account, because "no password is stored for this
   // server" is ambiguous once a server has two logins.
   it('names the account when no password is stored', () => {
-    expect(RELAY).toContain('No password is stored for ${rdpUser}')
+    expect(EN['main.rdpRelay.noPassword']).toMatch(/^No password is stored for \{\{user\}\}/)
+    expect(RELAY).toContain("mt('main.rdpRelay.noPassword', { user: rdpUser")
   })
 })
 

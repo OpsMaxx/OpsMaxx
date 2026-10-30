@@ -21,10 +21,7 @@ import {
 import { sudoAcrossFiles } from '../../../../shared/sudoers'
 import {
   ACCESS_STATUS_HELP,
-  ACCESS_WRITE_DISABLED_REASON,
-  ACCESS_WRITE_DISABLED_SUMMARY,
   ACCESS_WRITE_ENABLED,
-  ACCESS_WRITE_SCOPE,
   KEY_PROBLEM_HELP,
   accessSource,
   summariseAccess,
@@ -547,10 +544,10 @@ export function AccessPanel({
               exists to show. What stays visible carries both operative facts,
               that the write half is off and that nothing here writes
               anywhere, so a reader who never expands it is not misled. */}
-          <ShieldAlert size={12} /> <b>{ACCESS_WRITE_DISABLED_SUMMARY}</b>
+          <ShieldAlert size={12} /> <b>{t('shared.access.write.disabledSummary')}</b>
           <NoteWhy summary={t('monitor.access.writeGated.why')}>
-            <p>{ACCESS_WRITE_DISABLED_REASON}</p>
-            <p>{ACCESS_WRITE_SCOPE}</p>
+            <p>{t('shared.access.write.disabledReason')}</p>
+            <p>{t('shared.access.write.scope')}</p>
           </NoteWhy>
         </div>
       )}

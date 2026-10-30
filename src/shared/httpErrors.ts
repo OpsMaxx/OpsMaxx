@@ -5,13 +5,14 @@ import { maskUrl } from './apiUrl'
 import { VAULT_ENTRY_GONE_MESSAGE, VAULT_LOCKED_MESSAGE } from './apiSecrets'
 import { MAX_SOCKETS } from './httpSocket'
 import { CONNECTION_REVIEW_MESSAGE } from './apiRequestBuild'
+import { englishT, st, type MessageKey } from './i18n'
 
 /**
  * The send layer's refusal while an environment's or the globals' synced
  * changes await review. store/api re-exports it as ENV_REVIEW_MESSAGE, so the
  * refusal and the fix that answers it cannot drift apart.
  */
-export const ENV_REVIEW_TEXT = "Review this environment's changes"
+export const ENV_REVIEW_TEXT = englishT('shared.httpErrors.envReview')
 
 /** What a fix button does; the response pane maps each to a handler. */
 export type FixAction =
@@ -91,8 +92,12 @@ export interface PresentCtx {
 
 function seconds(ms: number): string {
   const s = ms / 1000
-  return `${Number.isInteger(s) ? s : s.toFixed(1)} s`
+  return String(Number.isInteger(s) ? s : s.toFixed(1))
 }
+
+/** A refusal matched by its English wording, or by the same sentence already
+ *  shown in the user's language (a WebSocket failure is presented twice). */
+const says = (raw: string, english: string, key: MessageKey): boolean => raw === english || raw === st(key)
 
 /** The sentence and fix for a class; the raw message is kept, masked, as `detail`. */
 export function presentError(cls: TransportErrorClass, raw: string, ctx: PresentCtx = {}): ClassifiedError {
@@ -105,57 +110,62 @@ export function presentError(cls: TransportErrorClass, raw: string, ctx: Present
   })
   switch (cls) {
     case 'dns':
-      return out('Host not found', { label: 'Send from…', action: 'route-menu' })
+      return out(st('shared.httpErrors.hostNotFound'), { label: st('shared.httpErrors.sendFrom'), action: 'route-menu' })
     case 'refused':
-      return out('Connection refused', { label: 'Send from…', action: 'route-menu' })
+      return out(st('shared.httpErrors.refused'), { label: st('shared.httpErrors.sendFrom'), action: 'route-menu' })
     case 'timeout': {
       const ms = ctx.timeoutMs ?? Number(/after (\d+)\s*ms/i.exec(raw)?.[1] ?? NaN)
-      return out(Number.isFinite(ms) ? `Timed out after ${seconds(ms)}` : 'Timed out', {
-        label: 'Raise the timeout',
-        action: 'raise-timeout'
-      })
+      return out(
+        Number.isFinite(ms) ? st('shared.httpErrors.timedOutAfter', { seconds: seconds(ms) }) : st('shared.httpErrors.timedOut'),
+        {
+          label: st('shared.httpErrors.raiseTimeout'),
+          action: 'raise-timeout'
+        }
+      )
     }
     case 'tls-not-tls':
-      return out('This port does not speak TLS', { label: 'Retry with http://', action: 'retry-http' })
+      return out(st('shared.httpErrors.notTls'), { label: st('shared.httpErrors.retryHttp'), action: 'retry-http' })
     case 'tls':
       // Never "turn verification off" from an error: the fix is to trust the CA.
       return out(
-        'Certificate not trusted',
+        st('shared.httpErrors.certUntrusted'),
         ctx.scratch
-          ? { label: 'Save to a collection to add a CA…', action: 'save-then-ca' }
-          : { label: 'Add a CA for this collection', action: 'add-ca' }
+          ? { label: st('shared.httpErrors.saveThenCa'), action: 'save-then-ca' }
+          : { label: st('shared.httpErrors.addCa'), action: 'add-ca' }
       )
     case 'reset':
-      return out('Connection reset')
+      return out(st('shared.httpErrors.reset'))
     case 'aborted':
-      return out('Cancelled', undefined, false)
+      return out(st('shared.httpErrors.cancelled'), undefined, false)
     case 'route-missing':
-      return out('That server was removed — requests will not be sent', {
-        label: 'Choose where to send from',
+      return out(st('shared.httpErrors.routeMissing'), {
+        label: st('shared.httpErrors.chooseRoute'),
         action: 'route-menu'
       })
     case 'vault-locked':
-      return out(VAULT_LOCKED_MESSAGE, { label: 'Unlock vault', action: 'unlock' }, false)
+      return out(st('shared.apiSecrets.vaultLocked'), { label: st('shared.httpErrors.unlockVault'), action: 'unlock' }, false)
     case 'vault-entry-gone':
-      return out(VAULT_ENTRY_GONE_MESSAGE, { label: 'Choose another vault entry', action: 'choose-vault' }, false)
+      return out(st('shared.apiSecrets.vaultEntryGone'), { label: st('shared.httpErrors.chooseVault'), action: 'choose-vault' }, false)
     case 'unresolved-variable':
-      return out(detail || 'A variable is not defined', { label: 'Add value…', action: 'add-variable' }, false)
+      return out(detail || st('shared.httpErrors.variableUndefined'), { label: st('shared.httpErrors.addValue'), action: 'add-variable' }, false)
     case 'socket-cap':
-      return out(`${MAX_SOCKETS} WebSockets are open, the most OpsMaxx allows`, {
-        label: 'Disconnect idle sockets…',
+      return out(st('shared.httpErrors.socketCap', { max: MAX_SOCKETS }), {
+        label: st('shared.httpErrors.disconnectIdle'),
         action: 'disconnect-idle'
       })
     case 'bridge-stale':
-      return out('This part of OpsMaxx needs a restart', { label: 'Restart OpsMaxx…', action: 'restart' })
+      return out(st('shared.httpErrors.bridgeStale'), { label: st('shared.httpErrors.restart'), action: 'restart' })
     case 'prod-declined':
       return out('', undefined, false)
     case 'other':
       // Synced changes held for review: the fix opens where they are accepted.
-      if (raw === ENV_REVIEW_TEXT) return out(raw, { label: 'Review changes', action: 'review-env' }, false)
-      if (raw === CONNECTION_REVIEW_MESSAGE) {
-        return out(raw, { label: 'Review changes', action: 'review-collection' }, false)
+      if (says(raw, ENV_REVIEW_TEXT, 'shared.httpErrors.envReview')) {
+        return out(st('shared.httpErrors.envReview'), { label: st('shared.httpErrors.reviewChanges'), action: 'review-env' }, false)
       }
-      return out(detail || 'The request failed', undefined, false)
+      if (says(raw, CONNECTION_REVIEW_MESSAGE, 'shared.apiRequestBuild.connectionReview')) {
+        return out(st('shared.apiRequestBuild.connectionReview'), { label: st('shared.httpErrors.reviewChanges'), action: 'review-collection' }, false)
+      }
+      return out(detail || st('shared.httpErrors.requestFailed'), undefined, false)
   }
 }
 

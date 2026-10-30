@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto'
 import type { Client, SFTPWrapper } from 'ssh2'
+import { LocalizedError } from '../../shared/i18n'
 
 /**
  * An image from this computer's clipboard, put where a program on the server
@@ -49,7 +50,7 @@ export async function uploadPastedImage(client: Client, png: Uint8Array): Promis
   try {
     sftp = await openSftp(client)
   } catch (err) {
-    throw new Error(`This server does not offer SFTP, so the image cannot be copied to it (${String((err as Error).message ?? err)}).`)
+    throw new LocalizedError('main.pastedImage.noSftp', { detail: String((err as Error).message ?? err) })
   }
   try {
     await step((cb) => sftp.mkdir(dir, { mode: 0o700 }, cb))
@@ -58,7 +59,7 @@ export async function uploadPastedImage(client: Client, png: Uint8Array): Promis
   } catch (err) {
     // Half a paste is still a file on someone's server.
     await step((cb) => sftp.rmdir(dir, cb)).catch(() => undefined)
-    throw new Error(`Could not write the image to /tmp on the server: ${String((err as Error).message ?? err)}`)
+    throw new LocalizedError('main.pastedImage.writeFailed', { detail: String((err as Error).message ?? err) })
   } finally {
     sftp.end()
   }

@@ -61,6 +61,9 @@ export interface PairingDeps {
  */
 async function gone(resp: Response): Promise<AddyError> {
   const detail = await relayDetail(resp)
+  // English on purpose, like the relay's own sentence beside it: the joiner's
+  // screen recognises it by its words (`joinerFailure`) to add what probably
+  // happened.
   return new AddyError(
     'pairing-expired',
     detail ||
@@ -81,7 +84,10 @@ export async function publish(deps: PairingDeps, id: string, role: string, frame
   )
   if (resp.status === 404) throw await gone(resp)
   if (!resp.ok) {
-    throw new AddyError('relay-unreachable', `the relay would not carry the frame (${resp.status})`)
+    throw new AddyError('relay-unreachable', {
+      key: 'main.addy.pairing.frameRefused',
+      vars: { status: resp.status }
+    })
   }
 }
 
@@ -111,12 +117,12 @@ export async function receive<T>(
   let backoff = 500
   let lastFailure = ''
   while (Date.now() < deadline) {
-    if (signal.aborted) throw new AddyError('pairing-expired', 'the pairing was cancelled')
+    if (signal.aborted) throw new AddyError('pairing-expired', { key: 'main.addy.pairing.cancelled' })
     let resp: Response | null = null
     try {
       resp = await relayFetch(`${deps.baseURL}/v1/pair/${id}?as=${role}`, { signal }, deps.insecureTLS)
     } catch (err) {
-      if (signal.aborted) throw new AddyError('pairing-expired', 'the pairing was cancelled')
+      if (signal.aborted) throw new AddyError('pairing-expired', { key: 'main.addy.pairing.cancelled' })
       if (err instanceof AddyError && err.code !== 'relay-unreachable') throw err
       lastFailure = err instanceof Error ? err.message : String(err)
     }
@@ -130,7 +136,10 @@ export async function receive<T>(
       return JSON.parse(Buffer.from(frame, 'base64').toString('utf8')) as T
     }
     if (resp && resp.status < 500) {
-      throw new AddyError('relay-unreachable', `the relay refused the rendezvous (${resp.status})`)
+      throw new AddyError('relay-unreachable', {
+        key: 'main.addy.pairing.rendezvousRefused',
+        vars: { status: resp.status }
+      })
     }
     if (resp) lastFailure = `the relay answered ${resp.status}`
     await new Promise((r) => setTimeout(r, Math.min(backoff, Math.max(0, deadline - Date.now()))))
@@ -139,8 +148,9 @@ export async function receive<T>(
   throw new AddyError(
     'pairing-expired',
     lastFailure
-      ? `the relay could not be reached reliably enough to finish pairing (${lastFailure})`
-      : 'the other device did not answer in time'
+      ? { key: 'main.addy.pairing.relayUnreliable', vars: { detail: lastFailure } }
+      : // English, for the same reason as `gone`.
+        'the other device did not answer in time'
   )
 }
 

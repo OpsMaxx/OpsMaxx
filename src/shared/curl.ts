@@ -30,6 +30,7 @@ import {
 } from './apiModel'
 import { userinfoSpan, type HttpRequestSpec } from './httpClient'
 import { userinfoIsReference } from './httpHistory'
+import { st } from './i18n'
 
 // ---------------------------------------------------------------- tokenise
 
@@ -69,7 +70,7 @@ function tokenize(input: string): Tokens | { error: string } {
     has = true
     if (c === "'") {
       const end = s.indexOf("'", i + 1)
-      if (end < 0) return { error: 'A single quote is not closed.' }
+      if (end < 0) return { error: st('shared.curl.singleQuoteOpen') }
       cur += s.slice(i + 1, end)
       i = end + 1
     } else if (c === '$' && s[i + 1] === "'") {
@@ -105,7 +106,7 @@ function tokenize(input: string): Tokens | { error: string } {
           cur += s[i++]
         }
       }
-      if (i >= s.length) return { error: 'A double quote is not closed.' }
+      if (i >= s.length) return { error: st('shared.curl.doubleQuoteOpen') }
       i++
     } else if (c === '\\') {
       if (i + 1 < s.length) cur += s[i + 1]
@@ -148,7 +149,7 @@ const SILENT = new Set(['compressed', 'silent', 'show-error', 'verbose', 'includ
 const baseName = (p: string): string => p.split(/[\\/]/).pop() || p
 
 function fileNote(flag: string, path: string): string {
-  return `${flag} @${baseName(path)}: files are not read. Choose the file again.`
+  return st('shared.curl.fileNotRead', { arg: `${flag} @${baseName(path)}` })
 }
 
 interface Draft {
@@ -197,13 +198,13 @@ export function parseCurl(
   if ('error' in tokens) return { ok: false, error: tokens.error }
   const args = tokens.args
   if (args.length === 0 || !/(^|[\\/])curl(\.exe)?$/i.test(args[0])) {
-    return { ok: false, error: 'That does not start with curl.' }
+    return { ok: false, error: st('shared.curl.notCurl') }
   }
   const notes: string[] = []
   const note = (n: string): void => {
     if (!notes.includes(n)) notes.push(n)
   }
-  if (tokens.expansion) note('Shell expansion is not performed: $(…), backticks and $VAR are kept as written.')
+  if (tokens.expansion) note(st('shared.curl.noExpansion'))
 
   const d: Draft = { headers: [], data: [], urlencoded: [], form: [], get: false, head: false, location: false }
   const positional: string[] = []
@@ -293,13 +294,13 @@ export function parseCurl(
       case 'form':
       case 'form-string': {
         const eq = v.indexOf('=')
-        if (eq < 0) return note(`-F ${v}: not a name=value pair, left out.`)
+        if (eq < 0) return note(st('shared.curl.formNotPair', { arg: `-F ${v}` }))
         const key = v.slice(0, eq)
         const rest = v.slice(eq + 1)
         if (name === 'form' && (rest.startsWith('@') || rest.startsWith('<'))) {
           const path = rest.slice(1).split(';')[0]
           d.form.push({ key, value: '', file: baseName(path) })
-          return note(`-F ${key}=${rest[0]}${baseName(path)}: files are not read. Choose the file again.`)
+          return note(st('shared.curl.fileNotRead', { arg: `-F ${key}=${rest[0]}${baseName(path)}` }))
         }
         d.form.push({ key, value: rest })
         return
@@ -318,7 +319,7 @@ export function parseCurl(
         return
       case 'location-trusted':
         d.location = true
-        return note('--location-trusted: credentials are never sent to a redirect on another host. Redirects are followed without them.')
+        return note(st('shared.curl.locationTrusted'))
       case 'max-redirs':
         d.maxRedirs = Math.max(0, Math.min(10, Math.floor(Number(v)) || 0))
         return
@@ -332,7 +333,7 @@ export function parseCurl(
         d.headers.push(['Referer', v])
         return
       case 'cookie':
-        if (!v.includes('=')) return note(`-b ${baseName(v)}: a cookie file is not read.`)
+        if (!v.includes('=')) return note(st('shared.curl.cookieFile', { arg: `-b ${baseName(v)}` }))
         d.headers.push(['Cookie', v])
         return
       case 'upload-file':
@@ -340,34 +341,32 @@ export function parseCurl(
         d.method ??= 'PUT'
         return note(fileNote('-T', v))
       case 'config':
-        return note(`-K ${baseName(v)}: a config file is not read.`)
+        return note(st('shared.curl.configFile', { arg: `-K ${baseName(v)}` }))
       case 'insecure':
-        return note(
-          "This command skipped certificate checks. OpsMaxx still checks; change it in the collection's Connection settings if you mean it."
-        )
+        return note(st('shared.curl.insecure'))
       case 'cacert':
       case 'capath':
       case 'cert':
       case 'key':
       case 'cert-type':
       case 'key-type':
-        return note(`--${name}: certificates are not imported. Set a custom CA in the collection's Connection settings.`)
+        return note(st('shared.curl.certNotImported', { arg: `--${name}` }))
       case 'resolve':
       case 'connect-to':
       case 'unix-socket':
       case 'abstract-unix-socket':
       case 'interface':
-        return note(`--${name}: not used. Choose Send from to pick where the request leaves from.`)
+        return note(st('shared.curl.routeFlag', { arg: `--${name}` }))
       default:
         if (SILENT.has(name)) return
-        if (/^(proxy|socks|preproxy)/.test(name)) return note('Proxies are not used; choose Send from instead.')
-        return note(`${name.startsWith('-') ? name : `--${name}`}: not supported, left out.`)
+        if (/^(proxy|socks|preproxy)/.test(name)) return note(st('shared.curl.proxy'))
+        return note(st('shared.curl.unsupported', { arg: name.startsWith('-') ? name : `--${name}` }))
     }
   }
 
   const url = d.url ?? positional[0]
-  if (!url) return { ok: false, error: 'There is no URL in that command.' }
-  if (positional.length > (d.url ? 0 : 1)) note('Only the first URL is imported.')
+  if (!url) return { ok: false, error: st('shared.curl.noUrl') }
+  if (positional.length > (d.url ? 0 : 1)) note(st('shared.curl.firstUrlOnly'))
 
   const req = defaults.http()
   const id = newId('req')
@@ -600,7 +599,7 @@ export function outgoing(
   let contentType = ''
   for (const [name, rawValue] of rawHeaders) {
     if (/[\r\n\0]/.test(rawValue) || /[\r\n\0]/.test(name)) {
-      notes.push(`The ${name} header contains a line break or NUL and was left out.`)
+      notes.push(st('shared.curl.headerControlChars', { name }))
       continue
     }
     if (name.toLowerCase() === 'content-type') contentType = rawValue
@@ -625,14 +624,14 @@ export function outgoing(
         row.kind === 'text' && mask && isSensitiveName(row.key) ? { ...row, value: maskedFrom(row.value) } : row
       )
     }
-    if (template.form.some((r) => r.kind === 'file')) notes.push('File fields name the file; pick its path when you run it.')
+    if (template.form.some((r) => r.kind === 'file')) notes.push(st('shared.curl.formFiles'))
   } else if (template.file !== undefined) {
     body = { file: template.file }
-    notes.push('The body is a file; the command names it, and the path is yours to fill in.')
+    notes.push(st('shared.curl.bodyFile'))
   } else {
     let text = bytes ? new TextDecoder().decode(bytes) : template.text
     if (bytes && text?.includes('\0')) {
-      notes.push('The body is binary and was left out.')
+      notes.push(st('shared.curl.bodyBinary'))
       text = undefined
     }
     if (text !== undefined && text !== '') {
@@ -649,13 +648,13 @@ export function outgoing(
   let insecure = false
   if ('tls' in spec) {
     insecure = spec.tls === 'unverified'
-    if (spec.tls === 'custom-ca') notes.push('This request trusts a custom CA; add --cacert with that certificate.')
+    if (spec.tls === 'custom-ca') notes.push(st('shared.curl.customCa'))
   } else {
     insecure = spec.insecureTls === true
-    if (spec.caPem) notes.push('This request trusts a custom CA; add --cacert with that certificate.')
+    if (spec.caPem) notes.push(st('shared.curl.customCa'))
   }
   if ('via' in spec ? spec.via.kind !== 'direct' : spec.route.key !== 'direct') {
-    notes.push('This request is sent through a server or VPN in OpsMaxx; the command sends it from wherever you run it.')
+    notes.push(st('shared.curl.routed'))
   }
   return {
     method: (spec.method || 'GET').toUpperCase(),

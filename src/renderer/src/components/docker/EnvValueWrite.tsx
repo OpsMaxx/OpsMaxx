@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { AlertTriangle, Check, KeyRound, Loader2 } from 'lucide-react'
 
-import { ENV_WRITE_DISCLOSURE } from '../../../../shared/envWrite'
 import type { ComposeEnvWriteResult } from '../../../../shared/compose'
 import type { VaultEntryDescriptor, VaultIndexResult } from '../../../../shared/vaultIndex'
 import { bridgeHas } from '../../lib/bridge'
@@ -215,7 +214,7 @@ export function EnvValueWrite({
       </div>
 
       <span className="faint" style={{ fontSize: 11 }}>
-        {ENV_WRITE_DISCLOSURE}
+        {t('shared.envWrite.disclosure')}
       </span>
 
       {result !== null && result.ok && (

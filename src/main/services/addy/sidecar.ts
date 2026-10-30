@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { resolveBundledBinary, BundledBinaryError } from '../bundledBinary'
 import type { AddyErrorCode } from '../../../shared/addy'
+import { LocalizedError, type MessageKey, type Vars } from '../../../shared/i18n'
 
 /**
  * The addyd sidecar, as main talks to it.
@@ -17,12 +18,22 @@ import type { AddyErrorCode } from '../../../shared/addy'
  * coming back -- never a key, never a socket.
  */
 
-export class AddyError extends Error {
+/**
+ * A failure the Sync & devices screen can show in the user's language.
+ *
+ * Ours to say: a catalog key and its values. Not ours — what addyd, the relay
+ * or the operating system said — passes as a plain string and reads the same
+ * to everyone. `message` is English either way, for the log and the audit.
+ */
+export class AddyError extends LocalizedError {
   constructor(
     readonly code: AddyErrorCode,
-    message: string
+    said: string | { key: MessageKey; vars?: Vars }
   ) {
-    super(message)
+    super(
+      typeof said === 'string' ? 'main.addy.verbatim' : said.key,
+      typeof said === 'string' ? { message: said } : said.vars
+    )
     this.name = 'AddyError'
   }
 }
@@ -151,7 +162,9 @@ export async function openAddyd(
     // downgrade the sidecar applies on its own side. A typo'd constant must
     // not be able to reach the UI as a code nothing handles.
     const code = (frame.error?.code ?? 'internal') as AddyErrorCode
-    held.reject(new AddyError(code, frame.error?.message ?? 'the sidecar failed without saying why'))
+    held.reject(
+      new AddyError(code, frame.error?.message ?? { key: 'main.addy.sidecar.failedSilently' })
+    )
   }
 
   child.stdout.setEncoding('utf8')
@@ -176,7 +189,11 @@ export async function openAddyd(
     settleAll(
       new AddyError(
         'internal',
-        `addyd exited (${signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`})`
+        signal
+          ? { key: 'main.addy.sidecar.exitedBySignal', vars: { signal } }
+          : code !== null
+            ? { key: 'main.addy.sidecar.exitedWithCode', vars: { code } }
+            : { key: 'main.addy.sidecar.exitedUnknown' }
       )
     )
     if (unasked) onExit?.(signal ? `signal ${signal}` : `code ${code ?? 'unknown'}`)
@@ -184,14 +201,16 @@ export async function openAddyd(
   child.on('error', (err) => {
     const unasked = !closed
     closed = true
-    settleAll(new AddyError('internal', `addyd could not start: ${err.message}`))
+    settleAll(
+      new AddyError('internal', { key: 'main.addy.sidecar.couldNotStart', vars: { detail: err.message } })
+    )
     if (unasked) onExit?.(err.message)
   })
 
   return {
     alive: () => !closed,
     send<T>(method: string, params?: unknown, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
-      if (closed) return Promise.reject(new AddyError('internal', 'addyd is not running'))
+      if (closed) return Promise.reject(new AddyError('internal', { key: 'main.addy.sidecar.notRunning' }))
       const id = String(++seq)
       return new Promise<T>((resolve, reject) => {
         const timer = setTimeout(() => {
@@ -199,16 +218,25 @@ export async function openAddyd(
           // The id is NOT reused after a timeout. A late reply to a timed-out
           // request must not be able to resolve the next one, which is what an
           // id counter that wrapped or was recycled would allow.
-          reject(new AddyError('internal', `addyd did not answer ${method} within ${timeoutMs}ms`))
+          reject(
+            new AddyError('internal', {
+              key: 'main.addy.sidecar.noAnswer',
+              vars: { method, ms: timeoutMs }
+            })
+          )
         }, timeoutMs)
         const line = JSON.stringify({ id, method, params }) + '\n'
         if (Buffer.byteLength(line) > MAX_LINE_BYTES) {
           clearTimeout(timer)
           reject(
-            new AddyError(
-              'too-large',
-              `that is too large to ${method} (${(Buffer.byteLength(line) / 1024 / 1024).toFixed(1)} MB encoded; the limit is ${MAX_LINE_BYTES / 1024 / 1024} MB)`
-            )
+            new AddyError('too-large', {
+              key: 'main.addy.sidecar.tooLarge',
+              vars: {
+                method,
+                size: (Buffer.byteLength(line) / 1024 / 1024).toFixed(1),
+                limit: MAX_LINE_BYTES / 1024 / 1024
+              }
+            })
           )
           return
         }
@@ -219,7 +247,7 @@ export async function openAddyd(
     close(): Promise<void> {
       if (closed) return Promise.resolve()
       closed = true
-      settleAll(new AddyError('internal', 'addyd was stopped'))
+      settleAll(new AddyError('internal', { key: 'main.addy.sidecar.stopped' }))
       return new Promise<void>((resolve) => {
         child.once('exit', () => resolve())
         // stdin EOF is the sidecar's own shutdown signal -- it treats a closed

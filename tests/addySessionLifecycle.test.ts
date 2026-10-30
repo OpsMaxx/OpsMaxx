@@ -327,6 +327,8 @@ describe('main is wired to all of it', () => {
   it('a new device raises an OS notification', () => {
     const hook = MAIN.slice(MAIN.indexOf('addySession.onDeviceAdded('))
     expect(hook.slice(0, 1500)).toMatch(/new Notification\(/)
-    expect(hook.slice(0, 1500)).toMatch(/recovery phrase/)
+    expect(hook.slice(0, 1500)).toMatch(/mt\('main\.addy\.deviceAddedWithPhraseTitle'\)/)
+    const en = JSON.parse(readFileSync(resolve(__dirname, '../src/shared/locales/en.json'), 'utf8'))
+    expect(en['main.addy.deviceAddedWithPhraseTitle']).toMatch(/recovery phrase/)
   })
 })

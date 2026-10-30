@@ -1,5 +1,6 @@
 import type { JobSpec, JobStep } from './jobs'
 import type { PackageManager } from './hostFacts'
+import { st } from './i18n'
 
 // Item 34b: the second typed step kind.
 //
@@ -34,15 +35,15 @@ export function checkPackageStep(
   names: string[]
 ): PackageStepCheck {
   const clean = names.map((n) => n.trim()).filter((n) => n !== '')
-  if (clean.length === 0) return { ok: false, reason: 'Name at least one package.' }
+  if (clean.length === 0) return { ok: false, reason: st('shared.packageStep.noNames') }
   if (clean.length > 25) {
-    return { ok: false, reason: 'More than 25 packages in one job is a list nobody reads before confirming it.' }
+    return { ok: false, reason: st('shared.packageStep.tooMany') }
   }
   for (const n of clean) {
     if (!NAME_RE.test(n)) {
       return {
         ok: false,
-        reason: `"${n}" is not a package name. Letters, digits and . _ - + : ~ @ = only — this text is run as root on every server you picked.`
+        reason: st('shared.packageStep.badName', { name: n })
       }
     }
   }
@@ -53,13 +54,13 @@ export function checkPackageStep(
     if (manager === 'apk') {
       return {
         ok: false,
-        reason: 'apk has no way to hold a package at a version, so this cannot be done on an Alpine server. Nothing else on this job would tell you it had been skipped.'
+        reason: st('shared.packageStep.apkHold')
       }
     }
     if (manager === 'pacman') {
       return {
         ok: false,
-        reason: 'pacman holds a package by adding it to IgnorePkg in /etc/pacman.conf, which is a config-file edit rather than a command. OpsMaxx does not write that file yet, and appending to it blindly is how the same line ends up in it fourteen times.'
+        reason: st('shared.packageStep.pacmanHold')
       }
     }
   }

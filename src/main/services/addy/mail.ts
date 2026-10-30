@@ -1,3 +1,4 @@
+import { englishT } from '../../../shared/i18n'
 import { AddyError, type AddySidecar } from './sidecar'
 
 /**
@@ -25,9 +26,7 @@ export const MAILBOX_MAX_AGE_MS = 49 * 60 * 60_000
  *  key, which says nothing about which device wrote it. */
 const LEGACY_PREFIX = Buffer.from('addy-obj-v1\0', 'latin1')
 
-export const LEGACY_MAIL_REASON =
-  'It was sent by an older version of OpsMaxx, which cannot prove which device sent it. ' +
-  'Update OpsMaxx on the sending device.'
+export const LEGACY_MAIL_REASON = englishT('main.addy.mail.legacy')
 
 export function isLegacyMail(sealed: string): boolean {
   // 12 bytes of prefix are exactly the first 16 base64 characters.
@@ -49,7 +48,7 @@ export async function sealMail(
   payload: Buffer
 ): Promise<string> {
   const toEnc = deps.peerEnc(to)
-  if (!toEnc) throw new AddyError('not-paired', 'that device is not on this account')
+  if (!toEnc) throw new AddyError('not-paired', { key: 'main.addy.notOnAccount' })
   const { sealed } = await deps.addyd.send<{ sealed: string }>('sealMail', {
     kind,
     to,
@@ -73,7 +72,7 @@ export async function openMail(
   sealed: string,
   maxAgeMs = MAILBOX_MAX_AGE_MS
 ): Promise<OpenedMail> {
-  if (isLegacyMail(sealed)) throw new AddyError('config-invalid', LEGACY_MAIL_REASON)
+  if (isLegacyMail(sealed)) throw new AddyError('config-invalid', { key: 'main.addy.mail.legacy' })
   const opened = await deps.addyd.send<{ from: string; sentAt: number; payload: string }>(
     'openMail',
     { kind, sealed, senders: deps.peers(), maxAgeMs }

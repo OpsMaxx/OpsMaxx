@@ -1,3 +1,5 @@
+import { st, type MessageKey, type Translate, translatedTable } from './i18n'
+
 /**
  * Minimum length of a backup passphrase.
  *
@@ -210,12 +212,12 @@ export type BackupDestination =
   | S3BackupDestination
   | AddyBackupDestination
 
-export const BACKUP_DESTINATION_LABEL: Record<BackupDestinationKind, string> = {
-  local: 'Local directory',
-  sftp: 'SFTP server',
-  s3: 'S3-compatible storage',
-  addy: 'Your addy relay'
-}
+export const BACKUP_DESTINATION_LABEL: Record<BackupDestinationKind, string> = translatedTable({
+  local: 'shared.backup.destinationLabel.local',
+  sftp: 'shared.backup.destinationLabel.sftp',
+  s3: 'shared.backup.destinationLabel.s3',
+  addy: 'shared.backup.destinationLabel.addy'
+})
 
 /**
  * What putting a backup here actually means, said where the destination is
@@ -226,11 +228,10 @@ export const BACKUP_DESTINATION_LABEL: Record<BackupDestinationKind, string> = {
  * the UI must make that obvious rather than bury it in a settings footnote —
  * so this text lives beside the destination form, not in documentation.
  */
-export const BACKUP_DESTINATION_EXPOSURE: Record<BackupDestinationKind, string> = {
-  local:
-    'Every credential in this app, your vault and your trusted host keys will be written to this directory as an encrypted file. Anyone who can read the directory and guess the passphrase has all of it. A synced folder (Dropbox, OneDrive, iCloud) copies it onward.',
-  sftp: 'Every credential in this app, your vault and your trusted host keys will be uploaded to this server as an encrypted file. Anyone with an account there that can read the directory holds your secrets, offline, for as long as the file exists.',
-  s3: 'Every credential in this app, your vault and your trusted host keys will be uploaded to this bucket as an encrypted file. A bucket that is public, or whose keys leak, hands over the whole file — the passphrase is then the only thing left between someone and your estate.',
+export const BACKUP_DESTINATION_EXPOSURE: Record<BackupDestinationKind, string> = translatedTable({
+  local: 'shared.backup.exposure.local',
+  sftp: 'shared.backup.exposure.sftp',
+  s3: 'shared.backup.exposure.s3',
   // Deliberately NOT the same sentence as the other three, because the trade
   // is genuinely different and saying otherwise would be the false comfort
   // this table exists to avoid. The bundle is encrypted with the passphrase
@@ -239,8 +240,8 @@ export const BACKUP_DESTINATION_EXPOSURE: Record<BackupDestinationKind, string> 
   // attacker and the estate. What has not changed: the relay is a machine you
   // run, and somebody who takes that machine AND learns the passphrase AND
   // holds a device key of this account has all of it.
-  addy: 'Every credential in this app, your vault and your trusted host keys will be uploaded to your relay as an encrypted file, sealed a second time under your account key — so the relay itself cannot read it even with the passphrase. Someone who holds one of your enrolled devices and the passphrase has all of it.'
-}
+  addy: 'shared.backup.exposure.addy'
+})
 
 /**
  * Why this S3 key prefix cannot be used, in the words the panel shows. Null
@@ -266,10 +267,10 @@ export function s3PrefixProblem(prefix: string): string | null {
   if (!trimmed) return null
   for (const segment of trimmed.split('/')) {
     if (segment === '') {
-      return `The key prefix “${prefix}” has an empty path segment. Object stores reject a key with “//” in it, so nothing would ever be written here.`
+      return st('shared.backup.s3Prefix.emptySegment', { prefix })
     }
     if (segment === '.' || segment === '..') {
-      return `The key prefix “${prefix}” has a “${segment}” path segment. The request is signed over the path before the URL is parsed, and the parser removes that segment afterwards — so the store would answer SignatureDoesNotMatch and it would look like the access key was wrong.`
+      return st('shared.backup.s3Prefix.dotSegment', { prefix, segment })
     }
   }
   return null
@@ -369,13 +370,17 @@ export function planRetention(
  */
 export type BackupStage = 'bundle' | 'write' | 'verify' | 'restore-test' | 'retention'
 
-export const BACKUP_STAGE_LABEL: Record<BackupStage, string> = {
-  bundle: 'building the bundle',
-  write: 'writing to the destination',
-  verify: 'reading the bundle back',
-  'restore-test': 'test-restoring the bundle',
-  retention: 'applying retention'
+/** The keys behind BACKUP_STAGE_LABEL, for main's desktop notification, which
+ *  is drawn in the user's language through `mt` rather than `st`. */
+export const BACKUP_STAGE_KEY: Record<BackupStage, MessageKey> = {
+  bundle: 'shared.backup.stage.bundle',
+  write: 'shared.backup.stage.write',
+  verify: 'shared.backup.stage.verify',
+  'restore-test': 'shared.backup.stage.restoreTest',
+  retention: 'shared.backup.stage.retention'
 }
+
+export const BACKUP_STAGE_LABEL: Record<BackupStage, string> = translatedTable(BACKUP_STAGE_KEY)
 
 /** The result of decrypting a bundle and looking inside it. */
 export interface BackupVerification {
@@ -456,24 +461,24 @@ export function dueDestinations(
 /** What stops a destination from being usable, in the words the panel shows.
  *  Null when it is fine. */
 export function destinationProblem(d: BackupDestination): string | null {
-  if (!d.name.trim()) return 'This destination has no name.'
-  if (d.kind === 'local' && !d.directory.trim()) return 'Choose a directory to write backups into.'
+  if (!d.name.trim()) return st('shared.backup.problem.noName')
+  if (d.kind === 'local' && !d.directory.trim()) return st('shared.backup.problem.localDirectory')
   if (d.kind === 'sftp') {
-    if (!d.serverId) return 'Choose which configured server to upload to.'
-    if (!d.directory.trim()) return 'Set the remote directory to upload into.'
+    if (!d.serverId) return st('shared.backup.problem.sftpServer')
+    if (!d.directory.trim()) return st('shared.backup.problem.sftpDirectory')
   }
   if (d.kind === 's3') {
-    if (!d.endpoint.trim()) return 'Set the endpoint URL of the object store.'
-    if (!d.bucket.trim()) return 'Set the bucket name.'
-    if (!d.region.trim()) return 'Set the region the bucket lives in.'
+    if (!d.endpoint.trim()) return st('shared.backup.problem.s3Endpoint')
+    if (!d.bucket.trim()) return st('shared.backup.problem.s3Bucket')
+    if (!d.region.trim()) return st('shared.backup.problem.s3Region')
     if (!d.vaultEntryId) {
-      return 'Choose the vault entry holding the access key — the secret key cannot be stored in settings, because settings travel inside every backup written here.'
+      return st('shared.backup.problem.s3VaultEntry')
     }
     const prefixProblem = s3PrefixProblem(d.prefix)
     if (prefixProblem) return prefixProblem
   }
   if (d.everyHours > 0 && !d.passphraseVaultEntryId) {
-    return 'A scheduled run has nobody to type a passphrase, so it needs a vault entry holding one.'
+    return st('shared.backup.problem.passphraseEntry')
   }
   return null
 }
@@ -796,7 +801,10 @@ export const BACKUP_OVERDUE_PERIODS = 2
 export function assessBackups(
   destinations: BackupDestination[],
   lastReport: Record<string, BackupRunReport>,
-  now: number
+  now: number,
+  // The webhook and the MCP bridge read `detail` in English, which is what `st`
+  // says in main; the panel's IPC can pass main's own `mt`.
+  t: Translate = st
 ): BackupAlarm[] {
   const out: BackupAlarm[] = []
   for (const d of destinations) {
@@ -811,7 +819,7 @@ export function assessBackups(
         destinationName: d.name,
         reason: 'never',
         level: 'alarm',
-        detail: `${d.name} is scheduled every ${d.everyHours}h and has never produced a backup.`
+        detail: t('shared.backup.alarm.never', { name: d.name, every: d.everyHours })
       })
       continue
     }
@@ -821,7 +829,7 @@ export function assessBackups(
         destinationName: d.name,
         reason: 'failed',
         level: 'alarm',
-        detail: `The last backup to ${d.name} failed: ${r.error ?? 'no reason given'}`
+        detail: t('shared.backup.alarm.failed', { name: d.name, error: r.error ?? t('shared.backup.noReason') })
       })
       continue
     }
@@ -835,7 +843,7 @@ export function assessBackups(
         destinationName: d.name,
         reason: 'overdue',
         level: 'alarm',
-        detail: `${d.name} has a backup report with an unreadable date, so how old it is cannot be told.`
+        detail: t('shared.backup.alarm.unreadableDate', { name: d.name })
       })
       continue
     }
@@ -846,7 +854,11 @@ export function assessBackups(
         destinationName: d.name,
         reason: 'overdue',
         level: 'alarm',
-        detail: `${d.name} last backed up ${Math.floor(lateBy / 3600_000)}h ago on a ${d.everyHours}h schedule.`
+        detail: t('shared.backup.alarm.overdue', {
+          name: d.name,
+          late: Math.floor(lateBy / 3600_000),
+          every: d.everyHours
+        })
       })
       continue
     }
@@ -856,7 +868,7 @@ export function assessBackups(
         destinationName: d.name,
         reason: 'unverified',
         level: 'watch',
-        detail: `${d.name} was written but not read back, so there is no evidence the backup is intact.`
+        detail: t('shared.backup.alarm.unverified', { name: d.name })
       })
     }
   }

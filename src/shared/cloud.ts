@@ -34,6 +34,8 @@
  * security boundary, and keep tests/cloudValidation.test.ts honest.
  */
 
+import { st, type MessageKey, type Translate } from './i18n'
+
 // ---------------------------------------------------------------------------
 // What a target is
 // ---------------------------------------------------------------------------
@@ -192,56 +194,76 @@ export const CLOUD_FAULTS = [
  *
  * These name no project, instance or account. The detail carries that, and the
  * detail is dropped on the way to an agent — see cloudFaultSentence.
+ *
+ * Keyed, so main can say one through `mt` and a screen through `st`.
  */
-export const CLOUD_FAULT_MESSAGE: Record<CloudFault, string> = {
-  'cli-not-installed': 'The command-line tool for this cloud provider was not found.',
-  'cli-unsupported-version': 'The installed command-line tool is too old for OpsMaxx to use.',
-  'not-authenticated': 'You are not signed in to this cloud provider.',
-  'auth-expired': 'Your session with this cloud provider has expired.',
-  'resource-not-found': 'That machine does not exist, or this account cannot see it.',
-  'instance-stopped': 'That machine is not running.',
-  'iam-permission-denied': 'The cloud provider denied this account access to that machine.',
-  'ssh-permission-denied': 'The machine refused the login.',
-  'network-unreachable': 'The machine could not be reached over the network.',
-  'tunnel-failed': 'The tunnel to the machine could not be established.',
-  'host-key-error': 'The machine presented a host key that did not match the one on record.',
-  'connection-timeout': 'The machine did not respond in time.',
-  'invalid-identifier': 'One of the cloud identifiers is not in a valid form, so nothing was run.',
-  'cli-failed': 'The cloud provider tool reported an error.',
-  unknown: 'OpsMaxx could not tell what went wrong.'
+export const CLOUD_FAULT_MESSAGE_KEY: Record<CloudFault, MessageKey> = {
+  'cli-not-installed': 'shared.cloud.fault.cliNotInstalled',
+  'cli-unsupported-version': 'shared.cloud.fault.cliUnsupportedVersion',
+  'not-authenticated': 'shared.cloud.fault.notAuthenticated',
+  'auth-expired': 'shared.cloud.fault.authExpired',
+  'resource-not-found': 'shared.cloud.fault.resourceNotFound',
+  'instance-stopped': 'shared.cloud.fault.instanceStopped',
+  'iam-permission-denied': 'shared.cloud.fault.iamPermissionDenied',
+  'ssh-permission-denied': 'shared.cloud.fault.sshPermissionDenied',
+  'network-unreachable': 'shared.cloud.fault.networkUnreachable',
+  'tunnel-failed': 'shared.cloud.fault.tunnelFailed',
+  'host-key-error': 'shared.cloud.fault.hostKeyError',
+  'connection-timeout': 'shared.cloud.fault.connectionTimeout',
+  'invalid-identifier': 'shared.cloud.fault.invalidIdentifier',
+  'cli-failed': 'shared.cloud.fault.cliFailed',
+  unknown: 'shared.cloud.fault.unknown'
 }
+
+export const CLOUD_FAULT_MESSAGE: Record<CloudFault, string> = Object.defineProperties(
+  {} as Record<CloudFault, string>,
+  Object.fromEntries(
+    CLOUD_FAULTS.map((f) => [f, { get: () => st(CLOUD_FAULT_MESSAGE_KEY[f]), enumerable: true }])
+  )
+)
 
 /**
  * One short instruction, because the UI turns most of these into a button.
- * Empty string means the message above already says it all.
+ * No key (an empty string in CLOUD_FAULT_HINT) means the message above
+ * already says it all.
  */
-export const CLOUD_FAULT_HINT: Record<CloudFault, string> = {
+export const CLOUD_FAULT_HINT_KEY: Record<CloudFault, MessageKey | null> = {
   // Deliberately empty: which tool, and how it is installed, differs per
   // provider and per platform, and the caller already knows both. OpsMaxx never
   // installs one itself.
-  'cli-not-installed': '',
-  'cli-unsupported-version': 'Update the provider tool, then try again.',
-  'not-authenticated': 'Sign in with the provider tool, then try again.',
-  'auth-expired': 'Sign in again to refresh the session.',
-  'resource-not-found': 'Check the identifiers, or pick the machine from the list.',
-  'instance-stopped': 'Start the machine in the cloud console, then try again.',
-  'iam-permission-denied': 'Ask whoever administers this cloud account for access.',
-  'ssh-permission-denied': 'Check that this account is allowed to log in as that user.',
-  'network-unreachable': 'Check that you are online, and whether this machine needs a tunnel.',
-  'tunnel-failed': 'Check that this account may open a tunnel to that machine.',
-  'host-key-error': '',
-  'connection-timeout': 'Check whether the machine is running and reachable.',
-  'invalid-identifier': 'Correct the highlighted field.',
-  'cli-failed': 'Open the details to see what the provider tool reported.',
-  unknown: ''
+  'cli-not-installed': null,
+  'cli-unsupported-version': 'shared.cloud.hint.cliUnsupportedVersion',
+  'not-authenticated': 'shared.cloud.hint.notAuthenticated',
+  'auth-expired': 'shared.cloud.hint.authExpired',
+  'resource-not-found': 'shared.cloud.hint.resourceNotFound',
+  'instance-stopped': 'shared.cloud.hint.instanceStopped',
+  'iam-permission-denied': 'shared.cloud.hint.iamPermissionDenied',
+  'ssh-permission-denied': 'shared.cloud.hint.sshPermissionDenied',
+  'network-unreachable': 'shared.cloud.hint.networkUnreachable',
+  'tunnel-failed': 'shared.cloud.hint.tunnelFailed',
+  'host-key-error': null,
+  'connection-timeout': 'shared.cloud.hint.connectionTimeout',
+  'invalid-identifier': 'shared.cloud.hint.invalidIdentifier',
+  'cli-failed': 'shared.cloud.hint.cliFailed',
+  unknown: null
 }
 
+export const CLOUD_FAULT_HINT: Record<CloudFault, string> = Object.defineProperties(
+  {} as Record<CloudFault, string>,
+  Object.fromEntries(
+    CLOUD_FAULTS.map((f) => {
+      const key = CLOUD_FAULT_HINT_KEY[f]
+      return [f, { get: () => (key ? st(key) : ''), enumerable: true }]
+    })
+  )
+)
+
 /** Full user-facing text: what happened, then what to do. */
-export function describeCloudFault(fault: CloudFault, detail?: string): string {
-  const parts = [CLOUD_FAULT_MESSAGE[fault]]
+export function describeCloudFault(fault: CloudFault, detail?: string, t: Translate = st): string {
+  const parts = [t(CLOUD_FAULT_MESSAGE_KEY[fault])]
   if (detail) parts.push(detail)
-  const hint = CLOUD_FAULT_HINT[fault]
-  if (hint) parts.push(hint)
+  const hint = CLOUD_FAULT_HINT_KEY[fault]
+  if (hint) parts.push(t(hint))
   return parts.join(' ')
 }
 
@@ -324,7 +346,7 @@ function argumentIsSafe(value: string): boolean {
 
 /** A field, its pattern, and what to call it when it fails. */
 interface FieldRule {
-  label: string
+  labelKey: MessageKey
   pattern: RegExp
   /** What a valid one looks like, shown to whoever has to fix it. */
   example: string
@@ -341,19 +363,19 @@ interface FieldRule {
 const GCP_RULES = {
   // 6-30 characters, lowercase letter first, no trailing hyphen.
   project: {
-    label: 'Project',
+    labelKey: 'shared.cloud.field.project',
     pattern: /^[a-z][a-z0-9-]{4,28}[a-z0-9]$/,
     example: 'my-project-id'
   },
   // Compute zones are a region plus a single-letter suffix: me-central2-c.
   zone: {
-    label: 'Zone',
+    labelKey: 'shared.cloud.field.zone',
     pattern: /^[a-z][a-z0-9]*-[a-z0-9]+-[a-z]$/,
     example: 'me-central2-c'
   },
   // RFC 1035: lowercase letter first, alphanumeric last, up to 63 characters.
   instance: {
-    label: 'Instance',
+    labelKey: 'shared.cloud.field.instance',
     pattern: /^[a-z]([-a-z0-9]{0,61}[a-z0-9])?$/,
     example: 'prod-web-01'
   }
@@ -363,25 +385,25 @@ const AWS_RULES = {
   // Profile names live in the user's own config file and permit a wide set;
   // the leading character is narrowed so one can never read as a flag.
   profile: {
-    label: 'Profile',
+    labelKey: 'shared.cloud.field.profile',
     pattern: /^[A-Za-z0-9_+=,.@][A-Za-z0-9_+=,.@-]{0,63}$/,
     example: 'production'
   },
   region: {
-    label: 'Region',
+    labelKey: 'shared.cloud.field.region',
     pattern: /^[a-z]{2}(-[a-z]+)+-\d$/,
     example: 'me-central-1'
   },
   // Eight or seventeen lowercase hex digits after `i-`. Nothing else is an
   // instance id, so nothing else is accepted.
   instanceId: {
-    label: 'Instance ID',
+    labelKey: 'shared.cloud.field.instanceId',
     pattern: /^i-([0-9a-f]{8}|[0-9a-f]{17})$/,
     example: 'i-0123456789abcdef0'
   },
   // A POSIX login name. `ubuntu`, `ec2-user`, `admin`.
   osUser: {
-    label: 'OS user',
+    labelKey: 'shared.cloud.field.osUser',
     pattern: /^[a-z_][a-z0-9_-]{0,31}$/,
     example: 'ubuntu'
   }
@@ -392,7 +414,7 @@ const AZURE_RULES = {
   // which is why this is the loosest pattern here - but it still cannot begin
   // with a hyphen and still admits no control characters.
   subscription: {
-    label: 'Subscription',
+    labelKey: 'shared.cloud.field.subscription',
     pattern:
       /^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[A-Za-z0-9][A-Za-z0-9 ._()-]{0,79})$/,
     example: 'Production'
@@ -400,12 +422,12 @@ const AZURE_RULES = {
   // 1-90 characters; letters, digits, underscore, parentheses, hyphen, period.
   // May not end with a period.
   resourceGroup: {
-    label: 'Resource group',
+    labelKey: 'shared.cloud.field.resourceGroup',
     pattern: /^[A-Za-z0-9][A-Za-z0-9._()-]{0,88}[A-Za-z0-9_()-]$/,
     example: 'production-rg'
   },
   vm: {
-    label: 'VM',
+    labelKey: 'shared.cloud.field.vm',
     pattern: /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}[A-Za-z0-9_-]$/,
     example: 'prod-server-01'
   }
@@ -420,13 +442,13 @@ export interface FieldProblem {
 
 function checkField(value: unknown, rule: FieldRule, field: string): FieldProblem | null {
   if (typeof value !== 'string' || value.length === 0) {
-    return { field, why: `${rule.label} is required.` }
+    return { field, why: st('shared.cloud.problem.required', { label: st(rule.labelKey) }) }
   }
   if (!argumentIsSafe(value)) {
-    return { field, why: `${rule.label} may not start with "-" or contain control characters.` }
+    return { field, why: st('shared.cloud.problem.unsafe', { label: st(rule.labelKey) }) }
   }
   if (!rule.pattern.test(value)) {
-    return { field, why: `${rule.label} is not in a valid form - for example, ${rule.example}.` }
+    return { field, why: st('shared.cloud.problem.invalid', { label: st(rule.labelKey), example: rule.example }) }
   }
   return null
 }
@@ -434,11 +456,11 @@ function checkField(value: unknown, rule: FieldRule, field: string): FieldProble
 function checkChoice<T extends string>(
   value: unknown,
   allowed: readonly T[],
-  label: string,
+  labelKey: MessageKey,
   field: string
 ): FieldProblem | null {
   if (typeof value !== 'string' || !(allowed as readonly string[]).includes(value)) {
-    return { field, why: `${label} must be one of: ${allowed.join(', ')}.` }
+    return { field, why: st('shared.cloud.problem.choice', { label: st(labelKey), allowed: allowed.join(', ') }) }
   }
   return null
 }
@@ -457,7 +479,7 @@ export const AZURE_AUTHENTICATIONS: readonly AzureAuthentication[] = ['entra']
  */
 export function validateCloudTarget(target: unknown): FieldProblem[] {
   if (typeof target !== 'object' || target === null) {
-    return [{ field: 'type', why: 'No cloud target was supplied.' }]
+    return [{ field: 'type', why: st('shared.cloud.problem.noTarget') }]
   }
   const t = target as Partial<CloudTarget> & { type?: unknown }
   const problems: FieldProblem[] = []
@@ -471,7 +493,7 @@ export function validateCloudTarget(target: unknown): FieldProblem[] {
       push(checkField(g.project, GCP_RULES.project, 'project'))
       push(checkField(g.zone, GCP_RULES.zone, 'zone'))
       push(checkField(g.instance, GCP_RULES.instance, 'instance'))
-      push(checkChoice(g.transport, GCP_TRANSPORTS, 'Transport', 'transport'))
+      push(checkChoice(g.transport, GCP_TRANSPORTS, 'shared.cloud.field.transport', 'transport'))
       return problems
     }
     case 'aws': {
@@ -480,7 +502,7 @@ export function validateCloudTarget(target: unknown): FieldProblem[] {
       push(checkField(a.region, AWS_RULES.region, 'region'))
       push(checkField(a.instanceId, AWS_RULES.instanceId, 'instanceId'))
       push(checkField(a.osUser, AWS_RULES.osUser, 'osUser'))
-      push(checkChoice(a.transport, AWS_TRANSPORTS, 'Transport', 'transport'))
+      push(checkChoice(a.transport, AWS_TRANSPORTS, 'shared.cloud.field.transport', 'transport'))
       return problems
     }
     case 'azure': {
@@ -488,11 +510,11 @@ export function validateCloudTarget(target: unknown): FieldProblem[] {
       push(checkField(z.subscription, AZURE_RULES.subscription, 'subscription'))
       push(checkField(z.resourceGroup, AZURE_RULES.resourceGroup, 'resourceGroup'))
       push(checkField(z.vm, AZURE_RULES.vm, 'vm'))
-      push(checkChoice(z.authentication, AZURE_AUTHENTICATIONS, 'Authentication', 'authentication'))
+      push(checkChoice(z.authentication, AZURE_AUTHENTICATIONS, 'shared.cloud.field.authentication', 'authentication'))
       return problems
     }
     default:
-      return [{ field: 'type', why: `Unknown cloud provider: ${String(t.type)}.` }]
+      return [{ field: 'type', why: st('shared.cloud.problem.unknownProvider', { provider: String(t.type) }) }]
   }
 }
 

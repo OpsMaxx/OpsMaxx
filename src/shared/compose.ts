@@ -86,6 +86,7 @@ import {
   validateImageRef
 } from './docker'
 import type { JobSpec, JobStep } from './jobs'
+import { englishT, st, translatedTable } from './i18n'
 
 // ---------------------------------------------------------------- failure
 
@@ -104,21 +105,15 @@ export type ComposeFailure =
   | 'invalid-project'
   | 'compose-provider-unsupported'
 
-export const COMPOSE_FAILURE_HELP: Record<ComposeFailure, string> = {
-  'not-installed':
-    'No docker on this server. Looked on PATH and in /usr/bin, /usr/local/bin, /snap/bin, /opt/homebrew/bin and /usr/sbin.',
-  'daemon-unreachable':
-    'Docker is installed but its daemon is not answering, so it cannot say which compose projects it is running.',
-  'permission-denied':
-    'This user cannot talk to the docker socket, so compose cannot be asked anything. The compose FILES may still be readable — the filesystem search below does not go through the daemon.',
-  'compose-unavailable':
-    'Docker is here, but `docker compose` is not. That is normal on servers still running the v1 `docker-compose` script, which is a separate program with a different command line. OpsMaxx does not drive v1: its flags differ enough that guessing would be running an unverified command on someone else\u2019s server.',
-  'compose-provider-unsupported':
-    'This host runs podman, and podman delegates `compose` to an external provider — here, `podman-compose`, which is a different program with a different command line. OpsMaxx does not drive it, and the reason is not tidiness: the ONE thing that keeps a compose read from printing every password in the project is `--no-interpolate --no-env-resolution`, and podman-compose rejects both flags outright. Measured on podman 5.8.4 with podman-compose 1.6.0, `podman compose config` printed a `.env` password in plaintext and there is no flag that stops it. Reading these projects here would mean choosing between an unverified command line and a credential dump.',
-  'invalid-project':
-    'Compose read the file and refused it. The line below is compose\u2019s own, verbatim \u2014 it names the service and the problem, and this panel has nothing to add to it.',
-  unknown: 'Compose returned an error that could not be classified. The raw message is below.'
-}
+export const COMPOSE_FAILURE_HELP: Record<ComposeFailure, string> = translatedTable({
+  'not-installed': 'shared.compose.failure.notInstalled',
+  'daemon-unreachable': 'shared.compose.failure.daemonUnreachable',
+  'permission-denied': 'shared.compose.failure.permissionDenied',
+  'compose-unavailable': 'shared.compose.failure.composeUnavailable',
+  'compose-provider-unsupported': 'shared.compose.failure.providerUnsupported',
+  'invalid-project': 'shared.compose.failure.invalidProject',
+  unknown: 'shared.compose.failure.unknown'
+})
 
 /**
  * Compose refusing a file it could read, as its own validator words it.
@@ -1043,11 +1038,7 @@ export function joinComposeState(
  * question and "OpsMaxx showed my production database password to whoever
  * was standing behind me" is an incident.
  */
-export const COMPOSE_ENV_DISCLOSURE =
-  'OpsMaxx reads the NAMES of the variables in this file and never their values. ' +
-  'The values are cut off on the server itself, so they do not cross the connection, ' +
-  'are not held in memory here, and cannot appear in an error message. A variable is ' +
-  'shown as set or empty; to see a value, open the file on the server.'
+export const COMPOSE_ENV_DISCLOSURE = englishT('shared.compose.envDisclosure')
 
 export interface ComposeEnvName {
   name: string
@@ -1149,22 +1140,12 @@ export function parseComposeEnvNamesOutput(output: string): ComposeEnvFileSummar
  * answered by showing a literal list, not by making the button redder — and
  * `down` is the compose-shaped instance of exactly that.
  */
-export const COMPOSE_REFUSALS: Record<string, string> = {
-  down:
-    '`docker compose down` removes every container in the project, and its network with them. ' +
-    'What it costs is not visible from a compose panel: whether a container was carrying state ' +
-    'nobody wrote down, whether it can be recreated from the file in front of you, and whether ' +
-    'the file in front of you is the one it was created from are three questions this UI cannot ' +
-    'answer, and the button would be offering to act as though it had. Stop the containers ' +
-    'instead — that is reversible, it is on the container panel already, and it is what people ' +
-    'reach for `down` to do nine times in ten.',
-  'down -v':
-    '`docker compose down -v` deletes the project\u2019s named volumes. That is the database. ' +
-    'It is not recoverable, it is not undone by running `up` again, and no confirmation dialog ' +
-    'makes it knowable from here.',
-  rm: '`docker compose rm` removes stopped containers. See `down`: recoverable only if you can reconstruct how they were run, which this panel cannot show you.',
-  kill: '`docker compose kill` sends SIGKILL with no grace period. `stop` sends SIGTERM and waits, and the difference is whether a database finishes its write.'
-}
+export const COMPOSE_REFUSALS: Record<string, string> = translatedTable({
+  down: 'shared.compose.refusal.down',
+  'down -v': 'shared.compose.refusal.downVolumes',
+  rm: 'shared.compose.refusal.rm',
+  kill: 'shared.compose.refusal.kill'
+})
 
 /** The refusal text for a verb this module will not run, or null when it will. */
 export function composeRefusal(action: string): string | null {
@@ -1230,8 +1211,8 @@ export function lintCompose(services: ComposeServiceDecl[]): ComposeLintFinding[
           service: s.name,
           because:
             tag === ''
-              ? `${s.name} has no tag on ${s.image}, which means \`latest\`. What \`up\` starts tomorrow is whatever was pushed by then, and the digest on the host is not the digest in the file.`
-              : `${s.name} runs ${s.image}. A \`${tag}\` tag moves, so \`pull\` then \`up\` can change what is running without any change to this file.`
+              ? st('shared.compose.lint.untagged', { service: s.name, image: s.image })
+              : st('shared.compose.lint.floatingTag', { service: s.name, image: s.image, tag })
         })
       }
     }
@@ -1241,7 +1222,7 @@ export function lintCompose(services: ComposeServiceDecl[]): ComposeLintFinding[
       out.push({
         rule: 'no-restart',
         service: s.name,
-        because: `${s.name} has no restart policy, so compose's default of \`no\` applies: it does not come back after a reboot or a daemon restart.`
+        because: st('shared.compose.lint.noRestart', { service: s.name })
       })
     }
     // Measured: compose ACCEPTS this file and exits 0. The container joins the
@@ -1252,7 +1233,11 @@ export function lintCompose(services: ComposeServiceDecl[]): ComposeLintFinding[
       out.push({
         rule: 'host-network-ports',
         service: s.name,
-        because: `${s.name} is on the host's network and also declares ${s.ports.length} port mapping(s). Compose accepts that and ignores the mappings: the service listens on whatever port it binds inside, not on ${s.ports[0]}.`
+        because: st('shared.compose.lint.hostNetworkPorts', {
+          service: s.name,
+          count: s.ports.length,
+          port: s.ports[0]
+        })
       })
     }
   }
@@ -1307,7 +1292,7 @@ export function planComposeServiceRestart(service: ComposeServiceState): Compose
       service: name,
       targets,
       plan: null,
-      refusal: `${name} has no container to restart. Starting it from the file is \`up\`, which is on this panel already.`,
+      refusal: st('shared.compose.restart.noContainer', { service: name }),
       caveats: []
     }
   }
@@ -1316,18 +1301,18 @@ export function planComposeServiceRestart(service: ComposeServiceState): Compose
       service: name,
       targets,
       plan: null,
-      refusal: `${name} has ${targets.length} containers, more than the ${DOCKER_ACTION_MAX_REFS} this acts on at once.`,
+      refusal: st('shared.compose.restart.tooMany', {
+        service: name,
+        count: targets.length,
+        max: DOCKER_ACTION_MAX_REFS
+      }),
       caveats: []
     }
   }
 
-  const caveats = [
-    'This restarts the containers as they are. A change to the compose file is not applied by a restart — measured: a container whose file said one thing and whose environment said another came back with the environment it already had. `up` is what applies the file.'
-  ]
+  const caveats = [st('shared.compose.restart.fileNotApplied')]
   if (targets.length > 1) {
-    caveats.push(
-      `${name} is ${targets.length} containers and all of them restart, which is what \`docker compose restart ${name}\` would also do.`
-    )
+    caveats.push(st('shared.compose.restart.allReplicas', { service: name, count: targets.length }))
   }
 
   return { service: name, targets, plan: planDockerAction('restart', targets), refusal: null, caveats }
@@ -1423,11 +1408,12 @@ export function composeJobSpec(
 ): ComposeJobPlan {
   const command = buildComposeActionCommand(action, project, opts)
   const services = opts.services ?? []
-  const scope = services.length === 0 ? 'every service' : services.join(', ')
+  const scope = services.length === 0 ? st('shared.compose.job.everyService') : services.join(', ')
+  // Shown in the dialog only; the spec's title below is sent on and stays English.
   const detail =
     action === 'pull'
-      ? `Fetches the images ${project.name} declares for ${scope}. Nothing running changes: a pulled image is used at the next \`up\`.`
-      : `Starts ${scope} in ${project.name} and recreates any container whose declaration has changed. Nothing is removed.`
+      ? st('shared.compose.job.pullDetail', { project: project.name, scope })
+      : st('shared.compose.job.upDetail', { project: project.name, scope })
   const steps: JobStep[] = [{ command, timeoutMs: COMPOSE_STEP_TIMEOUT_MS[action] }]
   return {
     action,
@@ -1582,10 +1568,10 @@ function locateComposeImage(fileText: string, service: string): ComposeImageLoca
     const rest = m[3]
     const valueMatch = rest.match(/^(['"]?)([^'"#]*?)\1(\s*(?:#.*)?)$/)
     if (valueMatch === null) {
-      return { ok: false, reason: `could not read the image value on line ${i + 1}` }
+      return { ok: false, reason: st('shared.compose.edit.unreadableImage', { line: i + 1 }) }
     }
     const value = valueMatch[2].trim()
-    if (value === '') return { ok: false, reason: `\`${service}\` has an empty image value` }
+    if (value === '') return { ok: false, reason: st('shared.compose.edit.emptyImage', { service }) }
     return {
       ok: true,
       at: {
@@ -1600,8 +1586,8 @@ function locateComposeImage(fileText: string, service: string): ComposeImageLoca
     }
   }
 
-  if (!inService) return { ok: false, reason: `\`${service}\` is not declared in this file` }
-  return { ok: false, reason: `\`${service}\` declares no image in this file — it is built, not pulled` }
+  if (!inService) return { ok: false, reason: st('shared.compose.edit.notDeclared', { service }) }
+  return { ok: false, reason: st('shared.compose.edit.builtNotPulled', { service }) }
 }
 
 /**
@@ -1616,7 +1602,7 @@ export function composeServiceImage(
   fileText: string,
   service: string
 ): { ok: true; image: string } | { ok: false; reason: string } {
-  if (!validateComposeService(service)) return { ok: false, reason: 'not a valid service name' }
+  if (!validateComposeService(service)) return { ok: false, reason: st('shared.compose.edit.invalidService') }
   const at = locateComposeImage(fileText, service)
   return at.ok ? { ok: true, image: at.at.value } : { ok: false, reason: at.reason }
 }
@@ -1636,9 +1622,9 @@ export function planComposeImageEdit(
   service: string,
   newRef: string
 ): ComposeImageEditPlan {
-  if (!validateComposeService(service)) return { ok: false, reason: 'not a valid service name' }
+  if (!validateComposeService(service)) return { ok: false, reason: st('shared.compose.edit.invalidService') }
   if (!validateImageRef(newRef)) {
-    return { ok: false, reason: `\`${newRef}\` is not a valid image reference` }
+    return { ok: false, reason: st('shared.compose.edit.invalidImage', { image: newRef }) }
   }
   const found = locateComposeImage(fileText, service)
   if (!found.ok) return { ok: false, reason: found.reason }
@@ -1806,7 +1792,7 @@ export function planComposeRevert(
 
 /** What the button is about to do, in one sentence, with no promise in it. */
 export function revertDescription(r: Extract<ComposeRevertPlan, { ok: true }>): string {
-  return `Put \`${r.plan.service}\` back to \`${r.to}\`, which is what it was pinned to immediately before OpsMaxx last edited this file. It is on \`${r.from}\` now. This is not a guarantee that \`${r.to}\` was working — it is the previous line, nothing more.`
+  return st('shared.compose.revert.description', { service: r.plan.service, to: r.to, from: r.from })
 }
 
 /**

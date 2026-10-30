@@ -101,12 +101,24 @@ export const GAP_LABEL: Record<CellGap, string> = {
 /** The sentence behind the phrase, shown on hover. The six that come off the
  *  collector reuse its own help strings rather than paraphrasing them. */
 export const GAP_HELP: Record<CellGap, string> = {
-  absent: FACT_STATUS_HELP.absent,
-  denied: FACT_STATUS_HELP.denied,
-  'no-tool': FACT_STATUS_HELP['no-tool'],
-  'stale-metadata': FACT_STATUS_HELP['stale-metadata'],
-  unsupported: FACT_STATUS_HELP.unsupported,
-  unknown: FACT_STATUS_HELP.unknown,
+  get absent() {
+    return FACT_STATUS_HELP.absent
+  },
+  get denied() {
+    return FACT_STATUS_HELP.denied
+  },
+  get 'no-tool'() {
+    return FACT_STATUS_HELP['no-tool']
+  },
+  get 'stale-metadata'() {
+    return FACT_STATUS_HELP['stale-metadata']
+  },
+  get unsupported() {
+    return FACT_STATUS_HELP.unsupported
+  },
+  get unknown() {
+    return FACT_STATUS_HELP.unknown
+  },
   get 'not-collected'() {
     return t('lib.inventory.gapHelp.notCollected')
   },

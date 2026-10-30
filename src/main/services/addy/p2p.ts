@@ -109,17 +109,11 @@ export async function dialPeer(
   )
   if (answer && !(await verifySignal(deps, answer, sent.deviceNonce))) {
     await deps.rtc.send('rtcClose', { sessionId: session }).catch(() => undefined)
-    throw new AddyError(
-      'peer-unreachable',
-      'the answer to this call was not signed by the device it claims to be from'
-    )
+    throw new AddyError('peer-unreachable', { key: 'main.addy.p2p.answerUnsigned' })
   }
   if (!answer) {
     await deps.rtc.send('rtcClose', { sessionId: session }).catch(() => undefined)
-    throw new AddyError(
-      'peer-unreachable',
-      'that device did not answer. It may be asleep, or on a network that needs a relay.'
-    )
+    throw new AddyError('peer-unreachable', { key: 'main.addy.p2p.noAnswer' })
   }
 
   try {
@@ -263,7 +257,7 @@ async function publishSignal(deps: P2PDeps, to: string, envelope: SignalEnvelope
   const resp = await deps.relay.request('POST', `/v1/signal?to=${encodeURIComponent(to)}`, {
     frame: Buffer.from(JSON.stringify(envelope), 'utf8').toString('base64')
   })
-  if (!resp.ok) throw await relayError(resp, 'the relay would not carry a signal')
+  if (!resp.ok) throw await relayError(resp, 'main.addy.relay.failed.signal')
 }
 
 /**
@@ -323,7 +317,7 @@ async function readSignals(relay: RelayClient, waiters: Set<SignalWaiter>): Prom
     while (waiters.size > 0) {
       const resp = await relay.request('GET', '/v1/signal')
       if (resp.status === 204) continue
-      if (!resp.ok) throw await relayError(resp, 'the relay refused signalling')
+      if (!resp.ok) throw await relayError(resp, 'main.addy.relay.failed.signalling')
       const { frame } = (await resp.json()) as { frame?: string }
       if (!frame) continue
       let envelope: SignalEnvelope

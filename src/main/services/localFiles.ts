@@ -19,6 +19,8 @@ import {
 import type { WebContents } from 'electron'
 import type { SftpDownloadSummary, SftpEntry, SftpResult, SftpUploadSummary } from '../../shared/ssh'
 import { reserveLocalFile, safeLocalName, tempName } from './transferName'
+import { LocalizedError } from '../../shared/i18n'
+import { mt } from './locale'
 
 /**
  * The Files view, backed by this machine's own filesystem.
@@ -128,12 +130,9 @@ function isProtected(path: string): boolean {
   return within(canonical(path), protectedRoot)
 }
 
-const PROTECTED_MESSAGE =
-  "This is OpsMaxx's own data directory. It holds the vault, the access policy and the audit log, and is not editable from the Files view."
-
 /** Guard for every path this module takes. Returns a failed result, or null. */
 function refuse(...paths: string[]): SftpResult<never> | null {
-  return paths.some(isProtected) ? { ok: false, error: PROTECTED_MESSAGE } : null
+  return paths.some(isProtected) ? { ok: false, error: mt('main.localFiles.protected') } : null
 }
 
 /**
@@ -148,7 +147,7 @@ function refuse(...paths: string[]): SftpResult<never> | null {
  * picked folder that is a symlink into that directory is refused too.
  */
 export function refuseDownloadDir(dir: string, picked: ReadonlySet<string>): SftpResult<never> | null {
-  if (!picked.has(dir)) return { ok: false, error: 'Choose a folder to save into first.' }
+  if (!picked.has(dir)) return { ok: false, error: mt('main.localFiles.chooseFolderFirst') }
   return refuse(dir)
 }
 
@@ -308,7 +307,7 @@ export async function localFilesUpload(
   const refused = refuse(destDir, ...localPaths)
   if (refused) return refused
   const copy = startCopy(key)
-  if (!copy) return BUSY
+  if (!copy) return busy()
   const { signal } = copy
   const uploaded: string[] = []
   const failed: { name: string; error: string }[] = []
@@ -329,13 +328,13 @@ export async function localFilesUpload(
       const st = await stat(from)
       // Directories would need a recursive walk; refused explicitly rather
       // than failing later with an opaque EISDIR, as the SSH path does.
-      if (st.isDirectory()) throw new Error('folders cannot be copied yet')
+      if (st.isDirectory()) throw new LocalizedError('main.localFiles.foldersNotCopyable')
       if (signal.aborted) break
       const target = await resolveTarget(join(destDir, name))
       // Copying a file onto itself truncates it to nothing, and the Files view
       // cannot tell that the source it was handed is already the destination.
       // Checked on the resolved path, and before anything is opened.
-      if (canonical(from) === target.dest) throw new Error('that file is already in this folder')
+      if (canonical(from) === target.dest) throw new LocalizedError('main.localFiles.alreadyInFolder')
       plan = await planCopy(target, inPlace.includes(name))
       if (plan.needs) {
         needsInPlace.push({ name, reason: plan.needs })
@@ -384,7 +383,7 @@ export async function localFilesDownload(
   const refused = refuse(destDir, ...sources)
   if (refused) return refused
   const copy = startCopy(key)
-  if (!copy) return BUSY
+  if (!copy) return busy()
   const { signal } = copy
   const saved: string[] = []
   const failed: { name: string; error: string }[] = []
@@ -395,7 +394,7 @@ export async function localFilesDownload(
     const shown = basename(from)
     const name = safeLocalName(shown)
     if (!name) {
-      failed.push({ name: shown, error: 'that name cannot be saved here' })
+      failed.push({ name: shown, error: mt('main.localFiles.nameNotSavable') })
       continue
     }
     const send = (transferred: number, total: number): void => {
@@ -408,7 +407,7 @@ export async function localFilesDownload(
     let plan: CopyPlan | undefined
     try {
       const st = await stat(from)
-      if (st.isDirectory()) throw new Error('folders cannot be downloaded yet')
+      if (st.isDirectory()) throw new LocalizedError('main.localFiles.foldersNotDownloadable')
       if (signal.aborted) break
       to = await reserveLocalFile(destDir, name)
       // The placeholder is this download's own empty file, so it is replaced
@@ -416,7 +415,7 @@ export async function localFilesDownload(
       plan = await planCopy(await resolveTarget(to), false)
       // The placeholder was just created there, so this is not expected — but
       // an in-place write is never a download's to make.
-      if (plan.needs) throw new Error('cannot write a copy in that folder')
+      if (plan.needs) throw new LocalizedError('main.localFiles.cannotWriteCopy')
       send(0, st.size)
       await copyWithProgress(from, plan.write, st.size, send, signal)
       await plan.commit()
@@ -444,7 +443,7 @@ export async function localFilesDownload(
 // per key: a second one would take the slot Cancel looks in.
 const copying = new Map<string, AbortController>()
 
-const BUSY: SftpResult<never> = { ok: false, error: 'A transfer is already running here.' }
+const busy = (): SftpResult<never> => ({ ok: false, error: mt('main.sftp.transferBusy') })
 
 function startCopy(key: string): AbortController | null {
   if (copying.has(key)) return null
@@ -522,11 +521,11 @@ async function resolveTarget(to: string): Promise<{ dest: string; existing?: Sta
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') break
       throw err
     }
-    if (hops === 40) throw new Error('too many levels of symbolic links')
+    if (hops === 40) throw new LocalizedError('main.localFiles.symlinkLoop')
     dest = resolvePath(dirname(dest), await readlink(dest))
   }
   // A link in the folder can point anywhere, including the app's own data.
-  if (isProtected(dest)) throw new Error(PROTECTED_MESSAGE)
+  if (isProtected(dest)) throw new LocalizedError('main.localFiles.protected')
   return { dest: canonical(dest), existing }
 }
 
@@ -616,6 +615,8 @@ function copyWithProgress(
   })
 }
 
+// Every result here is the Files view's, so ours are said in the user's language.
 function msg(err: unknown): string {
+  if (err instanceof LocalizedError) return mt(err.key, err.vars)
   return err instanceof Error ? err.message : String(err)
 }

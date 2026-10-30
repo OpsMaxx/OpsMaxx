@@ -10,13 +10,7 @@ import { useApp } from '../../store/app'
 import { openMonitor, openSettings, useNav } from '../../store/nav'
 import { CheckNowButton } from '../monitor/CheckNowButton'
 import {
-  ACCESS_WRITE_DISABLED_REASON,
-  ACCESS_WRITE_DISABLED_SUMMARY,
-  ACCESS_WRITE_OFF_SUMMARY,
-  ACCESS_WRITE_OPT_IN_NOTE,
-  ACCESS_WRITE_STALE_BRIDGE,
   ACCESS_WRITE_ENABLED,
-  ACCESS_WRITE_SCOPE,
   type AccessChangePreview,
   type AccessCommitOutcome,
   type AccessRunResult,
@@ -317,10 +311,10 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
           <ShieldAlert size={12} />{' '}
           <b>
             {gate === 'bridge'
-              ? ACCESS_WRITE_STALE_BRIDGE
+              ? t('shared.access.write.staleBridge')
               : gate === 'build'
-                ? ACCESS_WRITE_DISABLED_SUMMARY
-                : ACCESS_WRITE_OFF_SUMMARY}
+                ? t('shared.access.write.disabledSummary')
+                : t('shared.access.write.offSummary')}
           </b>
           {/* The switch, where the refusal is. Sending somebody to hunt for a
               setting they were not told the name of is what made this read as
@@ -344,8 +338,8 @@ export function KeyRevokePanel({ servers }: { servers: Server[] }): React.JSX.El
               watched firing on a real RHEL 9 host with KillUserProcesses=yes —
               because that is what they are accepting by turning it on. */}
           <NoteWhy summary={t('operations.revoke.whySummary')}>
-            <p>{gate === 'opt-in' ? ACCESS_WRITE_OPT_IN_NOTE : ACCESS_WRITE_DISABLED_REASON}</p>
-            <p>{ACCESS_WRITE_SCOPE}</p>
+            <p>{gate === 'opt-in' ? t('shared.access.write.optInNote') : t('shared.access.write.disabledReason')}</p>
+            <p>{t('shared.access.write.scope')}</p>
           </NoteWhy>
         </div>
       )}

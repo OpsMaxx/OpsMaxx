@@ -23,6 +23,7 @@ import {
   type CrashPodMinimal,
   type CrashReadState
 } from './k8sCrashloop'
+import { st } from './i18n'
 import { daemonSetVerdict, groupWarnings, parseAddonDaemonSets, parseWarnings } from './k8sAddon'
 import { judgeHpas, parseHpas } from './k8sHpa'
 import { judgeNodes, parseNodeHealth } from './k8sNodes'
@@ -279,7 +280,7 @@ export function reviewFindings(
     for (const n of read) {
       const f = judged.get(n.name)
       if (f === undefined) {
-        findings.push({ section: 'nodes', level: 'ok', subject: n.name, because: `${n.name} is Ready and under no pressure.` })
+        findings.push({ section: 'nodes', level: 'ok', subject: n.name, because: st('shared.k8sReview.nodeOk', { node: n.name }) })
         continue
       }
       findings.push({
@@ -301,8 +302,8 @@ export function reviewFindings(
         level: unbounded ? 'watch' : 'ok',
         subject: `${w.namespace}/${w.name}`,
         because: unbounded
-          ? `${w.namespace}/${w.name} declares no CPU or memory limit, so nothing bounds what it can take from the node.`
-          : `${w.namespace}/${w.name} declares limits.`
+          ? st('shared.k8sReview.noLimits', { workload: `${w.namespace}/${w.name}` })
+          : st('shared.k8sReview.hasLimits', { workload: `${w.namespace}/${w.name}` })
       })
     }
   }
@@ -323,7 +324,7 @@ export function reviewFindings(
     if (pdbText.trim() !== '' && pdbs.length === 0) {
       blind.push({
         section: 'pdb',
-        detail: 'the budget listing came back in a shape this build could not read, so coverage was not decided for anything'
+        detail: st('shared.k8sReview.pdbUnreadable')
       })
     } else {
     const workloads: WorkloadRef[] = []
@@ -361,7 +362,7 @@ export function reviewFindings(
         section: 'pdb',
         level: 'watch',
         subject: `${p.namespace}/${p.name}`,
-        because: `${p.namespace}/${p.name} guards no pods at all: it expects 0 and allows 0, which reads the same as a budget at its limit and is not one.`
+        because: st('shared.k8sReview.pdbOrphaned', { pdb: `${p.namespace}/${p.name}` })
       })
     }
     }
@@ -375,7 +376,7 @@ export function reviewFindings(
       const where = `${h.namespace}/${h.name}`
       const f = judged.get(where)
       if (f === undefined) {
-        findings.push({ section: 'hpa', level: 'ok', subject: where, because: `${where} is scaling on the metric it was given.` })
+        findings.push({ section: 'hpa', level: 'ok', subject: where, because: st('shared.k8sReview.hpaOk', { hpa: where }) })
         continue
       }
       findings.push({
@@ -452,7 +453,7 @@ export function reviewFindings(
           section: 'unused',
           level: 'watch',
           subject: `${c.namespace}/${c.name}`,
-          because: `No pod names this ConfigMap.`
+          because: st('shared.k8sReview.unusedConfigMap')
         })
       }
       notes.push(unusedCaveat('configmap', cand.length))
@@ -464,7 +465,7 @@ export function reviewFindings(
           section: 'unused',
           level: 'watch',
           subject: `${c.namespace}/${c.name}`,
-          because: `No pod mounts this claim.`
+          because: st('shared.k8sReview.unusedClaim')
         })
       }
       notes.push(unusedCaveat('pvc', cand.length))
@@ -500,6 +501,6 @@ export function crashloopFindings(
     section: 'stale' as const,
     level: 'alarm' as const,
     subject: `${r.namespace}/${r.name}`,
-    because: `${r.namespace}/${r.name} restarted ${r.by} more time${r.by === 1 ? '' : 's'} since the last look, ${r.restarts} in total.`
+    because: st('shared.k8sReview.restarted', { pod: `${r.namespace}/${r.name}`, count: r.by, total: r.restarts })
   }))
 }

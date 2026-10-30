@@ -58,17 +58,17 @@ export interface AddyTargetDeps {
  *  discovers when they need a restore. */
 function assertPreconditions(deps: AddyTargetDeps): void {
   if (MIN_PASSPHRASE < 12) {
-    throw new AddyError(
-      'config-invalid',
-      `addy destinations need a passphrase floor of at least 12; this build has ${MIN_PASSPHRASE}`
-    )
+    throw new AddyError('config-invalid', {
+      key: 'main.addy.target.floorTooLow',
+      vars: { min: MIN_PASSPHRASE }
+    })
   }
   const length = deps.passphraseLength()
   if (length > 0 && length < MIN_PASSPHRASE) {
-    throw new AddyError(
-      'config-invalid',
-      `this passphrase is ${length} characters; addy destinations need ${MIN_PASSPHRASE}`
-    )
+    throw new AddyError('config-invalid', {
+      key: 'main.addy.target.passphraseTooShort',
+      vars: { length, min: MIN_PASSPHRASE }
+    })
   }
 }
 
@@ -154,7 +154,9 @@ export function addyTarget(deps: AddyTargetDeps): BackupTarget {
 
     async get(name) {
       const stored = await deps.relay.getObject(objectName(name), deps.epoch())
-      if (!stored) throw new AddyError('internal', `the relay has no generation named ${name}`)
+      if (!stored) {
+        throw new AddyError('internal', { key: 'main.addy.target.noGeneration', vars: { name } })
+      }
       const bundle = await open(objectName(name), stored.body, 0)
 
       // Checked against what the client recorded when it wrote, not against
@@ -162,10 +164,7 @@ export function addyTarget(deps: AddyTargetDeps): BackupTarget {
       // it is the one party in this exchange that is not the server.
       const known = (await loadIndex()).generations.find((g) => g.name === name)
       if (known && sha256(bundle) !== known.sha256) {
-        throw new AddyError(
-          'internal',
-          `${name} came back with a different hash than this device recorded when it wrote it`
-        )
+        throw new AddyError('internal', { key: 'main.addy.target.hashMismatch', vars: { name } })
       }
       return bundle
     },

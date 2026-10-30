@@ -34,6 +34,8 @@
 // `/boot` that fills is the classic way an apt upgrade half-installs a kernel.
 // A read that only knows about `/` cannot see it coming.
 
+import { englishT, st, type MessageKey } from './i18n'
+
 export const STORAGE_MARKERS = {
   df: '===SP-STORE-DF===',
   dfBsd: '===SP-STORE-DFBSD===',
@@ -280,6 +282,16 @@ export interface LvmRead {
   detail: string
 }
 
+/** `detail` is read in main and crosses IPC as data, so it is English; the
+ *  headline finds its key again to say it in the user's language. */
+const LVM_DETAIL = {
+  empty: 'shared.storageLayout.lvm.empty',
+  noTool: 'shared.storageLayout.lvm.noTool',
+  refused: 'shared.storageLayout.lvm.refused',
+  unparsed: 'shared.storageLayout.lvm.unparsed',
+  none: 'shared.storageLayout.lvm.none'
+} as const satisfies Record<string, MessageKey>
+
 /**
  * Whether this host uses LVM.
  *
@@ -291,16 +303,12 @@ export interface LvmRead {
  */
 export function parseLvm(vgsText: string, lvsText: string): LvmRead {
   const raw = vgsText.trim()
-  if (raw === '') return { state: 'unknown', detail: 'the volume-group read produced nothing', groups: [] }
+  if (raw === '') return { state: 'unknown', detail: englishT(LVM_DETAIL.empty), groups: [] }
   if (raw === 'NOTOOL') {
-    return {
-      state: 'no-tool',
-      detail: 'LVM tools are not installed here, so whether this host uses LVM was not established.',
-      groups: []
-    }
+    return { state: 'no-tool', detail: englishT(LVM_DETAIL.noTool), groups: [] }
   }
   if (raw === 'FAILED') {
-    return { state: 'failed', detail: 'the volume-group read was refused', groups: [] }
+    return { state: 'failed', detail: englishT(LVM_DETAIL.refused), groups: [] }
   }
   let groups: string[]
   try {
@@ -308,20 +316,20 @@ export function parseLvm(vgsText: string, lvsText: string): LvmRead {
     const vgs = parsed.report?.flatMap((r) => r.vg ?? []) ?? []
     groups = vgs.map((v) => v.vg_name ?? '').filter((n) => n !== '')
   } catch {
-    return { state: 'unknown', detail: 'the volume-group read could not be parsed', groups: [] }
+    return { state: 'unknown', detail: englishT(LVM_DETAIL.unparsed), groups: [] }
   }
   if (groups.length === 0) {
     return {
       state: 'none',
       // The measured case: tools present, `{"report":[{"vg":[]}]}`, exit 0.
-      detail: 'LVM is installed and this host has no volume groups.',
+      detail: englishT(LVM_DETAIL.none),
       groups: []
     }
   }
   void lvsText
   return {
     state: 'present',
-    detail: `This host has ${groups.length} volume group(s): ${groups.join(', ')}.`,
+    detail: englishT('shared.storageLayout.lvm.present', { count: groups.length, groups: groups.join(', ') }),
     groups
   }
 }
@@ -406,24 +414,24 @@ export function storageHeadline(s: StorageLayout): string {
   const n = s.df.mounts.length
   if (n === 0) {
     return s.df.unreadable > 0
-      ? 'No filesystem could be read from this host.'
-      : 'This host reported no real filesystems, which means the read did not work rather than that it has none.'
+      ? st('shared.storageLayout.headline.unreadable')
+      : st('shared.storageLayout.headline.noRealFilesystems')
   }
-  const parts = [`${n} filesystem(s) that can actually fill up`]
+  const parts = [st('shared.storageLayout.headline.filesystems', { count: n })]
   const dropped = s.df.excluded.reduce((a, e) => a + e.count, 0)
   if (dropped > 0) {
     const how = s.df.excluded.map((e) => `${e.count} ${e.fstype}`).join(', ')
-    parts.push(`${dropped} excluded as pseudo or duplicate (${how})`)
+    parts.push(st('shared.storageLayout.headline.excluded', { dropped, how }))
   }
-  parts.push(s.lvm.state === 'present' ? `LVM in use` : s.lvm.detail.replace(/\.$/, ''))
-  if (s.raidArrays.length > 0) parts.push(`software RAID: ${s.raidArrays.join(', ')}`)
+  const lvmKey = Object.values(LVM_DETAIL).find((k) => englishT(k) === s.lvm.detail)
+  const lvm = lvmKey ? st(lvmKey) : s.lvm.detail
+  parts.push(s.lvm.state === 'present' ? st('shared.storageLayout.headline.lvmInUse') : lvm.replace(/[.。]$/, ''))
+  if (s.raidArrays.length > 0) parts.push(st('shared.storageLayout.headline.raid', { arrays: s.raidArrays.join(', ') }))
   const pools = sharedPools(s.df.mounts)
   if (pools.length > 0) {
     const biggest = pools[0]
     parts.push(
-      `${biggest.length} of them share one pool of free space (${biggest
-        .map((m) => m.target)
-        .join(', ')}), so filling any one fills all of them`
+      st('shared.storageLayout.headline.sharedPool', { count: biggest.length, mounts: biggest.map((m) => m.target).join(', ') })
     )
   }
   return `${parts.join('. ')}.`

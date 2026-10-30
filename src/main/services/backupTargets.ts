@@ -6,6 +6,7 @@ import { acquire, release, type PooledConnection } from './ssh'
 import { resolveChainSecrets, resolveDbSecrets, VaultLockedError } from './credentialResolver'
 import { vaultEntriesForResolve, vaultStatus } from './vault'
 import { loadData } from './store'
+import { LocalizedError } from '../../shared/i18n'
 import type {
   BackupDestination,
   BackupGeneration,
@@ -230,9 +231,7 @@ export function storedServer(serverId: string): StoredServer | null {
 async function openSftpIo(dest: SftpBackupDestination): Promise<SftpIo> {
   const server = storedServer(dest.serverId)
   if (!server || !server.host) {
-    throw new Error(
-      `This destination uploads to a server that is no longer configured (${dest.serverId}).`
-    )
+    throw new LocalizedError('main.backupTargets.serverGone', { serverId: dest.serverId })
   }
   const cfg = resolveChainSecrets({
     serverId: server.id,
@@ -597,7 +596,7 @@ export function s3TargetFrom(
 export function s3Credentials(dest: S3BackupDestination): S3Credentials {
   const status = vaultStatus()
   if (!status.exists) {
-    throw new Error('This destination authenticates with a vault entry, and there is no vault on this machine.')
+    throw new LocalizedError('main.backupTargets.noVault')
   }
   // A `VaultLockedError`, not a plain one. This threw a bare Error, which
   // carries no marker, so `isVaultLocked` in the renderer could not recognise
@@ -610,12 +609,10 @@ export function s3Credentials(dest: S3BackupDestination): S3Credentials {
   }
   const entry: VaultEntry | undefined = entries.find((e) => e.id === dest.vaultEntryId)
   if (!entry) {
-    throw new Error('The vault entry holding this destination’s access key no longer exists.')
+    throw new LocalizedError('main.backupTargets.vaultEntryGone')
   }
   if (!entry.username || !entry.password) {
-    throw new Error(
-      `Vault entry “${entry.name}” must hold the access key id as its username and the secret access key as its secret.`
-    )
+    throw new LocalizedError('main.backupTargets.vaultEntryShape', { name: entry.name })
   }
   return { accessKeyId: entry.username, secretAccessKey: entry.password }
 }
@@ -670,15 +667,15 @@ export function registerAddyTarget(
 export async function openTarget(dest: BackupDestination, deps: TargetDeps = {}): Promise<BackupTarget> {
   switch (dest.kind) {
     case 'local':
-      if (!dest.directory) throw new Error('This destination has no directory set.')
+      if (!dest.directory) throw new LocalizedError('main.backupTargets.noDirectory')
       return localTarget(dest)
     case 'sftp': {
-      if (!dest.directory) throw new Error('This destination has no remote directory set.')
+      if (!dest.directory) throw new LocalizedError('main.backupTargets.noRemoteDirectory')
       const io = await (deps.sftpIo ?? openSftpIo)(dest)
       return sftpTargetFrom(dest, io)
     }
     case 's3': {
-      if (!dest.bucket) throw new Error('This destination has no bucket set.')
+      if (!dest.bucket) throw new LocalizedError('main.backupTargets.noBucket')
       // Before the credential, so a prefix this driver cannot address is not
       // reported as a vault problem — and before the first request, so it is
       // not reported as SignatureDoesNotMatch either.

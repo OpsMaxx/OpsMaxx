@@ -12,6 +12,7 @@ import sftpProtocol from 'ssh2/lib/protocol/SFTP.js'
 import { liveServerConnection, onServerSession, release, type PooledConnection } from './ssh'
 import { getCachedServer } from './mcpDataCache'
 import { atomicWriteFileSync } from './atomicWrite'
+import { mt } from './locale'
 import { shellQuote } from '../../shared/curl'
 import {
   MOUNT_EXIT,
@@ -797,12 +798,12 @@ export function mountShare(
   manual: boolean
 ): Promise<MountReply> {
   const share = sharesOf(serverId).find((s) => s.id === shareId)
-  if (!share) return Promise.resolve({ ok: false, error: 'That share is not saved for this server.' })
+  if (!share) return Promise.resolve({ ok: false, error: mt('main.reverseMount.shareNotSaved') })
   if (isStale(serverId, share))
     return Promise.resolve({
       ok: false,
-      error: "This server's address, port or account changed after the share was set up.",
-      fix: 'Re-enable the share to mount it on the server as it is now.'
+      error: mt('main.reverseMount.serverChanged'),
+      fix: mt('main.reverseMount.serverChangedFix')
     })
   const problem = mountpointProblem(share.mountpoint)
   if (problem) return Promise.resolve({ ok: false, error: problem })
@@ -812,8 +813,8 @@ export function mountShare(
   if (!conn.dialledAs || serverIdentity(conn.dialledAs) !== share.identity)
     return Promise.resolve({
       ok: false,
-      error: 'The open terminal is connected to a different address, port or account than this share was given to.',
-      fix: 'Close every tab to this server and connect again, or re-enable the share for the server as it is now.'
+      error: mt('main.reverseMount.terminalElsewhere'),
+      fix: mt('main.reverseMount.terminalElsewhereFix')
     })
 
   const key = `${serverId}\0${share.mountpoint}`
@@ -823,7 +824,7 @@ export function mountShare(
     if (existing) {
       const live = existing.status.state === 'mounted' || existing.status.state === 'mounting'
       if (live && existing.share.localDir === share.localDir) return { ok: true }
-      if (live) return { ok: false, error: `${share.mountpoint} is already in use by another share.` }
+      if (live) return { ok: false, error: mt('main.reverseMount.mountpointInUse', { mountpoint: share.mountpoint }) }
       if (!manual && existing.kind === 'setup' && existing.share.id === share.id)
         return { ok: false, error: existing.status.error, fix: existing.status.fix }
       byPoint.delete(share.mountpoint)
@@ -848,7 +849,7 @@ export function mountShare(
     byPoint.set(share.mountpoint, m)
     emit(serverId)
 
-    const cancelled: MountReply = { ok: false, error: 'Stopped: the last terminal to this server closed.' }
+    const cancelled: MountReply = { ok: false, error: mt('main.reverseMount.lastTerminalClosed') }
     const fail = (reply: MountReply, kind: FailureKind): MountReply => {
       m.kind = kind
       m.status = { ...m.status, state: 'failed', error: reply.error, fix: reply.fix }
@@ -866,7 +867,7 @@ export function mountShare(
     try {
       root = await shareRoot(share.localDir)
     } catch {
-      return fail({ ok: false, error: `${share.localDir} is not a folder on this computer any more.` }, 'setup')
+      return fail({ ok: false, error: mt('main.reverseMount.localDirGone', { dir: share.localDir }) }, 'setup')
     }
     if (m.cancelled) return cancelled
 
@@ -877,7 +878,7 @@ export function mountShare(
       void opening.then((ch) => ch.close(), () => undefined)
       return cancelled
     }
-    if (!opened) return fail({ ok: false, error: 'The server would not open a channel for sshfs.' }, 'dropped')
+    if (!opened) return fail({ ok: false, error: mt('main.reverseMount.noChannel') }, 'dropped')
     const channel = opened.ch
     m.channel = channel
     if (m.cancelled) return cancelled
@@ -903,14 +904,14 @@ export function mountShare(
         (r): Outcome =>
           r.code === 0
             ? { ok: true }
-            : dropped(stderr.trim().slice(0, 400) || `${share.mountpoint} did not appear as a mount in time.`),
-        (): Outcome => dropped('The connection to the server closed.')
+            : dropped(stderr.trim().slice(0, 400) || mt('main.reverseMount.mountTimedOut', { mountpoint: share.mountpoint })),
+        (): Outcome => dropped(mt('main.reverseMount.connectionClosed'))
       ),
       ended.then(
         (code): Outcome =>
           code === null || code === undefined
-            ? dropped('The connection to the server closed while mounting.')
-            : { ...explainMountFailure(code, stderr, conn.username), kind: 'setup', exitCode: code }
+            ? dropped(mt('main.reverseMount.closedWhileMounting'))
+            : { ...explainMountFailure(code, stderr, conn.username, mt), kind: 'setup', exitCode: code }
       ),
       woken.then(() => cancelled)
     ])
@@ -926,7 +927,7 @@ export function mountShare(
       // Closed under a live mount: the connection dropped or sshfs died. A
       // reconnect mounts it again; this is not a setup failure.
       if (m.cancelled || m.status.state !== 'mounted') return
-      fail({ ok: false, error: 'The mount stopped: the connection to the server closed, or sshfs exited.' }, 'dropped')
+      fail({ ok: false, error: mt('main.reverseMount.mountStopped') }, 'dropped')
     })
     return { ok: true }
   })
@@ -976,7 +977,7 @@ function teardown(m: Mount, keepSetupFailure = false): Promise<void> {
     if (conn && !m.released) {
       try {
         const r = await run(conn, unmountScript(m.share.mountpoint))
-        if (r.code !== 0) failed = r.stderr.trim().slice(0, 400) || 'It is still mounted.'
+        if (r.code !== 0) failed = r.stderr.trim().slice(0, 400) || mt('main.reverseMount.stillMounted')
       } catch {
         // The connection is gone; nothing on the server can be reached. A
         // stale mount point left there is cleared by the next mount.
@@ -985,7 +986,7 @@ function teardown(m: Mount, keepSetupFailure = false): Promise<void> {
     releaseMount(m)
     if (failed) {
       m.kind = 'unmount'
-      m.status = { ...m.status, state: 'failed', error: `Could not unmount ${m.share.mountpoint} on the server. ${failed}`.trim() }
+      m.status = { ...m.status, state: 'failed', error: mt('main.reverseMount.unmountFailed', { mountpoint: m.share.mountpoint, detail: failed }).trim() }
     } else forget()
     emit(m.serverId)
   })

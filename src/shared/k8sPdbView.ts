@@ -1,4 +1,5 @@
 import type { K8sPdb } from './kubernetes'
+import { st } from './i18n'
 
 // Item 39's "PDBs as a view".
 //
@@ -72,7 +73,7 @@ export function pdbCoverage(workloads: WorkloadRef[], pdbs: K8sPdb[]): PdbCovera
         verdict: 'cannot-evaluate',
         covering: [],
         allowed: null,
-        because: `${unevaluable.length} budget(s) in ${w.namespace} select pods with matchExpressions, which a list read cannot evaluate — so whether ${w.name} is protected is unknown, not no.`
+        because: st('shared.k8sPdbView.cannotEvaluate', { count: unevaluable.length, namespace: w.namespace, name: w.name })
       }
     }
     if (covering.length === 0) {
@@ -82,7 +83,7 @@ export function pdbCoverage(workloads: WorkloadRef[], pdbs: K8sPdb[]): PdbCovera
         verdict: 'uncovered',
         covering: [],
         allowed: null,
-        because: `No budget selects ${w.name}, so draining a node takes every one of its ${w.replicas} replica(s) that lives there, at once.`
+        because: st('shared.k8sPdbView.uncovered', { name: w.name, replicas: w.replicas })
       }
     }
     if (allowed === 0) {
@@ -92,7 +93,7 @@ export function pdbCoverage(workloads: WorkloadRef[], pdbs: K8sPdb[]): PdbCovera
         verdict: 'blocking',
         covering: covering.map((p) => p.name),
         allowed: 0,
-        because: `${covering.map((p) => p.name).join(', ')} currently allows no disruptions, so a drain touching ${w.name} will wait rather than proceed.`
+        because: st('shared.k8sPdbView.blocking', { budgets: covering.map((p) => p.name).join(', '), name: w.name })
       }
     }
     return {
@@ -103,8 +104,8 @@ export function pdbCoverage(workloads: WorkloadRef[], pdbs: K8sPdb[]): PdbCovera
       allowed,
       because:
         allowed === null
-          ? `${w.name} is covered by ${covering.length} budget(s), none of which reported how many disruptions it allows.`
-          : `${w.name} is covered by ${covering.length} budget(s), allowing ${allowed}.`
+          ? st('shared.k8sPdbView.coveredUnknown', { name: w.name, count: covering.length })
+          : st('shared.k8sPdbView.covered', { name: w.name, count: covering.length, allowed })
     }
   })
 }

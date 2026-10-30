@@ -206,11 +206,7 @@ class AddySession {
     // finished. It survived because every existing test stubs the sidecar, and
     // a stub cannot refuse a field it was never told about.
     if (account.rootSignPub === undefined || account.rootSignPub === '') {
-      throw new AddyError(
-        'config-invalid',
-        'this device has no record of the account\u2019s root signing key, so it cannot verify its own device list. ' +
-          'Recover the account from your twelve-word phrase on this machine, or pair it again from a device that works.'
-      )
+      throw new AddyError('config-invalid', { key: 'main.addy.session.rootKeyMissing' })
     }
     await addyd.send('load', {
       accountId: account.accountId,
@@ -567,7 +563,7 @@ class AddySession {
       // Refused rather than upgraded. A relay reached over plain HTTP is one
       // whose TLS nothing checked, and silently rewriting what somebody typed
       // is how they end up trusting an address they did not choose.
-      throw new AddyError('config-invalid', 'a relay address must be https://')
+      throw new AddyError('config-invalid', { key: 'main.addy.session.relayNotHttps' })
     }
 
     await this.detach()
@@ -621,25 +617,24 @@ class AddySession {
       const detail = await relayDetail(resp)
       await this.detach()
       if (resp.status === 403) {
-        throw new AddyError(
-          'pairing-refused',
-          'that invite has been used, has expired, or is not one this relay issued'
-        )
+        throw new AddyError('pairing-refused', { key: 'main.addy.session.inviteRefused' })
       }
       if (resp.status === 409) {
         // The relay's own words were shown raw — `{"error":"store: that user
         // already has a sync group"}` under `config-invalid` — for the one
         // refusal a person can do something specific about.
-        throw new AddyError(
-          'conflict',
-          /already has a sync group/.test(detail)
-            ? 'the person this invite belongs to already has a sync group on this relay. Join it by pairing from a device that is already on it (Sync & devices), rather than creating a second one.'
-            : 'this relay already has that sync group. Nothing was created; try again.'
-        )
+        throw new AddyError('conflict', {
+          key: /already has a sync group/.test(detail)
+            ? 'main.addy.session.personHasGroup'
+            : 'main.addy.session.groupExists'
+        })
       }
       throw new AddyError(
         resp.status === 507 ? 'quota-exceeded' : resp.status >= 500 ? 'relay-unreachable' : 'config-invalid',
-        `the relay refused the sync group (${resp.status})${detail ? `: ${detail.slice(0, 200)}` : ''}`
+        {
+          key: detail ? 'main.addy.session.groupRefusedBecause' : 'main.addy.session.groupRefused',
+          vars: { status: resp.status, detail: detail.slice(0, 200) }
+        }
       )
     }
 
@@ -650,10 +645,7 @@ class AddySession {
       ['account', minted.secrets.akSeed]
     ] as const) {
       if (!storeAddySecret(kind === 'account' ? 'account' : 'device', `${minted.accountId}:${kind}`, value)) {
-        throw new AddyError(
-          'config-invalid',
-          'this machine has no usable keychain, so the account keys cannot be stored. Nothing was kept.'
-        )
+        throw new AddyError('config-invalid', { key: 'main.addy.session.noKeychain' })
       }
     }
 
@@ -803,18 +795,18 @@ class AddySession {
        * could wipe a device by saying so is a relay that can wipe every
        * device it serves.
        */
+      // The relay's claim and what the chain showed, as one sentence each way.
+      const baseURL = err.vars?.baseURL ?? account.baseURL
       const roster = await this.refreshRoster(err.chain).catch((verr: unknown) => {
-        throw new AddyError(
-          'not-paired',
-          `${err.message} The device list it sent did not verify (${verr instanceof Error ? verr.message : String(verr)}), so nothing on this machine was changed.`
-        )
+        throw new AddyError('not-paired', {
+          key: 'main.addy.session.removedUnverified',
+          vars: { baseURL, detail: verr instanceof Error ? verr.message : String(verr) }
+        })
       })
-      throw new AddyError(
-        'not-paired',
-        roster.stillListed
-          ? `${err.message} The device list it sent still includes this device, so nothing on this machine was changed.`
-          : `${err.message} The verified device list confirms it.`
-      )
+      throw new AddyError('not-paired', {
+        key: roster.stillListed ? 'main.addy.session.removedStillListed' : 'main.addy.session.removedConfirmed',
+        vars: { baseURL }
+      })
     }
     const { token, spki } = signedIn
     if (repinned.from !== '') {
@@ -1068,7 +1060,7 @@ class AddySession {
   /** Resolves when the other device has confirmed, with the emoji to compare. */
   async awaitPairing(): Promise<PairingConfirmation> {
     if (!this.pendingConfirmation) {
-      throw new AddyError('config-invalid', 'no pairing is in progress')
+      throw new AddyError('config-invalid', { key: 'main.addy.session.noPairing' })
     }
     return this.pendingConfirmation
   }
@@ -1146,12 +1138,12 @@ class AddySession {
     const account = this.account
     const pairing = this.pairing
     if (!addyd || !relay || !account || !pairing) {
-      throw new AddyError('config-invalid', 'no pairing is in progress on an attached account')
+      throw new AddyError('config-invalid', { key: 'main.addy.session.noPairingAttached' })
     }
     const peerPubEnc = confirmation.peer.pubEnc
     const peerPubSign = confirmation.self?.pubSign ?? confirmation.peer.pubSign
     if (!peerPubEnc) {
-      throw new AddyError('pairing-refused', 'the other device sent no encryption key')
+      throw new AddyError('pairing-refused', { key: 'main.addy.session.noEncryptionKey' })
     }
 
     // The head THIS device verified, never the relay's word for it.
@@ -1165,7 +1157,7 @@ class AddySession {
         ? loadAddySecret('account', `${account.accountId}:account:${account.epoch}`)
         : loadAddySecret('account', `${account.accountId}:account`)
     if (!akSeed) {
-      throw new AddyError('config-invalid', 'this device cannot read its own account key')
+      throw new AddyError('config-invalid', { key: 'main.addy.session.ownKeyUnreadable' })
     }
 
     // THE ROSTER ENTRY FIRST, THEN THE HANDOFF. It was the other way round,
@@ -1261,7 +1253,7 @@ class AddySession {
   async finishJoin(): Promise<{ accountId: string }> {
     const addyd = this.addyd
     const ctx = this.joinContext
-    if (!addyd || !ctx) throw new AddyError('config-invalid', 'no join is in progress')
+    if (!addyd || !ctx) throw new AddyError('config-invalid', { key: 'main.addy.session.noJoin' })
 
     const sealed = await receive<{
       handoff: string
@@ -1300,10 +1292,7 @@ class AddySession {
       ['account', 'account', accepted.secrets.akSeed]
     ] as const) {
       if (!storeAddySecret(kind, `${accepted.accountId}:${scope}`, value)) {
-        throw new AddyError(
-          'config-invalid',
-          'this machine has no usable keychain, so the account keys cannot be stored. Nothing was kept.'
-        )
+        throw new AddyError('config-invalid', { key: 'main.addy.session.noKeychain' })
       }
     }
 
@@ -1467,10 +1456,10 @@ class AddySession {
     // transition is withholding entries — the same refusal the pin makes, for
     // an enrolment whose pin predates the rotation or never had one.
     if (verified.epoch < account.epoch) {
-      throw new AddyError(
-        'roster-rewound',
-        `${account.baseURL} served a device list ending in epoch ${verified.epoch}, but this device has already moved to epoch ${account.epoch}. The relay is withholding entries; nothing was changed.`
-      )
+      throw new AddyError('roster-rewound', {
+        key: 'main.addy.session.rosterWithheld',
+        vars: { baseURL: account.baseURL, served: verified.epoch, have: account.epoch }
+      })
     }
     const chainEpoch = verified.epoch
     while (supplied === undefined && chainEpoch > (this.account?.epoch ?? 0)) {
@@ -1777,7 +1766,7 @@ class AddySession {
 
   private deps(): ConflictDeps {
     if (!this.addyd || !this.relay || !this.account) {
-      throw new AddyError('not-paired', 'this device is not attached to an addy account')
+      throw new AddyError('not-paired', { key: 'main.addy.session.notAttached' })
     }
     return {
       addyd: this.addyd,
@@ -2218,10 +2207,7 @@ class AddySession {
     // reason this whole method exists, and the keychain is the only thing
     // here with durable storage.
     if (!storeAddySecret('account', `${account.accountId}:account:${next}`, adopted.secrets.akSeed)) {
-      throw new AddyError(
-        'config-invalid',
-        'this machine has no usable keychain, so the new account key cannot be stored.'
-      )
+      throw new AddyError('config-invalid', { key: 'main.addy.session.noKeychainNewKey' })
     }
 
     this.account = { ...account, epoch: adopted.epoch }
@@ -2273,17 +2259,14 @@ class AddySession {
     const relay = this.relay
     const account = this.account
     if (!addyd || !relay || !account) {
-      throw new AddyError('not-paired', 'this device is not attached to an addy account')
+      throw new AddyError('not-paired', { key: 'main.addy.session.notAttached' })
     }
     // NOT WITHOUT A PIN. With none saved the sidecar verifies unpinned, and an
     // unpinned chain cut before a revoke entry in this same epoch passes —
     // the re-key would seal the new key to the device it exists to exclude.
     // A device that has never verified the roster has nothing to re-key from.
     if (!this.rosterPin().havePin) {
-      throw new AddyError(
-        'roster-invalid',
-        'this device has not verified its device list yet, so it cannot re-key safely. Wait for a sync to finish, then try again.'
-      )
+      throw new AddyError('roster-invalid', { key: 'main.addy.session.rosterUnverified' })
     }
 
     const chain = await relay.roster()
@@ -2314,10 +2297,10 @@ class AddySession {
     // rotation keeps them) would otherwise rotate away from an epoch the
     // account already left.
     if (prepared.epoch !== account.epoch + 1) {
-      throw new AddyError(
-        'roster-rewound',
-        `${account.baseURL} served a device list ending in epoch ${prepared.epoch - 1}, but this device is on epoch ${account.epoch}. Nothing was rotated.`
-      )
+      throw new AddyError('roster-rewound', {
+        key: 'main.addy.session.rotateBehind',
+        vars: { baseURL: account.baseURL, served: prepared.epoch - 1, have: account.epoch }
+      })
     }
 
     // 0. THE KEY ITSELF, BEFORE ANY OF THE WRITES.
@@ -2334,10 +2317,7 @@ class AddySession {
         prepared.secrets.akSeed
       )
     ) {
-      throw new AddyError(
-        'config-invalid',
-        'this machine has no usable keychain, so the new account key cannot be stored. Nothing was rotated.'
-      )
+      throw new AddyError('config-invalid', { key: 'main.addy.session.noKeychainNotRotated' })
     }
 
     // A RE-KEY THAT WAS INTERRUPTED CAN BE RUN AGAIN. Nothing reads epoch n+1
@@ -2446,16 +2426,16 @@ class AddySession {
         pinnedHead: prepared.entryHash
       })
       .catch((err: unknown) => {
-        throw new AddyError(
-          'roster-rewound',
-          `${account.baseURL} accepted the re-key but its device list does not carry it (${err instanceof Error ? err.message : String(err)}). The account is still on its old key and no key was deleted; try the re-key again, or move to another relay.`
-        )
+        throw new AddyError('roster-rewound', {
+          key: 'main.addy.session.rekeyNotCarried',
+          vars: { baseURL: account.baseURL, detail: err instanceof Error ? err.message : String(err) }
+        })
       })
     if (confirmed.epoch !== prepared.epoch) {
-      throw new AddyError(
-        'roster-rewound',
-        `${account.baseURL} accepted the re-key but its device list ends in epoch ${confirmed.epoch}, not ${prepared.epoch}. No key was deleted.`
-      )
+      throw new AddyError('roster-rewound', {
+        key: 'main.addy.session.rekeyWrongEpoch',
+        vars: { baseURL: account.baseURL, got: confirmed.epoch, want: prepared.epoch }
+      })
     }
 
     this.account = {
@@ -2547,7 +2527,7 @@ class AddySession {
   ): Promise<AddyRecoveryReview> {
     const relay = baseURL.replace(/\/+$/, '')
     if (!relay.startsWith('https://')) {
-      throw new AddyError('config-invalid', 'a relay address must be https://')
+      throw new AddyError('config-invalid', { key: 'main.addy.session.relayNotHttps' })
     }
 
     await this.detach()
@@ -2584,10 +2564,7 @@ class AddySession {
       // trying.
       const escrowObj = await client.getObject('escrow', 1)
       if (!escrowObj) {
-        throw new AddyError(
-          'not-paired',
-          'this relay has no escrow for that account, so there is nothing to recover from here. Check the relay address.'
-        )
+        throw new AddyError('not-paired', { key: 'main.addy.session.noEscrow' })
       }
       const chain = await client.roster()
 
@@ -2636,10 +2613,10 @@ class AddySession {
           // epoch 1's key, which is the key every revoked device still holds:
           // a recovery that quietly lands on it would re-seal the estate
           // under exactly what the re-key was performed to retire.
-          throw new AddyError(
-            'roster-invalid',
-            `this account is on epoch ${opened.needEpoch} and the relay has no escrow for it. Recovering onto the older key would undo the re-key, so this stops here.`
-          )
+          throw new AddyError('roster-invalid', {
+            key: 'main.addy.session.noEscrowForEpoch',
+            vars: { epoch: opened.needEpoch }
+          })
         }
         opened = await addyd.send<Opened>('recoverOpen', {
           escrow: current.body.toString('base64'),
@@ -2647,7 +2624,7 @@ class AddySession {
           chain
         })
         if (opened.needEpoch !== undefined) {
-          throw new AddyError('roster-invalid', 'the relay will not serve this account\'s current escrow')
+          throw new AddyError('roster-invalid', { key: 'main.addy.session.escrowWithheld' })
         }
       }
 
@@ -2708,7 +2685,7 @@ class AddySession {
       if (sealedByAccount) {
         throw new AddyError(
           'roster-rewound',
-          `this relay served a roster ending at epoch ${opened.epoch} while holding an escrow for epoch ${opened.epoch + 1}. That is a rolled-back account, not a recovery, and nothing was changed.`
+          { key: 'main.addy.session.rolledBackAccount', vars: { epoch: opened.epoch, next: opened.epoch + 1 } }
         )
       }
 
@@ -2785,7 +2762,7 @@ class AddySession {
     const p = this.pendingRecovery
     this.pendingRecovery = null
     if (!p) {
-      throw new AddyError('not-paired', 'there is no recovery waiting to be confirmed. Start again with the phrase.')
+      throw new AddyError('not-paired', { key: 'main.addy.session.noRecoveryWaiting' })
     }
     const id = p.account.accountId
     // UNDER ITS OWN EPOCH. The unsuffixed name is epoch 1's by convention —
@@ -2803,10 +2780,7 @@ class AddySession {
     try {
       for (const s of secrets) {
         if (!storeAddySecret(s[0], s[1], s[2])) {
-          throw new AddyError(
-            'config-invalid',
-            'this machine has no usable keychain, so the recovered keys cannot be stored. Nothing was kept.'
-          )
+          throw new AddyError('config-invalid', { key: 'main.addy.session.noKeychainRecovered' })
         }
         stored.push(s)
       }
@@ -2864,7 +2838,7 @@ class AddySession {
     const relay = this.relay
     const account = this.account
     if (!addyd || !relay || !account) {
-      throw new AddyError('not-paired', 'this device is not attached to an addy account')
+      throw new AddyError('not-paired', { key: 'main.addy.session.notAttached' })
     }
 
     const before = await this.refreshRoster()
@@ -2874,7 +2848,7 @@ class AddySession {
       // a revoke for a device the chain does not list produces an entry every
       // verifier refuses, and the account would be stuck on a head nobody
       // accepts.
-      throw new AddyError('config-invalid', 'that device is not on this account')
+      throw new AddyError('config-invalid', { key: 'main.addy.notOnAccount' })
     }
 
     const entry = await addyd.send<{ seq: number; entry: string }>('revokeDevice', {

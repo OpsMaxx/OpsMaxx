@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 const src = (p: string): string => readFileSync(fileURLToPath(new URL(p, import.meta.url)), 'utf8')
 const SSH = src('../src/main/services/ssh.ts')
 const KNOWN = src('../src/main/services/knownhosts.ts')
+const EN = JSON.parse(src('../src/shared/locales/en.json')) as Record<string, string>
 
 /**
  * A host key belongs to the server, not to the port it was reached on.
@@ -69,6 +70,7 @@ describe('the verifier', () => {
     // accepted it — see hostKeyExpected in services/syncTrust.ts.
     expect(KNOWN).toMatch(/const trusted = hostKeyExpected\(id, known\?\.fingerprint\)/)
     expect(KNOWN).toMatch(/if \(trusted === fp\) return Promise\.resolve\(true\)/)
-    expect(KNOWN).toMatch(/Host key changed/)
+    expect(KNOWN).toMatch(/mt\('main\.hostKey\.changedTitle'\)/)
+    expect(EN['main.hostKey.changedTitle']).toBe('Host key changed')
   })
 })

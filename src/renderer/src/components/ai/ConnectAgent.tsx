@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { englishT } from '../../../../shared/i18n'
 import { Copy, Eye, EyeOff, TriangleAlert, Terminal, MonitorSmartphone, SquareTerminal } from 'lucide-react'
 import { toast } from '../../store/toast'
 import type { ToastAction } from '../../store/toast'
@@ -146,7 +147,7 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         workspaces: workspaces.map((w) => ({ id: w.id, name: w.name })),
         // A predefined profile uses no group; only Custom is given one.
         groupId: chosen === 'custom' ? (group?.id ?? null) : null,
-        groupName: chosen === 'custom' ? (group?.name ?? 'No AI Access') : sessionModeLabel(chosen),
+        groupName: chosen === 'custom' ? (group?.name ?? 'No AI Access') : sessionModeLabel(chosen, undefined, englishT),
         // A config-file client has no way to re-pair when a token lapses — it
         // would just stop working silently. Revoke under Active Sessions
         // instead, which is visible and deliberate.

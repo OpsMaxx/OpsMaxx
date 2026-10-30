@@ -1,3 +1,4 @@
+import { LocalizedError, englishT } from '../../../shared/i18n'
 import type { VpnErrorCode } from '../../../shared/vpn'
 
 // Every failure the VPN layer can surface carries a code, and every code maps
@@ -5,14 +6,16 @@ import type { VpnErrorCode } from '../../../shared/vpn'
 // drawer: an unexplained ETIMEDOUT is the worst failure mode this class of
 // product has, and it is almost always avoidable.
 
-export class VpnError extends Error {
+export class VpnError extends LocalizedError {
   readonly code: VpnErrorCode
   // Extra words appended to the generic message: the endpoint that timed out,
-  // the port that was taken, the file that was missing.
+  // the port that was taken, the file that was missing. Diagnostics, so they
+  // stay as they were written; only the sentence before them is translated.
   readonly detail?: string
 
   constructor(code: VpnErrorCode, detail?: string, options?: { cause?: unknown }) {
-    super(detail ? `${VPN_ERROR_MESSAGE[code]} ${detail}` : VPN_ERROR_MESSAGE[code], options)
+    super(`main.vpn.error.${code}`, { detail: detail ? ` ${detail}` : '' })
+    if (options && 'cause' in options) this.cause = options.cause
     this.name = 'VpnError'
     this.code = code
     this.detail = detail
@@ -21,43 +24,6 @@ export class VpnError extends Error {
 
 export function isVpnError(e: unknown): e is VpnError {
   return e instanceof VpnError
-}
-
-// The message shown when nothing more specific is known. Kept complete: a test
-// asserts every VpnErrorCode has an entry, so adding a code without a message
-// fails CI rather than reaching a user as "undefined".
-export const VPN_ERROR_MESSAGE: Record<VpnErrorCode, string> = {
-  'binary-missing': 'The program that runs this tunnel could not be found.',
-  'binary-untrusted':
-    'The bundled tunnel program does not match its expected checksum, so it was not run.',
-  'config-invalid': 'This profile is not valid.',
-  'config-rejected': 'This configuration was rejected because it tries to run programs.',
-  'auth-failed': 'The server rejected these credentials.',
-  'engine-stopped': 'The program that runs this tunnel is installed but not running.',
-  'engine-failed': 'The tunnel engine started and then failed.',
-  'auth-otp-required': 'A one-time code is needed to connect.',
-  'tls-handshake-failed': 'The secure connection to the server could not be established.',
-  'cert-expired': 'The client certificate is outside its validity period.',
-  'handshake-timeout': 'No response from the server.',
-  'dns-failure': 'The server address could not be resolved.',
-  'dns-not-applied':
-    'The tunnel connected but the system resolver never took its DNS settings, so the tunnel was stopped.',
-  'port-in-use': 'The local port is already in use.',
-  'permission-denied': 'Permission was denied.',
-  'elevation-declined': 'The administrator prompt was dismissed, so the tunnel did not start.',
-  'network-unreachable': 'The network is unreachable.',
-  'server-rejected': 'The server refused the connection.',
-  'crash-loop': 'The tunnel program kept exiting, so it was stopped.',
-  'vault-locked': 'The vault is locked, so the credentials for this tunnel are unavailable.',
-  'proxy-required': 'This network appears to require a proxy.',
-  'version-mismatch': 'This client and the server are not compatible.',
-  'interface-conflict': 'That network interface name is already in use.',
-  'already-running': 'This tunnel is already running.',
-  'clock-skew': 'The system clock is too far off for the certificate to be accepted.',
-  'exposure-unacknowledged':
-    'This profile exposes a local port to a remote server and has not been confirmed.',
-  unsupported: 'That is not supported on this platform.',
-  internal: 'Something went wrong inside OpsMaxx.'
 }
 
 // What the user should do next, in one short instruction. Empty string means
@@ -112,6 +78,19 @@ export const VPN_ERROR_HINT: Record<VpnErrorCode, string> = {
   unsupported: '',
   internal: 'Check the log for details.'
 }
+
+// The message shown when nothing more specific is known, in English: this map
+// is what the log, the CLI and an agent read. The words live in the catalog,
+// under `main.vpn.error.<code>`, so the screen can say the same sentence in the
+// user's language. A test asserts every VpnErrorCode has an entry, so adding a
+// code without a message fails CI rather than reaching a user as "undefined";
+// the catalog key is checked by the compiler.
+export const VPN_ERROR_MESSAGE = Object.fromEntries(
+  (Object.keys(VPN_ERROR_HINT) as VpnErrorCode[]).map((c) => [
+    c,
+    englishT(`main.vpn.error.${c}`, { detail: '' })
+  ])
+) as Record<VpnErrorCode, string>
 
 /** Full user-facing text: what happened, then what to do. */
 export function describeVpnError(code: VpnErrorCode, detail?: string): string {

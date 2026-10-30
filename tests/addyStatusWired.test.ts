@@ -667,7 +667,8 @@ describe('recovery lands on the current epoch or refuses', () => {
   it('will not fall back to the older key when the current escrow is missing', () => {
     // Falling back would re-seal the estate under exactly what the re-key was
     // performed to retire.
-    expect(SESSION).toMatch(/Recovering onto the older key would undo the re-key/)
+    expect(SESSION).toContain("key: 'main.addy.session.noEscrowForEpoch'")
+    expect(read('src/shared/locales/en.json')).toMatch(/Recovering onto the older key would undo the re-key/)
   })
 
   it('files the recovered key under its own epoch', () => {

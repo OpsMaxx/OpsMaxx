@@ -5,8 +5,10 @@ import { sshHopsFor, sshTargetFor } from '../../lib/ssh'
 import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { clsx } from '../../lib/format'
 import {
+  CRON_SOURCE_LABEL,
   CRON_STATUS_HELP,
   cronEditRefusal,
+  describeSchedule,
   summariseCronSources
 } from '../../../../shared/cron'
 import type {
@@ -166,7 +168,7 @@ function SourceStatus({ sources }: { sources?: CronSourceReport[] }): React.JSX.
       )}
       {incomplete.map((s) => (
         <div key={s.id} className="state-unknown" style={{ marginTop: 2 }}>
-          <ShieldAlert size={11} /> {s.label}: {CRON_STATUS_HELP[s.status]}
+          <ShieldAlert size={11} /> {CRON_SOURCE_LABEL[s.id]}: {CRON_STATUS_HELP[s.status]}
           {s.detail ? ` (${s.detail})` : ''}
         </div>
       ))}
@@ -525,7 +527,7 @@ export function CronPanel({ servers }: { servers: Server[] }): React.JSX.Element
                     {/* Null means "a valid schedule I decline to describe".
                         A wrong sentence about when a job runs is worse than
                         none. */}
-                    <span className="faint cron-desc">{e.description ?? ''}</span>
+                    <span className="faint cron-desc">{e.description ? (describeSchedule(e.schedule) ?? e.description) : ''}</span>
                     {/* `e.input` is the text after an unescaped `%`, which
                         cron pipes to the command on stdin rather than running.
                         Showing it inside the command would be showing a command

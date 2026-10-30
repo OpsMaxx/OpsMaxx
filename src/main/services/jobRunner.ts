@@ -13,6 +13,7 @@ import type {
   JobSpec
 } from '../../shared/jobs'
 import type { ApprovalVerdict, CommandApproval, JobApprovalEntry } from '../../shared/jobs'
+import { LocalizedError } from '../../shared/i18n'
 import {
   JOB_ABANDONED_ERROR,
   JOB_GATE_SKIPPED_ERROR,
@@ -904,7 +905,7 @@ export class JobRunner {
         { jobId: req.jobId, title: req.spec.title, reason: verdict.reason },
         this.now
       )
-      throw new Error(`This job was not started: ${verdict.reason}`)
+      throw new LocalizedError('main.jobRunner.notStarted', { reason: verdict.reason })
     }
 
     // ---- Item 17: the reboot-ordering refusal, in MAIN and not only in the UI.
@@ -924,7 +925,7 @@ export class JobRunner {
         { jobId: req.jobId, title: req.spec.title, reason: refusal },
         this.now
       )
-      throw new Error(`This job was not started: ${refusal}`)
+      throw new LocalizedError('main.jobRunner.notStarted', { reason: refusal })
     }
 
     this.logApproval(req, 'granted')

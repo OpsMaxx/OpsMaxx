@@ -12,6 +12,8 @@ import { verifyRdpCertificate } from './rdpTrust'
 import { rdpSecretId } from '../../shared/rdp'
 import { askToUse, serverCredentialHeld, serverFieldsNow } from './syncTrust'
 import { getSecret } from './secrets'
+import { LocalizedError } from '../../shared/i18n'
+import { mt } from './locale'
 import { storedCredential } from './credentialLink'
 import type { RdpTicket, RdpTicketResult, RdpDesktopSize } from '../../shared/rdp'
 import type { SshHop } from '../../shared/ssh'
@@ -360,10 +362,10 @@ export async function rdpMintTicket(
 ): Promise<RdpTicketResult> {
   const server = getCachedServer(serverId)
   if (!server) {
-    return { ok: false, code: 'no-target', error: 'That server no longer exists.' }
+    return { ok: false, code: 'no-target', error: mt('main.rdpRelay.serverGone') }
   }
   if (!server.rdp) {
-    return { ok: false, code: 'no-target', error: `${server.name} is not configured for RDP.` }
+    return { ok: false, code: 'no-target', error: mt('main.rdpRelay.notRdp', { server: server.name }) }
   }
 
   /**
@@ -418,7 +420,7 @@ export async function rdpMintTicket(
     return {
       ok: false,
       code: 'no-credentials',
-      error: `No password is stored for ${rdpUser} on ${server.name}. RDP authenticates with a password.`
+      error: mt('main.rdpRelay.noPassword', { user: rdpUser, server: server.name })
     }
   }
 
@@ -843,7 +845,7 @@ async function dialThroughVpn(
   const started = await vpnStart(vpnId)
   if (!started.ok) {
     // The VPN's own message, not a connect timeout twenty seconds later.
-    throw new Error(started.error ?? 'The VPN for this server could not be started.')
+    throw started.error ? new Error(started.error) : new LocalizedError('main.ssh.vpnNotStarted')
   }
 
   let forward: { port: number; close: () => void } | null = null

@@ -42,6 +42,8 @@
 // allocatable, and it accepts nothing new. Adding it to a cluster total would
 // answer "can this cluster take another pod" with capacity that is closed.
 
+import { st } from './i18n'
+
 /** The columns, exactly as measured. Read as a constant rather than built, for
  *  the reason every other command in this codebase is: a column set assembled
  *  from parts is a column set nobody has run. */
@@ -334,8 +336,8 @@ export function allocationHeadline(r: AllocationReport): string {
   const open = r.nodes.filter((n) => !n.cordoned && n.cpuAllocatableMilli !== null)
   if (open.length === 0) {
     return r.nodes.length === 0
-      ? 'No nodes were read, so nothing can be said about capacity.'
-      : 'Every node is cordoned or could not be sized, so there is no schedulable capacity to report.'
+      ? st('shared.k8sAllocatable.noNodes')
+      : st('shared.k8sAllocatable.noSchedulable')
   }
   const cpuAlloc = open.reduce((a, n) => a + (n.cpuAllocatableMilli ?? 0), 0)
   const cpuReq = open.reduce((a, n) => a + n.cpuRequestedMilli, 0)
@@ -344,17 +346,13 @@ export function allocationHeadline(r: AllocationReport): string {
   const partial = r.nodes.reduce((a, n) => a + n.partialPods, 0)
   const cordoned = r.nodes.filter((n) => n.cordoned).length
 
-  const parts = [`${pct}% of CPU is requested across ${open.length} schedulable node(s)`]
-  if (unsized > 0) {
-    parts.push(
-      `${unsized} pod(s) request no CPU at all, so what they will actually use is not in that number`
-    )
-  }
-  if (partial > 0) parts.push(`${partial} pod(s) size only some of their containers`)
-  if (cordoned > 0) parts.push(`${cordoned} cordoned node(s) are excluded`)
+  const parts = [st('shared.k8sAllocatable.requested', { pct, nodes: open.length })]
+  if (unsized > 0) parts.push(st('shared.k8sAllocatable.unsized', { count: unsized }))
+  if (partial > 0) parts.push(st('shared.k8sAllocatable.partial', { count: partial }))
+  if (cordoned > 0) parts.push(st('shared.k8sAllocatable.cordoned', { count: cordoned }))
   if (r.unreadableNodes.length > 0) {
-    parts.push(`${r.unreadableNodes.length} node(s) could not be sized and are excluded`)
+    parts.push(st('shared.k8sAllocatable.unreadable', { count: r.unreadableNodes.length }))
   }
-  if (r.unplaced.length > 0) parts.push(`${r.unplaced.length} pod(s) are not scheduled anywhere`)
+  if (r.unplaced.length > 0) parts.push(st('shared.k8sAllocatable.unplaced', { count: r.unplaced.length }))
   return `${parts.join('. ')}.`
 }

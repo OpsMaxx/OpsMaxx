@@ -1,4 +1,5 @@
 import type { SudoersFileReading } from './sudoers'
+import { englishT, st } from './i18n'
 // Who can get into a host, and with which key — roadmap item 23, the read half.
 //
 // One `authorized_keys` file per user per host is the whole dataset, and no GUI
@@ -121,16 +122,27 @@ export const ACCESS_STATUSES: AccessStatus[] = [
  * only status a person can do something about immediately.
  */
 export const ACCESS_STATUS_HELP: Record<AccessStatus, string> = {
-  ok: 'Read successfully. An empty list here means empty, not "we could not look".',
-  partial:
-    'Some of it was read and some was not. The values shown are real; they are not the whole picture, and the accounts that could not be read are counted separately rather than being left out.',
-  absent: 'This server does not have the file that answers this, and that was checked rather than assumed.',
-  denied:
-    'It exists and this account was not allowed to read it. A different account, or passwordless sudo, would see more. This is NOT the same as there being nothing there.',
-  'no-tool': 'The program that answers this is not installed on this server.',
-  unsupported:
-    'This server cannot answer this question at all — not a permission problem and not a missing tool. Treat it as UNKNOWN, never as "none".',
-  unknown: 'The probe ran and its answer could not be read, or the collector never reported on it.'
+  get ok() {
+    return st('shared.access.statusHelp.ok')
+  },
+  get partial() {
+    return st('shared.access.statusHelp.partial')
+  },
+  get absent() {
+    return st('shared.access.statusHelp.absent')
+  },
+  get denied() {
+    return st('shared.access.statusHelp.denied')
+  },
+  get 'no-tool'() {
+    return st('shared.access.statusHelp.noTool')
+  },
+  get unsupported() {
+    return st('shared.access.statusHelp.unsupported')
+  },
+  get unknown() {
+    return st('shared.access.statusHelp.unknown')
+  }
 }
 
 /** The six things the collector reports on, each read independently. */
@@ -152,12 +164,24 @@ export const ACCESS_SOURCE_IDS: AccessSourceId[] = [
 ]
 
 export const ACCESS_SOURCE_LABEL: Record<AccessSourceId, string> = {
-  accounts: 'Accounts',
-  'authorized-keys': 'Authorized keys',
-  'sshd-config': 'sshd configuration',
-  'account-status': 'Password lock state',
-  sudoers: 'Administrative groups',
-  'last-login': 'Last login'
+  get accounts() {
+    return st('shared.access.sourceLabel.accounts')
+  },
+  get 'authorized-keys'() {
+    return st('shared.access.sourceLabel.authorizedKeys')
+  },
+  get 'sshd-config'() {
+    return st('shared.access.sourceLabel.sshdConfig')
+  },
+  get 'account-status'() {
+    return st('shared.access.sourceLabel.accountStatus')
+  },
+  get sudoers() {
+    return st('shared.access.sourceLabel.sudoers')
+  },
+  get 'last-login'() {
+    return st('shared.access.sourceLabel.lastLogin')
+  }
 }
 
 export interface AccessSourceReport {
@@ -177,7 +201,7 @@ export function accessSource(access: HostAccess, id: AccessSourceId): AccessSour
       id,
       label: ACCESS_SOURCE_LABEL[id],
       status: 'unknown',
-      detail: 'the collector did not report on this source'
+      detail: st('shared.access.source.notReported')
     }
   )
 }
@@ -241,17 +265,24 @@ export type KeyProblem =
   | 'certificate'
 
 export const KEY_PROBLEM_HELP: Record<KeyProblem, string> = {
-  malformed:
-    'This line is in the file and is not a key OpsMaxx can read. sshd may still accept it, so it is counted rather than hidden.',
-  'unknown-type':
-    'The key type on this line is not one this version of OpsMaxx knows. It is very likely valid — a newer algorithm — and it is NOT fingerprinted, so it will not match anything in the fleet view.',
-  'bad-base64': 'The key body on this line is not valid base64, so no fingerprint could be computed from it.',
-  'type-mismatch':
-    'The algorithm named at the start of the line is not the algorithm inside the key itself. sshd rejects lines like this; a person reading the file would not notice.',
-  truncated:
-    'This line was longer than the collector transmits and arrived cut short, so its fingerprint would be wrong. The line is reported and deliberately not fingerprinted.',
-  certificate:
-    'This line trusts a certificate, and the public key inside the certificate could not be read out of it. The certificate itself is deliberately not fingerprinted: that value is different for every certificate issued to the same key, so it would match nothing on any other server while looking like an answer.'
+  get malformed() {
+    return st('shared.access.keyProblemHelp.malformed')
+  },
+  get 'unknown-type'() {
+    return st('shared.access.keyProblemHelp.unknownType')
+  },
+  get 'bad-base64'() {
+    return st('shared.access.keyProblemHelp.badBase64')
+  },
+  get 'type-mismatch'() {
+    return st('shared.access.keyProblemHelp.typeMismatch')
+  },
+  get truncated() {
+    return st('shared.access.keyProblemHelp.truncated')
+  },
+  get certificate() {
+    return st('shared.access.keyProblemHelp.certificate')
+  }
 }
 
 /**
@@ -2084,37 +2115,27 @@ export function summariseAccess(access: HostAccess): AccessSummary {
   const uncertainty: string[] = []
   if (unread > 0) {
     uncertainty.push(
-      `${unread} of ${access.accounts.length} accounts could not be read, so any key they trust is not counted here`
+      st('shared.access.uncertainty.accountsUnread', { unread, total: access.accounts.length })
     )
   }
   if (access.authorizedKeysCommand !== null) {
-    uncertainty.push(
-      'sshd is configured with an AuthorizedKeysCommand, so it can accept keys that are not in any file on disk'
-    )
+    uncertainty.push(st('shared.access.uncertainty.authorizedKeysCommand'))
   }
   if (access.keyFileIsDefault === false) {
-    uncertainty.push(
-      'sshd is configured to read authorized keys from a path other than the default, which this collection does not read'
-    )
+    uncertainty.push(st('shared.access.uncertainty.keyFileNotDefault'))
   } else if (access.keyFileIsDefault === null) {
-    uncertainty.push(
-      'sshd’s AuthorizedKeysFile setting could not be determined, so it is not known whether this is where it looks'
-    )
+    uncertainty.push(st('shared.access.uncertainty.keyFileUnknown'))
   }
   // The narrower fact, and the one a reader most needs. `AuthorizedKeysFile
   // .ssh/authorized_keys2` names nothing outside the compiled-in default list,
   // so the clause above stays quiet — and every key on this screen is still a
   // key sshd does not look at.
   if (access.readsTheFileWeRead === false) {
-    uncertainty.push(
-      'sshd does not read .ssh/authorized_keys on this server, which is the file this collection read, so the keys listed here are not the keys it accepts'
-    )
+    uncertainty.push(st('shared.access.uncertainty.otherKeyFile'))
   }
   const legacy = access.accounts.filter((a) => a.hasLegacyKeyFile === true).map((a) => a.user)
   if (legacy.length > 0) {
-    uncertainty.push(
-      `${legacy.length} account${legacy.length === 1 ? ' has' : 's have'} a legacy .ssh/authorized_keys2 file, which sshd still reads and this collection does not`
-    )
+    uncertainty.push(st('shared.access.uncertainty.legacyKeyFile', { count: legacy.length }))
   }
   // "We could not look" is a different sentence from "it is there", and it has
   // to be one of these too: a key in a file sshd reads and this does not, on an
@@ -2123,20 +2144,18 @@ export function summariseAccess(access: HostAccess): AccessSummary {
   const legacyUnknown = access.accounts.filter((a) => a.hasLegacyKeyFile === null).map((a) => a.user)
   if (legacyUnknown.length > 0) {
     uncertainty.push(
-      `${legacyUnknown.length} account${legacyUnknown.length === 1 ? '' : 's'} could not be checked for a legacy .ssh/authorized_keys2 file, which sshd still reads and this collection does not`
+      st('shared.access.uncertainty.legacyKeyFileUnchecked', { count: legacyUnknown.length })
     )
   }
   if (unfingerprinted > 0) {
-    uncertainty.push(
-      `${unfingerprinted} line${unfingerprinted === 1 ? '' : 's'} in a file that was read could not be fingerprinted, so ${unfingerprinted === 1 ? 'it' : 'they'} cannot be matched against other servers`
-    )
+    uncertainty.push(st('shared.access.uncertainty.unfingerprinted', { count: unfingerprinted }))
   }
   // The one uncertainty that no amount of reading can remove. A cert-authority
   // line delegates trust to a signer, so the set of keys this host accepts is
   // not written down on this host — or on any other.
   if (certificateAuthorities > 0) {
     uncertainty.push(
-      `${certificateAuthorities} line${certificateAuthorities === 1 ? '' : 's'} trust${certificateAuthorities === 1 ? 's' : ''} a certificate authority, so this server also accepts every key that authority signs — including keys that do not exist yet and are in no file anywhere`
+      st('shared.access.uncertainty.certificateAuthorities', { count: certificateAuthorities })
     )
   }
 
@@ -2425,15 +2444,14 @@ export function accessToFacts(access: HostAccess): Record<string, string> {
  */
 export const ACCESS_WRITE_ENABLED = false
 
+// The notices below are plain strings fixed at import, so they are English:
+// main throws one, and a string constant cannot change language afterwards. A
+// screen that shows one in the user's language reads its key through `t()`.
+
 /** What the panel says beside the switch. It names the ONE unproven thing
  *  rather than gesturing at risk in general, because "this may be unsafe" is
  *  advice nobody can act on and "nobody has watched this work on RHEL 9" is. */
-export const ACCESS_WRITE_OPT_IN_NOTE =
-  'Adding and revoking keys is off by default. Every refusal and both rollbacks are built and ' +
-  'tested, and the change is staged behind a dead-man\u2019s switch on the server itself \u2014 but ' +
-  'nobody has yet watched that switch fire on a real RHEL 9 server with KillUserProcesses=yes, ' +
-  'which is the case it exists for. Turn this on only if you can afford to be locked out of the ' +
-  'server you point it at, and keep a second session open while you try it.'
+export const ACCESS_WRITE_OPT_IN_NOTE = englishT('shared.access.write.optInNote')
 
 /**
  * What the panel says where the button would be. One source of words, so the
@@ -2452,9 +2470,7 @@ export const ACCESS_WRITE_OPT_IN_NOTE =
  * If a reader who never expands the detail would be misled by this sentence
  * alone, then this sentence is wrong. It is not allowed to be merely shorter.
  */
-export const ACCESS_WRITE_DISABLED_SUMMARY =
-  'Changing authorized keys is not enabled in this build. Reading is unaffected \u2014 nothing on ' +
-  'this screen writes to any server.'
+export const ACCESS_WRITE_DISABLED_SUMMARY = englishT('shared.access.write.disabledSummary')
 
 /**
  * What to say when the only thing stopping a revocation is the operator's own
@@ -2472,20 +2488,12 @@ export const ACCESS_WRITE_DISABLED_SUMMARY =
  * turned it on, which is a different statement from "this release cannot do
  * it", on a repo where such claims get checked.
  */
-export const ACCESS_WRITE_OFF_SUMMARY =
-  'Revoking keys is switched off. Turn on \u201cAllow adding and revoking keys on servers\u201d in ' +
-  'Settings to use it. Nothing on this screen writes to any server until you do.'
+export const ACCESS_WRITE_OFF_SUMMARY = englishT('shared.access.write.offSummary')
 
 /** The bridge is a fact about this install, not a decision anybody made. */
-export const ACCESS_WRITE_STALE_BRIDGE =
-  'Restart OpsMaxx to revoke keys \u2014 this window is newer than the process behind it. Reading ' +
-  'is unaffected.'
+export const ACCESS_WRITE_STALE_BRIDGE = englishT('shared.access.write.staleBridge')
 
-export const ACCESS_WRITE_DISABLED_REASON =
-  'Changing authorized keys is not enabled in this build. The safety net behind it — the server ' +
-  'restoring its own previous file if nothing confirms the change — is not yet dependable, and a ' +
-  'rollback that cannot be relied on is worse than no rollback at all, because it tells you that ' +
-  'you are safe. Reading is unaffected: nothing on this screen writes to any server.'
+export const ACCESS_WRITE_DISABLED_REASON = englishT('shared.access.write.disabledReason')
 
 /**
  * What the write half will and will not be able to do when it is switched back
@@ -2499,13 +2507,7 @@ export const ACCESS_WRITE_DISABLED_REASON =
  * sshd will say which key the session is authenticated with, which is off by
  * default.
  */
-export const ACCESS_WRITE_SCOPE =
-  'Even once it is enabled it will only ever edit ~/.ssh/authorized_keys for the account ' +
-  'OpsMaxx connects as on each server — not another account\u2019s file, and not any path sshd was ' +
-  'configured to read instead. On the account it connects as it also needs the server to report ' +
-  'which key this session authenticated with (sshd\u2019s ExposeAuthInfo, off by default); without ' +
-  'that it refuses, because nothing can prove the key being removed is not the one holding the ' +
-  'connection open.'
+export const ACCESS_WRITE_SCOPE = englishT('shared.access.write.scope')
 
 /** How long the host waits for a disarm before putting the old file back.
  *

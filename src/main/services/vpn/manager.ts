@@ -34,6 +34,7 @@ import {
 } from './dependencies'
 import type { ResolvedVpnSecrets, VpnDriverContext } from './driver'
 import { driverFor, allDrivers } from './drivers'
+import { mt } from '../locale'
 import { toVpnResult, VpnError } from './errors'
 import { registerVpnManager } from './managerApi'
 import { elevatorForPlatform } from './elevation'
@@ -573,22 +574,21 @@ export async function vpnDiagnose(
   target: VpnDiagnoseTarget
 ): Promise<VpnDiagnoseResult | VpnDiagnoseRefusal> {
   const profile = live.get(id)?.profile ?? vpnProfile(id)
-  if (!profile) return { id, unsupported: 'There is no such VPN profile.' }
+  if (!profile) return { id, unsupported: mt('main.vpn.diagnose.noProfile') }
   const driver = driverFor(profile.spec.kind)
   if (!driver.diagnose) {
     return {
       id,
-      unsupported:
-        'This engine cannot be probed from inside its own tunnel. Only WireGuard in userspace mode runs its network stack in this process; anything else would have to leave the tunnel to answer, which measures a different route.'
+      unsupported: mt('main.vpn.diagnose.notProbeable')
     }
   }
   try {
     const res = await driver.diagnose(profile as never, target)
     if (res) return { ...res, checks: [...res.checks, await ipv6Row(profile)] }
-    return { id, unsupported: 'This VPN is not running, so nothing was sent.' }
+    return { id, unsupported: mt('main.vpn.diagnose.notRunning') }
   } catch (e) {
     const r = toVpnResult(e)
-    return { id, unsupported: r.error ?? 'The probe could not be run.' }
+    return { id, unsupported: r.error ?? mt('main.vpn.diagnose.probeFailed') }
   }
 }
 

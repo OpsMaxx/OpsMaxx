@@ -19,6 +19,8 @@
  * be the one thing keeping it in the keychain is meant to prevent.
  */
 
+import { st } from './i18n'
+
 /** What a grant is for, worked out from its id by the module that owns the id
  *  scheme. `other` is honest rather than a fallback: a future kind shows up as
  *  its raw id instead of being described wrongly. */
@@ -66,13 +68,7 @@ export interface MachineGrantView {
 }
 
 /** Every row says this, once, at the top of the section. */
-export const MACHINE_GRANT_MEANING =
-  'Each of these is readable by anything running as you on this machine, without your ' +
-  'master password. That is exactly what lets the work below happen while you are not here, ' +
-  'and it is the reason to check the list.'
-
-const BACKUP_BUNDLE_WARNING =
-  'Bundles already written with it can only be opened with it, so keep a copy somewhere this machine is not.'
+export const machineGrantMeaning = (): string => st('shared.machineGrants.meaning')
 
 export function machineGrantView(
   grant: MachineGrant,
@@ -87,22 +83,22 @@ export function machineGrantView(
         id,
         grantedAt,
         orphaned: true,
-        title: `Backup passphrase for a destination that no longer exists (${subject.destinationId})`,
-        consequence: `Nothing runs with this any more — the destination it was made for is gone. Revoking removes it from this machine. ${BACKUP_BUNDLE_WARNING}`
+        title: st('shared.machineGrants.orphanTitle', { id: subject.destinationId }),
+        consequence: st('shared.machineGrants.orphanConsequence')
       }
     }
     return {
       id,
       grantedAt,
       orphaned: false,
-      title: `Backup passphrase for “${dest.name}”`,
-      consequence: `Revoke this and the next scheduled run of “${dest.name}” stops, reporting that no passphrase is stored, until you store another one or move the destination back to a vault entry — which means unlocking the vault after every restart. ${BACKUP_BUNDLE_WARNING}`,
+      title: st('shared.machineGrants.backupTitle', { name: dest.name }),
+      consequence: st('shared.machineGrants.backupConsequence', { name: dest.name }),
       // Not an orphan — the destination is live — but the grant is idle, and an
       // idle authorisation is still an authorisation.
       note:
         dest.passphraseSource === 'machine'
           ? undefined
-          : `“${dest.name}” is set to take its passphrase from the vault, so this one is not being used by anything.`
+          : st('shared.machineGrants.backupIdleNote', { name: dest.name })
     }
   }
 
@@ -110,23 +106,23 @@ export function machineGrantView(
     // No list of addy accounts is kept on disk — the session holds one in
     // memory once a device attaches — so this row cannot say whether the
     // account still exists, and does not pretend to.
-    const what =
-      subject.secretKind === 'account'
-        ? 'account key'
-        : subject.secretKind === 'root'
-          ? 'root key'
-          : 'device key'
+    const account = subject.accountId || st('shared.machineGrants.unknownAccount')
     return {
       id,
       grantedAt,
       orphaned: false,
-      title: `addy ${what} for account ${subject.accountId || 'unknown'}`,
+      title:
+        subject.secretKind === 'account'
+          ? st('shared.machineGrants.addyAccountTitle', { account })
+          : subject.secretKind === 'root'
+            ? st('shared.machineGrants.addyRootTitle', { account })
+            : st('shared.machineGrants.addyDeviceTitle', { account }),
       consequence:
         subject.secretKind === 'device'
-          ? 'Revoke this and this device is no longer the device that account knows. A device key deliberately cannot be restored — the machine has to pair again and gets a new entry in the device list.'
+          ? st('shared.machineGrants.addyDeviceConsequence')
           : subject.secretKind === 'account'
-            ? 'Revoke this and this device can no longer read what the account has synced until it pairs again, which re-delivers the key.'
-            : 'Revoke this and this device can no longer authorise an epoch change. The twelve-word recovery phrase brings it back.'
+            ? st('shared.machineGrants.addyAccountConsequence')
+            : st('shared.machineGrants.addyRootConsequence')
     }
   }
 
@@ -135,7 +131,6 @@ export function machineGrantView(
     grantedAt,
     orphaned: false,
     title: id,
-    consequence:
-      'OpsMaxx cannot say what holds this id, so it cannot say what stops. Revoke it only if you know what put it here.'
+    consequence: st('shared.machineGrants.otherConsequence')
   }
 }

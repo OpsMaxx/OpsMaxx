@@ -4,6 +4,7 @@ import { writeFileSync } from 'node:fs'
 import { diagnosticsText } from './diagnostics'
 import type { DiagnosticsProbes } from './diagnostics'
 import { debugStatus, readDebugTrace } from './debugLog'
+import { mt } from './locale'
 import type { DebugBundle, ReportOs, SaveResult } from '../../shared/debug'
 
 // The report a bug reporter attaches: what this install IS, from
@@ -90,9 +91,9 @@ export async function saveDebugBundle(text: string): Promise<SaveResult> {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const stamp = new Date().toISOString().slice(0, 10)
   const chosen = await dialog.showSaveDialog(win, {
-    title: 'Save OpsMaxx bug report',
+    title: mt('main.debugBundle.saveDialogTitle'),
     defaultPath: join(app.getPath('downloads'), `opsmaxx-bug-report-${stamp}.txt`),
-    filters: [{ name: 'Text', extensions: ['txt'] }]
+    filters: [{ name: mt('main.debugBundle.textFiles'), extensions: ['txt'] }]
   })
   if (chosen.canceled || !chosen.filePath) return { ok: false, cancelled: true }
   try {

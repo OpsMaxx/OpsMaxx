@@ -69,7 +69,8 @@ import {
   parseLocalConnect,
   syncLocalTerminalEnabled
 } from './services/localGate'
-import { currentLocale, mt, syncLanguage } from './services/locale'
+import { currentLocale, installIpcErrorLocalization, mt, syncLanguage } from './services/locale'
+import { LocalizedError } from '../shared/i18n'
 import {
   sftpConnect,
   sftpList,
@@ -160,7 +161,6 @@ import type {
 } from '../shared/access'
 import {
   ACCESS_ROLLBACK_SECONDS,
-  ACCESS_WRITE_DISABLED_REASON,
   planAccessChange
 } from '../shared/access'
 import { isAccessWriteEnabled, syncAccessWriteEnabled } from './services/accessWriteGate'
@@ -410,7 +410,7 @@ import type { ApplyOptions as ProvisionApplyOptions } from './services/provision
 import type { BitwardenSource } from './services/import/bitwarden'
 import type { AgentDecision, SshAgentSettings } from '../shared/sshAgentHost'
 import { databaseDumpTarget, dumpableDatabases, registerAddyTarget } from './services/backupTargets'
-import { BACKUP_STAGE_LABEL } from '../shared/backup'
+import { BACKUP_STAGE_KEY } from '../shared/backup'
 import type { BackupDestination, BackupRunReport, DumpRunReport } from '../shared/backup'
 import {
   checkForUpdates,
@@ -571,6 +571,9 @@ import { forgetSession as forgetOAuthSession, listPendingConsents, approveConsen
 // because moving a handler into a feature module is how it would quietly stop
 // being true. services/debugLog.ts has the rest of the reasoning, including why
 // the arguments are never recorded.
+// Before the debug tap: installed second, the tap sits nearer each handler and
+// records an error as English, before this one translates it for the screen.
+installIpcErrorLocalization()
 installIpcDebugTap()
 
 // The screenshot demo, and only in a development build. `import.meta.env.DEV`
@@ -972,7 +975,7 @@ ipcMain.handle('dialog:openKey', async (_e, title?: unknown) => {
   const result = await dialog.showOpenDialog(mainWindow, {
     // The same picker also finds a certificate for Certificate auth. Only the
     // wording changes; a string from the renderer cannot widen what it opens.
-    title: typeof title === 'string' && title.length <= 80 ? title : 'Select private key',
+    title: typeof title === 'string' && title.length <= 80 ? title : mt('main.dialog.selectPrivateKey'),
     // ~/.ssh is where keys actually live and the picker will not show a hidden
     // folder unless it opens there, so landing anywhere else means the user
     // has to type the path they came here to avoid typing.
@@ -981,8 +984,8 @@ ipcMain.handle('dialog:openKey', async (_e, title?: unknown) => {
     // All files first: OpenSSH keys usually have no extension at all
     // (id_ed25519, or any bare filename), and an extension filter hides them.
     filters: [
-      { name: 'All files', extensions: ['*'] },
-      { name: 'Private keys', extensions: ['pem', 'key', 'ppk'] }
+      { name: mt('main.dialog.filterAllFiles'), extensions: ['*'] },
+      { name: mt('main.dialog.filterPrivateKeys'), extensions: ['pem', 'key', 'ppk'] }
     ]
   })
   return result.canceled ? null : result.filePaths[0] ?? null
@@ -1009,12 +1012,12 @@ ipcMain.handle('dialog:openKey', async (_e, title?: unknown) => {
 ipcMain.handle('dialog:openKeyMaterial', async (): Promise<{ path: string; material: string | null } | null> => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select private key',
+    title: mt('main.dialog.selectPrivateKey'),
     defaultPath: sshDir(),
     properties: ['openFile', 'showHiddenFiles'],
     filters: [
-      { name: 'All files', extensions: ['*'] },
-      { name: 'Private keys', extensions: ['pem', 'key', 'ppk'] }
+      { name: mt('main.dialog.filterAllFiles'), extensions: ['*'] },
+      { name: mt('main.dialog.filterPrivateKeys'), extensions: ['pem', 'key', 'ppk'] }
     ]
   })
   const path = result.canceled ? null : result.filePaths[0] ?? null
@@ -1038,7 +1041,7 @@ ipcMain.handle('ssh:keyMaterial', (_e, fileName: unknown) =>
 ipcMain.handle('dialog:saveJson', async (_e, suggestedName: string, contents: string) => {
   if (!mainWindow) return false
   const chosen = await dialog.showSaveDialog(mainWindow, {
-    title: 'Export',
+    title: mt('main.dialog.export'),
     defaultPath: suggestedName,
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
@@ -1050,7 +1053,7 @@ ipcMain.handle('dialog:saveJson', async (_e, suggestedName: string, contents: st
 ipcMain.handle('dialog:openJson', async () => {
   if (!mainWindow) return null
   const chosen = await dialog.showOpenDialog(mainWindow, {
-    title: 'Import',
+    title: mt('main.dialog.import'),
     properties: ['openFile'],
     filters: [{ name: 'JSON', extensions: ['json'] }]
   })
@@ -1076,11 +1079,11 @@ ipcMain.handle('dialog:openJson', async () => {
 ipcMain.handle('dialog:openScheme', async () => {
   if (!mainWindow) return null
   const chosen = await dialog.showOpenDialog(mainWindow, {
-    title: 'Import a colour scheme',
+    title: mt('main.dialog.importColourScheme'),
     properties: ['openFile'],
     filters: [
-      { name: 'Colour schemes', extensions: ['itermcolors', 'json', 'txt'] },
-      { name: 'All files', extensions: ['*'] }
+      { name: mt('main.dialog.filterColourSchemes'), extensions: ['itermcolors', 'json', 'txt'] },
+      { name: mt('main.dialog.filterAllFiles'), extensions: ['*'] }
     ]
   })
   const path = chosen.canceled ? null : chosen.filePaths[0] ?? null
@@ -1095,8 +1098,8 @@ ipcMain.handle('dialog:openScheme', async () => {
 ipcMain.handle('dialog:openUpload', async () => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Select files to upload',
-    buttonLabel: 'Upload',
+    title: mt('main.dialog.selectUpload'),
+    buttonLabel: mt('main.dialog.upload'),
     properties: ['openFile', 'multiSelections', 'showHiddenFiles']
   })
   return result.canceled ? null : result.filePaths
@@ -1117,8 +1120,8 @@ const downloadDirs = new Set<string>()
 ipcMain.handle('dialog:pickDownloadFolder', async () => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Choose a folder to save into',
-    buttonLabel: 'Save here',
+    title: mt('main.dialog.chooseDownloadFolder'),
+    buttonLabel: mt('main.dialog.saveHere'),
     properties: ['openDirectory', 'createDirectory']
   })
   const dir = result.canceled ? undefined : result.filePaths[0]
@@ -1216,7 +1219,7 @@ async function cloudReply<T>(run: () => Promise<T>): Promise<CloudReply<T>> {
     return { ok: true, value: await run() }
   } catch (e) {
     if (isCloudError(e)) {
-      return { ok: false, fault: e.fault, error: describeCloudFault(e.fault, e.detail) }
+      return { ok: false, fault: e.fault, error: describeCloudFault(e.fault, e.detail, mt) }
     }
     const message = e instanceof Error ? e.message : String(e)
     return { ok: false, fault: 'unknown', error: message }
@@ -1357,8 +1360,8 @@ onMountsChanged((serverId, view) => {
 ipcMain.handle('mounts:pick-folder', async () => {
   if (!mainWindow) return null
   const result = await dialog.showOpenDialog(mainWindow, {
-    title: 'Choose a folder to mount on the server',
-    buttonLabel: 'Choose folder',
+    title: mt('main.dialog.chooseMountFolder'),
+    buttonLabel: mt('main.dialog.chooseFolder'),
     properties: ['openDirectory']
   })
   return result.canceled ? null : (result.filePaths[0] ?? null)
@@ -2780,8 +2783,8 @@ ipcMain.handle('access:plan', (_e, req: Omit<AccessRunRequest, 'token' | 'confir
   // Here rather than only in the renderer because the renderer hiding a button
   // is a courtesy and this is the boundary: it covers a renderer that lies
   // about what it can do, a resumed job, and whatever calls this next.
-  if (!isAccessWriteEnabled()) throw new Error(ACCESS_WRITE_DISABLED_REASON)
-  if (!accessModuleOn) throw new Error('Key and access management is switched off in Settings.')
+  if (!isAccessWriteEnabled()) throw new LocalizedError('shared.access.write.disabledReason')
+  if (!accessModuleOn) throw new LocalizedError('main.access.moduleOff')
   const now = Date.now()
   const { plan, refusals } = deriveAccessPlan(req, now)
   return {
@@ -2809,17 +2812,15 @@ ipcMain.handle('access:run', async (_e, req: AccessRunRequest): Promise<AccessRu
   // The same gate, first, and not merely because `access:plan` already has one:
   // a caller that never asked for a plan can reach this channel directly, and
   // this is the one that writes.
-  if (!isAccessWriteEnabled()) throw new Error(ACCESS_WRITE_DISABLED_REASON)
-  if (!accessModuleOn) throw new Error('Key and access management is switched off in Settings.')
+  if (!isAccessWriteEnabled()) throw new LocalizedError('shared.access.write.disabledReason')
+  if (!accessModuleOn) throw new LocalizedError('main.access.moduleOff')
 
   const at = Number(req.token)
   if (!Number.isFinite(at) || !/^\d{10,16}$/.test(req.token)) {
-    throw new Error('This change was not started: its plan could not be identified.')
+    throw new LocalizedError('main.access.planUnidentified')
   }
   if (Date.now() - at > ACCESS_PREVIEW_MAX_AGE_MS) {
-    throw new Error(
-      'This change was not started: the plan it was confirmed against is more than ten minutes old, and the estate may have changed since. Look at it again.'
-    )
+    throw new LocalizedError('main.access.planStale')
   }
 
   const { plan, refusals } = deriveAccessPlan(req, at)
@@ -2844,9 +2845,7 @@ ipcMain.handle('access:run', async (_e, req: AccessRunRequest): Promise<AccessRu
     })
     // Not a warning and not a retry. What was agreed to is not what this would
     // run, and there is no version of that worth resolving automatically.
-    throw new Error(
-      'This change was not started: what would run on the servers is not what was confirmed. The collection has changed since the plan was shown, so look at it again.'
-    )
+    throw new LocalizedError('main.access.planMismatch')
   }
 
   // The row that says this ran. A key revoke is the most consequential write
@@ -3008,7 +3007,7 @@ ipcMain.handle('broadcast:run', async (_e, req: BroadcastRequest) => {
   }
   if (!verdict.ok) {
     recordJobApproval({ ...logRow, event: 'refused', reason: verdict.reason })
-    throw new Error(`This broadcast was not started: ${verdict.reason}`)
+    throw new LocalizedError('main.broadcast.refused', { reason: verdict.reason })
   }
   recordJobApproval({ ...logRow, event: 'granted' })
   // Secrets are resolved per host inside exec, not carried in the request, for
@@ -3410,11 +3409,7 @@ ipcMain.handle('jobs:run', async (_e, req: JobRunRequest) => {
      * on.
      */
     const why = historyDisabledReason()
-    throw new Error(
-      `Jobs need the history store, which is not open on this machine.${
-        why ? ` ${why}` : ''
-      } Run this as a broadcast instead, which needs no store.`
-    )
+    throw why ? new LocalizedError('main.jobs.noHistoryWhy', { reason: why }) : new LocalizedError('main.jobs.noHistory')
   }
   return jobRunner.run(req)
 })
@@ -4912,8 +4907,8 @@ function notifyApprovalPending(request: ApprovalRequest): boolean {
   }
   if (!Notification.isSupported()) return surfaced
   const n = new Notification({
-    title: `${request.agentName} needs approval`,
-    body: `${request.action}\non ${approvalTarget(request)}`,
+    title: mt('main.approval.notifyTitle', { agent: request.agentName }),
+    body: mt('main.approval.notifyBody', { action: request.action, target: approvalTarget(request, mt) }),
     icon: appIcon()
   })
   n.on('click', () => {
@@ -5080,7 +5075,7 @@ ipcMain.handle('addy:confirmHeld', (_e, kind: unknown, id: unknown) => {
 // than reachable from a renderer that asks for it.
 ipcMain.handle('addy:rotate', (_e, kind: unknown, mnemonic?: string) => {
   if (kind !== 'revocation') {
-    throw new Error('Only a re-key with the recovery phrase can be started from here.')
+    throw new LocalizedError('main.addy.rotateRevocationOnly')
   }
   return addySession.rotateEpoch('revocation', mnemonic)
 })
@@ -5184,10 +5179,10 @@ addySession.watch((snapshot) => {
 addySession.onDeviceAdded((d) => {
   if (!Notification.isSupported()) return
   const n = new Notification({
-    title: d.addedWithPhrase ? 'A device was added with your recovery phrase' : 'A new device was added',
+    title: d.addedWithPhrase ? mt('main.addy.deviceAddedWithPhraseTitle') : mt('main.addy.deviceAddedTitle'),
     body: d.addedWithPhrase
-      ? `“${d.label}” can now read everything you sync. If this was not you, your recovery phrase is exposed: remove it in Sync & devices and change the account key.`
-      : `“${d.label}” can now read everything you sync. If you do not recognise it, remove it in Sync & devices.`,
+      ? mt('main.addy.deviceAddedWithPhraseBody', { label: d.label })
+      : mt('main.addy.deviceAddedBody', { label: d.label }),
     icon: appIcon()
   })
   n.on('click', () => {
@@ -5295,8 +5290,8 @@ export function updateClipboardShortcuts(wanted: boolean): void {
     !globalShortcut.register(CLIPBOARD_SHORTCUTS.send, () => {
       void addySession.sendClipboard().then((r) => {
         notifyClipboard(
-          r.sent > 0 ? 'Clipboard sent' : 'Nothing sent',
-          r.skipped ?? `to ${r.sent} device${r.sent === 1 ? '' : 's'}`
+          r.sent > 0 ? mt('main.clipboard.sent') : mt('main.clipboard.nothingSent'),
+          r.skipped ?? mt('main.clipboard.sentTo', { count: r.sent })
         )
       })
     })
@@ -5307,8 +5302,8 @@ export function updateClipboardShortcuts(wanted: boolean): void {
     !globalShortcut.register(CLIPBOARD_SHORTCUTS.receive, () => {
       void addySession.receiveClipboard().then((r) => {
         notifyClipboard(
-          r.applied ? 'Clipboard received' : 'Nothing to receive',
-          r.reason ?? 'ready to paste'
+          r.applied ? mt('main.clipboard.received') : mt('main.clipboard.nothingToReceive'),
+          r.reason ?? mt('main.clipboard.readyToPaste')
         )
       })
     })
@@ -5537,7 +5532,7 @@ ipcMain.handle('http:chooseSpecFile', (e) => chooseSpecFile(BrowserWindow.fromWe
 ipcMain.handle('backup:chooseDirectory', async () => {
   const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const chosen = await dialog.showOpenDialog(win, {
-    title: 'Choose a folder for backups',
+    title: mt('main.dialog.chooseBackupFolder'),
     properties: ['openDirectory', 'createDirectory']
   })
   return chosen.canceled ? null : (chosen.filePaths[0] ?? null)
@@ -6797,8 +6792,11 @@ app.whenReady().then(() => {
     onNewFailure: (report) => {
       if (!Notification.isSupported()) return
       const n = new Notification({
-        title: `Backup to ${report.destinationName} failed`,
-        body: `${report.failedStage ? BACKUP_STAGE_LABEL[report.failedStage] : 'the run'}: ${report.error ?? 'no reason given'}`,
+        title: mt('main.backupNotify.failedTitle', { name: report.destinationName }),
+        body: mt('main.backupNotify.failedBody', {
+          stage: mt(report.failedStage ? BACKUP_STAGE_KEY[report.failedStage] : 'main.backupNotify.theRun'),
+          error: report.error ?? mt('main.backupNotify.noReason')
+        }),
         icon: appIcon()
       })
       n.on('click', () => {
@@ -6822,7 +6820,7 @@ app.whenReady().then(() => {
       notifyRenderer('backup:skipped', info)
       if (!Notification.isSupported()) return
       const n = new Notification({
-        title: `Backup to ${info.destinationName} was not run`,
+        title: mt('main.backupNotify.skippedTitle', { name: info.destinationName }),
         body: info.reason,
         icon: appIcon()
       })

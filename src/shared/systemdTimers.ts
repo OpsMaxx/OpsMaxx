@@ -44,6 +44,8 @@
 // state. Reading only the timer answers "is it scheduled" when the question is
 // "is it working".
 
+import { st } from './i18n'
+
 export const TIMER_MARKERS = {
   list: '===SP-TIMER-LIST===',
   timer: '===SP-TIMER-UNIT===',
@@ -190,7 +192,7 @@ export function timerHealth(i: TimerHealthInput): TimerHealth {
   const lastRunMs = i.row?.lastMs ?? null
   const nextRunMs = i.row?.nextMs ?? null
   const base = { lastRunMs, nextRunMs }
-  const name = i.timer.Id ?? 'this timer'
+  const name = i.timer.Id ?? st('shared.systemdTimers.thisTimer')
 
   if (i.timer.LoadState === 'not-found') {
     return {
@@ -198,37 +200,40 @@ export function timerHealth(i: TimerHealthInput): TimerHealth {
       verdict: 'absent',
       // NOT "no renewals are failing". The unit is not installed, and the
       // `Result=success` beside it is systemd answering about nothing.
-      detail: `${name} is not installed on this host, so nothing is scheduled. systemd reports success for a unit it does not have, which is not the same as a job that worked.`
+      detail: st('shared.systemdTimers.absent', { name })
     }
   }
   if (i.timer.LoadState === undefined || i.timer.LoadState === '') {
-    return { ...base, verdict: 'unknown', detail: `${name} could not be read.` }
+    return { ...base, verdict: 'unknown', detail: st('shared.systemdTimers.unreadable', { name }) }
   }
   if (i.timer.ActiveState !== 'active') {
     return {
       ...base,
       verdict: 'inactive',
-      detail: `${name} is installed but not active, so it will not fire. Whatever it runs is not being run on a schedule.`
+      detail: st('shared.systemdTimers.inactive', { name })
     }
   }
 
-  const svcName = i.service.Id ?? 'the service it activates'
+  const svcName = i.service.Id ?? st('shared.systemdTimers.itsService')
   if (i.service.LoadState === 'not-found') {
     return {
       ...base,
       verdict: 'failing',
-      detail: `${name} is active, but ${svcName} is not installed, so every run fails with nothing to start.`
+      detail: st('shared.systemdTimers.serviceMissing', { name, service: svcName })
     }
   }
   // Finding 5: `inactive` on a SERVICE is the normal end state of a oneshot and
   // is not consulted. What matters is how it last ended.
   if (i.service.ActiveState === 'failed' || (i.service.Result ?? 'success') !== 'success') {
     const code = i.service.ExecMainStatus
-    const why = i.service.Result ?? 'unknown'
+    const why = i.service.Result ?? st('shared.systemdTimers.unknownResult')
     return {
       ...base,
       verdict: 'failing',
-      detail: `${name} is firing, but ${svcName} last ended in failure (${why}${code !== undefined && code !== '' ? `, exit ${code}` : ''}). A timer that runs a job that fails is not a job that is getting done.`
+      detail:
+        code !== undefined && code !== ''
+          ? st('shared.systemdTimers.failingWithCode', { name, service: svcName, why, code })
+          : st('shared.systemdTimers.failing', { name, service: svcName, why })
     }
   }
   if (lastRunMs === null) {
@@ -236,26 +241,29 @@ export function timerHealth(i: TimerHealthInput): TimerHealth {
       ...base,
       verdict: 'never-run',
       // Zero is never, and never is not "56 years ago".
-      detail: `${name} is active but has never run. It is scheduled${nextRunMs === null ? ', though nothing is currently scheduled to fire' : ''}.`
+      detail:
+        nextRunMs === null
+          ? st('shared.systemdTimers.neverRunUnscheduled', { name })
+          : st('shared.systemdTimers.neverRun', { name })
     }
   }
   return {
     ...base,
     verdict: 'ok',
-    detail: `${name} is active, last ran ${describeAge(i.nowMs - lastRunMs)}, and ${svcName} finished successfully.`
+    detail: st('shared.systemdTimers.ok', { name, age: describeAge(i.nowMs - lastRunMs), service: svcName })
   }
 }
 
 /** Rounded to something a person reads. Never a bare millisecond count. */
 export function describeAge(ms: number): string {
-  if (ms < 0) return 'in the future, which means a clock moved'
+  if (ms < 0) return st('shared.systemdTimers.age.future')
   const s = Math.round(ms / 1000)
-  if (s < 90) return `${s} second(s) ago`
+  if (s < 90) return st('shared.systemdTimers.age.seconds', { n: s })
   const m = Math.round(s / 60)
-  if (m < 90) return `${m} minute(s) ago`
+  if (m < 90) return st('shared.systemdTimers.age.minutes', { n: m })
   const h = Math.round(m / 60)
-  if (h < 48) return `${h} hour(s) ago`
-  return `${Math.round(h / 24)} day(s) ago`
+  if (h < 48) return st('shared.systemdTimers.age.hours', { n: h })
+  return st('shared.systemdTimers.age.days', { n: Math.round(h / 24) })
 }
 
 /**

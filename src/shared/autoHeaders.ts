@@ -2,6 +2,7 @@
 
 import type { Auth, HttpRequest } from './apiModel'
 import { methodAllowsBody } from './httpClient'
+import { st } from './i18n'
 
 export interface AutoHeader {
   name: string
@@ -21,11 +22,11 @@ const CONTENT_TYPES: Record<string, string> = {
 
 function hostOf(url: string): string {
   const m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(url.trim()) ?? /^([^/?#]*)/.exec(url.trim())
-  return (m?.[1] ?? '').replace(/^[^@]*@/, '') || '<from the URL>'
+  return (m?.[1] ?? '').replace(/^[^@]*@/, '') || st('shared.autoHeaders.hostFromUrl')
 }
 
 function authHeader(auth: Auth): AutoHeader | null {
-  const reason = 'From the Auth tab'
+  const reason = st('shared.autoHeaders.fromAuthTab')
   switch (auth.type) {
     case 'bearer':
       return { name: 'Authorization', value: 'Bearer •••', reason, overridable: true }
@@ -54,7 +55,7 @@ export function autoHeadersFor(
     {
       name: 'User-Agent',
       value: `OpsMaxx/${ctx.version}`,
-      reason: 'OpsMaxx names itself unless you set User-Agent',
+      reason: st('shared.autoHeaders.userAgent'),
       overridable: true
     }
   ]
@@ -63,22 +64,27 @@ export function autoHeadersFor(
     out.push({
       name: 'Content-Type',
       value: CONTENT_TYPES[req.body.mode],
-      reason: 'Set from the body type',
+      reason: st('shared.autoHeaders.contentType'),
       overridable: true
     })
     out.push({
       name: 'Content-Length',
-      value: '<computed when sent>',
-      reason: 'Measured from the body; it has to match what is on the wire',
+      value: st('shared.autoHeaders.computedWhenSent'),
+      reason: st('shared.autoHeaders.contentLength'),
       overridable: false
     })
   }
-  out.push({ name: 'Host', value: hostOf(req.url), reason: 'Set by the connection', overridable: false })
+  out.push({ name: 'Host', value: hostOf(req.url), reason: st('shared.autoHeaders.host'), overridable: false })
   if (ctx.hasCookies) {
-    out.push({ name: 'Cookie', value: '<from the cookie jar>', reason: 'Cookies this route received earlier', overridable: true })
+    out.push({
+      name: 'Cookie',
+      value: st('shared.autoHeaders.fromCookieJar'),
+      reason: st('shared.autoHeaders.cookie'),
+      overridable: true
+    })
   }
   const auth = authHeader(req.auth.type === 'inherit' ? (ctx.inheritedAuth ?? { type: 'none' }) : req.auth)
-  if (auth) out.push(req.auth.type === 'inherit' ? { ...auth, reason: 'Inherited from the collection' } : auth)
+  if (auth) out.push(req.auth.type === 'inherit' ? { ...auth, reason: st('shared.autoHeaders.inherited') } : auth)
   return out
 }
 
