@@ -58,6 +58,24 @@ export function brandBanner(): string {
   return `\x1b[1;38;2;${r};${g};${b}mOpsMaxx\x1b[0m`
 }
 
+/**
+ * Undo whatever modes the previous session's programs left switched on.
+ *
+ * A reconnect reuses the terminal, and a session that dies under a TUI — the
+ * laptop slept, the vault locked — never gets to send the TUI's own teardown.
+ * Mouse tracking was the visible one: xterm kept reporting every mouse move as
+ * `ESC[<35;col;rowM`, the fresh shell's line editor ate the `ESC[<` and typed
+ * the rest, and the line filled with `35;90;36M35;90;35M…` until the tab was
+ * closed. The same leftovers hid the cursor, kept the alternate screen (no
+ * scrollback), and left focus reports and application cursor keys on.
+ *
+ * DECSTR covers cursor, attributes, scroll region, keypad, cursor keys,
+ * bracketed paste and focus reporting, but not mouse tracking or the alternate
+ * screen, so those are reset by name. 1047 rather than 1049: 1049 restores a
+ * saved cursor, which on the normal screen moves it up over the scrollback.
+ */
+export const RESET_STALE_MODES = '\x1b[!p\x1b[?1047l\x1b[?9;1000;1002;1003;1006;1016l'
+
 export function themeFromCss(
   schemeId?: string,
   custom?: TerminalScheme[]
@@ -622,7 +640,7 @@ export function useTerminalSession(
     sessionRef.current = sessionId
     setOnline(false)
 
-    if (generation > 0) term.writeln('')
+    if (generation > 0) term.write(RESET_STALE_MODES + '\r\n')
     term.writeln(brandBanner())
     term.writeln(
       t('hooks.terminalSession.connecting', {
@@ -659,6 +677,9 @@ export function useTerminalSession(
       }
     })
     const offClose = transport.onClose(sessionId, (why) => {
+      // Reset here too, or the notice lands on a dead TUI's alternate screen
+      // and the reconnect's reset switches it out of sight.
+      term.write(RESET_STALE_MODES)
       term.writeln(
         `\r\n\x1b[90m[${why ? t('hooks.terminalSession.closedLineWhy', { why }) : t('hooks.terminalSession.closedLine')}]\x1b[0m`
       )
