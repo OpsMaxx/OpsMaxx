@@ -49,16 +49,24 @@ func genKeypair(t *testing.T) (privB64, pubB64 string) {
 		base64.StdEncoding.EncodeToString(pub)
 }
 
-// freeUDPPort asks the OS for a port and gives it straight back. Racy in
-// principle; in practice nothing else claims it inside one test binary.
-func freeUDPPort(t *testing.T) int {
+// listenPort reads back the port a device actually bound. The server is
+// started with no listen_port, so the kernel chooses a free one at bind time;
+// probing for a "free" port first and handing it over left a gap in which
+// something else on a busy CI runner took it ("bind: address already in use").
+func listenPort(t *testing.T, tun *Tunnel) int {
 	t.Helper()
-	c, err := net.ListenPacket("udp", "127.0.0.1:0")
+	raw, err := tun.dev.IpcGet()
 	if err != nil {
-		t.Fatalf("probe udp port: %v", err)
+		t.Fatalf("read device state: %v", err)
 	}
-	defer c.Close()
-	return c.LocalAddr().(*net.UDPAddr).Port
+	snap, err := parseIPCGet(raw)
+	if err != nil {
+		t.Fatalf("parse device state: %v", err)
+	}
+	if snap.ListenPort == 0 {
+		t.Fatal("server tunnel reports no listen port")
+	}
+	return snap.ListenPort
 }
 
 // discardWriter is a Writer whose output goes nowhere. Protocol framing is
@@ -81,7 +89,6 @@ func newTestPair(t *testing.T, listeners []ListenerIn) *testPair {
 
 	serverPriv, serverPub := genKeypair(t)
 	clientPriv, clientPub := genKeypair(t)
-	port := freeUDPPort(t)
 
 	// The server has no endpoint for its peer: it learns the client's source
 	// address from the first handshake, which is how a real WireGuard server
@@ -91,7 +98,6 @@ func newTestPair(t *testing.T, listeners []ListenerIn) *testPair {
 		Iface: IfaceParams{
 			PrivateKey: serverPriv,
 			Addresses:  []string{serverIP + "/32"},
-			ListenPort: port,
 			MTU:        1420,
 		},
 		Peers: []PeerParams{{PublicKey: clientPub, AllowedIPs: []string{clientIP + "/32"}}},
@@ -100,6 +106,7 @@ func newTestPair(t *testing.T, listeners []ListenerIn) *testPair {
 		t.Fatalf("server tunnel: %v", err)
 	}
 	t.Cleanup(srv.closeAll)
+	port := listenPort(t, srv)
 
 	startEchoService(t, srv)
 	startDNSService(t, srv)
