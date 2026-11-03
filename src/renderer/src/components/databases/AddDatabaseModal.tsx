@@ -12,7 +12,7 @@ import { VpnTransportSelect } from '../vpn/VpnTransportSelect'
 import { saveDatabaseEdit, useDbEditor } from '../../store/dbEditor'
 import { displayHostFromUri } from '../../../../shared/dbAddress'
 import { dbConnectConfig } from '../../lib/dbConfig'
-import { adviseOnError } from '../../lib/connectionError'
+import { adviseOnError, classifyConnectionError } from '../../lib/connectionError'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import type { DbKind, UUID } from '../../types'
 import { Switch } from '../common/Switch'
@@ -267,7 +267,11 @@ export function AddDatabaseModal(): React.JSX.Element {
       // Through the same classifier the terminal's failure card uses, so a
       // refused port reads as a refused port rather than as the driver's text.
       const advice = adviseOnError(r?.error)
-      setTestResult({ ok: false, text: advice.hint ? `${advice.cause} ${advice.hint}` : advice.cause })
+      // Text the classifier could not explain is shown as it came, the way the
+      // terminal's failure card does: "could not tell what went wrong" alone
+      // left nothing to act on.
+      const raw = r?.error && classifyConnectionError(r.error) === 'unknown' ? r.error : advice.hint
+      setTestResult({ ok: false, text: raw ? `${advice.cause} ${raw}` : advice.cause })
     } finally {
       setTesting(false)
     }

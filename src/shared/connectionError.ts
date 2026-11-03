@@ -72,7 +72,10 @@ const PATTERNS: [ConnectionFault, RegExp][] = [
   ['key-missing', /(ENOENT|no such file|cannot (open|read))[^]*(key|\.pem|id_)/i],
   [
     'auth',
-    /authentication|permission denied \(|publickey|password rejected|access denied for user|auth failed|login failed/i
+    // `client password must be a string` is node-postgres refusing to start
+    // SCRAM with no password at all -- a Postgres asked for one and none was
+    // given, which is a credential problem whatever the wording says.
+    /authentication|permission denied \(|publickey|password rejected|access denied for user|auth failed|login failed|client password must be a string/i
   ],
   ['refused', /ECONNREFUSED|connection refused/i],
   ['unreachable', /ENOTFOUND|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT|getaddrinfo|timed out|timeout/i],

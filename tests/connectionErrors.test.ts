@@ -28,6 +28,8 @@ describe('classifyConnectionError', () => {
   it('separates a rejected credential from a refused file', () => {
     expect(classifyConnectionError('All configured authentication methods failed')).toBe('auth')
     expect(classifyConnectionError('Permission denied (publickey,password)')).toBe('auth')
+    // node-postgres, verbatim, for a Postgres that wants a password and got none.
+    expect(classifyConnectionError('SASL: SCRAM-SERVER-FIRST-MESSAGE: client password must be a string')).toBe('auth')
     // The bare form is a filesystem refusal — a different sentence and a
     // different fix from a credential the server would not take.
     expect(classifyConnectionError('Permission denied')).toBe('permission')

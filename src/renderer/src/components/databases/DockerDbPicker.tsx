@@ -9,6 +9,8 @@ import type { DbContainer } from '../../../../shared/dockerDb'
 const APP = 'OpsMaxx'
 const SSH = 'SSH'
 
+const ONE_LINE = { minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' } as const
+
 /**
  * Databases running in Docker where this connection is reached from.
  *
@@ -70,15 +72,18 @@ export function DockerDbPicker({
             style={{ flexDirection: 'row', justifyContent: 'flex-start', gap: 10, padding: '8px 12px' }}
             onClick={() => onPick(c)}
           >
-            <Database size={16} style={{ color: KIND_COLOR[c.kind] }} />
-            <span style={{ fontWeight: 600 }}>{c.name}</span>
-            <span className="grow" style={{ color: 'var(--text-muted)', textAlign: 'left' }}>
-              {c.image} · {c.port}
+            <Database size={16} style={{ color: KIND_COLOR[c.kind], flex: 'none' }} />
+            <span style={{ ...ONE_LINE, fontWeight: 600, flexShrink: 0, maxWidth: '55%' }} title={c.name}>
+              {c.name}
+            </span>
+            {/* A pinned digest is 70 characters nobody reads; the hover has it. */}
+            <span className="grow" style={{ ...ONE_LINE, color: 'var(--text-muted)', textAlign: 'left' }} title={c.image}>
+              {c.image.replace(/@sha256:.*$/, '')} · {c.port}
             </span>
             {c.published ? (
-              <span className="chip">{t('databases.add.docker.published')}</span>
+              <span className="chip" style={{ flex: 'none' }}>{t('databases.add.docker.published')}</span>
             ) : (
-              <span className="chip ok">{t('databases.add.docker.notExposed')}</span>
+              <span className="chip ok" style={{ flex: 'none' }}>{t('databases.add.docker.notExposed')}</span>
             )}
           </button>
         ))}
