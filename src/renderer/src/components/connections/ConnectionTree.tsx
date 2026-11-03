@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   ChevronRight,
   Folder,
@@ -15,6 +15,7 @@ import {
   Server as ServerIcon,
   Monitor,
   Plug,
+  Plus,
   Cloud
 } from 'lucide-react'
 import { useApp, useWorkspaceFolders, useWorkspaceServers } from '../../store/app'
@@ -52,6 +53,58 @@ function StatusDot({ status }: { status: ServerStatus }): React.JSX.Element {
 /** How many tags a row shows before it says "+N". The row is 28px tall and
  *  the name is the thing being scanned for, so the chips stay a hint. */
 const ROW_TAGS = 2
+
+/**
+ * A row's tag chips: as many as fit whole, the rest counted in "+N".
+ *
+ * Chips used to shrink, so inside a folder, where the indent takes the last of
+ * the room, "prod", "contabo", "+1" became "pr…", "cont…", "+…" — tags you
+ * could no longer read, where "+3" says the same thing honestly. Now a chip
+ * never shrinks (see `.tree-row .chip`): the name gives way down to its 6ch,
+ * and past that the row overflows, which is measurable where a chip's own
+ * sub-pixel ellipsis is not. So: start from ROW_TAGS, and drop one into the
+ * count while the row overflows.
+ *
+ * A component, unlike the row's render functions below, because it holds
+ * state; and at module level, so it is one type and never remounts.
+ * `display: contents` keeps the chips flex items of the row itself.
+ */
+function RowTags({ tags }: { tags: string[] }): React.JSX.Element | null {
+  const [shown, setShown] = useState(ROW_TAGS)
+  const ref = useRef<HTMLSpanElement>(null)
+  const tagsKey = tags.join('\n')
+  // More room, or different tags, could fit more: start over from the top.
+  useLayoutEffect(() => setShown(ROW_TAGS), [tagsKey])
+  useEffect(() => {
+    const row = ref.current?.parentElement
+    if (!row || typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => setShown(ROW_TAGS))
+    ro.observe(row)
+    return () => ro.disconnect()
+  }, [])
+  // Before paint, so a cut chip is never drawn.
+  useLayoutEffect(() => {
+    const row = ref.current?.parentElement
+    if (shown > 0 && row && row.scrollWidth > row.clientWidth) setShown(shown - 1)
+  })
+  if (tags.length === 0) return null
+  const visible = Math.min(shown, tags.length)
+  return (
+    <span ref={ref} style={{ display: 'contents' }}>
+      {tags.slice(0, visible).map((tag, i) => (
+        // By position: a tag list saved before normalisation can repeat one.
+        <span key={i} className="chip" title={tag} aria-hidden="true">
+          {tag}
+        </span>
+      ))}
+      {tags.length > visible && (
+        <span className="chip more" title={tags.slice(visible).join(', ')} aria-hidden="true">
+          +{tags.length - visible}
+        </span>
+      )}
+    </span>
+  )
+}
 
 interface Ctx {
   x: number
@@ -154,6 +207,11 @@ export function ConnectionTree(): React.JSX.Element {
   const renameFolder = useApp((s) => s.renameFolder)
   const deleteFolder = useApp((s) => s.deleteFolder)
   const moveServerToFolder = useApp((s) => s.moveServerToFolder)
+  const openAddServer = useApp((s) => s.openAddServer)
+  // Kept in settings, so a folded Recent stays folded across restarts.
+  const recentCollapsed = useApp((s) => s.settings.recentCollapsed === true)
+  const setSettings = useApp((s) => s.setSettings)
+  const toggleRecent = (): void => setSettings({ recentCollapsed: !recentCollapsed })
   const activeTab = useApp((s) => s.activeTab())
   // The distribution each host reported, from the hourly facts sweep. Absent
   // until that has run, and then the row simply has no icon.
@@ -218,7 +276,7 @@ export function ConnectionTree(): React.JSX.Element {
     }
     lastKeys.current = keys
     // Everything that decides which rows exist.
-  }, [focusKey, query, collapsed, servers, folders])
+  }, [focusKey, query, collapsed, recentCollapsed, servers, folders])
 
   const onTreeKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
     const el = e.target as HTMLElement
@@ -261,6 +319,7 @@ export function ConnectionTree(): React.JSX.Element {
   }
 
   const folderMenu = (id: string, name: string): MenuEntry[] => [
+    { label: t('connections.tree.addHere'), icon: <Plus size={14} />, onClick: () => openAddServer(id) },
     { label: t('connections.tree.rename'), icon: <Route size={14} />, onClick: () => setRenaming(id) },
     {
       label: t('connections.tree.newSubfolder'),
@@ -300,6 +359,24 @@ export function ConnectionTree(): React.JSX.Element {
     ) : (
       <span className="label">{name}</span>
     )
+
+  // The editor, opened with this folder already chosen. A pointer shortcut,
+  // hidden from assistive tech: a tree may hold only rows, and the row's own
+  // menu (right-click, Shift+F10) carries the same entry for the keyboard.
+  const addHereButton = (id: string): React.JSX.Element => (
+    <span
+      className="icon-btn xs tree-add"
+      aria-hidden="true"
+      title={t('connections.tree.addHere')}
+      onClick={(e) => {
+        e.stopPropagation()
+        openAddServer(id)
+      }}
+      onDoubleClick={(e) => e.stopPropagation()}
+    >
+      <Plus size={12} />
+    </span>
+  )
 
   const q = query.trim().toLowerCase()
   const match = (s: Server): boolean =>
@@ -470,17 +547,7 @@ export function ConnectionTree(): React.JSX.Element {
             </button>
           )
         })()}
-        {s.tags.slice(0, ROW_TAGS).map((tag, i) => (
-          // By position: a tag list saved before normalisation can repeat one.
-          <span key={i} className="chip" title={tag} aria-hidden="true">
-            {tag}
-          </span>
-        ))}
-        {s.tags.length > ROW_TAGS && (
-          <span className="chip" title={s.tags.slice(ROW_TAGS).join(', ')} aria-hidden="true">
-            +{s.tags.length - ROW_TAGS}
-          </span>
-        )}
+        <RowTags tags={s.tags} />
         <span className="spacer" />
         {s.favorite && <Star size={12} className="fav" fill="currentColor" />}
       </div>
@@ -603,6 +670,7 @@ export function ConnectionTree(): React.JSX.Element {
                       )}
                       {folderLabel(f.id, f.name)}
                       <span className="spacer" />
+                      {addHereButton(f.id)}
                       <span className="faint" style={{ fontSize: 11 }}>
                         {direct.length + childFolders.reduce((n, c) => n + serversIn(c.id).length, 0)}
                       </span>
@@ -650,6 +718,8 @@ export function ConnectionTree(): React.JSX.Element {
                                   <Folder size={15} className="folder-icon" />
                                 )}
                                 {folderLabel(cf.id, cf.name)}
+                                <span className="spacer" />
+                                {addHereButton(cf.id)}
                               </div>
                               {copen && (
                                 <div className="tree-children" role="group">
@@ -675,35 +745,51 @@ export function ConnectionTree(): React.JSX.Element {
             Recent, rather than a heading with an empty list under it. */}
         {recent.length > 0 && (
           <div className="tree-section">
-            <div className="tree-section-label">
+            {/* Folds like a folder does. A button rather than a treeitem: it
+                sits between the trees, not in one. */}
+            <div
+              className="tree-section-label toggle"
+              role="button"
+              tabIndex={0}
+              aria-expanded={!recentCollapsed}
+              onClick={toggleRecent}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter' && e.key !== ' ') return
+                e.preventDefault()
+                toggleRecent()
+              }}
+            >
+              <ChevronRight size={11} className={clsx('chev', !recentCollapsed && 'open')} />
               <ServerIcon size={11} /> {t('connections.tree.recent')}
             </div>
-            <div role="tree" aria-label={t('connections.tree.recent')}>
-              {recent.map((s) => {
-                const key = `recent:${s.id}`
-                return (
-                  <div
-                    key={key}
-                    role="treeitem"
-                    aria-label={rowName(s)}
-                    aria-level={1}
-                    data-key={key}
-                    tabIndex={focusKey === key ? 0 : -1}
-                    className="tree-row"
-                    onClick={() => openServer(s.id)}
-                    // The same menu as the server's row in the tree, which is
-                    // also what Shift+F10 on this row opens.
-                    onContextMenu={(e) => {
-                      e.preventDefault()
-                      setCtx({ x: e.clientX, y: e.clientY, server: s })
-                    }}
-                  >
-                    <StatusDot status={s.status} />
-                    <span className="label">{labels.get(s.id) ?? s.name}</span>
-                  </div>
-                )
-              })}
-            </div>
+            {!recentCollapsed && (
+              <div role="tree" aria-label={t('connections.tree.recent')}>
+                {recent.map((s) => {
+                  const key = `recent:${s.id}`
+                  return (
+                    <div
+                      key={key}
+                      role="treeitem"
+                      aria-label={rowName(s)}
+                      aria-level={1}
+                      data-key={key}
+                      tabIndex={focusKey === key ? 0 : -1}
+                      className="tree-row"
+                      onClick={() => openServer(s.id)}
+                      // The same menu as the server's row in the tree, which is
+                      // also what Shift+F10 on this row opens.
+                      onContextMenu={(e) => {
+                        e.preventDefault()
+                        setCtx({ x: e.clientX, y: e.clientY, server: s })
+                      }}
+                    >
+                      <StatusDot status={s.status} />
+                      <span className="label">{labels.get(s.id) ?? s.name}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </div>
         )}
       </div>

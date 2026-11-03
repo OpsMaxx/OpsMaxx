@@ -522,6 +522,20 @@ button {
 .tree-section-label.active {
   color: var(--text-muted);
 }
+/* A section that folds, like Recent. */
+.tree-section-label.toggle {
+  cursor: pointer;
+}
+.tree-section-label.toggle:hover {
+  color: var(--text-muted);
+}
+.tree-section-label .chev {
+  transition: transform 0.12s;
+  flex: none;
+}
+.tree-section-label .chev.open {
+  transform: rotate(90deg);
+}
 .tree-row {
   display: flex;
   align-items: center;
@@ -575,6 +589,15 @@ button {
 .tree-row:hover .drag-handle {
   opacity: 0.4;
 }
+/* A folder's "add connection here": shown on the row it belongs to. */
+.tree-row .tree-add {
+  flex: none;
+  visibility: hidden;
+}
+.tree-row:hover .tree-add,
+.tree-row:focus-visible .tree-add {
+  visibility: visible;
+}
 .tree-row.dragover {
   box-shadow: inset 0 0 0 1px var(--accent-border);
 }
@@ -583,12 +606,12 @@ button {
 .tree-row:focus-visible {
   outline-offset: -2px;
 }
-/* Tags on a connection row. The shared chip, a size down, and allowed to
-   shrink: the name keeps at least 6ch, and a long tag ellipsizes rather than
-   pushing the name off the row. */
+/* Tags on a connection row. The shared chip, a size down, and never shrunk:
+   the name gives way first (see `.label` below), and once it is down to 6ch
+   the row drops chips into its "+N" (RowTags in ConnectionTree.tsx) rather
+   than cutting "prod" to "pr…". Only a tag longer than 9ch ellipsizes. */
 .tree-row .chip {
-  flex: 0 1 auto;
-  min-width: 0;
+  flex: none;
   max-width: 9ch;
   /* Block, not the chip's inline-flex: an ellipsis needs a text line to cut. */
   display: inline-block;
@@ -600,7 +623,8 @@ button {
   text-overflow: ellipsis;
 }
 .tree-row .label {
-  flex: 1 0 6ch;
+  flex: 1 1 auto;
+  min-width: 6ch;
 }
 .tree-row .distro {
   display: inline-flex;

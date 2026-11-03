@@ -11,7 +11,7 @@ import {
   MonitorDot
 } from 'lucide-react'
 import { Modal } from '../common/Modal'
-import { useApp } from '../../store/app'
+import { useApp, useWorkspaceFolders } from '../../store/app'
 import { rdpSecretId } from '../../../../shared/rdp'
 import type { CredentialShape } from '../../../../shared/credentialShape'
 import { RouteHops } from './RouteHops'
@@ -214,6 +214,10 @@ export function AddServerModal(): React.JSX.Element {
   // Kept as the typed text and parsed on save. Parsing on every keystroke, as
   // the vault's tag field does, eats the comma you just typed.
   const [tagsText, setTagsText] = useState((existing?.tags ?? []).join(', '))
+  const folders = useWorkspaceFolders()
+  // A new server lands in the folder it was added from, if it was.
+  const newServerFolderId = useApp((s) => s.newServerFolderId)
+  const [folderId, setFolderId] = useState(existing ? existing.folderId : newServerFolderId)
   const [port, setPort] = useState(String(existing?.port ?? 22))
   const [username, setUsername] = useState(existing?.username ?? 'root')
   const [auth, setAuth] = useState<AuthMethod>(existing?.auth ?? 'key')
@@ -643,6 +647,7 @@ export function AddServerModal(): React.JSX.Element {
       host: isCloud ? '' : host.trim(),
       port: Number(port) || 22,
       tags: parseTags(tagsText),
+      folderId,
       // `root` IS THE WRONG DEFAULT FOR A WINDOWS DESKTOP, and it was not
       // inert: rdpRelay falls back to this field, so an RDP-only record saved
       // with the form's SSH default tried to sign in as root. The one account
@@ -940,6 +945,30 @@ export function AddServerModal(): React.JSX.Element {
         />
         <span className="field-hint">{t('connections.addServer.tagsHint', { max: MAX_TAGS })}</span>
       </div>
+
+      {folders.length > 0 && (
+        <div className="field">
+          <label className="field-label" htmlFor="server-folder">
+            {t('connections.addServer.folderLabel')}
+          </label>
+          <select
+            id="server-folder"
+            className="input"
+            value={folderId ?? ''}
+            onChange={(e) => setFolderId(e.target.value || null)}
+          >
+            <option value="">{t('connections.addServer.noFolder')}</option>
+            {folders.map((f) => {
+              const parent = f.parentId ? folders.find((p) => p.id === f.parentId) : undefined
+              return (
+                <option key={f.id} value={f.id}>
+                  {parent ? `${parent.name} / ${f.name}` : f.name}
+                </option>
+              )
+            })}
+          </select>
+        </div>
+      )}
 
       {/**
        * How this server is reached, which is a question about the machine

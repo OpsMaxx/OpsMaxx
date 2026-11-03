@@ -325,6 +325,8 @@ export interface AppSettings {
    */
   cicdStepsWidth?: number
   cicdDetailHeight?: number
+  /** The sidebar's Recent list is folded. Absent means open, for the reason above. */
+  recentCollapsed?: boolean
   // Command used to open remote files. Empty means the OS default handler.
   externalEditorCommand: string
   // Double-clicking a file opens it externally rather than in the inline editor.
@@ -605,6 +607,9 @@ interface AppState {
   // Which part of the editor to open on, when something asked for one: the
   // Folder shares indicator opens it on its own section.
   editServerSection: 'shares' | null
+  // The folder a new server is saved into, when it was added from a folder's
+  // own `+`. Only the editor's starting value: its Folder field can change it.
+  newServerFolderId: string | null
   paletteOpen: boolean
   theme: ThemeMode
   settings: AppSettings
@@ -730,6 +735,7 @@ interface AppState {
   setModal: (m: ModalKind) => void
   openRouteEditor: (serverId: string) => void
   openServerEditor: (serverId: string, section?: 'shares') => void
+  openAddServer: (folderId: string | null) => void
   togglePalette: (open?: boolean) => void
   setTheme: (t: ThemeMode) => void
   setSettings: (patch: Partial<AppSettings>) => void
@@ -1287,6 +1293,7 @@ export const useApp = create<AppState>((set, get) => ({
   routeEditorServerId: null,
   editServerId: null,
   editServerSection: null,
+  newServerFolderId: null,
   paletteOpen: false,
   theme: 'opsmaxx',
   settings: DEFAULT_SETTINGS,
@@ -1966,7 +1973,9 @@ export const useApp = create<AppState>((set, get) => ({
     })
   },
 
-  setModal: (m) => set({ modal: m, editServerId: null, editServerSection: null }),
+  setModal: (m) => set({ modal: m, editServerId: null, editServerSection: null, newServerFolderId: null }),
+  openAddServer: (folderId) =>
+    set({ modal: 'add-server', editServerId: null, editServerSection: null, newServerFolderId: folderId }),
   openServerEditor: (serverId, section) =>
     set({ editServerId: serverId, editServerSection: section ?? null, modal: 'add-server' }),
 

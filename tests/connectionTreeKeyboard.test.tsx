@@ -297,11 +297,16 @@ describe('the stylesheet behind a row', () => {
     }
   )
 
-  it('lets tag chips shrink before the name does', () => {
+  // Inside a folder the indent cut "prod" to "pr…". The name gives way, down
+  // to 6ch; a chip never does (RowTags drops it into "+N" instead), and only a
+  // tag longer than 9ch is ellipsized.
+  it('shortens the name and never squeezes a tag chip', () => {
     const chip = rule('.tree-row .chip')
-    expect(chip).toMatch(/min-width:\s*0/)
+    expect(chip).toMatch(/flex:\s*none/)
+    expect(chip).toMatch(/max-width:\s*9ch/)
     expect(chip).toMatch(/text-overflow:\s*ellipsis/)
-    expect(chip).not.toMatch(/flex:\s*none/)
-    expect(rule('.tree-row .label')).toMatch(/flex:\s*1 0 6ch/)
+    const label = rule('.tree-row .label')
+    expect(label).toMatch(/flex:\s*1 1 auto/)
+    expect(label).toMatch(/min-width:\s*6ch/)
   })
 })
