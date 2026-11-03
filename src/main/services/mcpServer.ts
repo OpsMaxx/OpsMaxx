@@ -1649,6 +1649,15 @@ Not available
 // carries one.
 function databaseConfig(db: CachedDatabase): Parameters<typeof dbQuery>[0] {
   const server = db.sshServerId ? getCachedServer(db.sshServerId) : null
+  // Finding a container on THIS computer runs docker here, and the bridge
+  // never runs anything on this computer. Through an SSH server it is a
+  // command on that server, like every other read the bridge makes.
+  if (db.container && !server) {
+    throw new Error(
+      `"${db.name}" is a container on this computer, which agents cannot reach. ` +
+        'Open it in OpsMaxx, or reach it through an SSH server.'
+    )
+  }
   return {
     id: db.id,
     // Carried, not defaulted. Main compares this against the cached client on
@@ -1661,6 +1670,7 @@ function databaseConfig(db: CachedDatabase): Parameters<typeof dbQuery>[0] {
     username: db.username,
     database: db.database || undefined,
     ssl: db.ssl,
+    container: db.container ?? undefined,
     ssh: server
       ? {
           serverId: server.id,

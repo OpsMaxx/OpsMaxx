@@ -94,6 +94,8 @@ export interface CachedDatabase {
   // Reached through this SSH server when set, exactly as an interactive
   // connection would be.
   sshServerId: string | null
+  // A Docker container named in place of an address. See shared/dockerDb.ts.
+  container: string | null
   // As on CachedServer: main-internal, and never returned to an agent.
   vpnProfileId: string | null
 }
@@ -275,6 +277,7 @@ function parseDatabases(raw: unknown): CachedDatabase[] {
       ssl: d.ssl === true,
       uri: d.uri === true,
       sshServerId: typeof d.sshServerId === 'string' ? d.sshServerId : null,
+      container: typeof d.container === 'string' && d.container !== '' ? d.container : null,
       vpnProfileId: typeof d.vpnProfileId === 'string' ? d.vpnProfileId : null,
       ...(typeof d.rev === 'number' ? { rev: d.rev } : {})
     }))

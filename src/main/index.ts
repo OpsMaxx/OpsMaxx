@@ -310,6 +310,7 @@ import type { InspectStartOptions } from '../shared/inspect'
 import { storeFrpToken } from './services/vpn/frpSetup'
 import { toVpnResult } from './services/vpn/errors'
 import { preparedSshTarget, withVpnTransportDb } from './services/vpn/transport'
+import { configureDockerDb, listDbContainers } from './services/dockerDb'
 import { brokerFor } from './services/cloud/providers'
 import {
   describeCloudFault,
@@ -3622,6 +3623,10 @@ ipcMain.handle('docker:list', (_e, cfg: unknown, opts?: { sudo?: boolean; autoSu
   dockerReader.list(cfg, opts ?? {})
 )
 ipcMain.handle('docker:can-sudo', (_e, cfg: unknown) => dockerReader.canSudo(cfg))
+// The add-database picker: running containers that look like a database, on
+// the chosen SSH server or on this computer. See shared/dockerDb.ts.
+configureDockerDb({ exec: targetExec, execQuiet: targetExecQuiet })
+ipcMain.handle('docker:db-containers', (_e, cfg: unknown) => listDbContainers(cfg))
 ipcMain.handle(
   'docker:logs',
   async (_e, cfg: unknown, ref: string, lines: unknown, opts?: DockerLogsOptions) => {

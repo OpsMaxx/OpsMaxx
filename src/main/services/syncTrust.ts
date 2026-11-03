@@ -215,6 +215,8 @@ export function fieldsOf(kind: HeldKind, rec: Rec): Record<string, string> | nul
       return {
         host: norm(rec.host),
         via: str(rec.sshServerId),
+        // A container name is an address: it decides where the password goes.
+        container: str(rec.container),
         tls: rec.ssl === true ? '1' : '0',
         vpn: str(rec.vpnProfileId),
         ws: str(rec.workspaceId),

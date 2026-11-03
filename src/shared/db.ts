@@ -48,6 +48,13 @@ export interface DbConnectConfig {
   // When present it takes precedence over the discrete host/port/... fields.
   uri?: string
   ssh?: DbSshConfig
+  /**
+   * A Docker container's name, in place of an address. Looked up on the SSH
+   * server -- or on this computer when there is none -- each time the
+   * connection opens, because the container's IP changes when it is
+   * recreated. See shared/dockerDb.ts.
+   */
+  container?: string
   // Reach the database through this VPN profile. Independent of `ssh`: a
   // database can be behind a bastion, behind a VPN, or behind both, and when
   // both are set the VPN is the outer transport — the bastion itself is only

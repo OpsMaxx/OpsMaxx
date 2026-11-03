@@ -16,6 +16,9 @@ import { adviseOnError } from '../../lib/connectionError'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import type { DbKind, UUID } from '../../types'
 import { Switch } from '../common/Switch'
+import { ContainerChip, ContainerExplainer, DockerDbPicker } from './DockerDbPicker'
+import { sshHopFor } from '../../lib/ssh'
+import { LOCAL_TARGET } from '../../../../shared/execTarget'
 import { useT } from '../../lib/i18n'
 import type { MessageKey } from '../../../../shared/i18n'
 
@@ -68,6 +71,8 @@ export function AddDatabaseModal(): React.JSX.Element {
   const [ssl, setSsl] = useState(existing?.ssl ?? false)
   const [uri, setUri] = useState('')
   const [sshServerId, setSshServerId] = useState(existing?.sshServerId ?? '')
+  const [container, setContainer] = useState<string | null>(existing?.container ?? null)
+  const jumpServer = servers.find((s) => s.id === sshServerId) ?? null
 
   const vaultUnlocked = useVault((st) => st.unlocked)
   const vaultEntries = useVault((st) => st.entries)
@@ -239,7 +244,8 @@ export function AddDatabaseModal(): React.JSX.Element {
           database: database.trim(),
           ssl,
           sshServerId: sshServerId || null,
-          vpnProfileId
+          vpnProfileId,
+          container: useUri ? null : container
         },
         servers
       )
@@ -286,7 +292,8 @@ export function AddDatabaseModal(): React.JSX.Element {
       uri: useUri,
       folderId: existing?.folderId ?? null,
       sshServerId: sshServerId || null,
-      vpnProfileId
+      vpnProfileId,
+      container: useUri ? null : container
     }
     const id = editId ? (saveDatabaseEdit(editId, fields), editId) : addDatabase(fields)
     /**
@@ -447,6 +454,43 @@ export function AddDatabaseModal(): React.JSX.Element {
         </div>
       </div>
 
+      <div className="field">
+        <label className="field-label">{t('databases.add.sshTunnel')}</label>
+        <select className="input" value={sshServerId} onChange={(e) => {
+            setSshServerId(e.target.value)
+            // A container belongs to the host it was found on.
+            if (container) {
+              setContainer(null)
+              setHost('')
+            }
+          }}>
+          <option value="">{t('databases.add.connectDirectly')}</option>
+          {servers.map((s) => (
+            <option key={s.id} value={s.id}>
+              {t('databases.add.via', { name: s.name, target: `${s.username}@${s.host}` })}
+            </option>
+          ))}
+        </select>
+        <span className="field-hint">
+          {kind === 'mongodb' ? t('databases.add.sshHintMongo') : t('databases.add.sshHint')}
+        </span>
+      </div>
+
+      {!useUri && (
+        <DockerDbPicker
+          target={jumpServer ? sshHopFor(jumpServer) : LOCAL_TARGET}
+          where={jumpServer ? jumpServer.name : t('databases.add.docker.thisComputer')}
+          selected={container}
+          onPick={(c) => {
+            setKind(c.kind)
+            setContainer(c.name)
+            setHost(c.name)
+            setPort(String(c.port))
+            if (!name.trim()) setName(c.name)
+          }}
+        />
+      )}
+
       {useUri ? (
         <>
           <Field
@@ -523,17 +567,28 @@ export function AddDatabaseModal(): React.JSX.Element {
               required
               error={problem('host', host.trim() ? null : t('databases.add.hostMissing'))}
             >
-              <input
-                className="input"
-                value={host}
-                onChange={(e) => setHost(e.target.value)}
-                onBlur={touch('host')}
-              />
+              {container ? (
+                <ContainerChip
+                  name={container}
+                  onClear={() => {
+                    setContainer(null)
+                    setHost('')
+                  }}
+                />
+              ) : (
+                <input
+                  className="input"
+                  value={host}
+                  onChange={(e) => setHost(e.target.value)}
+                  onBlur={touch('host')}
+                />
+              )}
             </Field>
             <Field label={t('databases.add.port')}>
               <input className="input" value={port} onChange={(e) => setPort(e.target.value)} />
             </Field>
           </div>
+          {container && <ContainerExplainer container={container} server={jumpServer?.name ?? null} />}
 
           <div className="field-row">
             <div className="field">
@@ -618,21 +673,6 @@ export function AddDatabaseModal(): React.JSX.Element {
           </div>
         </>
       )}
-
-      <div className="field">
-        <label className="field-label">{t('databases.add.sshTunnel')}</label>
-        <select className="input" value={sshServerId} onChange={(e) => setSshServerId(e.target.value)}>
-          <option value="">{t('databases.add.connectDirectly')}</option>
-          {servers.map((s) => (
-            <option key={s.id} value={s.id}>
-              {t('databases.add.via', { name: s.name, target: `${s.username}@${s.host}` })}
-            </option>
-          ))}
-        </select>
-        <span className="field-hint">
-          {kind === 'mongodb' ? t('databases.add.sshHintMongo') : t('databases.add.sshHint')}
-        </span>
-      </div>
 
       <VpnTransportSelect
         value={vpnProfileId}

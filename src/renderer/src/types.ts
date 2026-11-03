@@ -279,6 +279,12 @@ export interface DatabaseConn {
   folderId: UUID | null
   // Reach the database through this SSH server (a bastion) when set.
   sshServerId: UUID | null
+  /**
+   * A Docker container's name in place of an address, looked up on the SSH
+   * server above -- or on this computer -- each time it connects. Absent or
+   * null means `host` is the address. See shared/dockerDb.ts.
+   */
+  container?: string | null
   // Reach the database through a VPN profile when set. Independent of the
   // bastion above and composable with it: with both, the VPN carries the
   // *bastion*, and the database is reached from there as it always was.

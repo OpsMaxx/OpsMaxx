@@ -103,6 +103,7 @@ import type { BytesReading } from '../shared/bytesForecast'
 import type { EnginePrecheckProbe } from '../shared/enginePrecheck'
 import type { PackageManager } from '../shared/hostFacts'
 import type { ImageScanProbe } from '../shared/imageScan'
+import type { DbContainerProbe } from '../shared/dockerDb'
 import type { SecurityListProbe } from '../shared/securityUpdates'
 import type { K8sReviewProbe } from '../shared/k8sReview'
 import type {
@@ -1352,6 +1353,7 @@ const api = {
     list: (cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerProbe> =>
       ipcRenderer.invoke('docker:list', cfg, opts),
     canSudo: (cfg: unknown): Promise<boolean> => ipcRenderer.invoke('docker:can-sudo', cfg),
+    dbContainers: (cfg: unknown): Promise<DbContainerProbe> => ipcRenderer.invoke('docker:db-containers', cfg),
     logs: (
       cfg: unknown,
       ref: string,

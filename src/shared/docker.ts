@@ -1,6 +1,7 @@
 // Docker: list containers on a server, read their logs, open a shell in one.
 //
 import { st, translatedTable } from './i18n'
+import type { DbContainerProbe } from './dockerDb'
 // Two decisions, both taken from the roadmap and both worth restating because
 // the rest follows from them.
 //
@@ -3100,6 +3101,8 @@ export function parseDockerReclaimOutput(
 export interface DockerBridge {
   list(cfg: unknown, opts?: { sudo?: boolean; autoSudo?: boolean }): Promise<DockerProbe>
   canSudo(cfg: unknown): Promise<boolean>
+  /** Running containers that look like a database. See shared/dockerDb.ts. */
+  dbContainers(cfg: unknown): Promise<DbContainerProbe>
   logs(
     cfg: unknown,
     ref: string,

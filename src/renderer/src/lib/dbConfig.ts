@@ -35,6 +35,7 @@ export type DbConnectFields = Pick<
   | 'ssl'
   | 'sshServerId'
   | 'vpnProfileId'
+  | 'container'
 >
 
 export function dbConnectConfig(db: DbConnectFields, servers: Server[]): DbConnectConfig {
@@ -51,6 +52,7 @@ export function dbConnectConfig(db: DbConnectFields, servers: Server[]): DbConne
     database: db.database,
     ssl: db.ssl,
     ssh: jump ? sshHopFor(jump) : undefined,
+    container: db.container || undefined,
     // Dropped here until now, which is why a VPN chosen in the dialog was
     // ignored by a test: main resolves the profile from the SAVED record, and
     // an unsaved connection has no record to resolve. A saved one is

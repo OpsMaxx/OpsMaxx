@@ -71,6 +71,7 @@ async function build(cfg: DbConnectConfig, allowPrompt = false): Promise<Conn> {
   // waiting, is also what stops the failure surfacing downstream as an
   // unexplained connect timeout.
   if (cfg.vpnProfileId) return buildOverVpn(cfg, allowPrompt)
+  if (cfg.container && !cfg.uri) return buildInContainer(cfg, allowPrompt)
   if (!cfg.ssh) return buildDriver(cfg)
 
   if (cfg.uri && /^mongodb\+srv:/i.test(cfg.uri)) {
@@ -106,6 +107,42 @@ async function build(cfg: DbConnectConfig, allowPrompt = false): Promise<Conn> {
     }
   } catch (err) {
     fwd.close()
+    throw err
+  }
+}
+
+// Reach a database in a Docker container that publishes no port.
+//
+// The name is looked up where the container runs: on the SSH server, or on
+// this computer when there is none. Over SSH the server opens the hop to the
+// container's address, which it can always reach -- it is on every bridge
+// network it hosts. Locally that is true on Linux and not under Docker Desktop
+// or rootless Docker, so a local address that does not answer goes through
+// the relay in services/dockerDb.ts instead.
+async function buildInContainer(cfg: DbConnectConfig, allowPrompt: boolean): Promise<Conn> {
+  const { resolveDbContainer, canReach, openContainerRelay } = await import('./dockerDb')
+  const { LOCAL_TARGET } = await import('../../shared/execTarget')
+  const addr = await resolveDbContainer(cfg.ssh ?? LOCAL_TARGET, cfg.container as string, allowPrompt)
+  const port = cfg.port || DEFAULT_PORT[cfg.kind]
+  const direct: DbConnectConfig = { ...cfg, container: undefined, host: addr.ip, port }
+  if (cfg.ssh || (await canReach(addr.ip, port))) return build(direct, allowPrompt)
+
+  const relay = await openContainerRelay(addr.network, addr.ip, port)
+  try {
+    const conn = await buildDriver({ ...direct, host: '127.0.0.1', port: relay.port })
+    const inner = conn.close
+    return {
+      ...conn,
+      close: async () => {
+        try {
+          await inner()
+        } finally {
+          relay.close()
+        }
+      }
+    }
+  } catch (err) {
+    relay.close()
     throw err
   }
 }
