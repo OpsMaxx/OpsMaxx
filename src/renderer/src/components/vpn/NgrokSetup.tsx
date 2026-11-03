@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ExternalLink, Plus, Trash2 } from 'lucide-react'
+import { ChevronRight, ExternalLink, Plus, Trash2 } from 'lucide-react'
 import { Modal } from '../common/Modal'
 import { useApp } from '../../store/app'
 import { useVault } from '../../store/vault'
@@ -65,9 +65,15 @@ export function NgrokSetup({
   // The stored ref, so an edit shows which credential is in use rather than
   // presenting an empty picker over a profile that already has one.
   const [entryId, setEntryId] = useState(existing?.spec.authtokenRef?.vaultEntryId ?? '')
-  const [tunnels, setTunnels] = useState<NgrokTunnel[]>(
-    existing?.spec.tunnels.length ? existing.spec.tunnels : [blankTunnel(0)]
-  )
+  // None to start with. Somebody opening this often wants only the agent and
+  // its authtoken saved, and a pre-filled `web -> 3000` row with an unticked
+  // exposure box made that impossible: Save stayed disabled until they either
+  // published a port they did not mean to or worked out to delete the row.
+  const [tunnels, setTunnels] = useState<NgrokTunnel[]>(existing?.spec.tunnels ?? [])
+  // Folded unless the profile being edited already publishes something. Read
+  // once, so it is the initial state of the <details> and never fights the
+  // user's own toggle.
+  const [endpointsOpen] = useState(() => (existing?.spec.tunnels.length ?? 0) > 0)
 
   /**
    * Entries that could hold an authtoken.
@@ -118,7 +124,9 @@ export function NgrokSetup({
   const ready =
     name.trim() !== '' &&
     entryId !== '' &&
-    tunnels.length > 0 &&
+    // Zero endpoints is a valid profile: an agent with its authtoken, ready
+    // for a port to be added later. Every endpoint that IS here still needs
+    // its exposure box ticked.
     tunnels.every(
       (tn) =>
         /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(tn.name) &&
@@ -263,9 +271,21 @@ export function NgrokSetup({
         </span>
       </div>
 
-      <div className="field">
-        <label className="field-label">{t('vpn.ngrok.endpoints')}</label>
-        <div className="col" style={{ gap: 10 }}>
+      {/* flex: none, or the modal body's column squeezes it to its border. */}
+      <details className="disclosure" style={{ flex: 'none' }} open={endpointsOpen}>
+        <summary className="disclosure-head">
+          <ChevronRight size={14} className="chev" />
+          {t('vpn.ngrok.endpoints')}
+          <span className="field-hint" style={{ fontWeight: 400 }}>
+            {tunnels.length === 0
+              ? t('vpn.ngrok.endpointsNone')
+              : t('vpn.ngrok.endpointsSome', { count: tunnels.length })}
+          </span>
+        </summary>
+        <div className="disclosure-body">
+          {tunnels.length === 0 && (
+            <span className="field-hint">{t('vpn.ngrok.endpointsLater')}</span>
+          )}
           {tunnels.map((tn, i) => (
             <div key={i} className="col" style={{ gap: 6 }}>
               <div className="row" style={{ gap: 6 }}>
@@ -303,15 +323,13 @@ export function NgrokSetup({
                   value={tn.domain ?? ''}
                   onChange={(e) => patch(i, { domain: e.target.value.trim() || undefined })}
                 />
-                {tunnels.length > 1 && (
-                  <button
-                    className="btn sm"
-                    title={t('common.remove')}
-                    onClick={() => setTunnels((ts) => ts.filter((_, j) => j !== i))}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                )}
+                <button
+                  className="btn sm"
+                  title={t('common.remove')}
+                  onClick={() => setTunnels((ts) => ts.filter((_, j) => j !== i))}
+                >
+                  <Trash2 size={13} />
+                </button>
               </div>
               {/* The gate. Per endpoint, and unticked by default, because this
                   is the one control that decides whether a port on this machine
@@ -339,13 +357,11 @@ export function NgrokSetup({
             style={{ alignSelf: 'flex-start' }}
             onClick={() => setTunnels((ts) => [...ts, blankTunnel(ts.length)])}
           >
-            <Plus size={13} /> {t('vpn.ngrok.addEndpoint')}
+            <Plus size={13} /> {t(tunnels.length === 0 ? 'vpn.ngrok.addFirstEndpoint' : 'vpn.ngrok.addEndpoint')}
           </button>
-          <span className="field-hint">
-            {t('vpn.ngrok.planNote')}
-          </span>
+          {tunnels.length > 0 && <span className="field-hint">{t('vpn.ngrok.planNote')}</span>}
         </div>
-      </div>
+      </details>
     </Modal>
   )
 }

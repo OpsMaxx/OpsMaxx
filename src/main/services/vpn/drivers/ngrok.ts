@@ -91,12 +91,15 @@ export const ngrokDriver: VpnDriver<NgrokSpec> = {
         message: 'ngrok needs an account authtoken. Add it to the vault and select it here.'
       })
     }
+    // A warning, not an error: a profile that is only an agent and its
+    // authtoken is a valid thing to save, with a port added later. Starting
+    // one is what needs an endpoint, and `start` refuses that on its own.
     if (spec.tunnels.length === 0) {
       issues.push({
         path: 'tunnels',
-        severity: 'error',
+        severity: 'warning',
         code: 'no-tunnels',
-        message: 'Add at least one port to publish.'
+        message: 'Nothing is published until a port is added.'
       })
     }
     if (spec.tunnels.length > 1) {
@@ -195,6 +198,16 @@ export const ngrokDriver: VpnDriver<NgrokSpec> = {
 
     if (live.has(profile.id)) {
       return { ok: false, error: 'This profile is already running.', errorCode: 'already-running' }
+    }
+
+    // Before anything is spawned. The sidecar refuses an empty list as well,
+    // but in words about its own parameters rather than about the profile.
+    if (spec.tunnels.length === 0) {
+      return {
+        ok: false,
+        error: 'Add a port to publish before starting this profile.',
+        errorCode: 'config-invalid'
+      }
     }
 
     // Re-checked here and not only in validation: validation runs as the user

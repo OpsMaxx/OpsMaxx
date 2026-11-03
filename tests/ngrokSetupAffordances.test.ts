@@ -74,3 +74,26 @@ describe('the authtoken field', () => {
     expect(SRC).toMatch(/authtokenRef: \{ vaultEntryId/)
   })
 })
+
+describe('the endpoints', () => {
+  // Somebody opening this dialog often wants only the agent and its authtoken
+  // saved. A pre-filled `web -> 3000` row with an unticked exposure box made
+  // that impossible: Save stayed disabled until they published a port they
+  // did not mean to.
+  it('start empty for a new profile', () => {
+    expect(SRC).toMatch(/useState<NgrokTunnel\[\]>\(existing\?\.spec\.tunnels \?\? \[\]\)/)
+  })
+
+  it('are folded into a disclosure, open only when editing one that has some', () => {
+    expect(SRC).toMatch(/<details className="disclosure"[^>]*open=\{endpointsOpen\}/)
+    expect(SRC).toMatch(/existing\?\.spec\.tunnels\.length \?\? 0\) > 0/)
+  })
+
+  it('do not hold Save back when there are none', () => {
+    expect(SRC).not.toMatch(/tunnels\.length > 0 &&\s*\n\s*tunnels\.every/)
+  })
+
+  it('still need the exposure box ticked for every one that is added', () => {
+    expect(SRC).toMatch(/tunnels\.every\([\s\S]*?tn\.acknowledgedExposure\s*\)/)
+  })
+})

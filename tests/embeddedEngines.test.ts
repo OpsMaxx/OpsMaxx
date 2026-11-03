@@ -151,9 +151,27 @@ describe('ngrok validation and the exposure gate', () => {
     expect(ngrokDriver.validateConfig(SPEC).ok).toBe(true)
   })
 
-  it('needs an authtoken and at least one endpoint', () => {
+  it('needs an authtoken', () => {
     expect(ngrokDriver.validateConfig({ ...SPEC, authtokenRef: undefined }).ok).toBe(false)
-    expect(ngrokDriver.validateConfig({ ...SPEC, tunnels: [] }).ok).toBe(false)
+  })
+
+  /**
+   * An agent and its authtoken, with no port yet, is a profile somebody
+   * saves on purpose and adds a port to later. Saving it is valid; starting
+   * it is refused before the sidecar is touched, because it would publish
+   * nothing.
+   */
+  it('saves with no endpoints, and refuses to start one', async () => {
+    const v = ngrokDriver.validateConfig({ ...SPEC, tunnels: [] })
+    expect(v.ok).toBe(true)
+    expect(v.issues.find((i) => i.code === 'no-tunnels')?.severity).toBe('warning')
+
+    const r = await ngrokDriver.start(
+      { id: 'p0', workspaceId: 'w1', name: 'agent only', autoStart: false, spec: { ...SPEC, tunnels: [] } },
+      {} as never
+    )
+    expect(r.ok).toBe(false)
+    expect(r.errorCode).toBe('config-invalid')
   })
 
   /**
