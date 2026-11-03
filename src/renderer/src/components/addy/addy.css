@@ -576,6 +576,15 @@
   padding-top: var(--sp-1);
 }
 
+/* The section's full width. A <caption> is exactly as wide as its table, and
+   `.mini-table` sizes to its content -- so with one short device row the
+   three notes below it were wrapped into a ~170px column running down the
+   page beside an empty screen. Full width also puts Remove at the row's far
+   end, where every other row action on the panel sits. */
+.addy-devices {
+  width: 100%;
+}
+
 .addy-devices td .chip {
   margin-left: 6px;
 }

@@ -389,6 +389,14 @@ describe('the panel', () => {
     expect(screen.getByLabelText('Recovery phrase')).toBeTruthy()
   })
 
+  it('gives the device notes the section width rather than the first column', () => {
+    // The notes are the table's <caption>, which is exactly as wide as the
+    // table. `.mini-table` sizes to content, so one short device row squeezed
+    // three paragraphs into a ~170px column running down an empty screen.
+    const css = readFileSync(join(ROOT, 'src/renderer/src/components/addy/addy.css'), 'utf8')
+    expect(css).toMatch(/\.addy-devices \{\s*width: 100%;/)
+  })
+
   it('uses only colour tokens the app defines', () => {
     const css = readFileSync(join(ROOT, 'src/renderer/src/components/addy/addy.css'), 'utf8')
     const dir = join(ROOT, 'src/renderer/src/styles')
