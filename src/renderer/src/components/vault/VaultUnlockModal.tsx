@@ -5,6 +5,7 @@ import { useApp } from '../../store/app'
 import { useVault, bioBlockedReason } from '../../store/vault'
 import { VaultReset } from './VaultReset'
 import { useVaultPrompt } from '../../store/vaultPrompt'
+import { useBioRecheck } from '../../hooks/useBioRecheck'
 import { VAULT_MIN_PASSWORD } from '../../../../shared/vault'
 import { useT } from '../../lib/i18n'
 
@@ -150,6 +151,12 @@ export function VaultUnlockModal(): React.JSX.Element | null {
    * deliberately enrolled for this vault, which is a thing the user turned on.
    */
   const asked = useRef(false)
+  // Before the effect below, so a re-armed `asked` is seen in the same commit.
+  // A prompt that failed because the OS could not show one is not a refusal.
+  useBioRecheck(open && !creating && !checking, () => {
+    asked.current = false
+    clearError()
+  })
   useEffect(() => {
     if (!open) {
       asked.current = false

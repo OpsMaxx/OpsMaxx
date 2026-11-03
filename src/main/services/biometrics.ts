@@ -57,11 +57,17 @@ export function biometricSupport(): BiometricSupport {
     return { available: false, kind: 'none', reason: 'This system has no secure storage available.' }
   }
   if (process.platform === 'darwin') {
-    // canPromptTouchID is false on a Mac with no Touch Bar/sensor, and on one
-    // where the user has not enrolled a fingerprint.
+    // canPromptTouchID is false on a Mac with no sensor, with no fingerprint
+    // enrolled -- and, for a while, on one that has both: while the screen is
+    // locked (where a wake from sleep lands) and with the lid shut. It does not
+    // say which, so the reason must not pick one.
     return systemPreferences.canPromptTouchID()
       ? { available: true, kind: 'touch-id' }
-      : { available: false, kind: 'none', reason: 'No enrolled Touch ID fingerprint on this Mac.' }
+      : {
+          available: false,
+          kind: 'none',
+          reason: 'macOS is not offering Touch ID right now (the screen is locked, the lid is closed, or no fingerprint is enrolled).'
+        }
   }
   if (process.platform === 'win32') {
     // Electron exposes promptTouchID for macOS and nothing equivalent for

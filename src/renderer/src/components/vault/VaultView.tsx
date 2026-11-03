@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { useVault, newField, bioBlockedReason } from '../../store/vault'
 import { VaultReset } from './VaultReset'
+import { useBioRecheck } from '../../hooks/useBioRecheck'
 import { toast } from '../../store/toast'
 import { clsx } from '../../lib/format'
 import { useApp } from '../../store/app'
@@ -162,6 +163,10 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
   // guard means neither can loop.
   const autoPrompted = useRef(false)
   const autoPrompt = useApp((s) => s.settings.vaultAutoBiometricPrompt)
+  useBioRecheck(mode === 'unlock', () => {
+    autoPrompted.current = false
+    useVault.getState().clearError()
+  })
 
   useEffect(() => {
     if (!canUseBio || !autoPrompt || autoPrompted.current || busy) return
