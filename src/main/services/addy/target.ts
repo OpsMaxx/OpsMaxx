@@ -84,6 +84,11 @@ export function addyTarget(deps: AddyTargetDeps): BackupTarget {
   assertPreconditions(deps)
 
   let index: GenerationIndex | null = null
+  /** What the relay said the index was when this target last read or wrote
+   *  it. Sent as If-Match on the next write: the relay's PUT is CREATE ONLY
+   *  without one, so an index written unconditionally lands once and then
+   *  every later backup is refused as "written by another device first". */
+  let indexEtag = ''
   let indexCounter = 0
 
   const objectName = (generation: string): string => `${BACKUP_COLLECTION}/${generation}`
@@ -102,15 +107,19 @@ export function addyTarget(deps: AddyTargetDeps): BackupTarget {
     return Buffer.from(sealed, 'base64')
   }
 
-  const open = async (collection: string, sealed: Buffer, seenCounter: number): Promise<Buffer> => {
-    const result = await deps.addyd.send<{ payload: string }>('open', {
+  const open = async (
+    collection: string,
+    sealed: Buffer,
+    seenCounter: number
+  ): Promise<{ payload: Buffer; counter: number }> => {
+    const result = await deps.addyd.send<{ payload: string; counter?: number }>('open', {
       collection,
       epoch: deps.epoch(),
       sealed: sealed.toString('base64'),
       knownSchema: 1,
       seenCounter
     })
-    return Buffer.from(result.payload, 'base64')
+    return { payload: Buffer.from(result.payload, 'base64'), counter: result.counter ?? 0 }
   }
 
   const loadIndex = async (): Promise<GenerationIndex> => {
@@ -118,18 +127,58 @@ export function addyTarget(deps: AddyTargetDeps): BackupTarget {
     const stored = await deps.relay.getObject(BACKUP_COLLECTION, deps.epoch())
     if (!stored) {
       index = { generations: [] }
+      indexEtag = ''
       return index
     }
-    const plain = await open(BACKUP_COLLECTION, stored.body, 0)
-    index = JSON.parse(plain.toString('utf8')) as GenerationIndex
+    const opened = await open(BACKUP_COLLECTION, stored.body, 0)
+    index = JSON.parse(opened.payload.toString('utf8')) as GenerationIndex
+    indexEtag = stored.etag
+    // Never backwards: a counter this device already wrote stays the floor
+    // even if the copy just read carries a lower one.
+    indexCounter = Math.max(indexCounter, opened.counter)
     return index
   }
 
-  const saveIndex = async (next: GenerationIndex): Promise<void> => {
-    indexCounter += 1
-    const sealed = await seal(BACKUP_COLLECTION, indexCounter, Buffer.from(JSON.stringify(next), 'utf8'))
-    await deps.relay.putObject(BACKUP_COLLECTION, deps.epoch(), indexCounter, sealed)
-    index = next
+  const isConflict = (err: unknown): boolean => err instanceof AddyError && err.code === 'conflict'
+
+  /** Writes the index as `change` applied to the CURRENT one.
+   *
+   *  A change rather than a finished index, so that when the conditional write
+   *  loses -- another device backed up in between, or this target's cached
+   *  copy is older than the relay's -- it is re-read and the same change is
+   *  applied again on top. Failing instead would fail every backup after the
+   *  first one somebody else wrote, forever. */
+  const updateIndex = async (change: (current: GenerationIndex) => GenerationIndex): Promise<void> => {
+    for (let attempt = 0; ; attempt++) {
+      const next = change(await loadIndex())
+      const counter = indexCounter + 1
+      const sealed = await seal(BACKUP_COLLECTION, counter, Buffer.from(JSON.stringify(next), 'utf8'))
+      try {
+        indexEtag = await deps.relay.putObject(BACKUP_COLLECTION, deps.epoch(), counter, sealed, indexEtag || undefined)
+        indexCounter = counter
+        index = next
+        return
+      } catch (err) {
+        // ponytail: three tries, then the 409 surfaces; a device losing three
+        // races in a row is a loop worth hearing about rather than hiding.
+        if (!isConflict(err) || attempt >= 2) throw err
+        indexCounter = counter
+        index = null
+      }
+    }
+  }
+
+  /** Writes a generation object, replacing one of the same name if a run that
+   *  failed after this step left it there. */
+  const putGeneration = async (name: string, counter: number, data: Buffer): Promise<void> => {
+    const sealed = await seal(objectName(name), counter, data)
+    try {
+      await deps.relay.putObject(objectName(name), deps.epoch(), counter, sealed)
+    } catch (err) {
+      if (!isConflict(err)) throw err
+      const existing = await deps.relay.getObject(objectName(name), deps.epoch())
+      await deps.relay.putObject(objectName(name), deps.epoch(), counter, sealed, existing?.etag)
+    }
   }
 
   return {
@@ -140,16 +189,12 @@ export function addyTarget(deps: AddyTargetDeps): BackupTarget {
       // -- from a note, a reused password, a shoulder -- would hold everything
       // the bundle carries.
       const current = await loadIndex()
-      const counter = current.generations.length + 1
-      const sealed = await seal(objectName(name), counter, data)
-      await deps.relay.putObject(objectName(name), deps.epoch(), counter, sealed)
+      await putGeneration(name, current.generations.length + 1, data)
 
-      await saveIndex({
-        generations: [
-          ...current.generations.filter((g) => g.name !== name),
-          { name, size: data.length, modified: Date.now(), sha256: sha256(data) }
-        ]
-      })
+      const entry = { name, size: data.length, modified: Date.now(), sha256: sha256(data) }
+      await updateIndex((latest) => ({
+        generations: [...latest.generations.filter((g) => g.name !== name), entry]
+      }))
     },
 
     async get(name) {
@@ -157,7 +202,7 @@ export function addyTarget(deps: AddyTargetDeps): BackupTarget {
       if (!stored) {
         throw new AddyError('internal', { key: 'main.addy.target.noGeneration', vars: { name } })
       }
-      const bundle = await open(objectName(name), stored.body, 0)
+      const bundle = (await open(objectName(name), stored.body, 0)).payload
 
       // Checked against what the client recorded when it wrote, not against
       // anything the relay said. The whole point of the sealed index is that
@@ -179,15 +224,17 @@ export function addyTarget(deps: AddyTargetDeps): BackupTarget {
     },
 
     async remove(name) {
-      const current = await loadIndex()
       // The index first, then the object. The reverse order leaves a
       // generation listed that is not there, which restore offers and then
       // fails on; this order leaves at worst an orphaned object, which costs
       // quota and nothing else.
-      await saveIndex({ generations: current.generations.filter((g) => g.name !== name) })
-      await deps.relay.putObject(objectName(name), deps.epoch(), 0, Buffer.alloc(0)).catch(() => {
-        // A tombstone that does not land is not worth failing the removal
-        // over: the index is authoritative and no longer lists it.
+      await updateIndex((latest) => ({ generations: latest.generations.filter((g) => g.name !== name) }))
+      // Deleted rather than overwritten with an empty tombstone: the relay's
+      // PUT is create-only without an If-Match, so the tombstone was refused
+      // every time and every pruned generation stayed on the relay as quota.
+      await deps.relay.deleteObject(objectName(name), deps.epoch()).catch(() => {
+        // A delete that does not land is not worth failing the removal over:
+        // the index is authoritative and no longer lists it.
       })
     },
 

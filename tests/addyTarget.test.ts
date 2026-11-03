@@ -63,18 +63,37 @@ function fakeSidecar(): AddySidecar & { sealed: Buffer[] } {
   }
 }
 
-/** A relay that remembers what it was handed. */
-function fakeRelay(): RelayClient & { objects: Map<string, Buffer> } {
+/** A relay that remembers what it was handed, and refuses a write the way the
+ *  real one does.
+ *
+ *  The real relay's PUT is CREATE ONLY without an If-Match, and refuses a stale
+ *  one with a 409. The first version of this fake overwrote unconditionally,
+ *  which is exactly why an index written without an etag passed every test
+ *  here and then failed every backup after the first one in production. */
+function fakeRelay(): RelayClient & { objects: Map<string, Buffer>; etags: Map<string, string> } {
   const objects = new Map<string, Buffer>()
+  const etags = new Map<string, string>()
+  let nextEtag = 0
   return {
     objects,
+    etags,
     async getObject(name: string) {
       const held = objects.get(name)
-      return held ? { body: held, etag: 'e' } : null
+      return held ? { body: held, etag: etags.get(name) ?? '' } : null
     },
-    async putObject(name: string, _epoch: number, _counter: number, sealed: Buffer) {
+    async putObject(name: string, _epoch: number, _counter: number, sealed: Buffer, ifMatch?: string) {
+      const current = etags.get(name)
+      if (current === undefined ? Boolean(ifMatch) : ifMatch !== current) {
+        throw new AddyError('conflict', { key: 'main.addy.relay.writtenFirst', vars: { name } })
+      }
+      const etag = `e${++nextEtag}`
       objects.set(name, sealed)
-      return 'e'
+      etags.set(name, etag)
+      return etag
+    },
+    async deleteObject(name: string) {
+      objects.delete(name)
+      etags.delete(name)
     },
     async roster() {
       return ''
@@ -82,12 +101,12 @@ function fakeRelay(): RelayClient & { objects: Map<string, Buffer> } {
     async request() {
       throw new Error('not used')
     }
-  } as unknown as RelayClient & { objects: Map<string, Buffer> }
+  } as unknown as RelayClient & { objects: Map<string, Buffer>; etags: Map<string, string> }
 }
 
-function target(over: { passphraseLength?: number } = {}) {
+function target(over: { passphraseLength?: number; relay?: ReturnType<typeof fakeRelay> } = {}) {
   const addyd = fakeSidecar()
-  const relay = fakeRelay()
+  const relay = over.relay ?? fakeRelay()
   const t = addyTarget({
     addyd,
     relay,
@@ -185,6 +204,61 @@ describe('removing a generation', () => {
     // restore offers and then fails on. This order leaves at worst an orphaned
     // object, which costs quota and nothing else.
     expect(await t.list()).toEqual([])
+  })
+
+  it('deletes the object from the relay rather than leaving it as quota', async () => {
+    const { t, relay } = target()
+    await t.put('gen-1', BUNDLE)
+    await t.remove('gen-1')
+    expect(relay.objects.has(`${BACKUP_COLLECTION}/gen-1`)).toBe(false)
+  })
+})
+
+describe('writing the index again', () => {
+  // The reported failure: "backupGenerations was written by another device
+  // first", on an account with one device. The index was written without an
+  // If-Match, and the relay's PUT is create-only without one -- so the first
+  // backup ever landed and every one after it was refused.
+  it('succeeds on the second backup from the same target', async () => {
+    const { t } = target()
+    await t.put('gen-1', BUNDLE)
+    await t.put('gen-2', BUNDLE)
+    expect((await t.list()).map((g) => g.name)).toEqual(['gen-1', 'gen-2'])
+  })
+
+  it('succeeds from a fresh target, as the next scheduled run builds one', async () => {
+    const relay = fakeRelay()
+    await target({ relay }).t.put('gen-1', BUNDLE)
+    const { t } = target({ relay })
+    await t.put('gen-2', BUNDLE)
+    expect((await t.list()).map((g) => g.name)).toEqual(['gen-1', 'gen-2'])
+  })
+
+  it('keeps both when another device backed up in between', async () => {
+    const relay = fakeRelay()
+    const mine = target({ relay }).t
+    const theirs = target({ relay }).t
+    await mine.put('gen-mine-1', BUNDLE)
+    await theirs.put('gen-theirs', BUNDLE)
+
+    // `mine` still holds the index as it was before `theirs` wrote. Its
+    // conditional write loses, and it re-reads and applies its change on top
+    // rather than failing -- or overwriting the other device's generation.
+    await mine.put('gen-mine-2', BUNDLE)
+    expect((await target({ relay }).t.list()).map((g) => g.name)).toEqual([
+      'gen-mine-1',
+      'gen-theirs',
+      'gen-mine-2'
+    ])
+  })
+
+  it('re-applies a removal on top of a newer index', async () => {
+    const relay = fakeRelay()
+    const mine = target({ relay }).t
+    await mine.put('gen-1', BUNDLE)
+    await target({ relay }).t.put('gen-2', BUNDLE)
+    await mine.remove('gen-1')
+    expect((await target({ relay }).t.list()).map((g) => g.name)).toEqual(['gen-2'])
   })
 })
 
