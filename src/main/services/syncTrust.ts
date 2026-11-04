@@ -217,7 +217,10 @@ export function fieldsOf(kind: HeldKind, rec: Rec): Record<string, string> | nul
         via: str(rec.sshServerId),
         // A container name is an address: it decides where the password goes.
         container: str(rec.container),
-        tls: rec.ssl === true ? '1' : '0',
+        // Certificate checking off is the same exposure as TLS off, to anyone
+        // in the path. Folded into the one value so a record that never
+        // turned it off keeps the value it already had.
+        tls: rec.ssl === true ? (rec.tlsVerify === false ? '1-unverified' : '1') : '0',
         vpn: str(rec.vpnProfileId),
         ws: str(rec.workspaceId),
         // With the `uri` flag, which decides whether the entry is read as a

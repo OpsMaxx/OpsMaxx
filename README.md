@@ -67,7 +67,7 @@ Most terminal tools do one thing. A typical DevOps task needs four: open a shell
 | **Service checks** | HTTP checks against anything you can reach, running whether or not the window is open, with ping and traceroute beside them |
 | **Tunnels & VPN** | Local, remote and SOCKS5 forwards; userspace WireGuard with no administrator rights; OpenVPN, frp, and **Tailscale and ngrok embedded** — no client to install |
 | **HTTP client** | REST, WebSocket and GraphQL requests sent from this machine, through a server's SSH connection or over a VPN — so `localhost` can mean that server, with a private CA trusted per collection |
-| **Databases** | PostgreSQL, MySQL, SQL Server, MongoDB and Redis, direct or through a bastion |
+| **Databases** | PostgreSQL, MySQL, SQL Server, MongoDB, Redis and ClickHouse, direct or through a bastion |
 | **Containers** | Docker and Kubernetes on a server or on this machine — containers, images, logs and a shell inside one |
 | **CI/CD** | Jenkins, GitLab and GitHub Actions read beside the server a run changed — pipelines, run history, and the log of the step that failed. Reading only, and off until you turn it on: enabling it polls somebody else's API on a timer with a token you supply |
 | **Vault** | AES-256-GCM secrets store, with credentials in your OS keychain rather than a config file |

@@ -32,7 +32,8 @@ const BANNER: Record<DbKind, MessageKey> = {
   postgres: 'databases.shell.banner.postgres',
   mysql: 'databases.shell.banner.mysql',
   mssql: 'databases.shell.banner.mssql',
-  redis: 'databases.shell.banner.redis'
+  redis: 'databases.shell.banner.redis',
+  clickhouse: 'databases.shell.banner.clickhouse'
 }
 
 export function DbShell({ cfg, kind, dbName, onUseDatabase, onSchemaChanged }: Props): React.JSX.Element {

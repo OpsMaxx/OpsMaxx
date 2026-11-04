@@ -46,7 +46,9 @@ const KINDS: {
   { id: 'mongodb', label: 'MongoDB', port: 27017, dbLabelKey: 'databases.add.database', dbPlaceholder: 'admin' },
   // Redis numbers its databases rather than naming them, so the label changes
   // too — "Database: mydb" is not a thing a Redis user can type.
-  { id: 'redis', label: 'Redis', port: 6379, dbLabelKey: 'databases.add.databaseIndex', dbPlaceholder: '0' }
+  { id: 'redis', label: 'Redis', port: 6379, dbLabelKey: 'databases.add.databaseIndex', dbPlaceholder: '0' },
+  // The HTTP interface: 8123, or 8443 with TLS. Not the native port 9000.
+  { id: 'clickhouse', label: 'ClickHouse', port: 8123, dbLabelKey: 'databases.add.database', dbPlaceholder: 'default' }
 ]
 
 const kindOf = (k: DbKind): (typeof KINDS)[number] => KINDS.find((x) => x.id === k)!
@@ -69,6 +71,7 @@ export function AddDatabaseModal(): React.JSX.Element {
   const [password, setPassword] = useState('')
   const [database, setDatabase] = useState(existing?.database ?? '')
   const [ssl, setSsl] = useState(existing?.ssl ?? false)
+  const [tlsVerify, setTlsVerify] = useState(existing?.tlsVerify !== false)
   const [uri, setUri] = useState('')
   const [sshServerId, setSshServerId] = useState(existing?.sshServerId ?? '')
   const [container, setContainer] = useState<string | null>(existing?.container ?? null)
@@ -243,6 +246,7 @@ export function AddDatabaseModal(): React.JSX.Element {
           username: useUri ? '' : username.trim(),
           database: database.trim(),
           ssl,
+          tlsVerify,
           sshServerId: sshServerId || null,
           vpnProfileId,
           container: useUri ? null : container
@@ -293,6 +297,7 @@ export function AddDatabaseModal(): React.JSX.Element {
       username: useUri ? '' : username.trim(),
       database: database.trim(),
       ssl,
+      tlsVerify,
       uri: useUri,
       folderId: existing?.folderId ?? null,
       sshServerId: sshServerId || null,
@@ -372,12 +377,27 @@ export function AddDatabaseModal(): React.JSX.Element {
     setModal(null)
   }
 
+  // ClickHouse only: the other engines predate the setting and accept any
+  // certificate. Shown whenever TLS is in play -- the switch in field mode, or
+  // a connection string, whose https:// says so itself.
+  const verifyField = kind === 'clickhouse' && (useUri || ssl) && (
+    <div className="field">
+      <label className="field-label">{t('databases.add.tlsVerify')}</label>
+      <label className="row" style={{ height: 34, gap: 10 }}>
+        <Switch checked={tlsVerify} label={t('databases.add.tlsVerify')} onChange={setTlsVerify} />
+        <span className="muted">{tlsVerify ? t('common.enabled') : t('common.disabled')}</span>
+      </label>
+      {!tlsVerify && <span className="field-hint">{t('databases.add.tlsVerifyOff')}</span>}
+    </div>
+  )
+
   const uriPlaceholder: Record<DbKind, string> = {
     postgres: 'postgresql://user:pass@host:5432/dbname',
     mysql: 'mysql://user:pass@host:3306/dbname',
     mssql: 'Server=server,1433;Database=db;User Id=user;Password=pass;Encrypt=true',
     mongodb: 'mongodb+srv://user:pass@cluster.mongodb.net/dbname',
-    redis: 'redis://:pass@host:6379/0'
+    redis: 'redis://:pass@host:6379/0',
+    clickhouse: 'https://user:pass@host:8443/default'
   }
 
   return (
@@ -414,7 +434,7 @@ export function AddDatabaseModal(): React.JSX.Element {
     >
       <div className="field">
         <label className="field-label">{t('databases.add.engine')}</label>
-        <div className="radio-cards" style={{ gridTemplateColumns: 'repeat(5, 1fr)' }}>
+        <div className="radio-cards" style={{ gridTemplateColumns: `repeat(${KINDS.length}, 1fr)` }}>
           {KINDS.map((k) => (
             <button
               key={k.id}
@@ -551,6 +571,8 @@ export function AddDatabaseModal(): React.JSX.Element {
             </label>
           )}
 
+          {verifyField}
+
           {kind === 'mongodb' && (
             <div className="field">
               <label className="field-label">{t('databases.add.databaseOverride')}</label>
@@ -597,7 +619,13 @@ export function AddDatabaseModal(): React.JSX.Element {
           <div className="field-row">
             <div className="field">
               <label className="field-label">{t('databases.add.username')}</label>
-              <input className="input" value={username} onChange={(e) => setUsername(e.target.value)} />
+              <input
+                className="input"
+                // Left blank, the ClickHouse driver logs in as `default`; say so.
+                placeholder={kind === 'clickhouse' ? 'default' : undefined}
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+              />
             </div>
             {options.length > 0 && (
               <div className="field">
@@ -670,11 +698,21 @@ export function AddDatabaseModal(): React.JSX.Element {
               <label className="row" style={{ height: 34, gap: 10 }}>
                 {/* Named for the setting: the words it sits beside are its
                     state, and "Disabled, switch, off" says nothing. */}
-                <Switch checked={ssl} label="TLS / SSL" onChange={setSsl} />
+                <Switch
+                  checked={ssl}
+                  label="TLS / SSL"
+                  onChange={(on) => {
+                    setSsl(on)
+                    // ClickHouse serves HTTPS on its own port, so follow the
+                    // switch -- but only off the stock number, never a typed one.
+                    if (kind === 'clickhouse' && port === (on ? '8123' : '8443')) setPort(on ? '8443' : '8123')
+                  }}
+                />
                 <span className="muted">{ssl ? t('common.enabled') : t('common.disabled')}</span>
               </label>
             </div>
           </div>
+          {verifyField}
         </>
       )}
 

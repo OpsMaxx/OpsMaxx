@@ -24,6 +24,7 @@
     "mysql",
     "mongodb",
     "redis",
+    "clickhouse",
     "sql-server",
     "password-manager",
     "secrets-vault",
@@ -87,6 +88,7 @@
     "build:addyd": "bash scripts/build-addyd.sh"
   },
   "dependencies": {
+    "@clickhouse/client": "1.24.1",
     "@codemirror/autocomplete": "6.20.3",
     "@codemirror/commands": "6.11.0",
     "@codemirror/lang-html": "6.4.12",

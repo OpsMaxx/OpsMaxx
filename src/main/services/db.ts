@@ -35,7 +35,8 @@ const DEFAULT_PORT: Record<DbKind, number> = {
   mysql: 3306,
   mssql: 1433,
   mongodb: 27017,
-  redis: 6379
+  redis: 6379,
+  clickhouse: 8123
 }
 
 /**
@@ -92,7 +93,8 @@ async function build(cfg: DbConnectConfig, allowPrompt = false): Promise<Conn> {
       ...cfg,
       host: '127.0.0.1',
       port: fwd.port,
-      uri: cfg.uri ? rewriteUriHost(cfg.uri, '127.0.0.1', fwd.port) : undefined
+      uri: cfg.uri ? rewriteUriHost(cfg.uri, '127.0.0.1', fwd.port) : undefined,
+      tlsServername: cfg.tlsServername ?? targetHost
     })
     const inner = conn.close
     return {
@@ -266,7 +268,8 @@ async function buildOverVpn(cfg: DbConnectConfig, allowPrompt = false): Promise<
           vpnProfileId: undefined,
           host: '127.0.0.1',
           port: local.port,
-          uri: cfg.uri ? rewriteUriHost(cfg.uri, '127.0.0.1', local.port) : undefined
+          uri: cfg.uri ? rewriteUriHost(cfg.uri, '127.0.0.1', local.port) : undefined,
+          tlsServername: cfg.tlsServername ?? dbHost
         }
 
     const conn = await build(inner)
@@ -347,6 +350,54 @@ async function buildDriver(cfg: DbConnectConfig): Promise<Conn> {
       await c.connect()
       return { kind, client: c, close: async () => void c.quit() }
     }
+    case 'clickhouse': {
+      const { createClient } = await import('@clickhouse/client')
+      const raw = uri || `${ssl ? 'https' : 'http'}://${host}:${port}`
+      if (!/^https?:\/\//i.test(raw)) {
+        throw new Error('A ClickHouse connection string is an http:// or https:// URL to the HTTP interface, e.g. https://user:pass@host:8443/default.')
+      }
+      // The client lets a URL's path override the `database` option, so a
+      // database chosen later -- `\c other` in the shell -- has to go into the
+      // path or it would be silently ignored.
+      const parsed = new URL(raw)
+      if (uri && database) parsed.pathname = '/' + encodeURIComponent(database)
+      const url = parsed.toString()
+      // Our own agent only for TLS, and only to say two things the client has no
+      // option for: which name to present and check the certificate against --
+      // the real host, even when a tunnel has us dialling 127.0.0.1, which is
+      // also what ClickHouse Cloud routes on -- and whether to check it at all.
+      //
+      // Checked against the OS trust store as well as Node's bundled roots: a
+      // server behind a company CA the machine already trusts would otherwise
+      // fail here, and the only way past it would be switching the check off.
+      const verify = cfg.tlsVerify !== false
+      let agent: import('node:https').Agent | undefined
+      if (/^https:/i.test(url)) {
+        const { getCACertificates } = await import('node:tls')
+        agent = new (await import('node:https')).Agent({
+          keepAlive: true,
+          servername: cfg.tlsServername ?? parsed.hostname,
+          rejectUnauthorized: verify,
+          ca: verify ? [...new Set([...getCACertificates('default'), ...getCACertificates('system')])] : undefined
+        })
+      }
+      const c = createClient({
+        url,
+        // A URL carries its own credentials and database; the client reads them
+        // from it, and passing the discrete fields as well would override them.
+        ...(uri ? {} : { username: username || 'default', password: password ?? '', database: database || undefined }),
+        request_timeout: DB_CONNECT_TIMEOUT_MS * 3,
+        ...(agent ? { http_agent: agent, set_basic_auth_header: true } : {})
+      })
+      // The plain ping hits /ping, which answers without authenticating, so a
+      // wrong password would pass it. A SELECT has to log in.
+      const ping = await c.ping({ select: true })
+      if (!ping.success) {
+        await c.close()
+        throw ping.error
+      }
+      return { kind, client: c, close: () => c.close() }
+    }
   }
 }
 
@@ -401,6 +452,15 @@ export function mongoDbName(cfg: DbConnectConfig): string | undefined {
   return m?.[1] ? decodeURIComponent(m[1]) : undefined
 }
 
+/** ClickHouse statements that return rows, and so can be asked for them as JSON. */
+const CH_ROWS = /^\s*(select|with|show|describe|desc|explain|exists)\b/i
+const CH_MAX_ROWS = 10_000
+
+async function chRows(client: any, query: string): Promise<Record<string, unknown>[]> {
+  const res = await client.query({ query, format: 'JSONEachRow' })
+  return (await res.json()) as Record<string, unknown>[]
+}
+
 export async function dbTest(cfg: DbConnectConfig): Promise<DbTestResult> {
   try {
     // Somebody pressed Test connection; nothing else reaches this.
@@ -412,6 +472,7 @@ export async function dbTest(cfg: DbConnectConfig): Promise<DbTestResult> {
       else if (cfg.kind === 'mssql') version = (await conn.client.request().query('SELECT @@VERSION v')).recordset[0].v
       else if (cfg.kind === 'redis') version = 'Redis ' + (await conn.client.info('server')).match(/redis_version:([^\r\n]+)/)?.[1]
       else if (cfg.kind === 'mongodb') version = 'MongoDB ' + (await conn.client.db().admin().serverInfo()).version
+      else if (cfg.kind === 'clickhouse') version = 'ClickHouse ' + (await chRows(conn.client, 'SELECT version() v'))[0].v
     } catch {
       /* version optional */
     }
@@ -463,6 +524,37 @@ export async function dbQuery(
         return { ok: true, kind: 'rows', columns, rows: rec.map((r: any) => columns.map((c) => r[c])), rowCount: rec.length, elapsedMs: elapsed() }
       }
       return { ok: true, kind: 'message', message: `${res.rowsAffected?.[0] ?? 0} row(s) affected`, elapsedMs: elapsed() }
+    }
+    if (cfg.kind === 'clickhouse') {
+      const sql = text.trim().replace(/;\s*$/, '')
+      // Only a statement that returns rows can take the FORMAT clause the client
+      // appends to query(); INSERT, CREATE and the rest go through command().
+      if (!CH_ROWS.test(sql)) {
+        await conn.client.command({ query: sql })
+        return { ok: true, kind: 'message', message: 'OK', elapsedMs: elapsed() }
+      }
+      const res = await conn.client.query({
+        query: sql,
+        format: 'JSON',
+        // ponytail: fixed cap so `SELECT *` on a billion-row table cannot take
+        // main down; paging is the upgrade if people need to scroll further.
+        clickhouse_settings: { max_result_rows: String(CH_MAX_ROWS), result_overflow_mode: 'break' }
+      })
+      const body = (await res.json()) as { meta?: { name: string }[]; data?: Record<string, unknown>[] }
+      const columns = (body.meta ?? []).map((m) => m.name)
+      const data = body.data ?? []
+      // 'break' stops at a block boundary, so a capped result can run a little
+      // past the number as well as land on it.
+      const capped = data.length >= CH_MAX_ROWS
+      return {
+        ok: true,
+        kind: 'rows',
+        columns,
+        rows: data.map((r) => columns.map((c) => r[c])),
+        rowCount: data.length,
+        message: capped ? `${data.length} row(s), stopped at the ${CH_MAX_ROWS}-row limit` : `${data.length} row(s)`,
+        elapsedMs: elapsed()
+      }
     }
     if (cfg.kind === 'mongodb') {
       const command = JSON.parse(text)
@@ -525,6 +617,11 @@ export async function dbInfo(cfg: DbConnectConfig): Promise<DbInfo> {
       } catch {
         /* listCollections not permitted for this db */
       }
+      return { ok: true, databases, tables }
+    }
+    if (cfg.kind === 'clickhouse') {
+      const databases = (await chRows(conn.client, 'SHOW DATABASES')).map((r) => String(r.name))
+      const tables = (await chRows(conn.client, 'SHOW TABLES')).map((r) => String(r.name))
       return { ok: true, databases, tables }
     }
     // redis

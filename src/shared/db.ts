@@ -1,7 +1,7 @@
 import type { CloudTarget } from './cloud'
 import type { SshAuth } from './ssh'
 
-export type DbKind = 'postgres' | 'mysql' | 'mssql' | 'mongodb' | 'redis'
+export type DbKind = 'postgres' | 'mysql' | 'mssql' | 'mongodb' | 'redis' | 'clickhouse'
 
 // Optional SSH jump: the driver connects to a local forward instead of the
 // database host directly.
@@ -44,6 +44,18 @@ export interface DbConnectConfig {
   password?: string
   database?: string
   ssl?: boolean
+  /**
+   * With `ssl`, whether the server certificate is checked. Absent means yes.
+   * Only ClickHouse reads it today; the other engines predate it and accept
+   * any certificate.
+   */
+  tlsVerify?: boolean
+  /**
+   * The name TLS presents (SNI) and checks the certificate against. Set by
+   * main when a tunnel rewrites the host to 127.0.0.1, so the handshake still
+   * names the server the user asked for. Never sent by the renderer.
+   */
+  tlsServername?: string
   // Full connection string / URI (e.g. mongodb+srv://user:pass@cluster/db).
   // When present it takes precedence over the discrete host/port/... fields.
   uri?: string
@@ -98,7 +110,10 @@ export const DB_DEFAULT_PORT: Record<DbKind, number> = {
   mysql: 3306,
   mssql: 1433,
   mongodb: 27017,
-  redis: 6379
+  redis: 6379,
+  // The HTTP interface, which is what @clickhouse/client speaks. 8443 with TLS.
+  // The native protocol on 9000 is not supported.
+  clickhouse: 8123
 }
 
 export const DB_LABEL: Record<DbKind, string> = {
@@ -106,5 +121,6 @@ export const DB_LABEL: Record<DbKind, string> = {
   mysql: 'MySQL',
   mssql: 'SQL Server',
   mongodb: 'MongoDB',
-  redis: 'Redis'
+  redis: 'Redis',
+  clickhouse: 'ClickHouse'
 }

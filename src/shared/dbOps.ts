@@ -4874,7 +4874,8 @@ export type DbOpsEngine = 'postgres' | 'mysql' | 'mongodb' | 'redis' | 'mssql'
  * because they answer completely different questions and a thin imitation of
  * the SQL page would have been worse than no page. They have their own
  * questions now — replica-set state and oplog window; eviction policy,
- * persistence and the link to a master. SQL Server is still out.
+ * persistence and the link to a master. SQL Server followed. ClickHouse is
+ * out for the same reason MongoDB once was.
  */
 export function supportsDbOps(kind: string): kind is DbOpsEngine {
   return (
@@ -4888,8 +4889,8 @@ export function supportsDbOps(kind: string): kind is DbOpsEngine {
 
 export const DB_OPS_UNSUPPORTED_NOTE =
   'Operational reads are available for PostgreSQL, MySQL/MariaDB, MongoDB, Redis and SQL Server. ' +
-  'Every engine this app can connect to is now covered, so this note is kept for the next engine ' +
-  'rather than for a gap that exists today.'
+  'ClickHouse has the query editor and the shell, but not this page yet: its questions -- merges, ' +
+  'parts, replication queues -- are its own, and a copy of the SQL page would answer the wrong ones.'
 
 /** The questions asked of each engine, in the order they should be read. */
 export const DB_QUESTIONS_BY_ENGINE: Record<DbOpsEngine, readonly DbQuestionId[]> = {

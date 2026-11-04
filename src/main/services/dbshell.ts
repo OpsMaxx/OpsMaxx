@@ -66,6 +66,14 @@ Results are capped at 50 documents unless you add .limit(n).`,
   \\d <table>                 describe a table
   \\c <database>              switch database
   \\conninfo                  current connection info`,
+  clickhouse: `Commands
+  <SQL>                      run a statement
+  \\l                         list databases       (or SHOW DATABASES)
+  \\dt                        list tables          \\dv  views    \\du  users
+  \\d <table>                 describe a table     (or DESCRIBE TABLE <table>)
+  \\c <database>              switch database      (or USE <database>)
+  \\conninfo                  current connection info
+Results are capped at 10,000 rows.`,
   redis: `Commands
   <REDIS COMMAND>            e.g. GET mykey, KEYS user:*, HGETALL h
   SELECT <n>                 switch keyspace
@@ -368,6 +376,28 @@ function metaSql(kind: DbKind, cmd: string, arg: string): string | null {
       case 'd':
         if (!t) return 'SHOW FULL TABLES'
         return `DESCRIBE \`${t.replace(/`/g, '')}\``
+      default:
+        return null
+    }
+  }
+  if (kind === 'clickhouse') {
+    switch (cmd) {
+      case 'l':
+      case 'list':
+        return 'SHOW DATABASES'
+      case 'dt':
+        return "SELECT name, engine, total_rows FROM system.tables WHERE database = currentDatabase() AND NOT is_temporary AND engine NOT IN ('View', 'MaterializedView') ORDER BY name"
+      case 'dv':
+        return "SELECT name, engine FROM system.tables WHERE database = currentDatabase() AND engine IN ('View', 'MaterializedView') ORDER BY name"
+      case 'du':
+        return 'SHOW USERS'
+      case 'conninfo':
+        return 'SELECT currentDatabase() AS database, currentUser() AS user, version() AS version'
+      case 'd':
+        if (!t) return metaSql(kind, 'dt', '')
+        // Backquoted per part, so `db.table` and names with odd characters
+        // both reach DESCRIBE as the identifiers they are.
+        return `DESCRIBE TABLE ${t.split('.').map((p) => '`' + p.replace(/[`\\]/g, '\\$&') + '`').join('.')}`
       default:
         return null
     }

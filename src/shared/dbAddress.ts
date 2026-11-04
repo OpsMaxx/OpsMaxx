@@ -34,11 +34,12 @@
 // ---------------------------------------------------------------------------
 //
 // Two families reach this function, and they were read off real strings the
-// five supported drivers actually accept rather than off documentation:
+// six supported drivers actually accept rather than off documentation:
 //
 //   URI          postgresql://user:pass@host:5432/db     (postgres, mysql,
-//                mongodb+srv://user:pass@cluster/db       mongodb, redis)
-//                redis://:pass@host:6379/0
+//                mongodb+srv://user:pass@cluster/db       mongodb, redis,
+//                redis://:pass@host:6379/0                clickhouse)
+//                https://user:pass@host:8443/default
 //
 //   Key/value    Server=host,1433;Database=x;User Id=sa;Password=y   (mssql)
 //                Data Source=host;Initial Catalog=x;...

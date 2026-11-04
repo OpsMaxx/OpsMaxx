@@ -33,6 +33,7 @@ export type DbConnectFields = Pick<
   | 'username'
   | 'database'
   | 'ssl'
+  | 'tlsVerify'
   | 'sshServerId'
   | 'vpnProfileId'
   | 'container'
@@ -51,6 +52,7 @@ export function dbConnectConfig(db: DbConnectFields, servers: Server[]): DbConne
     username: db.username,
     database: db.database,
     ssl: db.ssl,
+    tlsVerify: db.tlsVerify,
     ssh: jump ? sshHopFor(jump) : undefined,
     container: db.container || undefined,
     // Dropped here until now, which is why a VPN chosen in the dialog was

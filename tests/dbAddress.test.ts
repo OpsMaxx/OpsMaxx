@@ -33,6 +33,12 @@ describe('the string that started it', () => {
   // The second half of the screenshot: `...Encrypt=false:1433`. The record's
   // own port column was glued onto whatever the "host" was, so a failure to
   // parse produced a malformed value that also lied about the port.
+  it('reads a ClickHouse https:// URL without showing its password', () => {
+    const ch = 'https://default:hunter2@abc.eu-west-1.aws.clickhouse.cloud:8443/default'
+    expect(parseDbAddress(ch)).toEqual({ kind: 'parsed', host: 'abc.eu-west-1.aws.clickhouse.cloud', port: 8443 })
+    expect(displayHostFromUri(ch)).not.toContain('hunter2')
+  })
+
   it('does not glue a port onto a host it could not find', () => {
     expect(formatDbAddress('', 1433)).toBe(DB_ADDRESS_UNPARSED_LABEL)
     expect(formatDbAddress('', 1433)).not.toContain('1433')

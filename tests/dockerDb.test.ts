@@ -57,6 +57,9 @@ describe('recognising an engine from its image', () => {
     ['mongo@sha256:abc', 'mongodb'],
     ['valkey/valkey:8', 'redis'],
     ['registry.example.com:5000/team/redis:7', 'redis'],
+    ['clickhouse/clickhouse-server:24.8', 'clickhouse'],
+    ['bitnami/clickhouse:24', 'clickhouse'],
+    ['clickhouse/clickhouse-keeper:24.8', null],
     ['nginx:1.27', null]
   ])('%s → %s', (image, kind) => {
     expect(dbKindForImage(image)).toBe(kind)

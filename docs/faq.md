@@ -64,7 +64,7 @@ key. `ProxyJump` entries in `~/.ssh/config` are imported as jump hosts automatic
 
 ### Which databases does it support?
 
-PostgreSQL, MySQL, SQL Server, MongoDB and Redis — each with a table/collection browser, a
+PostgreSQL, MySQL, SQL Server, MongoDB, Redis and ClickHouse — each with a table/collection browser, a
 query editor and an interactive shell. Any of them can be reached through an SSH tunnel, so a
 database that is only routable from inside the network still works.
 

@@ -804,7 +804,8 @@ const DEFAULT_DB_PORT: Record<DbKind, number> = {
   mysql: 3306,
   mssql: 1433,
   mongodb: 27017,
-  redis: 6379
+  redis: 6379,
+  clickhouse: 8123
 }
 
 function effectiveCommand(session: McpAgentSession, serverId: string, command: string): Decision {
@@ -1670,6 +1671,7 @@ function databaseConfig(db: CachedDatabase): Parameters<typeof dbQuery>[0] {
     username: db.username,
     database: db.database || undefined,
     ssl: db.ssl,
+    tlsVerify: db.tlsVerify,
     container: db.container ?? undefined,
     ssh: server
       ? {
@@ -3463,7 +3465,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
   // network something travels over is the decision the VPN rule keeps from
   // agents; a person picks it in OpsMaxx.
 
-  const DB_KIND = z.enum(['postgres', 'mysql', 'mssql', 'mongodb', 'redis'])
+  const DB_KIND = z.enum(['postgres', 'mysql', 'mssql', 'mongodb', 'redis', 'clickhouse'])
 
   /** A database by friendly name, among the session's workspaces. */
   const resolveDatabase = (

@@ -1636,7 +1636,12 @@ export function evaluateFilePath(
 // than ASK while Confirm risky actions is on.
 export type StatementKind = 'read' | 'mutating' | 'destructive'
 
-const DESTRUCTIVE = /^(drop|truncate|alter|create|rename|grant|revoke|flushall|flushdb|shutdown)\b/
+// The second line is ClickHouse's: DETACH/ATTACH/EXCHANGE/UNDROP move tables in
+// and out of the schema, KILL ends other people's queries and mutations, and
+// SYSTEM covers everything from dropping caches to SYSTEM SHUTDOWN. Left
+// unlisted they would only have graded as mutating.
+const DESTRUCTIVE =
+  /^(drop|truncate|alter|create|rename|grant|revoke|flushall|flushdb|shutdown|detach|attach|exchange|undrop|kill|system)\b/
 const MUTATING =
   /^(insert|update|delete|replace|merge|upsert|copy|load|call|do|set|del|unlink|expire|rpush|lpush|sadd|hset|incr|decr|append|getset|move|migrate|restore|persist|analyze|analyse|vacuum|reindex|cluster)\b/
 const READ = /^(select|show|explain|describe|desc|with|values|table|get|mget|keys|scan|type|ttl|exists|llen|lrange|smembers|hget|hgetall|zrange|info|dbsize|find|aggregate|count|distinct|list)\b/

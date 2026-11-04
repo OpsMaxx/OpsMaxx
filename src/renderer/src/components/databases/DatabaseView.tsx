@@ -52,14 +52,16 @@ const DEFAULT_QUERY: Record<DbKind, string> = {
   mysql: 'SHOW TABLES;',
   mssql: 'SELECT name FROM sys.tables;',
   mongodb: '{ "listCollections": 1 }',
-  redis: 'PING'
+  redis: 'PING',
+  clickhouse: 'SHOW TABLES;'
 }
 const KIND_LABEL: Record<DbKind, string> = {
   postgres: 'PostgreSQL',
   mysql: 'MySQL',
   mssql: 'SQL Server',
   mongodb: 'MongoDB',
-  redis: 'Redis'
+  redis: 'Redis',
+  clickhouse: 'ClickHouse'
 }
 
 // Moved to lib/dbConfig.ts when the size sampler needed the same shape. One

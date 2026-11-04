@@ -30,6 +30,8 @@ export function shellPrompt(kind: string, database?: string, user?: string): str
       return 'mysql> '
     case 'mssql':
       return `${database || 'master'}> `
+    case 'clickhouse':
+      return `${database || 'default'} :) `
     default:
       return '> '
   }

@@ -29,7 +29,7 @@ Everything OpsMaxx does, what it replaces, and the shapes of work it was built f
 | **Traffic inspector** | Read the HTTP and HTTPS a machine is actually making — a Burp- or Fiddler-style proxy with one-click certificate install, terminals and SSH sessions routed automatically, and a host that pins its certificate named rather than silently missing |
 | **SSH & databases over VPN** | Point a server or a database at a VPN profile and it is brought up, waited for, and torn down with the session |
 | **HTTP client** | REST, WebSocket and GraphQL requests sent from this machine, through a server's SSH connection or over a VPN — a service bound to a server's loopback is one request away. Collections, environments with a production confirm, cURL and OpenAPI import, and Copy as cURL with credentials masked. [How to use it](08-user/guides/http-client.md) |
-| **Databases** | PostgreSQL, MySQL, SQL Server, MongoDB and Redis — with an interactive shell per engine |
+| **Databases** | PostgreSQL, MySQL, SQL Server, MongoDB, Redis and ClickHouse — with an interactive shell per engine |
 | **Databases over SSH** | Reach a database that is only routable from a bastion |
 | **Vault** | AES-256-GCM encrypted store for URLs, logins, API keys and free-form key/value pairs |
 | **Workspaces** | Isolated, optionally password-protected spaces per client or environment |
@@ -53,7 +53,7 @@ on**, and an upgrade never switches a module on for an install that did not alre
 | **Docker** | Containers, images and volumes with honest per-item sizes, and reclaim by id against exactly what the preview showed — never a blind `prune` |
 | **Compose** | Read a project's services, their state and their drift from the file on disk |
 | **Kubernetes** | Workloads, cordon, drain and exec — drain refuses seven ways and treats a read that did not answer as a refusal in itself |
-| **Databases, operated** | Replication lag, slow queries, table sizes and connection counts for PostgreSQL, MySQL/MariaDB, SQL Server, MongoDB and Redis — every engine the client speaks |
+| **Databases, operated** | Replication lag, slow queries, table sizes and connection counts for PostgreSQL, MySQL/MariaDB, SQL Server, MongoDB and Redis |
 | **Backups** | Scheduled dumps to a local path or S3-compatible storage, with restore **verified by restoring**, not by checking a file exists |
 | **Security posture** | SSH config, sudo rules, listening ports and firewall state as they actually are on the server |
 | **Firewall rules** | The rules themselves rather than a count of them — off by default, behind its own consent, never stored, and unreadable by an agent at any setting |

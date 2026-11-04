@@ -122,7 +122,7 @@ describe.each(['dark', 'light', 'opsmaxx', 'opsmaxx-light'] as const)('%s theme'
   )
 
   // Rendered as the engine name in the tab header, so they are text colours.
-  it.each(['db-postgres', 'db-mysql', 'db-mssql', 'db-mongodb', 'db-redis'])(
+  it.each(['db-postgres', 'db-mysql', 'db-mssql', 'db-mongodb', 'db-redis', 'db-clickhouse'])(
     '--%s clears AA, because the engine name is drawn in it',
     (name) => {
       const { ratio, on } = worstOnSurfaces(theme, token(theme, name))

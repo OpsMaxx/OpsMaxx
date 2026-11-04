@@ -97,6 +97,8 @@ export function dbKindForImage(image: string): DbKind | null {
   if (/mssql|sql-server|azure-sql-edge/.test(repo)) return 'mssql'
   if (/mongo/.test(repo)) return 'mongodb'
   if (/redis|valkey|keydb/.test(repo)) return 'redis'
+  // Keeper ships from the same org but is ZooKeeper's stand-in, not a database.
+  if (/clickhouse/.test(repo) && !/keeper/.test(repo)) return 'clickhouse'
   return null
 }
 

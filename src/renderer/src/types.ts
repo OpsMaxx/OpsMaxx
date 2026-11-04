@@ -254,7 +254,7 @@ export interface Tunnel {
   target: string
 }
 
-export type DbKind = 'postgres' | 'mysql' | 'mssql' | 'mongodb' | 'redis'
+export type DbKind = 'postgres' | 'mysql' | 'mssql' | 'mongodb' | 'redis' | 'clickhouse'
 export interface DatabaseConn {
   id: UUID
   /**
@@ -275,6 +275,11 @@ export interface DatabaseConn {
   username: string
   database: string
   ssl: boolean
+  /**
+   * With `ssl`, whether the server certificate is checked. Absent means yes.
+   * ClickHouse only, so far -- see DbConnectConfig.tlsVerify.
+   */
+  tlsVerify?: boolean
   uri: boolean // true when the connection is defined by a full connection string
   folderId: UUID | null
   // Reach the database through this SSH server (a bastion) when set.

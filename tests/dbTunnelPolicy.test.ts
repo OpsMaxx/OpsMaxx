@@ -53,6 +53,16 @@ describe('statement classification', () => {
     }
   })
 
+  it('grades ClickHouse by what its verbs do', () => {
+    for (const s of ['SHOW TABLES', 'DESCRIBE TABLE events', 'EXISTS TABLE events']) {
+      expect(classifyStatement(s), s).toBe('read')
+    }
+    for (const s of ['DETACH TABLE events', 'EXCHANGE TABLES a AND b', 'KILL QUERY WHERE user = \'x\'', 'SYSTEM SHUTDOWN', 'ALTER TABLE events DELETE WHERE 1']) {
+      expect(classifyStatement(s), s).toBe('destructive')
+    }
+    expect(classifyStatement('OPTIMIZE TABLE events FINAL')).toBe('mutating')
+  })
+
   it('cannot be smuggled past by chaining a write onto a read', () => {
     expect(classifyStatement('SELECT 1; DROP TABLE users')).toBe('destructive')
     expect(classifyStatement('SELECT 1; DELETE FROM users')).toBe('mutating')

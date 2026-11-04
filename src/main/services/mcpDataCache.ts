@@ -90,6 +90,8 @@ export interface CachedDatabase {
   username: string
   database: string
   ssl: boolean
+  /** Absent means the certificate is checked. Set by a person, never an agent. */
+  tlsVerify?: boolean
   uri: boolean
   // Reached through this SSH server when set, exactly as an interactive
   // connection would be.
@@ -253,7 +255,7 @@ function parseRdp(raw: unknown): RdpSettings | null {
 }
 
 function isDbKind(v: unknown): v is DbKind {
-  return v === 'postgres' || v === 'mysql' || v === 'mssql' || v === 'mongodb' || v === 'redis'
+  return v === 'postgres' || v === 'mysql' || v === 'mssql' || v === 'mongodb' || v === 'redis' || v === 'clickhouse'
 }
 
 function isTunnelKind(v: unknown): v is TunnelKind {
@@ -275,6 +277,7 @@ function parseDatabases(raw: unknown): CachedDatabase[] {
       username: asString(d.username),
       database: asString(d.database),
       ssl: d.ssl === true,
+      ...(d.tlsVerify === false ? { tlsVerify: false } : {}),
       uri: d.uri === true,
       sshServerId: typeof d.sshServerId === 'string' ? d.sshServerId : null,
       container: typeof d.container === 'string' && d.container !== '' ? d.container : null,

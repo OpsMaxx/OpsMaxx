@@ -110,6 +110,7 @@
   --db-mssql: #f85149;
   --db-mongodb: #3fb950;
   --db-redis: #db61a2;
+  --db-clickhouse: #e3b341;
 
   /* Host identity in the log stream.
      Deliberately NOT drawn from the semantic ramp. The stream used to colour
@@ -362,6 +363,7 @@
   --db-mssql: #d61208;
   --db-mongodb: #2a7a35;
   --db-redis: #c22c7c;
+  --db-clickhouse: #7a5c00;
 
   /* Same hues, darkened for a light ground. */
   --host-blue: #2b6bab;

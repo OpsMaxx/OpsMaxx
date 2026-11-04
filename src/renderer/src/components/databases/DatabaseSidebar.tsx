@@ -37,14 +37,16 @@ export const KIND_COLOR: Record<DbKind, string> = {
   mysql: 'var(--db-mysql)',
   mssql: 'var(--db-mssql)',
   mongodb: 'var(--db-mongodb)',
-  redis: 'var(--db-redis)'
+  redis: 'var(--db-redis)',
+  clickhouse: 'var(--db-clickhouse)'
 }
 export const KIND_SHORT: Record<DbKind, string> = {
   postgres: 'PG',
   mysql: 'SQL',
   mssql: 'MS',
   mongodb: 'MDB',
-  redis: 'RDS'
+  redis: 'RDS',
+  clickhouse: 'CH'
 }
 
 export function DatabaseSidebar(): React.JSX.Element {
