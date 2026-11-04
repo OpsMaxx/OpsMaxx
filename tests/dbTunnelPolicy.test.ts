@@ -61,6 +61,21 @@ describe('statement classification', () => {
       expect(classifyStatement(s), s).toBe('destructive')
     }
     expect(classifyStatement('OPTIMIZE TABLE events FINAL')).toBe('mutating')
+    expect(classifyStatement('RESTORE TABLE events FROM Disk(\'backups\', \'b1\')')).toBe('destructive')
+    expect(classifyStatement('RESTORE mykey 0 "\\x00"')).toBe('mutating')
+  })
+
+  it('grades a ClickHouse table function that leaves the server as more than a read', () => {
+    for (const s of [
+      "SELECT * FROM url('http://169.254.169.254/latest/meta-data/', 'RawBLOB')",
+      "SELECT * FROM s3('https://bucket.s3.amazonaws.com/x.csv')",
+      "SELECT * FROM remoteSecure('other:9440', db.t, 'u', 'p')",
+      "SELECT * FROM mysql('db:3306', 'shop', 'users', 'u', 'p')",
+      "SELECT * FROM executable('x.sh', 'TSV', 'a String')"
+    ]) {
+      expect(classifyStatement(s), s).toBe('mutating')
+    }
+    expect(classifyStatement('SELECT url, count() FROM hits GROUP BY url')).toBe('read')
   })
 
   it('cannot be smuggled past by chaining a write onto a read', () => {

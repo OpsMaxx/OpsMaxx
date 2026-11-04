@@ -386,12 +386,16 @@ async function buildDriver(cfg: DbConnectConfig): Promise<Conn> {
         // A URL carries its own credentials and database; the client reads them
         // from it, and passing the discrete fields as well would override them.
         ...(uri ? {} : { username: username || 'default', password: password ?? '', database: database || undefined }),
-        request_timeout: DB_CONNECT_TIMEOUT_MS * 3,
+        // Per request, and analytics queries run for minutes; the client's own
+        // 30s default would cut them off while the server carried on. The
+        // other engines set no query timeout at all.
+        // ponytail: fixed 15 min, a per-connection setting if someone needs longer.
+        request_timeout: 15 * 60_000,
         ...(agent ? { http_agent: agent, set_basic_auth_header: true } : {})
       })
       // The plain ping hits /ping, which answers without authenticating, so a
       // wrong password would pass it. A SELECT has to log in.
-      const ping = await c.ping({ select: true })
+      const ping = await c.ping({ select: true, abort_signal: AbortSignal.timeout(DB_CONNECT_TIMEOUT_MS) })
       if (!ping.success) {
         await c.close()
         throw ping.error
@@ -453,8 +457,13 @@ export function mongoDbName(cfg: DbConnectConfig): string | undefined {
 }
 
 /** ClickHouse statements that return rows, and so can be asked for them as JSON. */
-const CH_ROWS = /^\s*(select|with|show|describe|desc|explain|exists)\b/i
+const CH_ROWS = /^(select|with|show|describe|desc|explain|exists|check)\b/i
 const CH_MAX_ROWS = 10_000
+/** Leading comments and parentheses, which say nothing about what a statement is. */
+const CH_LEAD = /^(?:\s+|--[^\n]*(?:\n|$)|#[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/|\()+/
+/** A trailing FORMAT clause. Strings and comments are not parsed, so a literal
+ *  ending in "format x" trips it -- a clear refusal, never a wrong result. */
+const CH_OWN_FORMAT = /\bformat\s+\w+\s*$/i
 
 async function chRows(client: any, query: string): Promise<Record<string, unknown>[]> {
   const res = await client.query({ query, format: 'JSONEachRow' })
@@ -527,32 +536,66 @@ export async function dbQuery(
     }
     if (cfg.kind === 'clickhouse') {
       const sql = text.trim().replace(/;\s*$/, '')
+      const head = sql.replace(CH_LEAD, '')
       // Only a statement that returns rows can take the FORMAT clause the client
       // appends to query(); INSERT, CREATE and the rest go through command().
-      if (!CH_ROWS.test(sql)) {
+      if (!CH_ROWS.test(head)) {
         await conn.client.command({ query: sql })
-        return { ok: true, kind: 'message', message: 'OK', elapsedMs: elapsed() }
+        // The HTTP interface has no session: each statement is its own, so a
+        // SET or USE here is gone before the next one runs.
+        const note = /^(set|use)\b/i.test(head)
+          ? 'OK -- but it lasts for this statement only. Put SETTINGS on the query, or pick the database in the sidebar.'
+          : 'OK'
+        return { ok: true, kind: 'message', message: note, elapsedMs: elapsed() }
       }
-      const res = await conn.client.query({
-        query: sql,
-        format: 'JSON',
-        // ponytail: fixed cap so `SELECT *` on a billion-row table cannot take
-        // main down; paging is the upgrade if people need to scroll further.
-        clickhouse_settings: { max_result_rows: String(CH_MAX_ROWS), result_overflow_mode: 'break' }
-      })
-      const body = (await res.json()) as { meta?: { name: string }[]; data?: Record<string, unknown>[] }
-      const columns = (body.meta ?? []).map((m) => m.name)
-      const data = body.data ?? []
-      // 'break' stops at a block boundary, so a capped result can run a little
-      // past the number as well as land on it.
-      const capped = data.length >= CH_MAX_ROWS
+      if (CH_OWN_FORMAT.test(sql)) {
+        throw new Error('Leave out the FORMAT clause: results come back as a table here, and ClickHouse takes only one.')
+      }
+      // Capped here, by reading no further, rather than with max_result_rows:
+      // a user on readonly = 1 may not change any setting, and would have had
+      // every SELECT refused. Stopping the read closes the request, and the
+      // server abandons the query at its next write.
+      const rs = await conn.client.query({ query: sql, format: 'JSONCompactEachRowWithNamesAndTypes' })
+      let columns: string[] = []
+      const rows: unknown[][] = []
+      let seen = 0
+      let capped = false
+      try {
+        read: for await (const batch of rs.stream()) {
+          for (const row of batch as { text: string; json<T>(): T }[]) {
+            let v: unknown[]
+            try {
+              v = row.json<unknown[]>()
+            } catch {
+              // An error after the first rows arrives as text in the body, past
+              // the 200 that has already been sent.
+              throw new Error(row.text.trim())
+            }
+            // Before 25.x, an error after the first rows is written in the
+            // output format itself -- here a one-element row holding the
+            // message -- so it parses as data unless it is looked for.
+            // ponytail: a single String column whose value really starts
+            // "Code: N. DB::Exception:" reads as an error; the exception tag
+            // newer servers send is the upgrade if that ever matters.
+            if (v.length === 1 && typeof v[0] === 'string' && /^Code: \d+\. DB::Exception: /.test(v[0])) throw new Error(v[0])
+            if (seen++ === 0) columns = v as string[]
+            else if (seen === 2) continue // the types row
+            else if (rows.length === CH_MAX_ROWS) {
+              capped = true
+              break read
+            } else rows.push(v)
+          }
+        }
+      } finally {
+        rs.close()
+      }
       return {
         ok: true,
         kind: 'rows',
         columns,
-        rows: data.map((r) => columns.map((c) => r[c])),
-        rowCount: data.length,
-        message: capped ? `${data.length} row(s), stopped at the ${CH_MAX_ROWS}-row limit` : `${data.length} row(s)`,
+        rows,
+        rowCount: rows.length,
+        message: capped ? `First ${CH_MAX_ROWS} rows; there are more. Add a LIMIT or a WHERE to see the rest.` : `${rows.length} row(s)`,
         elapsedMs: elapsed()
       }
     }

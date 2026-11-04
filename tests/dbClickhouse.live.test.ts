@@ -9,7 +9,10 @@ import type { DbConnectConfig } from '../src/shared/db'
 // (it does not, which is why the driver pings with a SELECT).
 //
 //   docker run -d --rm --name omx-ch -p 28123:8123 \
-//     -e CLICKHOUSE_PASSWORD=omx-test clickhouse/clickhouse-server:24.8
+//     -e CLICKHOUSE_PASSWORD=omx-test -e CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT=1 \
+//     clickhouse/clickhouse-server:24.8
+//
+// Access management lets the suite create the readonly = 1 user it needs.
 //
 // The client cache is keyed by id and rev, as in the app, so a case pointed at
 // another database takes its own id rather than reusing a client on `default`.
@@ -33,6 +36,7 @@ describe.skipIf(!LIVE)('ClickHouse, against a real server', () => {
     await dbClose('ch-live')
     await dbClose('ch-uri')
     await dbClose('ch-sys')
+    await dbClose('ch-ro')
   })
 
   it('tests the connection and reports the version', async () => {
@@ -58,8 +62,40 @@ describe.skipIf(!LIVE)('ClickHouse, against a real server', () => {
   it('stops a huge result at the row cap instead of loading it', async () => {
     const r = await dbQuery(cfg(), 'SELECT number FROM system.numbers LIMIT 1000000')
     expect(r.ok).toBe(true)
-    expect(r.rows!.length).toBeLessThan(1_000_000)
-    expect(r.message).toMatch(/limit/)
+    expect(r.rows!.length).toBe(10_000)
+    expect(r.message).toMatch(/there are more/)
+  })
+
+  it('does not call a result of exactly the cap cut off', async () => {
+    const r = await dbQuery(cfg(), 'SELECT number FROM numbers(10000)')
+    expect(r.rows!.length).toBe(10_000)
+    expect(r.message).toBe('10000 row(s)')
+  })
+
+  // The cap used to be max_result_rows, a setting -- and a readonly = 1 user
+  // may change none, so every SELECT they ran was refused.
+  it('runs a SELECT for a readonly = 1 user', async () => {
+    await dbQuery(cfg(), "CREATE USER IF NOT EXISTS omx_ro IDENTIFIED BY 'omx-ro' SETTINGS readonly = 1")
+    await dbQuery(cfg(), 'GRANT SELECT ON system.* TO omx_ro')
+    const r = await dbQuery(cfg({ id: 'ch-ro', username: 'omx_ro', password: 'omx-ro' }), 'SELECT 1 AS x')
+    expect(r).toMatchObject({ ok: true, rows: [[1]] })
+  })
+
+  it('returns rows for a SELECT that starts with a comment or a parenthesis', async () => {
+    expect((await dbQuery(cfg(), '-- why\nSELECT 42 AS a')).rows).toEqual([[42]])
+    expect((await dbQuery(cfg(), '/* x */ (SELECT 7 AS a)')).rows).toEqual([[7]])
+  })
+
+  it('reports an error that arrives after the first rows, not the rows before it', async () => {
+    const r = await dbQuery(cfg(), 'SELECT throwIf(number = 5000) FROM numbers(10000) SETTINGS max_block_size = 100')
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/DB::Exception/)
+  })
+
+  it('refuses a FORMAT clause of its own with a reason', async () => {
+    const r = await dbQuery(cfg(), 'SELECT 1 FORMAT CSV')
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/FORMAT clause/)
   })
 
   it('lists databases and tables for the sidebar', async () => {

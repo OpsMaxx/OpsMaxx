@@ -1660,6 +1660,14 @@ const READ = /^(select|show|explain|describe|desc|with|values|table|get|mget|key
 const SIDE_EFFECT_FN =
   /\b(pg_terminate_backend|pg_cancel_backend|pg_switch_wal|pg_switch_xlog|pg_promote|pg_reload_conf|pg_rotate_logfile|pg_drop_replication_slot|pg_create_restore_point|\w*_reset|dblink_exec|dblink|lo_unlink|lo_import|lo_export|lo_create|lo_put|lo_truncate|setval|nextval)\s*\(/
 
+// ClickHouse table functions that reach past the database: `SELECT * FROM
+// url('http://169.254.169.254/...')` reads like a SELECT and has the server
+// make the request -- dblink's job, graded the same way. `executable` runs a
+// script on the server. Over-cautious on a column that happens to be called
+// `file(`, which is the cheap direction.
+const EGRESS_FN =
+  /\b(url|urlcluster|s3|s3cluster|gcs|azureblobstorage|azureblobstoragecluster|hdfs|hdfscluster|file|filecluster|remote|remotesecure|mysql|postgresql|mongodb|redis|jdbc|odbc|sqlite|executable|iceberg|deltalake|hudi)\s*\(/
+
 // `SELECT * INTO newtable FROM t` CREATES A RELATION -- Postgres and MSSQL
 // both. The verb is still `select`.
 const SELECT_INTO = /^select\b[\s\S]*\binto\s+\S/
@@ -1749,12 +1757,15 @@ export function classifyStatement(sql: string): StatementKind {
     }
 
     if (DESTRUCTIVE.test(s)) return 'destructive'
+    // ClickHouse's RESTORE puts whole tables back, which is CREATE's grade;
+    // Redis's RESTORE <key> stays a mutation below.
+    if (/^restore\s+(table|database|dictionary|temporary|all)\b/.test(s)) return 'destructive'
     // A data-modifying CTE: `WITH d AS (DELETE FROM t RETURNING *) SELECT ...`.
     // The leading verb is `with`, a read, and the DELETE runs all the same. A
     // column that happens to be called `update` makes this over-cautious,
     // which is the cheap direction to be wrong in.
     const dmlInCte = /^with\b/.test(s) && /\b(insert|update|delete|merge)\b/.test(s)
-    if (MUTATING.test(s) || SIDE_EFFECT_FN.test(s) || SELECT_INTO.test(s) || dmlInCte) worst = 'mutating'
+    if (MUTATING.test(s) || SIDE_EFFECT_FN.test(s) || EGRESS_FN.test(s) || SELECT_INTO.test(s) || dmlInCte) worst = 'mutating'
     // An unrecognised verb is treated as mutating rather than read. There are
     // far too many dialects to enumerate, and guessing "harmless" is the
     // expensive direction to be wrong in.
