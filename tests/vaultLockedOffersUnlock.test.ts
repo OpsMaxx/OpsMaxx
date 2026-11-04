@@ -44,7 +44,7 @@ const lockedKeys = [
       .map(([k]) => k.replace(/_(zero|one|two|few|many|other)$/, ''))
   )
 ]
-const PATTERN = ['vault is locked', 'vault locked', ...lockedKeys.map((k) => `['"\`]${k.replace(/\./g, '\\.')}['"\`]`)].join('|')
+const PATTERN = ['vault is locked', 'vault locked', ...lockedKeys.map((k) => `['"\`]${k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"\`]`)].join('|')
 
 function offenders(): string[] {
   let hits = ''

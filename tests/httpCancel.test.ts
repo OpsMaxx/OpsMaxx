@@ -25,7 +25,8 @@ beforeAll(async () => {
       // Headers and half a body, then nothing: the cancel lands mid-body.
       res.writeHead(200, { 'content-type': 'text/plain', 'content-length': '100' })
       res.write('half')
-      arrived.get(path)?.()
+      const done = arrived.get(path)
+      if (typeof done === 'function') done()
       return
     }
     setTimeout(() => res.end('late'), 150)

@@ -11,7 +11,7 @@ import type { HttpRequestSpec } from '../src/shared/httpClient'
 // must come back out of every language's string literal unchanged.
 const V = 'a"b\\c\nd\'e$(touch /tmp/pwn)`id`'
 // A header cannot hold a newline (toCurl refuses one), so the header carries the rest.
-const H = V.replace('\n', ' ')
+const H = V.replaceAll('\n', ' ')
 
 const req: HttpRequest = {
   id: 'req_1',

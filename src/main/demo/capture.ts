@@ -53,20 +53,20 @@ function page(win: BrowserWindow): Page {
     async waitFor(selector, timeoutMs = 10_000) {
       const until = Date.now() + timeoutMs
       while (Date.now() < until) {
-        if (await js<boolean>(`!!document.querySelector(${JSON.stringify(selector)})`)) return
+        if (await js<boolean>(`!!document.querySelector(${jsString(selector)})`)) return
         await sleep(150)
       }
       throw new Error(`timed out waiting for ${selector}`)
     },
     async click(selector) {
       await p.waitFor(selector)
-      await js(`document.querySelector(${JSON.stringify(selector)}).click()`)
+      await js(`document.querySelector(${jsString(selector)}).click()`)
       await sleep(400)
     },
     async clickText(text, within = 'button, [role="tab"], a, [role="menuitem"], .seg-btn') {
       const ok = await js<boolean>(`(() => {
-        const t = ${JSON.stringify(text)}
-        const el = [...document.querySelectorAll(${JSON.stringify(within)})]
+        const t = ${jsString(text)}
+        const el = [...document.querySelectorAll(${jsString(within)})]
           .find((e) => e.textContent.trim() === t || e.getAttribute('aria-label') === t || e.getAttribute('title') === t)
         if (el) el.click()
         return !!el
@@ -94,11 +94,16 @@ function page(win: BrowserWindow): Page {
   return p
 }
 
+/** A string as a JS literal for executeJavaScript. JSON.stringify alone leaves
+ *  U+2028/U+2029 (line breaks in older JS) and `<` `>` `/` as they are. */
+const jsString = (s: string): string =>
+  JSON.stringify(s).replace(/[<>/\u2028\u2029]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'))
+
 async function capture(win: BrowserWindow, crop: string, file: string, focus?: string): Promise<void> {
   const rect = await win.webContents.executeJavaScript(
     focus
       ? `(() => {
-          const r = document.querySelector(${JSON.stringify(focus)})?.getBoundingClientRect()
+          const r = document.querySelector(${jsString(focus)})?.getBoundingClientRect()
           if (!r) return null
           const W = innerWidth, H = innerHeight, pad = 48
           let w = r.width + pad * 2, h = r.height + pad * 2
@@ -109,7 +114,7 @@ async function capture(win: BrowserWindow, crop: string, file: string, focus?: s
           const y = Math.min(Math.max(0, r.y + r.height / 2 - h / 2), H - h)
           return { x, y, width: w, height: h }
         })()`
-      : `(() => { const r = document.querySelector(${JSON.stringify(crop)})?.getBoundingClientRect()
+      : `(() => { const r = document.querySelector(${jsString(crop)})?.getBoundingClientRect()
       return r ? { x: r.x, y: r.y, width: r.width, height: r.height } : null })()`,
     true
   )
@@ -151,7 +156,7 @@ const LANGS = (process.env.OPSMAXX_DEMO_LANGS ?? '')
  */
 async function audit(p: Page, scope: string, pseudo: boolean): Promise<{ truncated: string[]; english: string[] }> {
   return p.js(`(() => {
-    const root = document.querySelector(${JSON.stringify(scope)}) || document.body
+    const root = document.querySelector(${jsString(scope)}) || document.body
     const seen = (e) => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0 }
     const truncated = new Set()
     for (const e of root.querySelectorAll('*')) {
@@ -175,7 +180,7 @@ async function audit(p: Page, scope: string, pseudo: boolean): Promise<{ truncat
 }
 
 async function speak(p: Page, lang: string): Promise<void> {
-  await p.js(`window.__opsmaxxLanguage?.(${JSON.stringify(lang)})`)
+  await p.js(`window.__opsmaxxLanguage?.(${jsString(lang)})`)
   await p.sleep(800)
 }
 

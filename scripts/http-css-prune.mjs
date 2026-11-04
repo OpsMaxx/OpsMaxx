@@ -39,7 +39,7 @@ const code = sources(join(ROOT, 'src/renderer/src')).join('\n')
 const used = new Map()
 const isUsed = (token) => {
   if (!used.has(token)) {
-    const escaped = token.replace(/[-]/g, '\\-')
+    const escaped = token.replace(/[-.*+?^${}()|[\]\\]/g, '\\$&')
     used.set(token, new RegExp(`(^|[^\\w-])${escaped}($|[^\\w-])`).test(code))
   }
   return used.get(token)

@@ -79,7 +79,13 @@ describe('branding', () => {
       }
       // Tags out, then whitespace collapsed: a wordmark split across lines by
       // a formatter is the same bug wearing different trousers.
-      const flattened = text.replace(/<[^>]*>/g, '').replace(/\s+/g, '')
+      // Until nothing changes, so markup nested inside a tag comes out too.
+      let stripped = text
+      for (let prev = ''; prev !== stripped; ) {
+        prev = stripped
+        stripped = stripped.replace(/<[^>]*>/g, '')
+      }
+      const flattened = stripped.replace(/\s+/g, '')
       if (flattened.toLowerCase().includes(NEEDLE)) hits.push(file)
     }
     expect(hits, `retired product name, split by markup, in:\n${hits.join('\n')}`).toEqual([])
