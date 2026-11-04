@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
-import { dbClose, dbInfo, dbQuery, dbTest } from '../src/main/services/db'
+import { clickhouseUrl, dbClose, dbInfo, dbQuery, dbTest } from '../src/main/services/db'
 import { dbShell } from '../src/main/services/dbshell'
 import type { DbConnectConfig } from '../src/shared/db'
 
@@ -29,6 +29,25 @@ const cfg = (over: Partial<DbConnectConfig> = {}): DbConnectConfig => ({
   username: 'default',
   password: PASSWORD,
   ...over
+})
+
+describe('ClickHouse connection strings from other tools', () => {
+  it('takes JDBC forms and their parameters', () => {
+    expect(clickhouseUrl('jdbc:clickhouse://h:8443/?ssl=true&database=logs&user=bob&password=p%40ss').toString()).toBe(
+      'https://bob:p%40ss@h:8443/logs'
+    )
+    expect(clickhouseUrl('jdbc:ch:https://h:8443/db').toString()).toBe('https://h:8443/db')
+    expect(clickhouseUrl('http://h:8123/?secure=1').protocol).toBe('https:')
+  })
+
+  it('keeps what the URL already says over a parameter', () => {
+    expect(clickhouseUrl('http://ann:x@h:8123/main?user=bob&database=logs').toString()).toBe('http://ann:x@h:8123/main')
+  })
+
+  it('names the native protocol rather than failing on it', () => {
+    expect(() => clickhouseUrl('clickhouse://h:9000/db')).toThrow(/native protocol/)
+    expect(() => clickhouseUrl('ftp://h/db')).toThrow(/http:\/\/ or https:\/\//)
+  })
 })
 
 describe.skipIf(!LIVE)('ClickHouse, against a real server', () => {
@@ -90,6 +109,32 @@ describe.skipIf(!LIVE)('ClickHouse, against a real server', () => {
     const r = await dbQuery(cfg(), 'SELECT throwIf(number = 5000) FROM numbers(10000) SETTINGS max_block_size = 100')
     expect(r.ok).toBe(false)
     expect(r.error).toMatch(/DB::Exception/)
+  })
+
+  it('keeps a temporary table and a SET for the next statement', async () => {
+    const c = cfg({ id: 'ch-sess' })
+    expect((await dbQuery(c, 'CREATE TEMPORARY TABLE omx_tmp (x UInt8)')).ok).toBe(true)
+    expect((await dbQuery(c, 'INSERT INTO omx_tmp VALUES (1), (2)')).ok).toBe(true)
+    expect((await dbQuery(c, 'SELECT count() AS n FROM omx_tmp')).rows).toEqual([['2']])
+    expect((await dbQuery(c, 'SET max_threads = 3')).ok).toBe(true)
+    expect((await dbQuery(c, "SELECT value FROM system.settings WHERE name = 'max_threads'")).rows).toEqual([['3']])
+    await dbClose('ch-sess')
+  })
+
+  it('runs statements that arrive together one after another, not into a locked session', async () => {
+    const c = cfg({ id: 'ch-sess' })
+    const [a, b] = await Promise.all([dbQuery(c, 'SELECT sleep(1) AS s'), dbQuery(c, 'SELECT 2 AS x')])
+    expect(a.ok && b.ok).toBe(true)
+    // A capped read leaves the server finishing up; the next one waits for it.
+    expect((await dbQuery(c, 'SELECT number FROM system.numbers')).rowCount).toBe(10_000)
+    expect((await dbQuery(c, 'SELECT 3 AS x')).rows).toEqual([[3]])
+    await dbClose('ch-sess')
+  })
+
+  it('keeps a String value that only looks like an error, when rows follow it', async () => {
+    const msg = "Code: 1. DB::Exception: fake (version 24.8.1.1 (official build))"
+    const r = await dbQuery(cfg(), `SELECT arrayJoin(['${msg}', 'after']) AS s`)
+    expect(r).toMatchObject({ ok: true, rows: [[msg], ['after']] })
   })
 
   it('refuses a FORMAT clause of its own with a reason', async () => {

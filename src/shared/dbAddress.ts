@@ -161,7 +161,9 @@ export function parseDbAddress(raw: string): DbAddress {
   // ---- URI family -------------------------------------------------------
   // `scheme://` is what makes this a URI. Matching on it first means a
   // key/value string containing a stray `//` is not mistaken for one.
-  const uri = /^[a-z][a-z0-9+.-]*:\/\/(.*)$/i.exec(s)
+  // A JDBC prefix (`jdbc:postgresql://`, `jdbc:clickhouse:https://`) belongs
+  // to the scheme; without it such a string would read as no address at all.
+  const uri = /^(?:jdbc:(?:[a-z][a-z0-9+.-]*:)?)?[a-z][a-z0-9+.-]*:\/\/(.*)$/i.exec(s)
   if (uri) {
     // Authority ends at the first `/`, `?` or `#`.
     const authority = uri[1].split(/[/?#]/)[0]

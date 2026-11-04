@@ -12,8 +12,11 @@ const conns = new Map<string, Conn>()
 
 // Replace the host:port in a connection string, preserving credentials and
 // everything after the authority.
+// A JDBC prefix (`jdbc:clickhouse://`, `jdbc:clickhouse:https://`) is part of
+// the scheme here. Without it the string would match nothing, and a tunnel
+// would be skipped rather than used.
 function rewriteUriHost(uri: string, host: string, port: number): string {
-  const m = /^([a-z][a-z0-9+.-]*:\/\/)([^/?#]*)(.*)$/i.exec(uri)
+  const m = /^((?:jdbc:(?:[a-z][a-z0-9+.-]*:)?)?[a-z][a-z0-9+.-]*:\/\/)([^/?#]*)(.*)$/i.exec(uri)
   if (!m) return uri
   const at = m[2].lastIndexOf('@')
   const creds = at === -1 ? '' : m[2].slice(0, at + 1)
@@ -21,7 +24,7 @@ function rewriteUriHost(uri: string, host: string, port: number): string {
 }
 
 function uriEndpoint(uri: string): { host: string; port: number } | null {
-  const m = /^[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(uri)
+  const m = /^(?:jdbc:(?:[a-z][a-z0-9+.-]*:)?)?[a-z][a-z0-9+.-]*:\/\/([^/?#]*)/i.exec(uri)
   if (!m) return null
   const authority = m[1].slice(m[1].lastIndexOf('@') + 1)
   const host = authority.split(',')[0] // first host of a replica-set list
@@ -352,14 +355,10 @@ async function buildDriver(cfg: DbConnectConfig): Promise<Conn> {
     }
     case 'clickhouse': {
       const { createClient } = await import('@clickhouse/client')
-      const raw = uri || `${ssl ? 'https' : 'http'}://${host}:${port}`
-      if (!/^https?:\/\//i.test(raw)) {
-        throw new Error('A ClickHouse connection string is an http:// or https:// URL to the HTTP interface, e.g. https://user:pass@host:8443/default.')
-      }
+      const parsed = clickhouseUrl(uri || `${ssl ? 'https' : 'http'}://${host}:${port}`)
       // The client lets a URL's path override the `database` option, so a
       // database chosen later -- `\c other` in the shell -- has to go into the
       // path or it would be silently ignored.
-      const parsed = new URL(raw)
       if (uri && database) parsed.pathname = '/' + encodeURIComponent(database)
       const url = parsed.toString()
       // Our own agent only for TLS, and only to say two things the client has no
@@ -381,7 +380,18 @@ async function buildDriver(cfg: DbConnectConfig): Promise<Conn> {
           ca: verify ? [...new Set([...getCACertificates('default'), ...getCACertificates('system')])] : undefined
         })
       }
-      const c = createClient({
+      const make = (): ReturnType<typeof createClient> => {
+        try {
+          return createClient(opts)
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          if (/Unknown URL parameters/i.test(msg)) {
+            throw new Error(`${msg}. The ClickHouse HTTP client takes none of these; remove them from the connection string.`)
+          }
+          throw err
+        }
+      }
+      const opts = {
         url,
         // A URL carries its own credentials and database; the client reads them
         // from it, and passing the discrete fields as well would override them.
@@ -392,7 +402,8 @@ async function buildDriver(cfg: DbConnectConfig): Promise<Conn> {
         // ponytail: fixed 15 min, a per-connection setting if someone needs longer.
         request_timeout: 15 * 60_000,
         ...(agent ? { http_agent: agent, set_basic_auth_header: true } : {})
-      })
+      }
+      const c = make()
       // The plain ping hits /ping, which answers without authenticating, so a
       // wrong password would pass it. A SELECT has to log in.
       const ping = await c.ping({ select: true, abort_signal: AbortSignal.timeout(DB_CONNECT_TIMEOUT_MS) })
@@ -465,6 +476,146 @@ const CH_LEAD = /^(?:\s+|--[^\n]*(?:\n|$)|#[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/|\()+/
  *  ending in "format x" trips it -- a clear refusal, never a wrong result. */
 const CH_OWN_FORMAT = /\bformat\s+\w+\s*$/i
 
+/** How ClickHouse writes an error into a result it has already started. */
+const CH_EXCEPTION = /^Code: \d+\. DB::Exception: [\s\S]*\(version [^()]*(?:\([^()]*\))?\)$/
+
+/**
+ * A connection string as other ClickHouse tools write it, as the URL the HTTP
+ * client takes. JDBC's `jdbc:clickhouse://` and `jdbc:ch://` are HTTP too, and
+ * spell TLS, the database and the login as parameters -- which the client knows
+ * none of, and would refuse the whole string over.
+ */
+export function clickhouseUrl(raw: string): URL {
+  const s = raw.trim()
+  const native = /^(clickhouse|tcp):\/\//i.exec(s)
+  if (native) {
+    throw new Error(
+      `${native[1]}:// is ClickHouse's native protocol (port 9000), which OpsMaxx does not speak. Use the HTTP interface: http://host:8123, or https://host:8443 with TLS.`
+    )
+  }
+  const jdbc = /^jdbc:(?:clickhouse|ch):(?:(https?):)?\/\//i.exec(s)
+  const http = jdbc ? `${jdbc[1] ?? 'http'}://${s.slice(jdbc[0].length)}` : s
+  if (!/^https?:\/\/[^/?#]/i.test(http)) {
+    throw new Error('A ClickHouse connection string is an http:// or https:// URL to the HTTP interface, e.g. https://user:pass@host:8443/default.')
+  }
+  const url = new URL(http)
+  const p = url.searchParams
+  const yes = (k: string): boolean => /^(1|true|yes)$/i.test(p.get(k) ?? '')
+  if (yes('ssl') || yes('secure')) url.protocol = 'https:'
+  const db = p.get('database') ?? p.get('db')
+  if (db && (url.pathname === '' || url.pathname === '/')) url.pathname = '/' + encodeURIComponent(db)
+  const user = p.get('user') ?? p.get('username')
+  if (user && !url.username) url.username = encodeURIComponent(user)
+  const pass = p.get('password')
+  if (pass && !url.password) url.password = encodeURIComponent(pass)
+  for (const k of ['ssl', 'secure', 'database', 'db', 'user', 'username', 'password']) p.delete(k)
+  return url
+}
+
+/**
+ * One server session per connection, so a temporary table, a SET or a USE
+ * lasts past the statement that made it, as it does in clickhouse-client.
+ *
+ * The editor, the shell and the operations panel share one client (see
+ * ensure()), and ClickHouse refuses a second statement in a session that is
+ * still busy, so statements in it take turns. The sidebar's reads stay outside
+ * the session and run alongside.
+ *
+ * ponytail: per-connection queue; a slow query holds up the shell behind it,
+ * which is what one clickhouse-client window does too.
+ */
+const chSessions = new WeakMap<object, { id: string; queue: Promise<unknown> }>()
+
+async function chInSession<T>(client: object, run: (session: string) => Promise<T>): Promise<T> {
+  let s = chSessions.get(client)
+  if (!s) chSessions.set(client, (s = { id: (await import('node:crypto')).randomUUID(), queue: Promise.resolve() }))
+  const id = s.id
+  const next = s.queue.then(async () => {
+    // A capped read closes its request early, and the server holds the
+    // session until it notices -- at its next block, so briefly.
+    for (let i = 0; ; i++) {
+      try {
+        return await run(id)
+      } catch (err) {
+        const locked = /SESSION_IS_LOCKED|locked by a concurrent client/i.test(`${(err as { type?: string })?.type} ${(err as Error)?.message}`)
+        if (!locked || i >= 30) throw err
+        await new Promise((r) => setTimeout(r, 100))
+      }
+    }
+  })
+  s.queue = next.catch(() => undefined)
+  return next
+}
+
+async function chStatement(client: any, text: string, session: string): Promise<Omit<DbQueryResult, 'elapsedMs'>> {
+  const sql = text.trim().replace(/;\s*$/, '')
+  const head = sql.replace(CH_LEAD, '')
+  // An hour idle before the server forgets the session -- its usual ceiling.
+  // Not a setting, so a readonly = 1 user may still send it.
+  const inSession = { session_id: session, clickhouse_settings: { session_timeout: 3600 } as Record<string, unknown> }
+  // Only a statement that returns rows can take the FORMAT clause the client
+  // appends to query(); INSERT, CREATE and the rest go through command().
+  if (!CH_ROWS.test(head)) {
+    await client.command({ query: sql, ...inSession })
+    return { ok: true, kind: 'message', message: 'OK' }
+  }
+  if (CH_OWN_FORMAT.test(sql)) {
+    throw new Error('Leave out the FORMAT clause: results come back as a table here, and ClickHouse takes only one.')
+  }
+  // Capped here, by reading no further, rather than with max_result_rows:
+  // a user on readonly = 1 may not change any setting, and would have had
+  // every SELECT refused. Stopping the read closes the request, and the
+  // server abandons the query at its next write.
+  const rs = await client.query({ query: sql, format: 'JSONCompactEachRowWithNamesAndTypes', ...inSession })
+  let columns: string[] = []
+  let types: string[] = []
+  const rows: unknown[][] = []
+  let seen = 0
+  let capped = false
+  try {
+    read: for await (const batch of rs.stream()) {
+      for (const row of batch as { text: string; json<T>(): T }[]) {
+        let v: unknown[]
+        try {
+          v = row.json<unknown[]>()
+        } catch {
+          // Newer servers mark an error after the first rows with a tag line
+          // rather than in the format; either way it is not a row.
+          throw new Error(row.text.trim())
+        }
+        if (seen === 0) columns = v as string[]
+        else if (seen === 1) types = v as string[]
+        else if (rows.length === CH_MAX_ROWS) {
+          capped = true
+          break read
+        } else {
+          // Before 25.x an error after the first rows is written in the output
+          // format itself: a one-element row holding the message, and always
+          // the last thing in the body. A row of the wrong shape cannot be
+          // data; one that fits a lone String column is judged once nothing
+          // follows it.
+          const suspect = v.length === 1 && typeof v[0] === 'string' && CH_EXCEPTION.test(v[0])
+          if (suspect && !(columns.length === 1 && /String/.test(types[0] ?? ''))) throw new Error(v[0] as string)
+          rows.push(v)
+        }
+        seen++
+      }
+    }
+  } finally {
+    rs.close()
+  }
+  const last = rows[rows.length - 1]
+  if (!capped && last && last.length === 1 && typeof last[0] === 'string' && CH_EXCEPTION.test(last[0])) throw new Error(last[0])
+  return {
+    ok: true,
+    kind: 'rows',
+    columns,
+    rows,
+    rowCount: rows.length,
+    message: capped ? `First ${CH_MAX_ROWS} rows; there are more. Add a LIMIT or a WHERE to see the rest.` : `${rows.length} row(s)`
+  }
+}
+
 async function chRows(client: any, query: string): Promise<Record<string, unknown>[]> {
   const res = await client.query({ query, format: 'JSONEachRow' })
   return (await res.json()) as Record<string, unknown>[]
@@ -535,69 +686,8 @@ export async function dbQuery(
       return { ok: true, kind: 'message', message: `${res.rowsAffected?.[0] ?? 0} row(s) affected`, elapsedMs: elapsed() }
     }
     if (cfg.kind === 'clickhouse') {
-      const sql = text.trim().replace(/;\s*$/, '')
-      const head = sql.replace(CH_LEAD, '')
-      // Only a statement that returns rows can take the FORMAT clause the client
-      // appends to query(); INSERT, CREATE and the rest go through command().
-      if (!CH_ROWS.test(head)) {
-        await conn.client.command({ query: sql })
-        // The HTTP interface has no session: each statement is its own, so a
-        // SET or USE here is gone before the next one runs.
-        const note = /^(set|use)\b/i.test(head)
-          ? 'OK -- but it lasts for this statement only. Put SETTINGS on the query, or pick the database in the sidebar.'
-          : 'OK'
-        return { ok: true, kind: 'message', message: note, elapsedMs: elapsed() }
-      }
-      if (CH_OWN_FORMAT.test(sql)) {
-        throw new Error('Leave out the FORMAT clause: results come back as a table here, and ClickHouse takes only one.')
-      }
-      // Capped here, by reading no further, rather than with max_result_rows:
-      // a user on readonly = 1 may not change any setting, and would have had
-      // every SELECT refused. Stopping the read closes the request, and the
-      // server abandons the query at its next write.
-      const rs = await conn.client.query({ query: sql, format: 'JSONCompactEachRowWithNamesAndTypes' })
-      let columns: string[] = []
-      const rows: unknown[][] = []
-      let seen = 0
-      let capped = false
-      try {
-        read: for await (const batch of rs.stream()) {
-          for (const row of batch as { text: string; json<T>(): T }[]) {
-            let v: unknown[]
-            try {
-              v = row.json<unknown[]>()
-            } catch {
-              // An error after the first rows arrives as text in the body, past
-              // the 200 that has already been sent.
-              throw new Error(row.text.trim())
-            }
-            // Before 25.x, an error after the first rows is written in the
-            // output format itself -- here a one-element row holding the
-            // message -- so it parses as data unless it is looked for.
-            // ponytail: a single String column whose value really starts
-            // "Code: N. DB::Exception:" reads as an error; the exception tag
-            // newer servers send is the upgrade if that ever matters.
-            if (v.length === 1 && typeof v[0] === 'string' && /^Code: \d+\. DB::Exception: /.test(v[0])) throw new Error(v[0])
-            if (seen++ === 0) columns = v as string[]
-            else if (seen === 2) continue // the types row
-            else if (rows.length === CH_MAX_ROWS) {
-              capped = true
-              break read
-            } else rows.push(v)
-          }
-        }
-      } finally {
-        rs.close()
-      }
-      return {
-        ok: true,
-        kind: 'rows',
-        columns,
-        rows,
-        rowCount: rows.length,
-        message: capped ? `First ${CH_MAX_ROWS} rows; there are more. Add a LIMIT or a WHERE to see the rest.` : `${rows.length} row(s)`,
-        elapsedMs: elapsed()
-      }
+      const r = await chInSession(conn.client, (session) => chStatement(conn.client, text, session))
+      return { ...r, elapsedMs: elapsed() }
     }
     if (cfg.kind === 'mongodb') {
       const command = JSON.parse(text)

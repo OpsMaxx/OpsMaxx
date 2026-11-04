@@ -33,6 +33,12 @@ describe('the string that started it', () => {
   // The second half of the screenshot: `...Encrypt=false:1433`. The record's
   // own port column was glued onto whatever the "host" was, so a failure to
   // parse produced a malformed value that also lied about the port.
+  it('reads a JDBC connection string as the address it names', () => {
+    expect(parseDbAddress('jdbc:clickhouse://db.internal:8123/default?ssl=true')).toEqual({ kind: 'parsed', host: 'db.internal', port: 8123 })
+    expect(parseDbAddress('jdbc:clickhouse:https://u:p@db.internal:8443/x')).toEqual({ kind: 'parsed', host: 'db.internal', port: 8443 })
+    expect(parseDbAddress('jdbc:postgresql://pg.internal:5432/app')).toEqual({ kind: 'parsed', host: 'pg.internal', port: 5432 })
+  })
+
   it('reads a ClickHouse https:// URL without showing its password', () => {
     const ch = 'https://default:hunter2@abc.eu-west-1.aws.clickhouse.cloud:8443/default'
     expect(parseDbAddress(ch)).toEqual({ kind: 'parsed', host: 'abc.eu-west-1.aws.clickhouse.cloud', port: 8443 })
