@@ -11,7 +11,7 @@ import { refreshMcpDataCache, listCachedWorkspaces } from '../src/main/services/
 import { setAssignment, listAssignments, listGroups, resetPolicyCacheForTests } from '../src/main/services/policyStore'
 import { setMcpConfig, createSession, resetMcpAuthForTests } from '../src/main/services/mcpAuth'
 import { startMcpServer, stopMcpServer, explainSessionAccess } from '../src/main/services/mcpServer'
-import { writeClaudeDesktopConfigTo, writeCodexConfigTo, claudeCodeCommand } from '../src/main/services/clientConfig'
+import { writeClaudeCodeConfigTo, writeClaudeDesktopConfigTo, writeCodexConfigTo, claudeCodeCommand } from '../src/main/services/clientConfig'
 import { resolveDefaultSessionGroup } from '../src/shared/mcp'
 
 // Exercises exactly what the "Connect Claude Code" / "Connect Claude Desktop"
@@ -167,6 +167,26 @@ describe('connect flow', () => {
     expect(url).toBe(`http://127.0.0.1:${PORT}/mcp`)
 
     const client = await httpClient(bearer!)
+    try {
+      expect(await callText(client, 'list_servers')).toContain('Nginx Server Prod')
+    } finally {
+      await client.close()
+    }
+  })
+
+  // Read back from the file and used exactly as Claude Code would: the header
+  // straight from disk, against the live server, with no sign-in in between.
+  it('the Claude Code config it writes authenticates with no sign-in', async () => {
+    const file = join(dir, '.claude.json')
+    const token = newSession('Claude Code (written)', 'grp-read-only', 'Read Only')
+    expect(writeClaudeCodeConfigTo(file, token, PORT).ok).toBe(true)
+    const entry = JSON.parse(readFileSync(file, 'utf8')).mcpServers.opsmaxx as {
+      url: string
+      headers: Record<string, string>
+    }
+    const transport = new StreamableHTTPClientTransport(new URL(entry.url), { requestInit: { headers: entry.headers } })
+    const client = new Client({ name: 'claude-code-written', version: '1.0.0' })
+    await client.connect(transport)
     try {
       expect(await callText(client, 'list_servers')).toContain('Nginx Server Prod')
     } finally {

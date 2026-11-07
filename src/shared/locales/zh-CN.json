@@ -3108,6 +3108,8 @@
   "ai.connect.commandCopied": "命令已复制",
   "ai.connect.copyAgain": "再次复制",
   "ai.connect.written": "已写入 <path/>。该文件只在启动时读取，因此请完全退出该应用并重新打开——OpsMaxx 随后会出现在其工具中。",
+  "ai.connect.claudeCodeConfigured": "Claude Code 已配置。启动一个新的 Claude Code 会话即可载入 OpsMaxx。",
+  "ai.connect.writtenClaudeCode": "已写入 <path/>。启动一个新的 Claude Code 会话（在终端或 Claude Desktop 的 Code 标签页中），OpsMaxx 就会出现在其工具中，无需登录。已打开的会话仍使用旧连接。下面的命令可在另一台机器上完成同样的设置。",
   "ai.connect.backedUp": "之前的文件已复制到 <path/>。",
   "ai.sessionAccess.verdict.allow": "允许",
   "ai.sessionAccess.verdict.ask": "询问",

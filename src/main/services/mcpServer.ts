@@ -7706,20 +7706,20 @@ function readRaw(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let size = 0
-    const onData = (c: Buffer): void => {
+    req.on('data', (c: Buffer) => {
       size += c.length
-      if (size <= MAX_BODY_BYTES) {
-        chunks.push(c)
-        return
-      }
-      // Stop keeping it, but keep draining it: destroying the socket here would
-      // leave no way to say why.
-      req.off('data', onData)
-      req.resume()
-      reject(new BodyTooLarge())
-    }
-    req.on('data', onData)
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+      // Past the cap nothing more is kept, but the rest is still read and
+      // dropped, and the answer waits for the end of it: a 413 sent while the
+      // client is still uploading closes the socket under it, and the client
+      // sees a reset instead of the reason. Found under load, not in isolation.
+      if (size <= MAX_BODY_BYTES) chunks.push(c)
+      // A client that never stops sending is not owed that courtesy.
+      else if (size > MAX_BODY_BYTES * 16) req.destroy(new BodyTooLarge())
+    })
+    req.on('end', () => {
+      if (size > MAX_BODY_BYTES) reject(new BodyTooLarge())
+      else resolve(Buffer.concat(chunks).toString('utf8'))
+    })
     req.on('error', reject)
   })
 }

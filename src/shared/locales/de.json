@@ -3266,6 +3266,8 @@
   "ai.connect.commandCopied": "Befehl kopiert",
   "ai.connect.copyAgain": "Erneut kopieren",
   "ai.connect.written": "Nach <path/> geschrieben. Diese Datei wird nur beim Start gelesen, beenden Sie die App also vollständig und öffnen Sie sie erneut — OpsMaxx erscheint dann unter ihren Tools.",
+  "ai.connect.claudeCodeConfigured": "Claude Code ist eingerichtet. Starte eine neue Claude-Code-Sitzung, damit OpsMaxx übernommen wird.",
+  "ai.connect.writtenClaudeCode": "Nach <path/> geschrieben. Starte eine neue Claude-Code-Sitzung – im Terminal oder im Code-Tab von Claude Desktop –, dann steht OpsMaxx ohne Anmeldung in den Tools. Bereits geöffnete Sitzungen behalten ihre alte Verbindung. Der Befehl unten macht dasselbe auf einem anderen Rechner.",
   "ai.connect.backedUp": "Die vorherige Datei wurde nach <path/> kopiert.",
   "ai.sessionAccess.verdict.allow": "Erlauben",
   "ai.sessionAccess.verdict.ask": "Fragen",

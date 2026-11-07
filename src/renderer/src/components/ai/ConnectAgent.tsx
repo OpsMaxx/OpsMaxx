@@ -170,9 +170,19 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
 
       if (target === 'claude-code') {
         const command = await api.aiMcp.claudeCodeCommand(created.token, status.port)
+        // Written directly where possible: the same entry the command would add,
+        // with nothing to paste -- and the only route that reaches Claude
+        // Desktop's Code tab on a machine where nobody opens a terminal. The
+        // command stays on screen either way, for another machine.
+        const written = await api.aiMcp.writeClaudeCodeConfig?.(created.token, status.port)
         await navigator.clipboard.writeText(command)
-        setReady({ target, command })
-        toast(t('ai.connect.commandCopiedPaste'))
+        if (written?.ok) {
+          setReady({ target, command, path: written.path })
+          toast(t('ai.connect.claudeCodeConfigured'), 'ok')
+        } else {
+          setReady({ target, command })
+          toast(t('ai.connect.commandCopiedPaste'))
+        }
       } else {
         const label = FILE_CLIENTS[target]
         const write = target === 'codex' ? api.aiMcp.writeCodexConfig : api.aiMcp.writeClaudeDesktopConfig
@@ -280,6 +290,14 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
       {ready?.target === 'claude-code' && ready.command && (
         <div className="settings-section" style={{ marginTop: 12 }}>
           <h3>Claude Code</h3>
+          {ready.path && (
+            <div className="s-desc" style={{ marginBottom: 8 }}>
+              <Trans
+                i18nKey="ai.connect.writtenClaudeCode"
+                components={{ path: <code className="mono">{ready.path}</code> }}
+              />
+            </div>
+          )}
           {/* The old copy read "the token is in that command and is shown only
               once here" — beside a Copy again button, above the full 64-character
               token in plain selectable text. The claim was defensible (only the

@@ -82,6 +82,129 @@ export function claudeCodeCommand(token: string, port: number): string {
   return `${removes} ${add}`
 }
 
+// ---------------------------------------------------------------------------
+// Claude Code's own config, written directly
+// ---------------------------------------------------------------------------
+//
+// The Code tab of Claude Desktop runs Claude Code and reads the same user-scope
+// entries from ~/.claude.json as the terminal CLI. An entry there WITHOUT a
+// bearer header -- one added by hand, with the CLI then signing in through
+// OpsMaxx's OAuth pages -- works in the terminal and not in Desktop: Desktop
+// refuses to open a sign-in page that is not https ("Refused to open sign-in
+// URL for opsmaxx: must be https"), and OpsMaxx's are on http://127.0.0.1. With
+// the token in a header there is nothing to sign in to. Copying a command for
+// the user to paste fixed it only where someone could open a terminal, so the
+// button now writes the entry itself.
+//
+// Claude Code writes this file through a temp file and a rename, and an entry
+// added from another process survives the many sessions that rewrite it -- so
+// unlike Claude Desktop's own config it can be written while Claude is open.
+// writeClaudeCodeConfig() still re-reads it afterwards, once, to catch the one
+// race left: a session's write landing between this read and this rename.
+export function claudeCodeConfigPath(): string {
+  const dir = process.env.CLAUDE_CONFIG_DIR
+  return dir ? join(dir, '.claude.json') : join(homedir(), '.claude.json')
+}
+
+function claudeCodeNeedsAuthCachePath(): string {
+  return join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'mcp-needs-auth-cache.json')
+}
+
+export function claudeCodeEntry(token: string, port: number): Record<string, unknown> {
+  return { type: 'http', url: httpUrl(port), headers: { Authorization: `Bearer ${token}` } }
+}
+
+function hasEntry(file: string, token: string): boolean {
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { mcpServers?: Record<string, { headers?: Record<string, string> }> }
+    return parsed.mcpServers?.[SERVER_KEY]?.headers?.Authorization === `Bearer ${token}`
+  } catch {
+    return false
+  }
+}
+
+export function writeClaudeCodeConfigTo(file: string, token: string, port: number, cacheFile?: string): WriteResult {
+  let existing: Record<string, unknown> = {}
+  if (existsSync(file)) {
+    let raw: string
+    try {
+      raw = readFileSync(file, 'utf8')
+    } catch (err) {
+      return { ok: false, path: file, error: `Could not read ${file}: ${(err as Error).message}` }
+    }
+    if (raw.trim()) {
+      try {
+        const parsed: unknown = JSON.parse(raw)
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not a JSON object')
+        existing = parsed as Record<string, unknown>
+      } catch (err) {
+        // Claude Code's whole state lives in this file. Never replace it.
+        return { ok: false, path: file, error: `${file} is not valid JSON (${(err as Error).message}), so it was left untouched.` }
+      }
+    }
+  }
+
+  const isRecord = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+  const servers = isRecord(existing.mcpServers) ? { ...existing.mcpServers } : {}
+  for (const key of LEGACY_MCP_SERVER_KEYS) delete servers[key]
+  servers[SERVER_KEY] = claudeCodeEntry(token, port)
+  const next: Record<string, unknown> = { ...existing, mcpServers: servers }
+
+  // A project-scoped entry under the same name wins over the user one, and
+  // `claude mcp add` defaults to project scope -- so a hand-added entry from
+  // before, with no header, would still be the one used in that folder.
+  if (isRecord(existing.projects)) {
+    const projects: Record<string, unknown> = {}
+    for (const [dir, project] of Object.entries(existing.projects)) {
+      if (isRecord(project) && isRecord(project.mcpServers)) {
+        const own = { ...project.mcpServers }
+        for (const key of [SERVER_KEY, ...LEGACY_MCP_SERVER_KEYS]) delete own[key]
+        projects[dir] = { ...project, mcpServers: own }
+      } else projects[dir] = project
+    }
+    next.projects = projects
+  }
+
+  try {
+    mkdirSync(dirname(file), { recursive: true })
+    atomicWriteFileSync(file, `${JSON.stringify(next, null, 2)}\n`, 0o600, `${file}.opsmaxx-tmp`)
+  } catch (err) {
+    return { ok: false, path: file, error: `Could not write ${file}: ${(err as Error).message}` }
+  }
+
+  // Claude Code remembers which servers last asked for a sign-in and may not
+  // try them again for a while. The entry this replaces did ask; this one never
+  // will. A cache, so dropping one key of it costs nothing.
+  if (cacheFile && existsSync(cacheFile)) {
+    try {
+      const cache = JSON.parse(readFileSync(cacheFile, 'utf8')) as Record<string, unknown>
+      let changed = false
+      for (const key of [SERVER_KEY, ...LEGACY_MCP_SERVER_KEYS]) {
+        if (key in cache) {
+          delete cache[key]
+          changed = true
+        }
+      }
+      if (changed) atomicWriteFileSync(cacheFile, JSON.stringify(cache), 0o600, `${cacheFile}.opsmaxx-tmp`)
+    } catch {
+      /* the entry is written; a stale cache only delays the first connect */
+    }
+  }
+
+  return { ok: true, path: file }
+}
+
+export async function writeClaudeCodeConfig(token: string, port: number): Promise<WriteResult> {
+  const file = claudeCodeConfigPath()
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const result = writeClaudeCodeConfigTo(file, token, port, claudeCodeNeedsAuthCachePath())
+    if (!result.ok) return result
+    await new Promise((r) => setTimeout(r, 1_000))
+    if (hasEntry(file, token)) return result
+  }
+  return { ok: false, path: file, error: `${file} kept being rewritten while OpsMaxx wrote to it.` }
+}
+
 export function claudeDesktopConfigPath(): string {
   if (process.platform === 'win32') {
     return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'Claude', 'claude_desktop_config.json')

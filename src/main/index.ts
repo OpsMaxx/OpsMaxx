@@ -525,7 +525,13 @@ import {
   armAllPendingApprovals
 } from './services/approvals'
 import { onCliPairingEvent, cancelCliPairing } from './services/cliPairing'
-import { claudeCodeCommand, claudeDesktopRunning, writeClaudeDesktopConfig, writeCodexConfig } from './services/clientConfig'
+import {
+  claudeCodeCommand,
+  claudeDesktopRunning,
+  writeClaudeCodeConfig,
+  writeClaudeDesktopConfig,
+  writeCodexConfig
+} from './services/clientConfig'
 import {
   setAgentServerCreator,
   setAgentConfigWriter,
@@ -6282,6 +6288,9 @@ setAgentConfigWriter((req: AgentConfigRequest) => {
 ipcMain.handle('aiMcp:claudeCodeCommand', (_e, token: string, port: number) => claudeCodeCommand(token, port))
 ipcMain.handle('aiMcp:writeClaudeDesktopConfig', (_e, token: string, port: number) =>
   writeClaudeDesktopConfig(token, port)
+)
+ipcMain.handle('aiMcp:writeClaudeCodeConfig', (_e, token: string, port: number) =>
+  writeClaudeCodeConfig(token, port)
 )
 // Asked before a session is minted, so a refusal leaves no orphan behind.
 ipcMain.handle('aiMcp:claudeDesktopRunning', () => claudeDesktopRunning())

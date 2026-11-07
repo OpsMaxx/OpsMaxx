@@ -105,12 +105,18 @@ assignment, so it never holds a later session below this one:
 
 | Button | What it does |
 |---|---|
-| **Connect Claude Code** | Copies a ready `claude mcp add` command, token already in it — paste it in a terminal |
-| **Connect Claude Desktop** | Writes the bridge entry into `claude_desktop_config.json`, merging with whatever is already there |
+| **Connect Claude Code** | Writes the entry, token in its `Authorization` header, into `~/.claude.json` — used by the terminal CLI and by Claude Desktop's **Code** tab alike. Start a new session to pick it up. The same `claude mcp add` command is copied too, for another machine |
+| **Connect Claude Desktop** | Writes the bridge entry into `claude_desktop_config.json`, merging with whatever is already there. Refuses while Claude Desktop is open: it rewrites that file from memory and would drop the entry |
 | **Connect Codex** | Writes a managed `[mcp_servers.opsmaxx]` block into `~/.codex/config.toml` |
 
 Existing config files are backed up first, other MCP servers in them are left alone, and running a
-button again replaces its own entry rather than adding a second one. A workspace you have already
+button again replaces its own entry rather than adding a second one.
+
+**Why Claude Code gets a header, not a sign-in.** Claude Desktop's Code tab will not open a sign-in
+page that is not `https`, and OpsMaxx's OAuth pages are on `http://127.0.0.1`. An `opsmaxx` entry
+added by hand, with no header, signs in fine from the terminal CLI and shows **Connect** forever in
+Desktop ("Refused to open sign-in URL for opsmaxx: must be https"). The button replaces such an
+entry — including a project-scoped one of the same name, which would otherwise win in that folder. A workspace you have already
 assigned to an access group — including **No AI Access** — is never reassigned.
 
 There is also a CLI, if you would rather not click:

@@ -18,6 +18,7 @@ import {
   claudeDesktopConfigPath,
   claudeDesktopRunning,
   httpUrl,
+  writeClaudeCodeConfigTo,
   writeClaudeDesktopConfig,
   writeClaudeDesktopConfigTo,
   writeCodexConfigTo,
@@ -156,6 +157,81 @@ describe('writing the claude desktop config', () => {
     writeFileSync(file, JSON.stringify({ mcpServers: 'nonsense' }))
     expect(writeClaudeDesktopConfigTo(file, 'tok', 5177).ok).toBe(true)
     expect(read().mcpServers.opsmaxx).toBeDefined()
+  })
+})
+
+// Claude Desktop's Code tab reads ~/.claude.json like the CLI, but refuses to
+// open OpsMaxx's http sign-in page, so an entry with no header can never
+// connect there. The button writes one that carries the token itself.
+describe('writing the claude code config', () => {
+  const cc = (): string => join(dir, '.claude.json')
+  const cache = (): string => join(dir, 'mcp-needs-auth-cache.json')
+  const readCc = (): Record<string, any> => JSON.parse(readFileSync(cc(), 'utf8'))
+
+  it('adds a user-scope entry that carries the token as a header', () => {
+    expect(writeClaudeCodeConfigTo(cc(), 'tok', 5177).ok).toBe(true)
+    expect(readCc().mcpServers.opsmaxx).toEqual({
+      type: 'http',
+      url: httpUrl(5177),
+      headers: { Authorization: 'Bearer tok' }
+    })
+  })
+
+  it("replaces a hand-added entry with no header, and keeps all of Claude Code's own state", () => {
+    writeFileSync(
+      cc(),
+      JSON.stringify({
+        numStartups: 412,
+        oauthAccount: { emailAddress: 'someone@example.com' },
+        mcpServers: { opsmaxx: { type: 'http', url: httpUrl(5177) }, other: { command: 'x' } }
+      })
+    )
+    expect(writeClaudeCodeConfigTo(cc(), 'tok', 5177).ok).toBe(true)
+    const next = readCc()
+    expect(next.numStartups).toBe(412)
+    expect(next.oauthAccount).toEqual({ emailAddress: 'someone@example.com' })
+    expect(next.mcpServers.other).toEqual({ command: 'x' })
+    expect(next.mcpServers.opsmaxx.headers.Authorization).toBe('Bearer tok')
+  })
+
+  // `claude mcp add` defaults to project scope, and a project entry under the
+  // same name wins over the user one in that folder.
+  it('removes project-scoped entries under its own names, and nothing else of the project', () => {
+    writeFileSync(
+      cc(),
+      JSON.stringify({
+        projects: {
+          '/work/app': {
+            allowedTools: ['Bash'],
+            mcpServers: { opsmaxx: { type: 'http', url: httpUrl(5177) }, [LEGACY_MCP_SERVER_KEYS[0]]: {}, db: { command: 'pg' } }
+          },
+          '/work/other': { history: [] }
+        }
+      })
+    )
+    expect(writeClaudeCodeConfigTo(cc(), 'tok', 5177).ok).toBe(true)
+    const projects = readCc().projects
+    expect(projects['/work/app']).toEqual({ allowedTools: ['Bash'], mcpServers: { db: { command: 'pg' } } })
+    expect(projects['/work/other']).toEqual({ history: [] })
+  })
+
+  it('drops a legacy user entry, which would list every tool twice', () => {
+    writeFileSync(cc(), JSON.stringify({ mcpServers: { [LEGACY_MCP_SERVER_KEYS[0]]: { type: 'http' } } }))
+    writeClaudeCodeConfigTo(cc(), 'tok', 5177)
+    expect(Object.keys(readCc().mcpServers)).toEqual(['opsmaxx'])
+  })
+
+  it('never replaces a file it cannot parse — it holds all of Claude Code’s state', () => {
+    writeFileSync(cc(), '{ not json')
+    const result = writeClaudeCodeConfigTo(cc(), 'tok', 5177)
+    expect(result.ok).toBe(false)
+    expect(readFileSync(cc(), 'utf8')).toBe('{ not json')
+  })
+
+  it('forgets that OpsMaxx once needed a sign-in, and nothing else in that cache', () => {
+    writeFileSync(cache(), JSON.stringify({ opsmaxx: { timestamp: 1 }, 'plugin:x': { timestamp: 2 } }))
+    writeClaudeCodeConfigTo(cc(), 'tok', 5177, cache())
+    expect(JSON.parse(readFileSync(cache(), 'utf8'))).toEqual({ 'plugin:x': { timestamp: 2 } })
   })
 })
 
