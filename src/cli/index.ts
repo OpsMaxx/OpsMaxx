@@ -5,6 +5,7 @@ import { getOrPairSession } from './pairing.js'
 import { runBridge } from './bridge.js'
 import { registerClaudeMcp, registerCodexMcp } from './agents.js'
 import { runVpnCommand } from './vpn.js'
+import { BRIDGE_TOKEN_ENV } from '../shared/mcpClientKeys.js'
 
 const selfScript = fileURLToPath(import.meta.url)
 const execPath = process.execPath
@@ -47,10 +48,15 @@ async function main(): Promise<void> {
   const [cmd, ...rest] = process.argv.slice(2)
 
   if (cmd === 'bridge') {
-    const token = argValue(rest, '--token')
+    // From the environment: argv is readable by every local user through `ps`,
+    // a process's environment is not. `--token` stays for configs written
+    // before the switch, and wins when given -- an explicit flag is the more
+    // deliberate of the two, and a stale variable left in someone's shell must
+    // not quietly override it.
+    const token = argValue(rest, '--token') || process.env[BRIDGE_TOKEN_ENV]
     const port = Number(argValue(rest, '--port'))
     if (!token || !port) {
-      console.error('Usage: opsmaxx bridge --token <token> --port <port>')
+      console.error(`Usage: ${BRIDGE_TOKEN_ENV}=<token> opsmaxx bridge --port <port>`)
       process.exitCode = 1
       return
     }

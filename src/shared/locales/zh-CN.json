@@ -3091,6 +3091,7 @@
   "ai.connect.cannotConfigure": "此版本的 OpsMaxx 无法为你配置 {{client}}。",
   "ai.connect.checkUpdates": "检查更新",
   "ai.connect.writeFailed": "无法写入 {{client}} 配置文件。",
+  "ai.connect.quitDesktopFirst": "Claude Desktop 正在运行。它会用内存中的副本覆盖自己的配置文件，从而再次删除 OpsMaxx。请先完全退出它（macOS 上按 ⌘Q，Windows 上从托盘图标选择“退出”），然后再次点击“连接 Claude Desktop”。",
   "ai.connect.configured": "{{client}} 已配置完成。请退出并重新打开它以加载 OpsMaxx。",
   "ai.connect.title": "连接代理",
   "ai.connect.intro": "开启桥接，创建覆盖你所有工作区的会话，并将其交给客户端。该会话不会过期——可在“活动会话”下将其吊销。",

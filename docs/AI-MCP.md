@@ -671,7 +671,10 @@ request only clears when:
   as **Cancelled — agent disconnected**, not as a timeout or a denial. It starts no deny cooldown,
   because nobody decided anything. If the operator's yes and the disconnect land together,
   `gate()` re-reads the signal after the answer and runs nothing (audited the same way), and a
-  session grant given in that moment is not remembered.
+  session grant given in that moment is not remembered. A cancel reaches the call even though the
+  endpoint is stateless: `notifications/cancelled` arrives in a POST of its own, and the server
+  hands it to the call's own request by session and request id, so one agent cannot cancel
+  another's.
 
 **Withdrawing is bounded, and a yes is armed.** Because an agent can now end its own request, it
 could otherwise ask something benign, withdraw it, and ask something else in its place while the
@@ -828,7 +831,7 @@ opsmaxx codex             Registers OpsMaxx with Codex, then launches `codex`
 opsmaxx run -- <command>  Sets OPSMAXX_MCP_COMMAND/ARGS, then launches <command>
 ```
 
-`opsmaxx bridge --token <token> --port <port>` is the fourth, internal subcommand these three
+`opsmaxx bridge --port <port>`, with the token in `OPSMAXX_MCP_TOKEN`, is the fourth, internal subcommand these three
 configure their target client to run — a pure stdio↔HTTP relay (`src/cli/bridge.ts`) with no
 tool/session/policy logic of its own. Whatever client spawns it gets the exact same
 authenticated, audited, policy-gated path an HTTP client talking to OpsMaxx directly would.
@@ -907,7 +910,7 @@ Desktop reads `command`/`args`/`env` there and ignores `url` and `headers` entir
 remote-MCP support is a separate, account-level Connectors feature that expects a publicly
 reachable server with OAuth, and offers no field for a bearer token against `127.0.0.1`.
 
-Use the stdio bridge instead. `opsmaxx bridge --token <token> --port <port>`
+Use the stdio bridge instead. `opsmaxx bridge --port <port>`, token in `OPSMAXX_MCP_TOKEN`,
 (`src/cli/bridge.ts`) is a pure protocol relay: stdio in, Streamable HTTP out, `Authorization`
 header attached on the way. No tool, session or policy logic lives in it, so a stdio client is
 subject to exactly the same Access Group checks, approval prompts and audit entries as an HTTP
@@ -915,7 +918,10 @@ one.
 
 1. Create a session under **AI & MCP → AI Agents** and copy its token (shown once). Set
    **Expires** to *Never* — a Desktop client has no way to re-pair when a token lapses.
-2. Add this to `claude_desktop_config.json`
+2. **Quit Claude Desktop completely** (⌘Q, or Quit from the tray icon on Windows). It loads this
+   file once at launch and writes that copy back over it on routine actions — opening a session,
+   changing a preference — so anything added while it is open disappears within minutes.
+3. Add this to `claude_desktop_config.json`
    (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS,
    `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
 
@@ -926,9 +932,9 @@ one.
       "command": "/Applications/OpsMaxx.app/Contents/MacOS/OpsMaxx",
       "args": [
         "/Applications/OpsMaxx.app/Contents/Resources/app.asar.unpacked/out/cli/index.js",
-        "bridge", "--token", "<token>", "--port", "<port>"
+        "bridge", "--port", "<port>"
       ],
-      "env": { "ELECTRON_RUN_AS_NODE": "1" }
+      "env": { "ELECTRON_RUN_AS_NODE": "1", "OPSMAXX_MCP_TOKEN": "<token>" }
     }
   }
 }
@@ -937,15 +943,28 @@ one.
    On Windows the two paths are `%LOCALAPPDATA%\Programs\OpsMaxx\OpsMaxx.exe` and
    `%LOCALAPPDATA%\Programs\OpsMaxx\resources\app.asar.unpacked\out\cli\index.js`.
 
-3. Restart Claude Desktop.
+4. Open Claude Desktop.
 
 `ELECTRON_RUN_AS_NODE=1` runs OpsMaxx's bundled Electron binary as plain Node, so the bridge
 needs no separate Node install and does not depend on `PATH` — which Claude Desktop does not
 inherit from a login shell. `out/cli/**` and `bin/**` are kept outside the asar archive
 (`asarUnpack` in `electron-builder.yml`) precisely so they can be spawned as real files.
 
+Start order does not matter. If OpsMaxx is not listening yet, the bridge holds each message for up
+to 30 seconds and delivers it once the app is up. It retries only a refused connection, the one
+failure that proves nothing was sent. If OpsMaxx answers but refuses the token, the client sees
+that, with OpsMaxx's reason (revoked, expired, replaced), rather than "not reachable" — reconnect
+with the button below and restart the client. If OpsMaxx quits in the middle of a call, the call
+is answered with an error that says it may already have run, rather than left waiting forever.
+
+The token goes in `env`, not `args`: any local user can read a running process's arguments with
+`ps`, but not its environment. Configs written by older builds pass `--token` instead and keep
+working; `--token` wins if both are given.
+
 **AI & MCP → Overview → Connect Claude Desktop** writes this block for you, filling in the paths
 and a fresh token; the manual steps are here for anyone who would rather see what it does.
+It refuses while Claude Desktop is running, for the reason in step 2, and creates no session when
+it does.
 
 If you lose the token before pasting it, there's nothing to recover — revoke that session under
 **Active Sessions** and create a new one.

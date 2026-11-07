@@ -26,6 +26,11 @@ export const MCP_SERVER_KEY = 'opsmaxx'
  */
 export const LEGACY_MCP_SERVER_KEYS: readonly string[] = [['shell', 'pilot'].join('')]
 
+/** Where the stdio bridge reads its bearer token. An environment variable rather
+ *  than `--token`, because a process's argv is visible to every local user
+ *  through `ps` and its environment is not. */
+export const BRIDGE_TOKEN_ENV = 'OPSMAXX_MCP_TOKEN'
+
 export const CODEX_BLOCK_START = '# >>> opsmaxx managed block — written by OpsMaxx, safe to remove >>>'
 export const CODEX_BLOCK_END = '# <<< opsmaxx managed block <<<'
 

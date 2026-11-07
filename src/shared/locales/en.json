@@ -3239,6 +3239,7 @@
   "ai.connect.cannotConfigure": "This build of OpsMaxx cannot configure {{client}} for you.",
   "ai.connect.checkUpdates": "Check for updates",
   "ai.connect.writeFailed": "The {{client}} config file could not be written.",
+  "ai.connect.quitDesktopFirst": "Claude Desktop is open. It rewrites its own config file from memory and would drop OpsMaxx again. Quit it completely (⌘Q on macOS, or Quit from its tray icon on Windows), then click Connect Claude Desktop again.",
   "ai.connect.configured": "{{client}} is configured. Quit it and open it again to pick OpsMaxx up.",
   "ai.connect.title": "Connect an agent",
   "ai.connect.intro": "Turns on the bridge, creates a session across your workspaces and hands it to the client. The session does not expire — revoke it under Active Sessions.",

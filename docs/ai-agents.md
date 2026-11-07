@@ -200,9 +200,9 @@ Or point Desktop straight at the bundled bridge, with no Node dependency at all:
       "command": "/Applications/OpsMaxx.app/Contents/MacOS/OpsMaxx",
       "args": [
         "/Applications/OpsMaxx.app/Contents/Resources/app.asar.unpacked/out/cli/index.js",
-        "bridge", "--token", "<token>", "--port", "<port>"
+        "bridge", "--port", "<port>"
       ],
-      "env": { "ELECTRON_RUN_AS_NODE": "1" }
+      "env": { "ELECTRON_RUN_AS_NODE": "1", "OPSMAXX_MCP_TOKEN": "<token>" }
     }
   }
 }
@@ -212,7 +212,9 @@ On **Windows**, the two paths become `%LOCALAPPDATA%\Programs\OpsMaxx\OpsMaxx.ex
 `%LOCALAPPDATA%\Programs\OpsMaxx\resources\app.asar.unpacked\out\cli\index.js`.
 
 The config file lives at `~/Library/Application Support/Claude/claude_desktop_config.json` on
-macOS and `%APPDATA%\Claude\claude_desktop_config.json` on Windows. Restart Desktop afterwards.
+macOS and `%APPDATA%\Claude\claude_desktop_config.json` on Windows. Quit Desktop completely
+before editing it — Desktop writes its in-memory copy back over the file while it runs, and an
+entry added meanwhile is lost — then open it again.
 
 `ELECTRON_RUN_AS_NODE` makes OpsMaxx's own bundled Electron binary run the bridge as plain
 Node, so nothing has to be installed separately and none of this depends on what is on your

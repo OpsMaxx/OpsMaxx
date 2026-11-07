@@ -7,6 +7,7 @@ import { z } from 'zod'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js'
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js'
+import { isJSONRPCNotification, isJSONRPCRequest } from '@modelcontextprotocol/sdk/types.js'
 import type { HostMetrics } from '../../shared/ssh'
 import { formatBytes } from '../../shared/bytesForecast'
 import { assessCommand } from '../../shared/commandRisk'
@@ -7610,21 +7611,86 @@ function auditBase(ctx: AuditContext): {
 
 let httpServer: HttpServer | null = null
 
-function readBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    req.on('data', (c: Buffer) => chunks.push(c))
-    req.on('end', () => {
-      const raw = Buffer.concat(chunks).toString('utf8')
-      if (!raw) return resolve(undefined)
-      try {
-        resolve(JSON.parse(raw))
-      } catch (err) {
-        reject(err)
-      }
-    })
-    req.on('error', reject)
-  })
+// The calls each session has open, by JSON-RPC id, so a cancel can find its call.
+//
+// The endpoint is stateless: every POST gets its own McpServer, and a
+// `notifications/cancelled` arrives in a POST of its own -- so it lands on a
+// server that never saw the request it names, and the SDK drops it there. The
+// call it meant to stop kept its POST open, its approval stayed on screen, and
+// a yes given after the client had given up ran the command anyway. Handing the
+// cancel to the transport that owns the call lets that call's own server abort
+// it, exactly as if it had been one connection. Keyed by session as well as id:
+// ids are only unique per client, and one agent must never cancel another's.
+//
+// The cancelled call's POST is then ended too. A cancelled request gets no
+// response -- that is the protocol -- so its stream would otherwise stay open,
+// with its McpServer, until the client process exits: one leaked socket per
+// cancel for the whole life of a long-running client such as Claude Desktop.
+// Only when the POST carried that one request, though: ending a batch would
+// cut off the calls in it that nobody cancelled.
+interface InFlightCall {
+  transport: StreamableHTTPServerTransport
+  res: ServerResponse
+  requestsInPost: number
+}
+const inFlight = new Map<string, InFlightCall>()
+
+const inFlightKey = (sessionId: string, id: unknown): string => `${sessionId}\0${typeof id}:${String(id)}`
+
+function registerInFlight(
+  sessionId: string,
+  messages: unknown[],
+  transport: StreamableHTTPServerTransport,
+  res: ServerResponse
+): string[] {
+  const keys = messages.filter(isJSONRPCRequest).map((m) => inFlightKey(sessionId, m.id))
+  for (const key of keys) inFlight.set(key, { transport, res, requestsInPost: keys.length })
+  return keys
+}
+
+function releaseInFlight(keys: string[], transport: StreamableHTTPServerTransport): void {
+  // Only this POST's own entries: a client that reused an id after giving up on
+  // the first call must not lose the second.
+  for (const key of keys) if (inFlight.get(key)?.transport === transport) inFlight.delete(key)
+}
+
+function forwardCancels(sessionId: string, messages: unknown[]): void {
+  for (const m of messages) {
+    if (!isJSONRPCNotification(m) || m.method !== 'notifications/cancelled') continue
+    const requestId = (m.params as { requestId?: unknown } | undefined)?.requestId
+    if (requestId === undefined) continue
+    const call = inFlight.get(inFlightKey(sessionId, requestId))
+    if (!call) continue
+    call.transport.onmessage?.(m)
+    if (call.requestsInPost === 1) call.res.end()
+  }
+}
+
+async function readBody(req: IncomingMessage): Promise<unknown> {
+  const raw = await readRaw(req)
+  return raw ? JSON.parse(raw) : undefined
+}
+
+// The SDK's own limit for an MCP message. Every body this server reads is held
+// in memory in the main process, several of them before any authentication
+// (/register, /token, /revoke, /pair/*), so without a cap any local process
+// could take the app down with one large POST.
+const MAX_BODY_BYTES = 4 * 1024 * 1024
+
+class BodyTooLarge extends Error {}
+
+// Written by the request wrapper for anything a route did not answer itself.
+function answerUnhandled(res: ServerResponse, err: unknown): void {
+  if (res.headersSent) {
+    res.end()
+    return
+  }
+  if (err instanceof BodyTooLarge) {
+    sendJson(res, 413, { error: 'payload_too_large', error_description: `Request bodies are limited to ${MAX_BODY_BYTES} bytes.` }, { connection: 'close' })
+    return
+  }
+  console.error('[mcp] request handling failed:', err)
+  res.writeHead(500).end()
 }
 
 function sendJson(res: ServerResponse, code: number, body: unknown, headers: Record<string, string> = {}): void {
@@ -7639,7 +7705,20 @@ function formBody(raw: string): URLSearchParams {
 function readRaw(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
-    req.on('data', (c: Buffer) => chunks.push(c))
+    let size = 0
+    const onData = (c: Buffer): void => {
+      size += c.length
+      if (size <= MAX_BODY_BYTES) {
+        chunks.push(c)
+        return
+      }
+      // Stop keeping it, but keep draining it: destroying the socket here would
+      // leave no way to say why.
+      req.off('data', onData)
+      req.resume()
+      reject(new BodyTooLarge())
+    }
+    req.on('data', onData)
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
     req.on('error', reject)
   })
@@ -8012,7 +8091,8 @@ export async function startMcpServer(): Promise<{ ok: boolean; error?: string }>
         if (req.method === 'POST' && req.url === '/pair/start') return handlePairStart(req, res)
         if (req.method === 'POST' && req.url === '/pair/confirm') return handlePairConfirm(req, res)
 
-        if (!req.url.startsWith('/mcp')) {
+        // Exact, so `/mcpanything` is a 404 like any other unknown path.
+        if (req.url !== '/mcp' && !req.url.startsWith('/mcp?')) {
           res.writeHead(404).end()
           return
         }
@@ -8067,12 +8147,25 @@ export async function startMcpServer(): Promise<{ ok: boolean; error?: string }>
           return
         }
 
+        let body: unknown
         try {
-          const body = await readBody(req)
+          body = await readBody(req)
+        } catch (err) {
+          if (!(err instanceof SyntaxError)) throw err
+          // JSON-RPC's own answer to unparseable input, as a 400 -- not an empty
+          // 500 that reads as the app having crashed.
+          return sendJson(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } })
+        }
+
+        try {
           const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined })
           const mcp = buildServer()
+          const messages = Array.isArray(body) ? body : [body]
+          const owned = registerInFlight(preAuth.session.id, messages, transport, res)
+          forwardCancels(preAuth.session.id, messages)
           // Both are per-request, so neither may outlive the response.
           res.on('close', () => {
+            releaseInFlight(owned, transport)
             void transport.close()
             void mcp.close()
           })
@@ -8082,7 +8175,9 @@ export async function startMcpServer(): Promise<{ ok: boolean; error?: string }>
           console.error('[mcp] request handling failed:', err)
           if (!res.headersSent) res.writeHead(500).end()
         }
-      })()
+        // Covers every route: /token and /revoke read their bodies with no
+        // handler of their own, and a rejection here used to go nowhere.
+      })().catch((err: unknown) => answerUnhandled(res, err))
     })
 
     server.on('error', (err) => {

@@ -16,7 +16,9 @@ import {
   bridgeInvocation,
   claudeCodeCommand,
   claudeDesktopConfigPath,
+  claudeDesktopRunning,
   httpUrl,
+  writeClaudeDesktopConfig,
   writeClaudeDesktopConfigTo,
   writeCodexConfigTo,
   codexConfigPath
@@ -39,8 +41,16 @@ describe('bridge invocation', () => {
   it('runs the bundled Electron binary as plain Node', () => {
     const inv = bridgeInvocation('tok', 5177)
     expect(inv.command).toBe(process.execPath)
-    expect(inv.env).toEqual({ ELECTRON_RUN_AS_NODE: '1' })
-    expect(inv.args.slice(1)).toEqual(['bridge', '--token', 'tok', '--port', '5177'])
+    expect(inv.env).toEqual({ ELECTRON_RUN_AS_NODE: '1', OPSMAXX_MCP_TOKEN: 'tok' })
+    expect(inv.args.slice(1)).toEqual(['bridge', '--port', '5177'])
+  })
+
+  // argv is readable by every local user through `ps`; a process's environment
+  // is not. The token used to sit in args, in plain sight for the bridge's life.
+  it('keeps the token out of the command line', () => {
+    const inv = bridgeInvocation('secret-token', 5177)
+    expect(inv.args.join(' ')).not.toContain('secret-token')
+    expect(inv.args).not.toContain('--token')
     expect(inv.args[0].endsWith(join('out', 'cli', 'index.js'))).toBe(true)
   })
 
@@ -92,9 +102,8 @@ describe('writing the claude desktop config', () => {
     const result = writeClaudeDesktopConfigTo(nested, 'tok', 5177)
     expect(result.ok).toBe(true)
     const written = JSON.parse(readFileSync(nested, 'utf8'))
-    expect(written.mcpServers.opsmaxx.args).toContain('--token')
-    expect(written.mcpServers.opsmaxx.args).toContain('tok')
-    expect(written.mcpServers.opsmaxx.env).toEqual({ ELECTRON_RUN_AS_NODE: '1' })
+    expect(written.mcpServers.opsmaxx.args).not.toContain('tok')
+    expect(written.mcpServers.opsmaxx.env).toEqual({ ELECTRON_RUN_AS_NODE: '1', OPSMAXX_MCP_TOKEN: 'tok' })
   })
 
   it('keeps other mcp servers and unrelated top-level keys', () => {
@@ -115,10 +124,9 @@ describe('writing the claude desktop config', () => {
   it('replaces its own previous entry rather than accumulating duplicates', () => {
     writeClaudeDesktopConfigTo(file, 'old-token', 5177)
     writeClaudeDesktopConfigTo(file, 'new-token', 6000)
-    const args: string[] = read().mcpServers.opsmaxx.args
-    expect(args).toContain('new-token')
-    expect(args).not.toContain('old-token')
-    expect(args[args.indexOf('--port') + 1]).toBe('6000')
+    const entry = read().mcpServers.opsmaxx as { args: string[]; env: Record<string, string> }
+    expect(entry.env.OPSMAXX_MCP_TOKEN).toBe('new-token')
+    expect(entry.args[entry.args.indexOf('--port') + 1]).toBe('6000')
     expect(Object.keys(read().mcpServers)).toEqual(['opsmaxx'])
   })
 
@@ -151,6 +159,21 @@ describe('writing the claude desktop config', () => {
   })
 })
 
+// Desktop writes the copy of this file it loaded at launch back over it on
+// routine actions, so an entry added while it is open is silently dropped --
+// the button reported success and Desktop came back without OpsMaxx.
+describe('writing the claude desktop config while Desktop is open', () => {
+  it('refuses, and says why, rather than writing an entry Desktop will erase', () => {
+    const result = writeClaudeDesktopConfig('tok', 5177, true)
+    expect(result).toMatchObject({ ok: false, reason: 'desktop-running' })
+    expect(result.error).toContain('quit it completely')
+  })
+
+  it('answers whether Desktop is running without throwing, on any platform', () => {
+    expect(typeof claudeDesktopRunning()).toBe('boolean')
+  })
+})
+
 describe('writing the codex config', () => {
   const codex = (): string => join(dir, 'config.toml')
   const readToml = (): string => readFileSync(codex(), 'utf8')
@@ -163,7 +186,8 @@ describe('writing the codex config', () => {
     expect(writeCodexConfigTo(codex(), 'tok', 5177).ok).toBe(true)
     const toml = readToml()
     expect(toml).toContain('[mcp_servers.opsmaxx]')
-    expect(toml).toContain('"--token", "tok"')
+    expect(toml).toContain('OPSMAXX_MCP_TOKEN = "tok"')
+    expect(toml).not.toContain('--token')
     expect(toml).toContain('ELECTRON_RUN_AS_NODE = "1"')
   })
 

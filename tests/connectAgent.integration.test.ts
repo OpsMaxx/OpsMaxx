@@ -184,11 +184,19 @@ describe('connect flow', () => {
     const toml = readFileSync(file, 'utf8')
     const command = JSON.parse(/^command = (".*")$/m.exec(toml)![1]) as string
     const args = JSON.parse(`[${/^args = \[(.*)\]$/m.exec(toml)![1]}]`) as string[]
+    // `env = { K = "v", ... }` -- each value is a JSON string, so read them as such.
+    const env = Object.fromEntries(
+      [.../^env = \{ (.*) \}$/m.exec(toml)![1].matchAll(/(\w+) = ("(?:[^"\\]|\\.)*")/g)].map(([, k, v]) => [
+        k,
+        JSON.parse(v) as string
+      ])
+    )
+    expect(args.join(' ')).not.toContain(token)
 
     const transport = new StdioClientTransport({
       command,
       args,
-      env: { ...(process.env as Record<string, string>), ELECTRON_RUN_AS_NODE: '1' }
+      env: { ...(process.env as Record<string, string>), ...env }
     })
     const client = new Client({ name: 'codex-test', version: '1.0.0' })
     await client.connect(transport)

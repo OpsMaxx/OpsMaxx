@@ -3249,6 +3249,7 @@
   "ai.connect.cannotConfigure": "Cette version d’OpsMaxx ne peut pas configurer {{client}} pour vous.",
   "ai.connect.checkUpdates": "Rechercher des mises à jour",
   "ai.connect.writeFailed": "Le fichier de configuration de {{client}} n’a pas pu être écrit.",
+  "ai.connect.quitDesktopFirst": "Claude Desktop est ouvert. Il réécrit son fichier de configuration depuis la mémoire et supprimerait à nouveau OpsMaxx. Quittez-le complètement (⌘Q sur macOS, ou Quitter depuis son icône de la barre d’état sous Windows), puis cliquez à nouveau sur Connecter Claude Desktop.",
   "ai.connect.configured": "{{client}} est configuré. Quittez-le et rouvrez-le pour qu’il prenne en compte OpsMaxx.",
   "ai.connect.title": "Connecter un agent",
   "ai.connect.intro": "Active le pont, crée une session couvrant vos espaces de travail et la transmet au client. La session n’expire pas — révoquez-la sous Sessions actives.",

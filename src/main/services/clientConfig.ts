@@ -2,8 +2,10 @@ import { app } from 'electron'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import { atomicWriteFileSync } from './atomicWrite'
 import {
+  BRIDGE_TOKEN_ENV,
   CODEX_BLOCK_END,
   CODEX_BLOCK_START,
   LEGACY_MCP_SERVER_KEYS,
@@ -38,11 +40,14 @@ export interface BridgeInvocation {
   env: Record<string, string>
 }
 
+// The token travels in `env`, not `args`: a running process's argv is readable
+// by every local user through `ps`, its environment is not. It is still in the
+// client's config file either way -- that file is 0600, see below.
 export function bridgeInvocation(token: string, port: number): BridgeInvocation {
   return {
     command: process.execPath,
-    args: [bridgeScript(), 'bridge', '--token', token, '--port', String(port)],
-    env: { ELECTRON_RUN_AS_NODE: '1' }
+    args: [bridgeScript(), 'bridge', '--port', String(port)],
+    env: { ELECTRON_RUN_AS_NODE: '1', [BRIDGE_TOKEN_ENV]: token }
   }
 }
 
@@ -97,10 +102,58 @@ export interface WriteResult {
   path: string
   backedUpTo?: string
   error?: string
+  /** Set when nothing was written because Claude Desktop is open. */
+  reason?: 'desktop-running'
 }
 
-export function writeClaudeDesktopConfig(token: string, port: number): WriteResult {
-  return writeClaudeDesktopConfigTo(claudeDesktopConfigPath(), token, port)
+// Claude Desktop loads claude_desktop_config.json once, at launch, and writes
+// its in-memory copy back over the file on routine actions -- opening a
+// session, changing a preference. So an entry added while it is open lasts
+// only until its next write: seen on a real machine, the opsmaxx entry was
+// written at 08:06 and gone at 08:26, the file byte-for-byte the size of the
+// backup taken just before it was added. The button reported success, the
+// user restarted Desktop as told, and Desktop came back without OpsMaxx. The
+// only write that sticks is one made while Desktop is closed.
+//
+// macOS asks LaunchServices by bundle id rather than matching a process path:
+// on a real machine `pgrep` did not see Desktop's main process at all, only
+// its helpers, and Claude Code's own `claude.app` binaries live under the same
+// Application Support folder. `lsappinfo` prints `"pid"=N` for a running app
+// and nothing otherwise, exiting 0 either way.
+//
+// ponytail: Windows matches the image name, which another program could share.
+// Desktop has no lock file or API to ask instead. Linux has no official Claude
+// Desktop, so it is never reported as running there.
+export function claudeDesktopRunning(): boolean {
+  try {
+    if (process.platform === 'darwin') {
+      const r = spawnSync('lsappinfo', ['info', '-only', 'pid', '-app', 'com.anthropic.claudefordesktop'], {
+        encoding: 'utf8'
+      })
+      return /"pid"\s*=\s*\d+/.test(r.stdout ?? '')
+    }
+    if (process.platform === 'win32') {
+      const r = spawnSync('tasklist', ['/FI', 'IMAGENAME eq Claude.exe', '/NH'], { encoding: 'utf8' })
+      return /\bClaude\.exe\b/i.test(r.stdout ?? '')
+    }
+  } catch {
+    // A check that cannot run must not block the button; the toast still says
+    // to quit and reopen Desktop.
+  }
+  return false
+}
+
+export function writeClaudeDesktopConfig(token: string, port: number, running = claudeDesktopRunning()): WriteResult {
+  const file = claudeDesktopConfigPath()
+  if (running) {
+    return {
+      ok: false,
+      path: file,
+      reason: 'desktop-running',
+      error: 'Claude Desktop is open. It rewrites its config file from memory and would drop OpsMaxx again — quit it completely first, then connect.'
+    }
+  }
+  return writeClaudeDesktopConfigTo(file, token, port)
 }
 
 // Merges a `opsmaxx` entry into whatever is already in the file. A user's

@@ -2319,8 +2319,9 @@ const api = {
     writeClaudeDesktopConfig: (
       token: string,
       port: number
-    ): Promise<{ ok: boolean; path: string; backedUpTo?: string; error?: string }> =>
+    ): Promise<{ ok: boolean; path: string; backedUpTo?: string; error?: string; reason?: 'desktop-running' }> =>
       ipcRenderer.invoke('aiMcp:writeClaudeDesktopConfig', token, port),
+    claudeDesktopRunning: (): Promise<boolean> => ipcRenderer.invoke('aiMcp:claudeDesktopRunning'),
     writeCodexConfig: (
       token: string,
       port: number

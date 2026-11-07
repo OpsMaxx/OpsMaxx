@@ -525,7 +525,7 @@ import {
   armAllPendingApprovals
 } from './services/approvals'
 import { onCliPairingEvent, cancelCliPairing } from './services/cliPairing'
-import { claudeCodeCommand, writeClaudeDesktopConfig, writeCodexConfig } from './services/clientConfig'
+import { claudeCodeCommand, claudeDesktopRunning, writeClaudeDesktopConfig, writeCodexConfig } from './services/clientConfig'
 import {
   setAgentServerCreator,
   setAgentConfigWriter,
@@ -6283,6 +6283,8 @@ ipcMain.handle('aiMcp:claudeCodeCommand', (_e, token: string, port: number) => c
 ipcMain.handle('aiMcp:writeClaudeDesktopConfig', (_e, token: string, port: number) =>
   writeClaudeDesktopConfig(token, port)
 )
+// Asked before a session is minted, so a refusal leaves no orphan behind.
+ipcMain.handle('aiMcp:claudeDesktopRunning', () => claudeDesktopRunning())
 ipcMain.handle('aiMcp:writeCodexConfig', (_e, token: string, port: number) => writeCodexConfig(token, port))
 
 // ---- AI & MCP: CLI pairing (the `opsmaxx claude|codex|run` launcher) ----

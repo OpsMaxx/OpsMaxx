@@ -4,6 +4,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { atomicWriteFileSync } from '../main/services/atomicWrite.js'
 import {
+  BRIDGE_TOKEN_ENV,
   CODEX_BLOCK_END,
   CODEX_BLOCK_START,
   LEGACY_MCP_SERVER_KEYS,
@@ -11,8 +12,17 @@ import {
   spliceCodexBlock
 } from '../shared/mcpClientKeys.js'
 
-function bridgeArgs(selfScript: string, token: string, port: number): string[] {
-  return [selfScript, 'bridge', '--token', token, '--port', String(port)]
+function bridgeArgs(selfScript: string, port: number): string[] {
+  return [selfScript, 'bridge', '--port', String(port)]
+}
+
+// The token goes in the environment, not argv (see BRIDGE_TOKEN_ENV).
+// ELECTRON_RUN_AS_NODE is set explicitly too: when this CLI runs on OpsMaxx's
+// own Electron binary, execPath is that binary, and an MCP client that starts
+// it with a trimmed environment would otherwise launch the app, not the bridge.
+// Plain Node ignores it.
+function bridgeEnv(token: string): Record<string, string> {
+  return { ELECTRON_RUN_AS_NODE: '1', [BRIDGE_TOKEN_ENV]: token }
 }
 
 // Re-registers (remove, then add) so a fresh pairing always replaces a
@@ -25,7 +35,19 @@ export function registerClaudeMcp(execPath: string, selfScript: string, token: s
   }
   const res = spawnSync(
     'claude',
-    ['mcp', 'add', '--transport', 'stdio', MCP_SERVER_KEY, '--', execPath, ...bridgeArgs(selfScript, token, port)],
+    [
+      'mcp',
+      'add',
+      '--transport',
+      'stdio',
+      // After the name, as in `claude mcp add --help`: `-e` takes several values,
+      // so ahead of the name it would swallow the name as one more of them.
+      MCP_SERVER_KEY,
+      ...Object.entries(bridgeEnv(token)).flatMap(([k, v]) => ['-e', `${k}=${v}`]),
+      '--',
+      execPath,
+      ...bridgeArgs(selfScript, port)
+    ],
     { stdio: ['ignore', 'ignore', 'inherit'], shell: process.platform === 'win32' }
   )
   if (res.error || res.status !== 0) {
@@ -42,12 +64,15 @@ export function registerCodexMcp(execPath: string, selfScript: string, token: st
   mkdirSync(dir, { recursive: true })
   const existing = existsSync(file) ? readFileSync(file, 'utf8') : ''
 
-  const args = bridgeArgs(selfScript, token, port)
+  const args = bridgeArgs(selfScript, port)
   const block = [
     CODEX_BLOCK_START,
     `[mcp_servers.${MCP_SERVER_KEY}]`,
     `command = ${JSON.stringify(execPath)}`,
     `args = [${args.map((a) => JSON.stringify(a)).join(', ')}]`,
+    `env = { ${Object.entries(bridgeEnv(token))
+      .map(([k, v]) => `${k} = ${JSON.stringify(v)}`)
+      .join(', ')} }`,
     CODEX_BLOCK_END
   ].join('\n')
 

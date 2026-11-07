@@ -134,6 +134,13 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         })
       }
 
+      // Before a session is minted, so a refusal leaves nothing behind. Desktop
+      // writes its in-memory config back over the file while it is open, which
+      // silently drops an entry added meanwhile -- see claudeDesktopRunning().
+      if (target === 'claude-desktop' && (await api.aiMcp.claudeDesktopRunning?.())) {
+        throw new StepError(t('ai.connect.quitDesktopFirst'))
+      }
+
       const group = groups.find((g) => g.id === groupId) ?? null
 
       // Connecting writes NO workspace assignment. It used to pin every
@@ -179,7 +186,14 @@ export function ConnectAgent({ onConnected }: { onConnected?: () => void }): Rea
         // Nothing in the app can fix a config file it is not allowed to write,
         // so this one says what happened and stops there rather than offering a
         // button that would do nothing.
-        if (!result.ok) throw new StepError(result.error ?? t('ai.connect.writeFailed', { client: label }))
+        if (!result.ok) {
+          // Desktop was opened between the check above and the write.
+          if ('reason' in result && result.reason === 'desktop-running') {
+            void api.aiMcp.deleteSession?.(created.session.id)
+            throw new StepError(t('ai.connect.quitDesktopFirst'))
+          }
+          throw new StepError(result.error ?? t('ai.connect.writeFailed', { client: label }))
+        }
         setReady({ target, path: result.path, backedUpTo: result.backedUpTo })
         toast(t('ai.connect.configured', { client: label }), 'ok')
       }
