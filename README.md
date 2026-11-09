@@ -111,7 +111,7 @@ Already keep hosts in `~/.ssh/config`? Import them instead of retyping — `Prox
 | **[Terminal](docs/terminal.md)** | The terminal, the local shell, the command palette and every shortcut |
 | **[Cloud servers](docs/cloud.md)** | Google Cloud, AWS and Azure through the CLI you already have — and why it brokers rather than wraps |
 | **[Monitoring](docs/monitoring.md)** | Watching a fleet, and running one change across all of it |
-| **[Databases](docs/databases.md)** | Five engines, direct or through a bastion |
+| **[Databases](docs/databases.md)** | Six engines, direct or through a bastion |
 | **[Tunnels and VPN](docs/tunnels.md)** | Forwards, SOCKS5, WireGuard, OpenVPN and frp |
 | **[Vault and settings](docs/vault.md)** | The secrets store, backups, and the settings worth knowing |
 | **[Sync and devices](docs/08-user/guides/sync-and-devices.md)** | Setting up a relay, pairing your machines, the recovery phrase, and removing a lost one |
@@ -156,7 +156,7 @@ Please do keep the copyright notice, and do not imply the maintainers endorse a 
 
 **Built for the DevOps community.** If OpsMaxx saves you time, a ⭐ helps others find it.
 
-[⬇ Download OpsMaxx](https://github.com/OpsMaxx/OpsMaxx/releases/latest) · [🐞 Report a bug](https://github.com/OpsMaxx/OpsMaxx/issues/new?template=bug_report.yml) · [📧 Contact](mailto:aliwaqarofficial@gmail.com)
+[⬇ Download OpsMaxx](https://github.com/OpsMaxx/OpsMaxx/releases/latest) · [🐞 Report a bug](https://github.com/OpsMaxx/OpsMaxx/issues/new?template=bug_report.yml) · [📧 Contact](mailto:support@opsmaxx.dev)
 
 *Keywords: open source SSH client, free SSH client for Windows, free MobaXterm alternative, PuTTY alternative, Termius alternative, SecureCRT alternative, Xshell alternative, MobaXterm for Mac, SSH client for macOS, SSH client for Linux, SSH terminal manager, SSH connection manager, SFTP client, SCP file transfer, SSH tunnel manager, port forwarding tool, SOCKS5 proxy client, bastion host client, jump host SSH client, ProxyJump GUI, ssh config importer, server monitoring tool, database GUI client, PostgreSQL client, MySQL client, MongoDB client, Redis client, SQL Server client, database over SSH tunnel, password manager for developers, encrypted secrets vault, AES-256-GCM vault, DevOps tools, sysadmin tools, self-hosted, no telemetry, no subscription, Electron SSH client, cross-platform terminal, Windows macOS Linux, MCP server, Model Context Protocol, AI agent SSH access, Claude Code MCP integration, Claude Desktop MCP server, Codex MCP server, Gemini CLI MCP, AI DevOps tool, secure AI infrastructure access, AI agent access control, credential-free AI automation, human-in-the-loop AI approvals, AI audit log.*
 

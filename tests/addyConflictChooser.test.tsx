@@ -258,6 +258,11 @@ describe('a vault set aside on the first sync', () => {
     render(<ConflictChooser />)
 
     const field = await screen.findByLabelText(/master password that copy was made with/)
+    // Same race as the Escape test above: the field clears itself in a
+    // `useEffect` keyed on the conflict, and `findBy` resolves on the commit
+    // BEFORE that effect runs. Typing in the gap gets wiped, and the click
+    // lands on a disabled button. Drain the effects first.
+    await act(async () => {})
     const add = screen.getByRole('button', { name: 'Add its entries to this vault' })
     expect((add as HTMLButtonElement).disabled).toBe(true)
     fireEvent.change(field, { target: { value: 'old-master' } })
@@ -276,9 +281,9 @@ describe('a vault set aside on the first sync', () => {
     })
     render(<ConflictChooser />)
 
-    fireEvent.change(await screen.findByLabelText(/master password that copy was made with/), {
-      target: { value: 'wrong' }
-    })
+    const field = await screen.findByLabelText(/master password that copy was made with/)
+    await act(async () => {}) // see the test above
+    fireEvent.change(field, { target: { value: 'wrong' } })
     fireEvent.click(screen.getByRole('button', { name: 'Add its entries to this vault' }))
 
     expect((await screen.findByText(/does not open the other copy/)).textContent).toMatch(/That did not finish/)

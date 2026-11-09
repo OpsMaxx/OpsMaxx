@@ -32,7 +32,7 @@ Examples of unacceptable behaviour:
 ## Enforcement
 
 Instances of abusive, harassing or otherwise unacceptable behaviour may be
-reported to the maintainer at <aliwaqarofficial@gmail.com>. All complaints
+reported to the maintainer at <support@opsmaxx.dev>. All complaints
 will be reviewed and investigated promptly and fairly, and the privacy and
 security of the reporter will be respected.
 

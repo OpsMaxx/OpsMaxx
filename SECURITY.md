@@ -11,7 +11,7 @@ where that design's limits are — see [docs/AI-SECURITY.md](docs/AI-SECURITY.md
 **Please do not open a public issue for a security problem.**
 
 Use GitHub's [private vulnerability reporting](../../security/advisories/new),
-or email the maintainer at <aliwaqarofficial@gmail.com>. Include:
+or email the maintainer at <support@opsmaxx.dev>. Include:
 
 - what the issue is and roughly how severe you think it is
 - steps to reproduce, or a proof of concept

@@ -292,7 +292,7 @@ dmg:
 linux:
   icon: build/icon.png
   category: Development
-  maintainer: ghauri01 <aliwaqarofficial@gmail.com>
+  maintainer: OpsMaxx <support@opsmaxx.dev>
   synopsis: Your DevOps workstation, everywhere.
   description: >-
     Free, open-source SSH client, SFTP browser, SSH tunnel manager, multi-engine
