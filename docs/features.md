@@ -96,20 +96,22 @@ this is the short version:
 
 | | **OpsMaxx** | MobaXterm | PuTTY | Termius | SecureCRT |
 |---|---|---|---|---|---|
-| Price | **Free, MIT** | Free tier, paid Pro | Free | Free tier, paid Pro | Paid licence |
+| Price | **Free, MIT** | Free tier; Pro $69/user | Free | Free tier; Pro $10/month | $119 with 1 year of updates |
 | Open source | **Yes** | No | Yes | No | No |
 | Windows / macOS / Linux | **All three** | Windows only | All three | All three | All three |
-| Account required | **No** | No | No | Yes for sync | No |
-| Telemetry | **None** | Some | None | Yes | Some |
-| Saved sessions limit | **Unlimited** | 12 on free tier | Unlimited | Limited on free tier | Unlimited |
+| Account required | **No** | No | No | Prompted at first launch; needed for sync | No |
+| Telemetry | **None** | Not documented | None | Not documented | Not documented |
+| Saved sessions limit | **Unlimited** | 12 on free tier | Unlimited | No cap listed | Unlimited |
 | Chained jump hosts | **Unlimited** | Yes | Manual | Yes | Yes |
-| SFTP browser | **Built in** | Built in | Separate app | Built in | Built in |
-| SSH tunnels + SOCKS5 | **Yes** | Yes | Yes | Yes | Yes |
-| Database client | **PostgreSQL, MySQL, SQL Server, MongoDB, Redis** | No | No | No | No |
-| Encrypted secrets vault | **Yes, AES-256-GCM** | Password store | No | Cloud vault | No |
+| SFTP browser | **Built in** | Built in | Separate app | Built in | SFTP tab; graphical browser is SecureFX (bundle $129) |
+| SSH tunnels + SOCKS5 | **Yes** | Yes (2 on free tier) | Yes | Yes | Yes |
+| Database client | **PostgreSQL, MySQL, SQL Server, MongoDB, Redis, ClickHouse** | No | No | No | No |
+| Encrypted secrets vault | **Yes, AES-256-GCM** | Password store | No | Local vault; cloud vault on Pro | No |
 | Live server monitoring | **Yes** | Basic | No | No | No |
 | Rebindable shortcuts | **Every one** | Partial | Partial | Partial | Yes |
 | AI agent integration (MCP) | **Yes, access-group scoped** | No | No | No | No |
+
+Competitor details checked against each vendor's own pricing and product pages on 9 November 2026. "Not documented" means the vendor's pages say nothing either way.
 
 The point of difference is the **database client and the vault**. Every other tool in that table
 sends you to a second application the moment you need to query a table or look up an API key.
