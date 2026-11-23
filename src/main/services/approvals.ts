@@ -305,9 +305,21 @@ export function wouldRefuse(input: RationingInput): boolean {
   return refusal(input) !== null
 }
 
+// The approval copy wraps each of these in quotation marks, so a quote inside
+// one would close it early: a server named `web” and changes nothing else. Also
+// moves “db` reads as two clauses. Server names never went through the
+// bridge's name rules, so every quote form is replaced here, at the floor.
+const QUOTE_FORMS = /["“”„‟«»‹›]/g
+// Wider than NAME_MAX_CHARS: a folder path is several names, and cutting the
+// whole path at 200 would hide which folder it ends in.
+const STRUCTURAL_MAX_CHARS = 512
+
 function sanitizeStructural(s: StructuralChange): StructuralChange {
   return Object.fromEntries(
-    Object.entries(s).map(([k, v]) => [k, k === 'kind' || typeof v !== 'string' ? v : remoteText(v, NAME_MAX_CHARS)])
+    Object.entries(s).map(([k, v]) => [
+      k,
+      k === 'kind' || typeof v !== 'string' ? v : remoteText(v, STRUCTURAL_MAX_CHARS).replace(QUOTE_FORMS, "'")
+    ])
   ) as StructuralChange
 }
 

@@ -34,6 +34,7 @@ type ApprovalRequest = import('../src/shared/mcp').ApprovalRequest
 type SessionMode = import('../src/shared/mcp').SessionMode
 
 const PORT = 18905
+const QUOTED_SERVER = 'web\u201d and changes nothing else. Also moves \u201cdb'
 
 // Alpha and Beta are in the session; "Secret Ops" is not, and must never be
 // visible -- not by listing, not by a collision, not by a folder path.
@@ -62,7 +63,10 @@ const sampleData = {
   ],
   servers: [
     { id: 's1', workspaceId: 'ws-a', name: 'Web1', host: '10.0.0.1', port: 22, username: 'root', auth: 'key', os: 'Linux', route: [] },
-    { id: 's2', workspaceId: 'ws-b', name: 'Web2', host: '10.0.0.2', port: 22, username: 'root', auth: 'key', os: 'Linux', route: [] }
+    { id: 's2', workspaceId: 'ws-b', name: 'Web2', host: '10.0.0.2', port: 22, username: 'root', auth: 'key', os: 'Linux', route: [] },
+    // Server names never pass the bridge's name rules: this one is written to
+    // close the approval copy's quotes early and add a clause of its own.
+    { id: 's3', workspaceId: 'ws-a', name: QUOTED_SERVER, host: '10.0.0.3', port: 22, username: 'root', auth: 'key', os: 'Linux', route: [] }
   ]
 }
 
@@ -112,10 +116,14 @@ beforeEach(() => {
   saveGroup({ ...full, id: BLIND, name: 'Blind', builtIn: false, capabilities: { ...full.capabilities, viewServer: 'deny', manageServers: 'allow' } })
 })
 
-async function clientFor(groupId: string, mode?: SessionMode): Promise<Client> {
+async function clientFor(
+  groupId: string,
+  mode?: SessionMode,
+  workspaces: { id: string; name: string }[] = SESSION_WORKSPACES
+): Promise<Client> {
   const { token } = createSession({
     agentName: 'Workspace Agent',
-    workspaces: SESSION_WORKSPACES,
+    workspaces,
     groupId,
     groupName: groupId,
     ttlMinutes: null,
@@ -145,8 +153,13 @@ function autoRespond(decision: 'approved' | 'denied'): { stop: () => void; reque
   return { stop: off, requests }
 }
 
-async function withClient(groupId: string, fn: (c: Client) => Promise<void>, mode?: SessionMode): Promise<void> {
-  const c = await clientFor(groupId, mode)
+async function withClient(
+  groupId: string,
+  fn: (c: Client) => Promise<void>,
+  mode?: SessionMode,
+  workspaces?: { id: string; name: string }[]
+): Promise<void> {
+  const c = await clientFor(groupId, mode, workspaces)
   try {
     await fn(c)
   } finally {
@@ -607,16 +620,71 @@ describe('review round 1', () => {
     expect(created).toHaveLength(0)
   })
 
-  it('gives one folder error when the session may not see the workspace servers', async () => {
+  it('refuses every folder operation, before any lookup, where the session may not view servers', async () => {
     await withClient(BLIND, async (c) => {
       const outs = [
         await call(c, 'create_folder', { name: 'X', parentFolder: 'Nope', workspaceName: 'Alpha' }),
         await call(c, 'create_folder', { name: 'X', parentFolder: 'Dup', workspaceName: 'Alpha' }),
         await call(c, 'create_folder', { name: 'Prod', workspaceName: 'Alpha' }),
-        await call(c, 'rename_folder', { folder: 'Nope', name: 'X', workspaceName: 'Alpha' })
+        await call(c, 'rename_folder', { folder: 'Nope', name: 'X', workspaceName: 'Alpha' }),
+        await call(c, 'rename_folder', { folder: 'Prod', name: 'X', workspaceName: 'Alpha' }),
+        await call(c, 'add_server', { name: 'New', host: '10.0.0.9', workspaceName: 'Alpha', folder: 'Prod' }),
+        await call(c, 'update_server', { serverName: 'Web1', folder: 'Nope' })
       ]
-      for (const out of outs) expect(out).toBe('That folder path cannot be used in workspace Alpha.')
+      for (const out of outs)
+        expect(out).toBe('Denied: Server folders are not available in this workspace: this session may not view its servers.')
     })
+    expect(written).toHaveLength(0)
+    expect(created).toHaveLength(0)
+  })
+
+  it('neutralises quotes in a server name before the approval copy wraps it', async () => {
+    const a = autoRespond('approved')
+    try {
+      await withClient(MANAGE_ASK, async (c) => {
+        await call(c, 'update_server', { serverName: QUOTED_SERVER, folder: 'Prod' })
+      })
+      const sent = a.requests[0].structural as { server: string }
+      expect(sent.server).not.toMatch(/["\u201c\u201d]/)
+      const text = describeConsequence(a.requests[0]).text
+      // The sentence's own two pairs, and no more.
+      expect(text.match(/\u201c/g)).toHaveLength(2)
+      expect(text.match(/\u201d/g)).toHaveLength(2)
+    } finally {
+      a.stop()
+    }
+  })
+
+  it('refuses a workspace name two session workspaces answer to', async () => {
+    refreshMcpDataCache({ ...sampleData, workspaces: [...sampleData.workspaces, { id: 'ws-c', name: 'ALPHA' }] })
+    const both = [
+      { id: 'ws-a', name: 'Alpha' },
+      { id: 'ws-c', name: 'ALPHA' }
+    ]
+    await withClient('grp-full', async (c) => {
+      for (const [tool, args] of [
+        ['add_server', { name: 'N', host: '10.0.0.9', workspaceName: 'alpha' }],
+        ['add_database', { name: 'D', kind: 'postgres', host: 'db', workspaceName: 'alpha' }],
+        ['create_folder', { name: 'F', workspaceName: 'alpha' }]
+      ] as const)
+        expect(await call(c, tool, args)).toBe('Two workspaces in this session share that name; ask the user to rename one.')
+    }, undefined, both)
+    expect(written).toHaveLength(0)
+    expect(created).toHaveLength(0)
+  })
+
+  it('refuses a rename under Bypass where the group denies manageServers', async () => {
+    setAssignment({ level: 'workspace', workspaceId: 'ws-a' }, NO_MANAGE)
+    const a = autoRespond('approved')
+    try {
+      await withClient('grp-full', async (c) => {
+        expect(await call(c, 'rename_workspace', { workspaceName: 'Alpha', name: 'Zeta' })).toContain('Denied')
+      }, 'bypass')
+      expect(a.requests).toHaveLength(0)
+      expect(written).toHaveLength(0)
+    } finally {
+      a.stop()
+    }
   })
 
   it('moves a server between folders without the connection-rewrite ask, and asks for a mixed change', async () => {
