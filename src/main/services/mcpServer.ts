@@ -5014,9 +5014,9 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
   // ------------------------------------------------ workspaces and folders
   //
   // None of these can change what a session reaches. A session's workspace
-  // list is fixed when the user creates it and only the user edits it
-  // (setSessionWorkspaces, human-only over IPC), so a workspace created here is
-  // in no session, this one included. Every lookup -- the workspace to rename,
+  // list is set by the person, when they create it and later in its Workspaces
+  // panel, and by nothing on this bridge, so a workspace created here is in no
+  // session, this one included. Every lookup -- the workspace to rename,
   // a name to collide with, the folder a path names -- is made inside
   // session.workspaces and nowhere wider: list_workspaces promises never to
   // reveal a workspace outside the grant, and a collision check against every
