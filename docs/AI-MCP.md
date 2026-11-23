@@ -87,7 +87,7 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `add_server` | `manageServers`, resolved on the **workspace**, **never cached**; not risky, so ALLOW adds without asking | The name the new connection was saved under. `auth` takes `password`, `key`, `certificate` (a key plus the CA-signed `certificatePath`, `<keyPath>-cert.pub` when omitted) or `agent`. `jumpHosts` names existing servers to reach it through, so a bastion-only host can be onboarded without disclosing one; `verify: true` dials it once and reports whether it came up rather than reporting a dead entry as added. `folder` files it under a server folder of the same workspace, by path |
 | `update_server` | `manageServers`, **risky**; a session grant covers only further changes to that one server | Which fields changed. Only what you pass is touched — a port change does not disturb the stored credential. `folder` moves it between server folders of **its own workspace** (`""` is the root); there is no way to move a server to another workspace, because that changes which restriction governs it |
 | `remove_server` | `manageServers`, **risky**, **never cached** | That the connection and its stored credential are gone. The approval names what the removal takes with it when the server is another server's jump host |
-| `create_workspace` | `manageServers` not denied in at least one of the session's workspaces; **asks every time, even at allow** (only Bypass skips it; Read-only refuses it), **never cached** | That the workspace exists — and that it is **in no AI session, this one included**. Only the user can add it to a session (AI Access → the session → Workspaces). A name is checked for collisions only against the session's own workspaces, so no answer reveals one outside the grant |
+| `create_workspace` | `manageServers` not denied in at least one of the session's workspaces; **asks every time, even at allow** (only Bypass skips it; Read-only refuses it), **never cached** | That the workspace exists — and that it is **in no AI session, this one included**. Only the user can add it to a session (**AI & MCP → Active Sessions →** the session's **Workspaces** button). A name is checked for collisions only against the session's own workspaces, so no answer reveals one outside the grant |
 | `rename_workspace` | `manageServers` in that workspace; **asks every time, even at allow** (only Bypass skips it), **never cached** | The rename, shown to the approver as `"old" → "new"`. Only a workspace in the session. Asked for because approvals and the audit log name a workspace by its name: a silent rename would make the next dialog say the wrong one |
 | `create_folder` | `manageServers` in that workspace; not risky, so ALLOW is silent; a session grant covers only further creates in that workspace | A server folder at the root or under `parentFolder` (a path such as `Prod/EU`, case-insensitive per segment). A same-named sibling, or a path segment matching two folders, is refused rather than guessed. Folders grant and restrict nothing |
 | `rename_folder` | As `create_folder` | The folder's old and new path. The same sibling rule |
@@ -402,15 +402,17 @@ Sessions are stored at `opsmaxx-mcp-sessions.json` in OpsMaxx's userData directo
 
 A session's workspace grant is a hard boundary, not a filter applied after the fact. A session
 can be created with one workspace or several — chosen explicitly at creation, never "all
-workspaces including future ones" — and every tool resolves servers against exactly that set:
+workspaces including future ones", and changed afterwards only by the user, from that session's
+**Workspaces** button under Active Sessions — and every tool resolves servers against exactly that set:
 `listCachedServers(session.workspaces.map(w => w.id))` (`mcpDataCache.ts`) only ever loads servers
 belonging to a granted workspace in the first place. A workspace left out isn't denied to the
 session — it is invisible, because it's never in the candidate list `serverResolver.ts` searches.
 
 An agent can create and rename workspaces (`create_workspace`, `rename_workspace`) and server
 folders, and none of that moves the boundary. A workspace it creates is in no session — not even
-the one that created it — until the user adds it under **AI Access → the session → Workspaces**;
-the bridge has no tool that edits a session's workspace list. Every lookup those tools make — the
+the one that created it — until the user ticks it under **AI & MCP → Active Sessions →** the
+session's **Workspaces** button, which applies from the agent's next request. The bridge has no
+tool that edits a session's workspace list. Every lookup those tools make — the
 workspace to rename, a name to collide with, the folder a path names — is made inside the
 session's own workspaces, so a refusal never says anything about one outside them. Workspace and
 folder names are refused if they hold control characters, line breaks or text-direction
@@ -688,6 +690,11 @@ request only clears when:
   endpoint is stateless: `notifications/cancelled` arrives in a POST of its own, and the server
   hands it to the call's own request by session and request id, so one agent cannot cancel
   another's.
+
+A yes does not outlive the session it was asked for. After any approval, `gate()` re-reads the
+session record: if it was revoked or deleted while the card waited, or the user took the
+workspace the action is in out of that session, nothing runs, the agent is told so ("This session
+no longer has access to that workspace."), and the row is audited as denied.
 
 **Withdrawing is bounded, and a yes is armed.** Because an agent can now end its own request, it
 could otherwise ask something benign, withdraw it, and ask something else in its place while the
