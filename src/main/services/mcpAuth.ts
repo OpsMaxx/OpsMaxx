@@ -5,6 +5,7 @@ import { randomBytes, createHash, timingSafeEqual } from 'node:crypto'
 import type { McpAgentSession, McpGlobalConfig, SessionMode, WorkspaceRef } from '../../shared/mcp'
 import { DEFAULT_MCP_PORT, PICKERLESS_MODE, isSessionMode } from '../../shared/mcp'
 import { atomicWriteFileSync } from './atomicWrite'
+import { nameKey } from '../../shared/workspace'
 
 const CONFIG_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-config.json')
 const SESSIONS_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-sessions.json')
@@ -124,7 +125,7 @@ function hashToken(raw: string): string {
   return createHash('sha256').update(raw).digest('hex')
 }
 
-function isExpired(session: McpAgentSession): boolean {
+export function isExpired(session: McpAgentSession): boolean {
   return session.expiresAt !== null && new Date(session.expiresAt).getTime() <= Date.now()
 }
 
@@ -241,6 +242,54 @@ export function setSessionMode(id: string, mode: SessionMode): McpAgentSession |
   const session = loadSessions().find((s) => s.id === id)
   if (!session) return null
   session.mode = mode
+  writeSessions()
+  return session
+}
+
+/**
+ * Change which workspaces a live session reaches. Takes effect on its next
+ * request: every request authenticates afresh and reads this same object.
+ *
+ * Human-only, like setSessionMode: IPC calls it and no MCP tool does (held by
+ * tests/sessionWorkspaces). Adding a workspace is a grant, so what is stored
+ * comes from `known` -- the workspaces the app has actually saved -- never from
+ * the caller: an id that is not there is dropped, and the name is the saved one.
+ *
+ * Refuses (null) a revoked or expired session, and a list that would leave it
+ * none. A session with no workspace can do nothing yet still looks connected;
+ * revoking it says what is meant. Also refuses:
+ *  - adding a workspace in `locked` -- one whose password nobody has entered.
+ *    One the session already has may stay: keeping it widens nothing.
+ *  - adding a workspace whose name, ignoring case and Unicode form, matches
+ *    another in the result. Tools address workspaces by name, so the agent
+ *    could not tell them apart, and an agent that made the second one could
+ *    pass it off as the first. Only additions: a session that already holds
+ *    two such (granted before this rule, or renamed since) may still drop
+ *    anything, including one of the pair.
+ */
+export function setSessionWorkspaces(
+  id: string,
+  workspaceIds: unknown,
+  known: WorkspaceRef[],
+  locked: readonly string[] = []
+): McpAgentSession | null {
+  if (!Array.isArray(workspaceIds)) return null
+  const session = loadSessions().find((s) => s.id === id)
+  if (!session || session.revoked || isExpired(session)) return null
+  const byId = new Map(known.map((w) => [w.id, w]))
+  const next = new Map<string, WorkspaceRef>()
+  for (const wid of workspaceIds) {
+    const w = typeof wid === 'string' ? byId.get(wid) : undefined
+    if (w) next.set(w.id, { id: w.id, name: w.name })
+  }
+  if (next.size === 0) return null
+  const had = new Set(session.workspaces.map((w) => w.id))
+  if ([...next.keys()].some((wid) => !had.has(wid) && locked.includes(wid))) return null
+  const added = [...next.values()].filter((w) => !had.has(w.id))
+  const clashes = (w: WorkspaceRef): boolean =>
+    [...next.values()].some((o) => o.id !== w.id && nameKey(o.name) === nameKey(w.name))
+  if (added.some(clashes)) return null
+  session.workspaces = [...next.values()]
   writeSessions()
   return session
 }

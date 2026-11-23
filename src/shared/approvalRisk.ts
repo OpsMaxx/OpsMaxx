@@ -37,7 +37,7 @@
 // is printed as a missing reason.
 
 import { englishT, st, type Translate } from './i18n'
-import type { AiCapability, ContentPreview } from './mcp'
+import type { AiCapability, ContentPreview, StructuralChange } from './mcp'
 
 /**
  * The scale, low to high, in order. Exported because the modal prints its
@@ -72,6 +72,8 @@ export interface ApprovalSubject {
    * the local derivation rather than blanking the band.
    */
   riskReason?: string
+  /** A workspace or folder change, as the bridge described it. See StructuralChange. */
+  structural?: StructuralChange
 }
 
 /**
@@ -170,6 +172,44 @@ export function approvalWhere(r: { serverName: string | null; workspaceName: str
  * it does not belong here. It is still a hand-kept copy of somebody else's
  * rules, which is precisely why it is no longer what the operator reads first.
  */
+/**
+ * The approval copy for a workspace or folder change, from the fields the
+ * bridge sent -- never parsed out of `action`, which holds agent-written names
+ * that could be shaped to move a parse.
+ */
+function structuralCopy(c: StructuralChange): { reason: string; consequence: string } {
+  switch (c.kind) {
+    case 'workspaceCreate':
+      return {
+        reason: st('shared.approvalRisk.reason.workspaceCreate'),
+        consequence: st('shared.approvalRisk.consequence.workspaceCreate', { name: c.name })
+      }
+    case 'workspaceRename':
+      return {
+        reason: st('shared.approvalRisk.reason.workspaceRename'),
+        consequence: st('shared.approvalRisk.consequence.workspaceRename', { from: c.from, to: c.to })
+      }
+    case 'folderCreate':
+      return {
+        reason: st('shared.approvalRisk.reason.folderCreate'),
+        consequence: st('shared.approvalRisk.consequence.folderCreate', { path: c.path })
+      }
+    case 'folderRename':
+      return {
+        reason: st('shared.approvalRisk.reason.folderRename'),
+        consequence: st('shared.approvalRisk.consequence.folderRename', { from: c.from, to: c.to })
+      }
+    case 'folderMove':
+      return {
+        reason: st('shared.approvalRisk.reason.folderMove'),
+        consequence:
+          c.to === null
+            ? st('shared.approvalRisk.consequence.folderMoveRoot', { server: c.server })
+            : st('shared.approvalRisk.consequence.folderMove', { server: c.server, to: c.to })
+      }
+  }
+}
+
 export function riskReasons(s: ApprovalSubject): string[] {
   const out: string[] = []
   const action = s.action
@@ -217,14 +257,21 @@ export function riskReasons(s: ApprovalSubject): string[] {
   // Same problem, same fix: this capability grew two verbs that destroy or
   // rewrite rather than add, and a single sentence about "writes ... and stores
   // a credential" describes none of what a removal does.
-  if (s.capability === 'manageServers')
+  //
+  // Workspaces and folders joined it later, and fell to serverAdd: creating a
+  // workspace was described as storing a credential. The bridge now sends
+  // them as fields (`structural`), which win over the verb.
+  if (s.capability === 'manageServers') {
     out.push(
-      /^remove\b/i.test(action)
-        ? st('shared.approvalRisk.reason.serverRemove')
-        : /^(change|update)\b/i.test(action)
-          ? st('shared.approvalRisk.reason.serverChange')
-          : st('shared.approvalRisk.reason.serverAdd')
+      s.structural
+        ? structuralCopy(s.structural).reason
+        : /^remove\b/i.test(action)
+          ? st('shared.approvalRisk.reason.serverRemove')
+          : /^(change|update)\b/i.test(action)
+            ? st('shared.approvalRisk.reason.serverChange')
+            : st('shared.approvalRisk.reason.serverAdd')
     )
+  }
 
   const prod = productionHint(s)
   if (prod) out.push(st('shared.approvalRisk.reason.production', { name: prod }))
@@ -574,7 +621,8 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
           : st('shared.approvalRisk.consequence.vpnStop'),
         known: true
       }
-    case 'manageServers':
+    case 'manageServers': {
+      if (s.structural) return { text: structuralCopy(s.structural).consequence, known: true }
       return {
         text: /^remove\b/i.test(action)
           ? st('shared.approvalRisk.consequence.serverRemove')
@@ -583,6 +631,7 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
             : st('shared.approvalRisk.consequence.serverAdd'),
         known: true
       }
+    }
     case 'viewServer':
       return {
         text: st('shared.approvalRisk.consequence.viewServer', { host }),

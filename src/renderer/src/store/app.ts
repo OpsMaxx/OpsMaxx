@@ -25,6 +25,7 @@ import type {
   RdpTab,
   UUID,
   Workspace,
+  WorkspaceColor,
   Folder,
   FolderKind,
   VpnProfile,
@@ -114,6 +115,9 @@ export interface TabPanes {
 // in the UI before it is enforced here, and a hotkey that hits it does nothing
 // rather than opening a dialog over the terminal you are typing into.
 export const MAX_PANES = 4
+
+/** The palette, in the order the Workspaces dialog offers it. */
+export const WORKSPACE_COLORS: WorkspaceColor[] = ['green', 'purple', 'blue', 'orange', 'red', 'cyan', 'pink']
 
 export interface AppSettings {
   /**
@@ -749,7 +753,9 @@ interface AppState {
   setWorkspaceProtected: (id: string, hasPassword: boolean) => void
   syncWorkspaceLocks: (lockedIds: string[]) => void
   toggleWorkspaceHidden: (id: string) => void
-  addWorkspace: (name: string, color: Workspace['color']) => string
+  /** No color: the first one no workspace uses yet, else round the palette. */
+  addWorkspace: (name: string, color?: Workspace['color'], extra?: Pick<Workspace, 'agentCreated'>) => string
+  renameWorkspace: (id: string, name: string) => void
   deleteWorkspace: (id: string) => void
   toggleFavorite: (serverId: string) => void
   addServer: (input: Partial<Server> & { name: string; host: string }) => string
@@ -769,7 +775,9 @@ interface AppState {
   closeDatabase: (id: string) => void
   /** Drag-to-reorder for the database strip. `toIndex` is among the open ones. */
   moveOpenDatabase: (id: string, toIndex: number) => void
-  addFolder: (name: string, parentId?: string | null, kind?: FolderKind) => string
+  /** `workspaceId` absent is the active one, as the sidebar means it; an agent
+   *  names the workspace it is working in, which need not be on screen. */
+  addFolder: (name: string, parentId?: string | null, kind?: FolderKind, workspaceId?: string) => string
   renameFolder: (id: string, name: string) => void
   deleteFolder: (id: string) => void
   moveServerToFolder: (serverId: string, folderId: string | null) => void
@@ -2014,15 +2022,26 @@ export const useApp = create<AppState>((set, get) => ({
       workspaces: s.workspaces.map((w) => (w.id === id ? { ...w, hidden: !w.hidden } : w))
     })),
 
-  addWorkspace: (name, color) => {
+  addWorkspace: (name, color, extra) => {
     const id = uid('ws')
-    set((s) => ({
-      workspaces: [
-        ...s.workspaces,
-        { id, name, color, hidden: false, locked: false, hasPassword: false }
-      ]
-    }))
+    set((s) => {
+      const used = new Set(s.workspaces.map((w) => w.color))
+      const pick =
+        color ?? WORKSPACE_COLORS.find((c) => !used.has(c)) ?? WORKSPACE_COLORS[s.workspaces.length % WORKSPACE_COLORS.length]
+      return {
+        workspaces: [
+          ...s.workspaces,
+          { id, name, color: pick, hidden: false, locked: false, hasPassword: false, ...extra }
+        ]
+      }
+    })
     return id
+  },
+
+  renameWorkspace: (id, name) => {
+    const next = name.trim()
+    if (!next) return
+    set((s) => ({ workspaces: s.workspaces.map((w) => (w.id === id ? { ...w, name: next } : w)) }))
   },
 
   // Removes the workspace and everything scoped to it. Refuses the last one,
@@ -2248,10 +2267,10 @@ export const useApp = create<AppState>((set, get) => ({
       }
     }),
 
-  addFolder: (name, parentId = null, kind = 'server') => {
+  addFolder: (name, parentId = null, kind = 'server', workspaceId) => {
     const id = uid('f')
     set((s) => ({
-      folders: [...s.folders, { id, workspaceId: s.activeWorkspaceId, name, parentId, kind }]
+      folders: [...s.folders, { id, workspaceId: workspaceId ?? s.activeWorkspaceId, name, parentId, kind }]
     }))
     return id
   },

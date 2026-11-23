@@ -1,19 +1,18 @@
 import { useRef, useState } from 'react'
-import { EyeOff, Eye, Trash2, Plus, Lock, LockOpen, Check } from 'lucide-react'
+import { EyeOff, Eye, Trash2, Plus, Lock, LockOpen, Check, Pencil } from 'lucide-react'
 import { Modal } from '../common/Modal'
-import { useApp } from '../../store/app'
+import { useApp, WORKSPACE_COLORS as COLORS } from '../../store/app'
 import { rdpSecretId } from '../../../../shared/rdp'
 // The one value wslock.ts enforces in main, imported rather than copied, so the
 // form can refuse a short password itself instead of round-tripping to be told.
 import { WS_MIN_PASSWORD } from '../../../../shared/workspace'
+import { nameKey } from '../../../../shared/workspace'
 import { toast } from '../../store/toast'
 import { colorVar } from '../layout/WorkspaceSwitcher'
 import type { WorkspaceColor } from '../../types'
 import { Switch } from '../common/Switch'
 import { useT } from '../../lib/i18n'
 import { Trans } from '../../lib/Trans'
-
-const COLORS: WorkspaceColor[] = ['green', 'purple', 'blue', 'orange', 'red', 'cyan', 'pink']
 
 export function WorkspaceManager(): React.JSX.Element {
   const t = useT()
@@ -35,6 +34,8 @@ export function WorkspaceManager(): React.JSX.Element {
   const [newPassword, setNewPassword] = useState('')
   // Workspace id whose password form is open.
   const [editing, setEditing] = useState<string | null>(null)
+  // Workspace id whose rename form is open.
+  const [renaming, setRenaming] = useState<string | null>(null)
 
   const active = workspaces.filter((w) => !w.hidden)
   const hidden = workspaces.filter((w) => w.hidden)
@@ -95,6 +96,7 @@ export function WorkspaceManager(): React.JSX.Element {
       <div className="list-row" style={{ padding: '10px 14px' }}>
         <span className="ws-dot" style={{ background: colorVar[wcolor], color: colorVar[wcolor] }} />
         <span className="r-title">{wname}</span>
+        <WorkspaceFacts id={id} />
         {hasPassword && (
           <span
             className="row"
@@ -136,6 +138,20 @@ export function WorkspaceManager(): React.JSX.Element {
               <Lock size={13} /> {t('workspace.unlock.unlock')}
             </button>
           ))}
+        {/* A locked workspace stays as it is until someone with the password
+            opens it -- its name included. */}
+        <button
+          className="icon-btn sm"
+          title={
+            hasPassword && !unlockedWorkspaces.includes(id)
+              ? t('workspace.manager.renameLocked', { name: wname })
+              : t('workspace.manager.rename')
+          }
+          disabled={hasPassword && !unlockedWorkspaces.includes(id)}
+          onClick={() => setRenaming(renaming === id ? null : id)}
+        >
+          <Pencil size={14} />
+        </button>
         <button
           className="icon-btn sm"
           title={hasPassword ? t('workspace.manager.changePassword') : t('workspace.manager.setPassword')}
@@ -208,6 +224,7 @@ export function WorkspaceManager(): React.JSX.Element {
           </div>
         </div>
       )}
+      {renaming === id && <RenameForm id={id} wname={wname} onDone={() => setRenaming(null)} />}
       {editing === id && (
         <PasswordForm
           id={id}
@@ -301,7 +318,14 @@ export function WorkspaceManager(): React.JSX.Element {
           {t('workspace.manager.activeHeading', { count: active.length })}
         </div>
         {active.map((w) => (
-          <Row key={w.id} id={w.id} wname={w.name} wcolor={w.color} isHidden={false} hasPassword={w.hasPassword} />
+          <Row
+            key={w.id}
+            id={w.id}
+            wname={w.name}
+            wcolor={w.color}
+            isHidden={false}
+            hasPassword={w.hasPassword}
+          />
         ))}
       </div>
 
@@ -311,11 +335,86 @@ export function WorkspaceManager(): React.JSX.Element {
             {t('workspace.manager.hiddenHeading', { count: hidden.length })}
           </div>
           {hidden.map((w) => (
-            <Row key={w.id} id={w.id} wname={w.name} wcolor={w.color} isHidden hasPassword={w.hasPassword} />
+            <Row
+              key={w.id}
+              id={w.id}
+              wname={w.name}
+              wcolor={w.color}
+              isHidden
+              hasPassword={w.hasPassword}
+              />
           ))}
         </div>
       )}
     </Modal>
+  )
+}
+
+/**
+ * What tells two workspaces apart at a glance: how many servers each holds,
+ * whether an agent made it, and whether another has the same name as an agent
+ * would read it. Shown wherever a workspace is chosen for an agent, because an
+ * agent-made "Prod" beside the real one is exactly what someone might grant by
+ * mistake. Renderer-only: none of it is sent to an agent.
+ */
+export function WorkspaceFacts({ id }: { id: string }): React.JSX.Element | null {
+  const t = useT()
+  const servers = useApp((s) => s.servers.reduce((n, sv) => n + (sv.workspaceId === id ? 1 : 0), 0))
+  const workspaces = useApp((s) => s.workspaces)
+  const me = workspaces.find((w) => w.id === id)
+  if (!me) return null
+  const clash = workspaces.some((w) => w.id !== id && nameKey(w.name) === nameKey(me.name))
+  return (
+    <>
+      <span className="s-desc">{t('workspace.manager.serverCount', { count: servers })}</span>
+      {me.agentCreated && <span className="chip info">{t('workspace.manager.agentCreated')}</span>}
+      {clash && (
+        <span className="chip warn" title={t('workspace.manager.sameNameTitle')}>
+          {t('workspace.manager.sameName')}
+        </span>
+      )}
+    </>
+  )
+}
+
+// Its own component so typing re-renders the form alone: Row is redefined on
+// every render of the manager, which would remount an input held inside it.
+function RenameForm({ id, wname, onDone }: { id: string; wname: string; onDone: () => void }): React.JSX.Element {
+  const t = useT()
+  const renameWorkspace = useApp((s) => s.renameWorkspace)
+  const [next, setNext] = useState(wname)
+  const canSave = next.trim().length > 0 && next.trim() !== wname
+
+  const save = (): void => {
+    if (!canSave) return
+    renameWorkspace(id, next)
+    toast(t('workspace.manager.toastRenamed', { from: wname, name: next.trim() }), 'ok')
+    onDone()
+  }
+
+  return (
+    <div className="vault-panel">
+      <div className="row" style={{ gap: 6 }}>
+        <input
+          className="input grow"
+          autoFocus
+          aria-label={t('workspace.manager.namePlaceholder')}
+          placeholder={t('workspace.manager.namePlaceholder')}
+          value={next}
+          onChange={(e) => setNext(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') save()
+            if (e.key === 'Escape') onDone()
+          }}
+        />
+        <button className="btn primary sm" disabled={!canSave} onClick={save}>
+          {t('common.save')}
+        </button>
+        <button className="btn sm" onClick={onDone}>
+          {t('common.cancel')}
+        </button>
+      </div>
+    </div>
   )
 }
 

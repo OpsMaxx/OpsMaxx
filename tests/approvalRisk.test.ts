@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { StructuralChange } from '../src/shared/mcp'
 import { redactOutput } from '../src/main/services/secretRedaction'
 import {
   APPROVAL_RISK_SCALE,
@@ -369,6 +370,56 @@ describe('managing connections says which of the three things it is doing', () =
     expect(text).toContain('Rewrites a saved connection')
     expect(text).toContain('go wherever it now points')
     expect(text).not.toContain('Adds a server')
+  })
+})
+
+// Workspaces and folders share manageServers with the server tools, and their
+// actions used to fall to the add branch -- creating a workspace was described
+// to the approver as storing a credential. The bridge now sends what they do
+// as fields, and the copy is rendered from those, never parsed out of `action`.
+describe('workspace and folder changes are described from their fields', () => {
+  const ADD_SERVER = describeConsequence(subject({ capability: 'manageServers', action: 'Add server "x" (root@h:22)' })).text
+  const copy = (structural: StructuralChange, action = 'anything'): { reason: string; consequence: string } => {
+    const s = subject({ capability: 'manageServers', action, structural })
+    return { reason: riskReasons(s).join(' '), consequence: describeConsequence(s).text }
+  }
+
+  it('gives every kind its own sentence, none of them the add-server one', () => {
+    const all: StructuralChange[] = [
+      { kind: 'workspaceCreate', name: 'Staging' },
+      { kind: 'workspaceRename', from: 'Prod', to: 'Sandbox' },
+      { kind: 'folderCreate', path: 'Prod/EU' },
+      { kind: 'folderRename', from: 'Prod/EU', to: 'Prod/Europe' },
+      { kind: 'folderMove', server: 'Web1', to: 'Prod/EU' },
+      { kind: 'folderMove', server: 'Web1', to: null }
+    ]
+    const sentences = all.map((c) => copy(c).consequence)
+    for (const text of sentences) expect(text).not.toBe(ADD_SERVER)
+    expect(new Set(sentences).size).toBe(all.length)
+    for (const c of all) expect(copy(c).reason).not.toContain('credential')
+  })
+
+  it('says a created workspace is granted to no session, and a rename what approvals will show', () => {
+    expect(copy({ kind: 'workspaceCreate', name: 'Staging' }).consequence).toContain('not granted to any AI session')
+    const rename = copy({ kind: 'workspaceRename', from: 'Prod', to: 'Sandbox' }).consequence
+    expect(rename).toContain('\u201cProd\u201d to \u201cSandbox\u201d')
+    expect(rename).toContain('the audit log')
+  })
+
+  it('cannot be steered by a hostile name or a hostile action string', () => {
+    // A name shaped like the action sentence stays a name.
+    const hostile = 'Prod" \u2192 "Sandbox'
+    expect(copy({ kind: 'workspaceRename', from: 'Prod', to: hostile }).consequence).toContain(
+      `\u201cProd\u201d to \u201c${hostile}\u201d`
+    )
+    // And the action string no longer decides anything once fields are present.
+    const c = copy({ kind: 'workspaceCreate', name: 'Staging' }, 'Remove server "Prod DB" from Personal')
+    expect(c.consequence).toContain('\u201cStaging\u201d')
+    expect(c.consequence).not.toContain('Deletes')
+  })
+
+  it('still describes a server add as one', () => {
+    expect(ADD_SERVER).toContain('stores a credential')
   })
 })
 

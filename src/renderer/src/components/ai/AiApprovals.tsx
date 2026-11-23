@@ -80,7 +80,8 @@ export function AiApprovals(): React.JSX.Element {
           action: a.action,
           risk: a.risk,
           serverName: a.serverName,
-          workspaceName: a.workspaceName
+          workspaceName: a.workspaceName,
+          structural: a.structural
         }
         const tone = riskTone(a.risk)
         const consequence = describeConsequence(subject)

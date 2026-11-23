@@ -30,6 +30,9 @@ export interface Workspace {
   hidden: boolean
   locked: boolean
   hasPassword: boolean
+  /** Made by an AI agent. Shown in the Workspaces dialog so one cannot pass
+   *  for a workspace the person made; never sent to an agent. */
+  agentCreated?: true
 }
 
 export type ServerStatus = 'online' | 'idle' | 'offline' | 'connecting'

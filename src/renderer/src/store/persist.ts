@@ -85,7 +85,7 @@ let timer: ReturnType<typeof setTimeout> | null = null
 // saves every two seconds at most, not on every keystroke.
 let sessionTimer: ReturnType<typeof setTimeout> | null = null
 
-const saveSoon = (): void => {
+export const saveSoon = (): void => {
   if (timer) clearTimeout(timer)
   timer = setTimeout(save, 400)
 }

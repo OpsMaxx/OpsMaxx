@@ -37,6 +37,8 @@ function mount(): void {
   stored = null
   fire = null
   stubBridge({
+    // The add path saves before it answers, so main's cache has the server.
+    data: { save: vi.fn(async () => {}) },
     aiMcp: {
       onCreateServerRequest: vi.fn((cb: (e: { id: string; request: unknown }) => void) => {
         fire = cb
