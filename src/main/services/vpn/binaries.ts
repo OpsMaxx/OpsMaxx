@@ -26,10 +26,11 @@ import {
 //    search on Windows (E44) and no relative paths, world-writable parents,
 //    or symlinks out of an allowlisted root (E45).
 //
-// `resolveEngineBinary` is the two in order, and is what the OpenVPN driver
-// calls: OpsMaxx now ships `openvpn` on macOS and Linux, but a Windows
-// build has none — and someone may still want the copy they installed
-// themselves. See its own comment for why the ordering is not symmetric.
+// `resolveEngineBinary` is the two in order, and is what the OpenVPN and frp
+// drivers call: OpsMaxx ships `openvpn` on macOS and Linux but not Windows,
+// and ships `frpc` nowhere (see `BUNDLED_PLATFORMS` in shared/vpnEngines.ts) —
+// and someone may still want the copy they installed themselves. See its own
+// comment for why the ordering is not symmetric.
 
 // Which engine each binary implements. The name alone reaches the caller, so
 // this is where it turns back into a `VpnKind` for the returned info.
@@ -42,7 +43,7 @@ const ENGINE_KIND: Record<string, VpnKind> = {
   // that throw is the first line of resolution.
 }
 
-// The only directories a system-installed OpenVPN is accepted from, in the
+// The only directories a system-installed engine is accepted from, in the
 // order they are tried. A fixed list rather than a search: on Windows the
 // search *is* the vulnerability. Windows has no entry here because there is no
 // fixed list to write — see `winCandidates`.
@@ -63,6 +64,54 @@ const SYSTEM_CANDIDATES: Record<string, { posix: string[] }> = {
       '/run/current-system/sw/bin/openvpn'
     ]
   },
+  // frpc is a user binary, so `bin` rather than `sbin`. Every entry resolves
+  // inside `POSIX_ROOTS`, which is what makes the list safe to auto-accept.
+  //
+  // Nothing for Windows, deliberately and not as a gap: frp has no installer
+  // there, so it lives wherever someone unzipped it — Downloads, a tools
+  // folder, scoop's per-user shims — and every one of those is user-writable,
+  // which is exactly what `winRoots()` exists to exclude. The Windows answer
+  // is a path the user confirms in the profile.
+  frpc: {
+    posix: [
+      // Intel Homebrew (`brew install frpc`, homebrew-core), and where a binary
+      // from the upstream release is usually copied by hand. /usr.
+      '/usr/local/bin/frpc',
+      // Apple-silicon Homebrew; the link points into Cellar, still /opt.
+      '/opt/homebrew/bin/frpc',
+      // MacPorts. /opt.
+      '/opt/local/bin/frpc',
+      // A distribution or hand-built package. /usr.
+      '/usr/bin/frpc',
+      // NixOS (`pkgs.frp`): a symlink into /nix/store, a real Go binary there.
+      '/run/current-system/sw/bin/frpc'
+      // NOT /snap/bin/frpc. Every /snap/bin entry is a symlink to
+      // /usr/bin/snap, which picks the app from argv[0] — and `describe`
+      // reports the REAL path, so the driver would spawn `snap -c frpc.toml`.
+      // A snap user can still point "Set the path" at the binary inside
+      // /snap/<name>/current/.
+    ]
+  }
+}
+
+// The oldest engine each driver can actually drive, for engines whose version
+// the user picks. A bundled engine has no entry: we built it, so we know it.
+//
+// frpc 0.62.0, for two separate reasons:
+//  - The driver writes TOML (`frpConfig.ts`) with the v1 key layout —
+//    `auth.*`, `transport.*`, `webServer.*`, `log.to` — which frpc reads from
+//    0.52.0. Its admin API (`/healthz`, `/api/status`, `/api/config`,
+//    `/api/reload`, `POST /api/stop`) is older than that.
+//  - Secrets reach frpc as `{{ .Envs.X }}` templates. Up to and including
+//    0.61, frpc rendered its config with Go's `html/template`, which
+//    HTML-escapes what it substitutes: a token containing `+`, `&`, `<` or a
+//    quote silently became a DIFFERENT token, and the user saw "authentication
+//    failed" against a server whose token they had typed correctly. 0.62.0
+//    switched `pkg/config/load.go` to `text/template`.
+// So 0.52–0.61 would work for some tokens and not others, which is worse than
+// refusing them all with a sentence that names the fix.
+const MIN_VERSION: Record<string, [number, number, number]> = {
+  frpc: [0, 62, 0]
 }
 
 // A symlink is allowed to move a candidate around inside these roots — Homebrew
@@ -530,7 +579,6 @@ async function winCandidates(name: string): Promise<Candidate[]> {
 // always right and only less specific.
 const BUILD_SCRIPT: Record<string, string> = {
   'opsmaxx-netd': 'scripts/build-sidecar.sh',
-  frpc: 'scripts/build-frpc.sh',
   openvpn: 'scripts/build-openvpn.sh'
 }
 
@@ -653,7 +701,17 @@ export async function resolveSystem(
         [`${opts.binaryPath} ${problem}`, others].filter(Boolean).join(' ')
       )
     }
-    return describe(kind, opts.binaryPath)
+    const info = await describe(kind, opts.binaryPath)
+    const old = tooOld(name, info.version)
+    // `binary-missing` rather than `config-invalid`: the path is right and the
+    // fix is a newer program, which is the button that code gets.
+    if (old) {
+      throw new VpnError(
+        'binary-missing',
+        [`${opts.binaryPath} ${old}`, await installAdvice(name)].filter(Boolean).join(' ')
+      )
+    }
+    return info
   }
 
   const candidates: Candidate[] = win32
@@ -668,10 +726,13 @@ export async function resolveSystem(
       ...(candidate.extraRoots ?? []),
       ...roots
     ])
-    if (!problem) return describe(kind, candidate.path)
+    // A copy too old to drive is refused like any other, so a newer one later
+    // in the list or on PATH still gets its turn.
+    const accepted = problem ? null : await describeIfNewEnough(name, kind, candidate.path, refused)
+    if (accepted) return accepted
     // `does not exist` is the ordinary case on any machine without this
     // engine, and listing forty of them buries the one that matters.
-    if (!problem.startsWith('does not exist')) refused.push(`${candidate.path} ${problem}`)
+    if (problem && !problem.startsWith('does not exist')) refused.push(`${candidate.path} ${problem}`)
   }
 
   // No PATH search on Windows, ever. `PATH` there routinely contains
@@ -683,7 +744,8 @@ export async function resolveSystem(
       if (!dir) continue
       const candidate = join(dir, name)
       if (await checkExecutable(candidate, [dir, ...roots])) continue
-      return describe(kind, candidate)
+      const accepted = await describeIfNewEnough(name, kind, candidate, refused)
+      if (accepted) return accepted
     }
   }
 
@@ -692,21 +754,63 @@ export async function resolveSystem(
   // put four sentences of advice in a toast with no control in it. The UI
   // renders the code's hint and a button that performs it, and shows this
   // detail behind a Details disclosure for whoever actually wants the paths.
-  const where = candidates.length
-    ? candidates.map((c) => c.path).join(', ')
-    : 'the standard install locations'
+  // An empty list is frpc on Windows, which has no install location worth the
+  // name (see SYSTEM_CANDIDATES) — so nothing is claimed to have been searched.
+  const where = candidates.map((c) => c.path).join(', ')
   const parts = [
     win32
-      ? `Looked in ${where}. OpsMaxx does not search PATH on Windows.`
-      : `Looked in ${where} and on PATH.`
+      ? `${where ? `Looked in ${where}. ` : ''}OpsMaxx does not search PATH on Windows.`
+      : `Looked in ${where || 'the standard install locations'} and on PATH.`
   ]
   // The distinction the reader needs first: a refused candidate means the
-  // program IS installed, and no amount of installing it again will help.
+  // program IS installed, and no amount of installing it again will help —
+  // unless it was refused for its version, where a newer copy is the fix.
   if (refused.length) parts.push(`Found but not used: ${refused.join('; ')}.`)
   parts.push(loginPathCaveat(name))
   parts.push(await openVpnClientSentence())
   parts.push(await installAdvice(name))
   throw new VpnError('binary-missing', parts.filter(Boolean).join(' '))
+}
+
+/** `describe`, or null with the reason pushed onto `refused` when the copy is
+ *  older than `MIN_VERSION` allows. */
+async function describeIfNewEnough(
+  name: string,
+  kind: VpnKind,
+  path: string,
+  refused: string[]
+): Promise<VpnEngineInfo | null> {
+  const info = await describe(kind, path)
+  const old = tooOld(name, info.version)
+  if (!old) return info
+  refused.push(`${path} ${old}`)
+  return null
+}
+
+/**
+ * Why this engine's version will not do, as a fragment to follow its path, or
+ * null when it will. Exported for the resolver tests.
+ *
+ * An unreadable version is refused too: every frpc release prints a bare
+ * `0.x.y` for `--version`, so a binary that does not is either not frpc or not
+ * one this driver has ever seen, and running it would fail later and worse.
+ */
+export function tooOld(name: string, version: string | undefined): string | null {
+  const min = MIN_VERSION[name.endsWith('.exe') ? name.slice(0, -4) : name]
+  if (!min) return null
+  const want = min.join('.')
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(version ?? '')
+  if (!m) {
+    return `did not report a version OpsMaxx could read, and OpsMaxx needs ${name} ${want} or newer.`
+  }
+  const have = [Number(m[1]), Number(m[2]), Number(m[3])]
+  for (let i = 0; i < 3; i++) {
+    if (have[i] > min[i]) return null
+    if (have[i] < min[i]) {
+      return `is ${name} ${have.join('.')}, and OpsMaxx needs ${want} or newer.`
+    }
+  }
+  return null
 }
 
 /**
@@ -741,31 +845,65 @@ export async function resolveSystem(
  * widening a boundary every future security review has to re-examine. The
  * sentence below costs nothing and reaches the same user.
  *
- * openvpn only, like `installAdvice`, and for the same kind of reason: "Set the
- * path" is rendered for this engine and no other (see the `engineMissing` block
- * in useVpnProfiles.tsx), so naming it on a WireGuard or frp failure would
- * point at a button that is not on the screen.
+ * openvpn and frpc only, like `installAdvice`, and for the same kind of reason:
+ * "Set the path" is rendered for those engines and no other (see the
+ * `engineMissing` block in useVpnProfiles.tsx), so naming it on a WireGuard
+ * failure would point at a button that is not on the screen.
  */
 function loginPathCaveat(name: string): string {
   // Not on Windows, which refuses the PATH search by design (E44) and says so
   // three lines up. Explaining that a search we did not do used the wrong PATH
   // would contradict the sentence next to it.
-  if (name !== 'openvpn' || process.platform === 'win32') return ''
+  if (!(name in SYSTEM_CANDIDATES) || process.platform === 'win32') return ''
   return (
     'OpsMaxx searched the PATH it was started with, which is not your login shell’s — ' +
-    'a desktop launcher hands the app the session’s PATH, so an openvpn installed by nix, ' +
-    'asdf or into a custom prefix answers `which openvpn` in a terminal and is not found ' +
+    `a desktop launcher hands the app the session’s PATH, so a ${name} installed by nix, ` +
+    `asdf or into a custom prefix answers \`which ${name}\` in a terminal and is not found ` +
     'here. Use “Set the path” to point at it.'
+  )
+}
+
+/** Where upstream publishes frpc for every platform. homebrew-core's `frpc`
+ *  formula is the macOS route. Linux gets no package-manager command because
+ *  none could be confirmed across distributions — Arch's official
+ *  repositories, for one, have no frp — and naming a package that does not
+ *  exist is worse than naming the download. */
+const FRP_RELEASES = 'https://github.com/fatedier/frp/releases'
+
+/** frpc's advice, which unlike openvpn's has no bundled copy to defer to on
+ *  any platform. The antivirus sentence is there because it is the most likely
+ *  reason a copy the user just installed is "missing" again tomorrow — and
+ *  because OpsMaxx stopped shipping frpc for exactly that reason, so the user
+ *  should hear it from us before their antivirus tells them. */
+function frpcInstallAdvice(): string {
+  const av =
+    'Antivirus software, Microsoft Defender included, often flags frpc as a hacktool ' +
+    'because it is a reverse proxy; if yours removes it, allow that file.'
+  if (process.platform === 'darwin') {
+    return `You can install it with \`brew install frpc\`, or download it from ${FRP_RELEASES}. ${av}`
+  }
+  if (process.platform === 'win32') {
+    return (
+      `Download frpc.exe from ${FRP_RELEASES} and use “Set the path” to point at it — ` +
+      `OpsMaxx does not look for frpc anywhere on Windows by itself. ${av}`
+    )
+  }
+  return (
+    `Download frpc from ${FRP_RELEASES} and copy it to /usr/local/bin, or use “Set the path” ` +
+    `to point at it. ${av}`
   )
 }
 
 /** How to get this engine on THIS machine, in one sentence.
  *
- *  Windows says nothing: `installHint` in the OpenVPN driver already prints
+ *  frpc has its own answer on every platform — see `frpcInstallAdvice`.
+ *
+ *  For openvpn, Windows says nothing: `installHint` in the OpenVPN driver already prints
  *  the full openvpn.net paragraph there — it is the one platform with no
  *  bundled copy — and two install instructions in one toast contradict each
  *  other about which to follow. */
 async function installAdvice(name: string): Promise<string> {
+  if (name === 'frpc') return frpcInstallAdvice()
   if (name !== 'openvpn' || process.platform === 'win32') return ''
   // AND NOT WHERE OPSMAXX SHIPS ONE.
   //

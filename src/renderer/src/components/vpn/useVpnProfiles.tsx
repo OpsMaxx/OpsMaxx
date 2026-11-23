@@ -7,7 +7,7 @@ import { bytes, clsx } from '../../lib/format'
 import { bridgeHas } from '../../lib/bridge'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
 import { isVpnRunning } from '../../../../shared/vpn'
-import { engineForKindIsBundled, userSuppliesEngine } from '../../../../shared/vpnEngines'
+import { engineForKindIsBundled, engineForKindIsUserSupplied } from '../../../../shared/vpnEngines'
 import type {
   FrpProxy,
   ImportableVpnKind,
@@ -111,6 +111,38 @@ const DEPENDENT_KIND: Record<VpnDependent['kind'], MessageKey> = {
 }
 
 const OPENVPN_DOWNLOAD = 'https://openvpn.net/community-downloads/'
+/** Upstream's releases page, which is where frpc comes from on Linux and
+ *  Windows; on macOS homebrew-core's `frpc` formula page, which shows the
+ *  `brew install frpc` line. OpsMaxx stopped shipping frpc because antivirus
+ *  flags it, so these are the user's own install. */
+const FRP_RELEASES = 'https://github.com/fatedier/frp/releases'
+const FRPC_FORMULA = 'https://formulae.brew.sh/formula/frpc'
+
+/**
+ * The kinds whose engine a user can install and point a profile at. A kind
+ * here gets "Set the path" whenever its engine is missing — pointing at a copy
+ * you installed yourself is a valid answer whether or not we ship one — and
+ * "Install …" where `engineForKindIsUserSupplied` says the engine is theirs to
+ * get. WireGuard is absent: its sidecar is ours, and so is the repair.
+ */
+const USER_ENGINE: Partial<
+  Record<VpnKind, { label: MessageKey; url: (platform: NodeJS.Platform | null) => string }>
+> = {
+  openvpn: { label: 'vpn.profiles.installOpenvpn', url: () => OPENVPN_DOWNLOAD },
+  frp: {
+    label: 'vpn.profiles.installFrp',
+    url: (platform) => (platform === 'darwin' ? FRPC_FORMULA : FRP_RELEASES)
+  }
+}
+
+/** "Install OpenVPN" / "Install frp", or undefined where installing is not the
+ *  user's job on this platform. Exported for the publish dialog, which starts
+ *  an frp profile outside the row and so reports its failure itself. */
+export function installAction(kind: VpnKind, platform: NodeJS.Platform | null): ToastAction | undefined {
+  const engine = USER_ENGINE[kind]
+  if (!engine || !engineForKindIsUserSupplied(kind, platform)) return undefined
+  return { label: tr(engine.label), run: () => openExternal(engine.url(platform)) }
+}
 
 /** Where a damaged install is repaired from. Reaching for this is not the
  *  user having failed to install something: the engine shipped inside the app
@@ -120,13 +152,13 @@ const OPSMAXX_DOWNLOAD = 'https://opsmaxx.dev'
 /** What a missing *bundled* engine says on the row, in place of the message
  *  main composed.
  *
- *  For WireGuard and frp that message is "The program that runs this tunnel
- *  could not be found." followed, under Details, by `run
- *  scripts/build-sidecar.sh` — an instruction for whoever builds OpsMaxx, in
- *  front of somebody whose antivirus quarantined a file. With a disabled Start
- *  and no button beside it, that row told the user nothing they could act on.
- *  (OpenVPN already had a sentence like this one on macOS and Linux; this is
- *  the same answer for the two engines that never got it.) */
+ *  For WireGuard that message is "The program that runs this tunnel could not
+ *  be found." followed, under Details, by `run scripts/build-sidecar.sh` — an
+ *  instruction for whoever builds OpsMaxx, in front of somebody whose
+ *  antivirus quarantined a file. With a disabled Start and no button beside
+ *  it, that row told the user nothing they could act on. (OpenVPN already had
+ *  a sentence like this one on macOS and Linux. frp used to get this too, and
+ *  no longer can: OpsMaxx does not ship frpc.) */
 function bundledEngineMissing(label: string): string {
   return tr('vpn.profiles.bundledMissing', { label })
 }
@@ -209,22 +241,23 @@ function remedyFor(
     // originally pressed.
     case 'vault-locked':
       return { label: tr('ui.unlockVault.label'), run: r.start }
-    // WireGuard and frp always ship inside OpsMaxx, and OpenVPN does too
-    // everywhere except Windows — so on every other combination a missing
-    // engine is a damaged install, which no button in this window can repair.
-    // Offering a download page there would send the reader off to install
-    // something they already have.
+    // frp is always the user's install, and OpenVPN is on Windows: there the
+    // answer is the download. WireGuard always ships inside OpsMaxx, and
+    // OpenVPN does on macOS and Linux — so a missing engine there is a damaged
+    // install, and offering a download page would send the reader off to
+    // install something they already have. An frpc that is present but too
+    // old arrives here too, and installing a newer one is its fix as well.
     case 'binary-missing':
-      if (kind === 'openvpn' && userSuppliesEngine('openvpn', platform)) {
-        return { label: tr('vpn.profiles.installOpenvpn'), run: () => openExternal(OPENVPN_DOWNLOAD) }
-      }
-      // A damaged install is not unfixable, which is what "no button at all"
-      // used to imply. Reinstalling is the actual repair — the same one
-      // `binary-untrusted` has always advised — so it is offered rather than
-      // left for the user to work out from a build-script name under Details.
-      return engineForKindIsBundled(kind, platform)
-        ? { label: tr('vpn.profiles.reinstallOpsmaxx'), run: () => openExternal(OPSMAXX_DOWNLOAD) }
-        : undefined
+      return (
+        installAction(kind, platform) ??
+        // A damaged install is not unfixable, which is what "no button at all"
+        // used to imply. Reinstalling is the actual repair — the same one
+        // `binary-untrusted` has always advised — so it is offered rather than
+        // left for the user to work out from a build-script name under Details.
+        (engineForKindIsBundled(kind, platform)
+          ? { label: tr('vpn.profiles.reinstallOpsmaxx'), run: () => openExternal(OPSMAXX_DOWNLOAD) }
+          : undefined)
+      )
     case 'exposure-unacknowledged':
       return { label: tr('vpn.profiles.openProfile'), run: () => r.profile('proxies') }
     case 'config-invalid':
@@ -325,7 +358,7 @@ export function useVpnProfiles(): VpnProfiles {
     attached: { id: string; kind: VpnDependent['kind']; name: string }[]
   } | null>(null)
   const [engines, setEngines] = useState<Partial<Record<VpnKind, VpnEngineInfo>>>({})
-  // Feeds `userSuppliesEngine`, which decides whether a missing engine is the
+  // Feeds `engineForKindIsUserSupplied`, which decides whether a missing engine is the
   // user's to install or a damaged install of ours. Null until the round trip
   // lands, and that shared helper treats null as "not the user's".
   const [platform, setPlatform] = useState<NodeJS.Platform | null>(null)
@@ -606,6 +639,7 @@ export function useVpnProfiles(): VpnProfiles {
     const open = expanded === p.id
     const gated = !running && ungated.length > 0
     const engineMissing = engine?.available === false
+    const install = engineMissing ? installAction(p.spec.kind, platform) : undefined
     // main explains where it looked, what to install and why it will not look
     // anywhere else. All true, none of it needed before the user has decided
     // what to do — so the row shows the first sentence and the buttons, and
@@ -739,19 +773,13 @@ export function useVpnProfiles(): VpnProfiles {
             <div className="row" style={{ gap: 6, color: 'var(--danger)', fontSize: 11 }}>
               <AlertTriangle size={12} style={{ flexShrink: 0 }} />
               <span className="grow">{engineProblem}</span>
-              {/* "Set the path" holds everywhere OpenVPN is involved: pointing
-                  at a copy you installed yourself is a valid answer whether or
-                  not we ship one. "Install OpenVPN" does not — see
-                  `userSuppliesEngine`. WireGuard and frp get neither; both
-                  always ship with OpsMaxx. */}
-              {p.spec.kind === 'openvpn' && (
+              {/* See `USER_ENGINE`: "Set the path" for every kind listed there,
+                  "Install …" only where the engine is the user's to get. */}
+              {USER_ENGINE[p.spec.kind] && (
                 <>
-                  {userSuppliesEngine('openvpn', platform) && (
-                    <button
-                      className="btn sm primary"
-                      onClick={() => openExternal(OPENVPN_DOWNLOAD)}
-                    >
-                      {t('vpn.profiles.installOpenvpn')}
+                  {install && (
+                    <button className="btn sm primary" onClick={install.run}>
+                      {install.label}
                     </button>
                   )}
                   <button

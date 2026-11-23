@@ -1279,32 +1279,57 @@ function OpenVpnFields({ spec, issue, onChange, shown, focus }: OvpnProps): Reac
         </div>
       )}
 
-      <label className="field">
-        <span className="field-label">{t('vpn.profileForm.openvpnBinary')}</span>
-        <input
-          className="input"
-          placeholder={t('vpn.profileForm.detectedAutomatically')}
-          // Opened from a "could not find OpenVPN" failure, this is the field
-          // that answers it — so the caret is already in it, and the browser
-          // scrolls it into view for free.
-          autoFocus={focus === 'binaryPath'}
-          value={spec.binaryPath ?? ''}
-          onChange={(e) => set({ binaryPath: e.target.value || undefined })}
-        />
-        <Issue at="binaryPath" map={issue} shown={shown} />
-        {/* Which of these is true depends on whether we ship OpenVPN here, and
-            `shared/vpnEngines.ts` is the one place that knows. Deliberately not
-            phrased as "on Windows": the day another platform drops off that
-            list, naming the platform here would be the thing that goes stale. */}
-        <span className="field-hint">
-          {userSuppliesEngine('openvpn', platform)
+      <EngineBinaryField
+        label={t('vpn.profileForm.openvpnBinary')}
+        placeholder={t('vpn.profileForm.detectedAutomatically')}
+        value={spec.binaryPath}
+        onChange={(binaryPath) => set({ binaryPath })}
+        focus={focus}
+        issue={issue}
+        shown={shown}
+        // Which of these is true depends on whether we ship OpenVPN here, and
+        // `shared/vpnEngines.ts` is the one place that knows. Deliberately not
+        // phrased as "on Windows": the day another platform drops off that
+        // list, naming the platform here would be the thing that goes stale.
+        hint={
+          userSuppliesEngine('openvpn', platform)
             ? t('vpn.profileForm.binaryHintUserSupplied')
             : platform
               ? t('vpn.profileForm.binaryHintBundled')
-              : t('vpn.profileForm.binaryHintUnknown')}
-        </span>
-      </label>
+              : t('vpn.profileForm.binaryHintUnknown')
+        }
+      />
     </>
+  )
+}
+
+/** Where a profile's engine program is, for the engines a user can supply.
+ *  Opened from a "could not find …" failure, this is the field that answers
+ *  it — so the caret is already in it, and the browser scrolls it into view
+ *  for free. */
+function EngineBinaryField(props: {
+  label: string
+  placeholder: string
+  hint: string
+  value: string | undefined
+  onChange: (value: string | undefined) => void
+  focus?: VpnFormFocus
+  issue: IssueMap
+  shown: Set<string>
+}): React.JSX.Element {
+  return (
+    <label className="field">
+      <span className="field-label">{props.label}</span>
+      <input
+        className="input"
+        placeholder={props.placeholder}
+        autoFocus={props.focus === 'binaryPath'}
+        value={props.value ?? ''}
+        onChange={(e) => props.onChange(e.target.value || undefined)}
+      />
+      <Issue at="binaryPath" map={props.issue} shown={props.shown} />
+      <span className="field-hint">{props.hint}</span>
+    </label>
   )
 }
 
@@ -1321,6 +1346,7 @@ interface FrpProps {
 function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX.Element {
   const t = useT()
   const set = (patch: Partial<FrpSpec>): void => onChange({ ...spec, ...patch })
+  const platform = usePlatform()
 
   // The proxy list is below the server and transport fields, so a form opened
   // from "confirm what this exposes" starts scrolled past the checkbox it was
@@ -1500,6 +1526,27 @@ function FrpFields({ spec, issue, onChange, shown, focus }: FrpProps): React.JSX
           ))}
         </div>
       )}
+
+      {/* OpsMaxx ships no frpc anywhere (shared/vpnEngines.ts). On Windows
+          nothing is detected at all — every place frp gets unzipped to is
+          user-writable — so there the field is the only way in, and the
+          placeholder must not promise detection. */}
+      <EngineBinaryField
+        label={t('vpn.profileForm.frpcBinary')}
+        placeholder={
+          platform === 'win32' ? 'C:\\Tools\\frp\\frpc.exe' : t('vpn.profileForm.detectedAutomatically')
+        }
+        value={spec.binaryPath}
+        onChange={(binaryPath) => set({ binaryPath })}
+        focus={focus}
+        issue={issue}
+        shown={shown}
+        hint={
+          platform === 'win32'
+            ? t('vpn.profileForm.frpcBinaryHintWindows')
+            : t('vpn.profileForm.frpcBinaryHint')
+        }
+      />
     </>
   )
 }

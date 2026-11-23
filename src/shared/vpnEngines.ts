@@ -17,7 +17,7 @@
 /**
  * Engines shipped on some platforms but not all, keyed by binary base name.
  * Anything absent from this map is shipped everywhere, which is true of
- * `opsmaxx-netd` and `frpc`.
+ * `opsmaxx-netd` alone.
  */
 const BUNDLED_PLATFORMS: Record<string, readonly NodeJS.Platform[]> = {
   // OpenVPN needs a tun adapter driver on Windows and cannot produce one
@@ -28,7 +28,15 @@ const BUNDLED_PLATFORMS: Record<string, readonly NodeJS.Platform[]> = {
   // install, whose installer brings both the driver and the Interactive
   // Service. The obstacle is a driver, not the GPL — see
   // THIRD-PARTY-NOTICES.md, which explains why the licence permits bundling.
-  openvpn: ['darwin', 'linux']
+  openvpn: ['darwin', 'linux'],
+  // Never bundled, on any platform, and not by choice of licence: frp is
+  // Apache-2.0. Antivirus engines — Microsoft Defender among them — flag
+  // upstream `frpc` as a hacktool (it is a reverse proxy, which is what
+  // malware uses it for), and a flagged file inside the installer got the
+  // whole of OpsMaxx quarantined, updates included. So the user installs it,
+  // the resolver finds it on a fixed allowlist or at a path they confirmed,
+  // and their antivirus judges their copy rather than ours.
+  frpc: []
   // Never bundled, on any platform. The Tailscale client is the user's own
   // install: it is a machine-wide daemon with its own updater and its own login
   // flow, and shipping a second copy would fight the one they already run.
@@ -81,4 +89,15 @@ const KIND_BINARY: Record<string, string> = {
 export function engineForKindIsBundled(kind: string, platform: NodeJS.Platform | null): boolean {
   const name = KIND_BINARY[kind]
   return name !== undefined && platform !== null && isEngineBundledOn(name, platform)
+}
+
+/**
+ * Whether the engine for `kind` is one the user installs on this platform —
+ * the kind-keyed twin of `userSuppliesEngine`, for a renderer that only holds
+ * a `VpnKind`. False for `tailscale` and `ngrok`, which have no engine of ours
+ * to be missing, and for a `null` platform, for the reason given above.
+ */
+export function engineForKindIsUserSupplied(kind: string, platform: NodeJS.Platform | null): boolean {
+  const name = KIND_BINARY[kind]
+  return name !== undefined && userSuppliesEngine(name, platform)
 }
