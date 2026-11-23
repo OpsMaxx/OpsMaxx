@@ -222,6 +222,11 @@ export interface FrpSpec {
   // this field exists to avoid.
   publicHost?: FrpPublicHost
   strippedDirectives?: StrippedDirective[]
+  // Explicit user override for the frpc program; absent means the allowlist
+  // (and PATH on POSIX). OpsMaxx does not ship frpc, and on Windows this is
+  // the only way one is found. Machine-specific, so sync strips it on landing,
+  // exactly like `OpenVpnSpec.binaryPath`.
+  binaryPath?: string
   // Choices the user has explicitly accepted, each of which validation
   // otherwise treats as an error.
   //

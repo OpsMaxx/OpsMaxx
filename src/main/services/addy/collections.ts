@@ -247,7 +247,8 @@ function serversSource(): CollectionSource {
  * Same shape and same reason as `serversSource()` above, applied to fields
  * that are not live state but are still nobody's business but one computer's.
  *
- * `OpenVpnSpec.binaryPath` is an absolute path on the machine whose form it
+ * `OpenVpnSpec.binaryPath` (and `FrpSpec.binaryPath`, for the same reasons)
+ * is an absolute path on the machine whose form it
  * was typed into, and the OpenVPN driver treats its mere presence as the
  * user's confirmed choice — so `resolveEngineBinary` short-circuits on it and
  * never looks at the engine OpsMaxx ships. Across a mixed fleet that is a
@@ -373,7 +374,10 @@ function landProfile(raw: unknown, before: Map<string, string> = new Map()): unk
   const spec = profile.spec
   if (!spec || typeof spec !== 'object') return profile
   const kind = (spec as { kind?: unknown }).kind
-  if (kind === 'openvpn') {
+  // frp's engine path is the same kind of fact as OpenVPN's: this machine's
+  // disk, and treated by the driver as the user's confirmed choice. frp has
+  // no `sourcePath`, so deleting it there is a no-op.
+  if (kind === 'openvpn' || kind === 'frp') {
     const landed = { ...(spec as Record<string, unknown>) }
     delete landed.binaryPath
     delete landed.sourcePath

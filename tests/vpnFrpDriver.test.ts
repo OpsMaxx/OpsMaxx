@@ -2,18 +2,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import net from 'node:net'
 import { spawn as nodeSpawn } from 'node:child_process'
 import type { ChildProcess, SpawnOptions } from 'node:child_process'
-import { createHash } from 'node:crypto'
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
   statSync,
   writeFileSync
 } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import type {
@@ -26,6 +26,7 @@ import type {
   VpnStatus
 } from '../src/shared/vpn'
 import { resetBinaryCache } from '../src/main/services/vpn/binaries'
+import { isVpnError } from '../src/main/services/vpn/errors'
 import type { ResolvedVpnSecrets, VpnDriverContext } from '../src/main/services/vpn/driver'
 import {
   frpDriver,
@@ -38,20 +39,32 @@ import { Supervisor } from '../src/main/services/vpn/supervisor'
 // The whole point of this driver is what it does with a real process, a real
 // admin socket and real ANSI-coloured output arriving on stdout, so nothing
 // here is mocked: the tests drive tests/fixtures/fake-frpc.mjs through the real
-// Supervisor, and the driver resolves it through the real bundled-binary
-// resolver by way of a shim on disk with a matching manifest hash.
+// Supervisor, and the driver resolves it through the real system-engine
+// resolver — OpsMaxx ships no frpc — as the path the profile confirmed.
 
 const FIXTURE = fileURLToPath(new URL('./fixtures/fake-frpc.mjs', import.meta.url))
-const PLATFORM_DIR = `${process.platform}-${process.arch}`
 const FRPC = process.platform === 'win32' ? 'frpc.exe' : 'frpc'
+// Beside the repo rather than under os.tmpdir(): on Linux that is /tmp, which
+// is world-writable, and the resolver rightly refuses any engine under it.
+// tests/vpnBinaries.test.ts explains the same choice at length.
+const SANDBOX = resolve(__dirname, '..', '.tmp-tests')
+// A developer machine may really have frpc on the allowlist, and then "none
+// installed" cannot be staged without touching /usr or /opt.
+const FRPC_INSTALLED = [
+  '/usr/local/bin/frpc',
+  '/opt/homebrew/bin/frpc',
+  '/opt/local/bin/frpc',
+  '/usr/bin/frpc',
+  '/run/current-system/sw/bin/frpc'
+].some((p) => existsSync(p))
 const TOKEN = 'tok_live_a41f9c'
 const PLUGIN_PASSWORD = 'pw_plugin_5521'
 
 let root: string
 let runDir: string
 let binRoot: string
+let frpcPath: string
 let supervisor: Supervisor
-let previousBinDir: string | undefined
 const cleanups: (() => void)[] = []
 
 interface Spawned {
@@ -84,7 +97,8 @@ function makeSpec(proxies: FrpProxy[], visitors: FrpVisitor[] = []): FrpSpec {
     auth: { method: 'token', tokenRef: { vaultEntryId: 'v1', field: 'token' } },
     transport: { protocol: 'tcp', tlsEnable: true },
     proxies,
-    visitors
+    visitors,
+    binaryPath: frpcPath
   }
 }
 
@@ -139,27 +153,27 @@ function makeCtx(secrets = makeSecrets()): Ctx {
   }
 }
 
-/** A `frpc` the resolver will accept: an executable whose hash is in the
- *  manifest beside it. It forwards to the fixture and appends whatever failure
- *  mode the test asked for, which is how `--fail auth` reaches a child the
- *  driver spawned rather than one the test did. */
-function installFrpcShim(): void {
-  const dir = join(binRoot, PLATFORM_DIR)
-  mkdirSync(dir, { recursive: true })
-  const file = join(dir, FRPC)
+/** A `frpc` the resolver will accept as a confirmed path. It forwards to the
+ *  fixture and appends whatever failure mode the test asked for, which is how
+ *  `--fail auth` reaches a child the driver spawned rather than one the test
+ *  did. */
+function installFrpcShim(): string {
+  mkdirSync(binRoot, { recursive: true, mode: 0o755 })
+  const file = join(binRoot, FRPC)
   const node = JSON.stringify(process.execPath)
   const body = `#!/bin/sh\nexec ${node} ${JSON.stringify(FIXTURE)} "$@" $SP_TEST_FRP_FAIL\n`
   writeFileSync(file, body)
   chmodSync(file, 0o755)
-  writeFileSync(
-    join(binRoot, 'manifest.json'),
-    JSON.stringify({
-      version: '0.1.0',
-      binaries: {
-        [`${PLATFORM_DIR}/${FRPC}`]: { sha256: createHash('sha256').update(body).digest('hex') }
-      }
-    })
-  )
+  return file
+}
+
+function withPath(value: string): void {
+  const previous = process.env.PATH
+  process.env.PATH = value
+  cleanups.push(() => {
+    if (previous === undefined) delete process.env.PATH
+    else process.env.PATH = previous
+  })
 }
 
 function failMode(args: string): void {
@@ -195,14 +209,12 @@ function configText(): string {
 }
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'sp-frpdrv-'))
+  mkdirSync(SANDBOX, { recursive: true })
+  root = mkdtempSync(join(SANDBOX, 'sp-frpdrv-'))
   runDir = join(root, 'run')
   binRoot = join(root, 'bin')
   mkdirSync(runDir, { recursive: true, mode: 0o700 })
-  installFrpcShim()
-
-  previousBinDir = process.env.OPSMAXX_VPN_BIN_DIR
-  process.env.OPSMAXX_VPN_BIN_DIR = binRoot
+  frpcPath = installFrpcShim()
   resetBinaryCache()
 
   spawns = []
@@ -228,8 +240,6 @@ afterEach(async () => {
   frpTuning.reloadTimeoutMs = 10_000
   frpTuning.adminPortAttempts = 3
   frpTuning.adminPortPicker = null
-  if (previousBinDir === undefined) delete process.env.OPSMAXX_VPN_BIN_DIR
-  else process.env.OPSMAXX_VPN_BIN_DIR = previousBinDir
   resetBinaryCache()
   rmSync(root, { recursive: true, force: true })
 })
@@ -287,20 +297,37 @@ describe('frp driver lifecycle', () => {
     expect(frpDriver.kind).toBe('frp')
   })
 
-  it('probes the bundled frpc and reports the version it printed', async () => {
-    const info = await frpDriver.probe()
-    expect(info.available).toBe(true)
-    expect(info.bundled).toBe(true)
-    expect(info.kind).toBe('frp')
-    expect(info.version).toBe('0.71.0')
+  it('runs the frpc the profile points at, and records the version it printed', async () => {
+    const profile = makeProfile(makeSpec([proxy()]))
+    expect(await frpDriver.start(profile, makeCtx().ctx)).toMatchObject({ ok: true })
+    expect(spawns[0].command).toBe(realpathSync(frpcPath))
   })
 
-  it('reports a missing binary as unavailable with a reason rather than throwing', async () => {
-    rmSync(join(binRoot, PLATFORM_DIR, FRPC), { force: true })
-    resetBinaryCache()
-    const info = await frpDriver.probe()
-    expect(info.available).toBe(false)
-    expect(info.reason).toContain(FRPC)
+  it.skipIf(FRPC_INSTALLED)(
+    'reports no frpc as unavailable, not bundled, with install advice rather than throwing',
+    async () => {
+      // An upgrade from a build that shipped frpc lands exactly here: the
+      // profile is intact, the engine is gone, and the row must say what to
+      // install rather than "reinstall OpsMaxx".
+      withPath('')
+      const info = await frpDriver.probe()
+      expect(info.available).toBe(false)
+      expect(info.bundled).toBe(false)
+      expect(info.reason).toContain('frpc')
+      expect(info.reason).toContain('github.com/fatedier/frp/releases')
+      expect(info.reason).not.toMatch(/reinstall/i)
+    }
+  )
+
+  it('refuses an frpc older than the driver can drive, naming both versions, and spawns nothing', async () => {
+    // 0.51 reads no TOML and 0.52–0.61 HTML-escape the token they template in.
+    writeFileSync(frpcPath, '#!/bin/sh\necho 0.61.0\n')
+    const profile = makeProfile(makeSpec([proxy()]))
+    const err = await frpDriver.start(profile, makeCtx().ctx).catch((e) => e)
+    expect(isVpnError(err) && err.code).toBe('binary-missing')
+    expect(err.detail).toContain('0.61.0')
+    expect(err.detail).toContain('0.62.0')
+    expect(spawns).toHaveLength(0)
   })
 
   it('delegates validateConfig to the shared validator', () => {

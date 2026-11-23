@@ -35,11 +35,11 @@ export function isVpnError(e: unknown): e is VpnError {
 // reads instead of clicking. The CLI and the log still print the sentence, so
 // it has to stand alone; it does not have to teach.
 export const VPN_ERROR_HINT: Record<VpnErrorCode, string> = {
-  // Deliberately empty. OpsMaxx now ships the sidecar, frpc, and — on macOS
-  // and Linux — OpenVPN, so "install it" is wrong for three of the four
-  // engines, and which advice is right depends on both the engine and the
-  // platform. `resolveBundled` and `absentReason` already build a detail that
-  // knows both (reinstall vs. antivirus vs. openvpn.net), and describeVpnError
+  // Deliberately empty. OpsMaxx ships the sidecar and — on macOS and Linux —
+  // OpenVPN, but not frpc, so "install it" is right for some engines on some
+  // platforms and wrong for the rest. `resolveBundled`, `resolveSystem` and
+  // `absentReason` already build a detail that knows both (reinstall vs.
+  // antivirus vs. openvpn.net vs. brew/frp releases), and describeVpnError
   // appends this after it. A generic sentence here could only contradict them.
   'binary-missing': '',
   'binary-untrusted': 'Reinstall OpsMaxx — antivirus software sometimes alters bundled files.',

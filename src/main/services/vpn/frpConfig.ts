@@ -516,6 +516,16 @@ export function validateFrpSpec(spec: FrpSpec, confirm?: FrpConfirmations): VpnV
   if (!isPort(spec.serverPort)) {
     issues.error('serverPort', 'server-port-invalid', 'Enter a port between 1 and 65535.')
   }
+  // The same rule as OpenVPN's field: blank-but-present would be "confirmed"
+  // (the driver treats presence as confirmation) and then refused as a
+  // relative path, so it is caught here where the field is on screen.
+  if (spec.binaryPath !== undefined && spec.binaryPath.trim() === '') {
+    issues.error(
+      'binaryPath',
+      'empty-path',
+      'The program path is blank. Clear it to use an frpc OpsMaxx finds by itself.'
+    )
+  }
 
   if (spec.auth.method === 'token') {
     if (!spec.auth.tokenRef) {

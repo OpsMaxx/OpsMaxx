@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { isEngineBundledOn, userSuppliesEngine } from '../src/shared/vpnEngines'
+import {
+  engineForKindIsBundled,
+  engineForKindIsUserSupplied,
+  isEngineBundledOn,
+  userSuppliesEngine
+} from '../src/shared/vpnEngines'
 
 // The predicate that decides, in two processes at once, whether an engine is
 // ours to ship or the user's to install.
@@ -43,9 +48,17 @@ describe('isEngineBundledOn', () => {
     // from the WireGuard project, which is the wrong project entirely.
     for (const platform of EVERY_PLATFORM) {
       expect(isEngineBundledOn('opsmaxx-netd', platform)).toBe(true)
-      expect(isEngineBundledOn('frpc', platform)).toBe(true)
       expect(isEngineBundledOn('opsmaxx-netd.exe', platform)).toBe(true)
-      expect(isEngineBundledOn('frpc.exe', platform)).toBe(true)
+    }
+  })
+
+  it('ships frpc nowhere', () => {
+    // Antivirus engines flag upstream frpc as a hacktool, and a flagged file
+    // inside the installer quarantined all of OpsMaxx. An empty list — not an
+    // absent entry, which would mean "everywhere" — is what says so.
+    for (const platform of EVERY_PLATFORM) {
+      expect(isEngineBundledOn('frpc', platform)).toBe(false)
+      expect(isEngineBundledOn('frpc.exe', platform)).toBe(false)
     }
   })
 })
@@ -61,8 +74,20 @@ describe('userSuppliesEngine', () => {
   it('is never true for an engine that always ships', () => {
     for (const platform of EVERY_PLATFORM) {
       expect(userSuppliesEngine('opsmaxx-netd', platform)).toBe(false)
-      expect(userSuppliesEngine('frpc', platform)).toBe(false)
     }
+  })
+
+  it('is true for frpc everywhere, by binary name and by kind', () => {
+    for (const platform of EVERY_PLATFORM) {
+      expect(userSuppliesEngine('frpc', platform)).toBe(true)
+      expect(engineForKindIsUserSupplied('frp', platform)).toBe(true)
+      // So a missing frpc is never "Reinstall OpsMaxx".
+      expect(engineForKindIsBundled('frp', platform)).toBe(false)
+    }
+    // Kinds with no engine of ours have nothing for the user to install.
+    expect(engineForKindIsUserSupplied('tailscale', 'win32')).toBe(false)
+    expect(engineForKindIsUserSupplied('ngrok', 'darwin')).toBe(false)
+    expect(engineForKindIsUserSupplied('frp', null)).toBe(false)
   })
 
   it('answers "not the user\'s" while the platform is still unknown', () => {
