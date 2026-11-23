@@ -2,15 +2,14 @@
 // Rebuild resources/bin/manifest.json for one engine, leaving the other
 // engines' entries alone.
 //
-// Four build scripts write into the same tree (build-sidecar.sh, build-frpc.sh,
+// Four build scripts write into the same tree (build-sidecar.sh, build-addyd.sh,
 // build-openvpn.sh, fetch-wintun.sh) and they run independently, so none can
 // own the whole file: whichever ran last would erase the others' entries and
 // the app would refuse to exec a binary it has no hash for. Merging here, keyed
 // by binary name, is what makes the scripts order-independent.
 //
 // Usage: node scripts/update-bin-manifest.mjs <binaryName>
-//   e.g. node scripts/update-bin-manifest.mjs frpc
-//        node scripts/update-bin-manifest.mjs opsmaxx-netd
+//   e.g. node scripts/update-bin-manifest.mjs opsmaxx-netd
 //        node scripts/update-bin-manifest.mjs wintun.dll
 //
 // A name with no extension is an executable and picks up `.exe` under the

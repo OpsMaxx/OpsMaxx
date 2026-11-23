@@ -76,6 +76,12 @@ jobs:
       - name: Build the engines from source
         run: npm run build:engines
 
+      # frpc is not shipped (antivirus flags it), so build:engines no longer
+      # builds it. This copy lands in .frp-build/bin, outside resources/bin, and
+      # is the one the e2e test drives.
+      - name: Build frpc for the test
+        run: bash scripts/build-frpc.sh
+
       - name: Verify the engine manifest
         run: node scripts/verify-bin-manifest.mjs
 

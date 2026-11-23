@@ -1,43 +1,26 @@
 #!/usr/bin/env bash
 #
-# Build frpc (the frp client) from pinned upstream source for every platform
-# OpsMaxx ships, and fold the results into resources/bin/manifest.json.
+# Build frpc (the frp client) from pinned upstream source for the HOST platform,
+# for the nightly real-engine test (.github/workflows/vpn-e2e.yml) only.
 #
-# Why build rather than download a release tarball: the manifest records a
-# SHA-256 that the app verifies before every exec, so the bytes have to come
-# from something we can reproduce. A downloaded archive would make the hash a
-# record of "whatever was on the CDN that day".
-#
-# Why frp at all, and why this is licence-safe: frp is Apache-2.0, which places
-# no obligation on OpsMaxx beyond shipping the licence and NOTICE files —
-# unlike OpenVPN, which is GPL-2.0 and is therefore deliberately NOT bundled
-# (OpsMaxx detects a system install instead). See docs/plans/vpn-tunnel-clients.md
-# section 4.
+# OpsMaxx does not ship frpc. Every antivirus flags it as a hacktool, which got
+# the installers quarantined, so frp is an engine the user installs themselves.
+# This binary is test infrastructure: it is written to $FRPC_OUT (default
+# .frp-build/bin/), never to resources/bin, so electron-builder cannot pick it
+# up. tests/vpnEngines.e2e.test.ts reads it from the same place, or from
+# $FRPC_PATH.
 set -euo pipefail
 
 FRP_VERSION="${FRP_VERSION:-v0.71.0}"
 FRP_REPO="https://github.com/fatedier/frp.git"
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_ROOT="$ROOT/resources/bin"
 WORK="${FRP_WORKDIR:-$ROOT/.frp-build}"
+OUT="${FRPC_OUT:-$WORK/bin}"
 
 # Retries for every step below that reaches the network; see the file itself
 # for why these are shared rather than duplicated.
 . "$ROOT/scripts/lib/net-retry.sh"
-
-# GOOS/GOARCH on the left, Node's platform-arch on the right. The right-hand
-# names are what process.platform/process.arch produce and what
-# electron-builder's ${platform}-${arch} macro expands to, so the lookup path
-# is identical in a dev checkout and in a packaged app.
-TARGETS=(
-  "darwin amd64 darwin-x64"
-  "darwin arm64 darwin-arm64"
-  "linux amd64 linux-x64"
-  "linux arm64 linux-arm64"
-  "windows amd64 win32-x64"
-  "windows arm64 win32-arm64"
-)
 
 command -v go >/dev/null 2>&1 || { echo "go toolchain not found" >&2; exit 1; }
 command -v git >/dev/null 2>&1 || { echo "git not found" >&2; exit 1; }
@@ -75,42 +58,14 @@ build the dashboard assets. The API under /api and /healthz is unaffected.</p>
 HTML
 fi
 
-# Everything the six builds below need, fetched once and retried.
 prefetch_modules "$WORK/frp" ./cmd/frpc
 
-mkdir -p "$OUT_ROOT"
-
-for t in "${TARGETS[@]}"; do
-  read -r goos goarch nodedir <<<"$t"
-  exe=""
-  [ "$goos" = "windows" ] && exe=".exe"
-  dest="$OUT_ROOT/$nodedir"
-  mkdir -p "$dest"
-  echo "==> frpc $goos/$goarch -> $nodedir/frpc$exe"
-  # CGO off keeps this a pure cross-compile with no per-platform toolchain, and
-  # keeps the binary static so it does not pick up a host libc at runtime.
-  # -trimpath and an empty -buildid make the output reproducible, which is what
-  # makes the recorded hash meaningful.
-  ( cd "$WORK/frp" && \
-    CGO_ENABLED=0 GOOS="$goos" GOARCH="$goarch" \
-    go build -trimpath \
-      -ldflags "-s -w -buildid= -X github.com/fatedier/frp/pkg/util/version.version=${FRP_VERSION#v}" \
-      -o "$dest/frpc$exe" ./cmd/frpc )
-done
-
-# Upstream licence and attribution travel with the binaries: Apache-2.0 section
-# 4 requires both the licence text and any NOTICE file to be distributed.
-mkdir -p "$ROOT/resources/licenses/frp"
-cp "$WORK/frp/LICENSE" "$ROOT/resources/licenses/frp/LICENSE"
-# Written as an if rather than `[ -f x ] && cp` because under `set -e` the
-# latter's exit status is the test's, and a release with no NOTICE file would
-# then depend on a bash subtlety to not abort the build.
-if [ -f "$WORK/frp/NOTICE" ]; then
-  cp "$WORK/frp/NOTICE" "$ROOT/resources/licenses/frp/NOTICE"
-fi
-printf '%s\n' "frp $FRP_VERSION ($SRC_SHA)" > "$ROOT/resources/licenses/frp/VERSION"
-
-echo "==> merging into manifest"
-FRPC_VERSION="${FRP_VERSION#v}" node "$ROOT/scripts/update-bin-manifest.mjs" frpc
+mkdir -p "$OUT"
+exe="$(go env GOEXE)"
+echo "==> frpc $(go env GOOS)/$(go env GOARCH) -> $OUT/frpc$exe"
+( cd "$WORK/frp" && \
+  CGO_ENABLED=0 go build -trimpath \
+    -ldflags "-s -w -buildid= -X github.com/fatedier/frp/pkg/util/version.version=${FRP_VERSION#v}" \
+    -o "$OUT/frpc$exe" ./cmd/frpc )
 
 echo "done."

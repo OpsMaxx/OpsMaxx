@@ -20,7 +20,7 @@ import { emitOvpnConfig, ovpnArgs } from '../src/main/services/vpn/parsers'
 // needs `npm run build:engines` to have run, and a real WireGuard handshake
 // takes seconds rather than milliseconds.
 //
-//     npm run build:engines && VPN_E2E=1 npx vitest run tests/vpnEngines.e2e.test.ts
+//     npm run build:engines && bash scripts/build-frpc.sh && VPN_E2E=1 npx vitest run tests/vpnEngines.e2e.test.ts
 //
 // It is not in the default suite, and CI does not gate on it — see the plan's
 // §10 for the Linux nightly that should.
@@ -29,7 +29,9 @@ const ROOT = resolve(__dirname, '..')
 const platformDir = `${process.platform}-${process.arch}`
 const exe = process.platform === 'win32' ? '.exe' : ''
 const NETD = join(ROOT, 'resources', 'bin', platformDir, `opsmaxx-netd${exe}`)
-const FRPC = join(ROOT, 'resources', 'bin', platformDir, `frpc${exe}`)
+// frpc is not shipped, so it is not under resources/bin: scripts/build-frpc.sh
+// builds a host copy for this test only. FRPC_PATH points anywhere else.
+const FRPC = process.env.FRPC_PATH || join(ROOT, '.frp-build', 'bin', `frpc${exe}`)
 // No `${exe}`: OpsMaxx bundles openvpn on macOS and Linux only, so there is
 // never an openvpn.exe here to name.
 const OPENVPN = join(ROOT, 'resources', 'bin', platformDir, 'openvpn')
@@ -281,7 +283,7 @@ describeE2e('frpc admin API', () => {
   })
 
   it('is built', () => {
-    expect(has(FRPC), `${FRPC} is missing. Run: npm run build:engines`).toBe(true)
+    expect(has(FRPC), `${FRPC} is missing. Run: bash scripts/build-frpc.sh`).toBe(true)
   })
 
   it('serves /healthz unauthenticated and /api/* behind Basic auth', async () => {

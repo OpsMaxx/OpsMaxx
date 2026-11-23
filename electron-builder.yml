@@ -53,16 +53,21 @@ files:
   - package.json
 
 # Tunnel engines: opsmaxx-netd (our sidecar — WireGuard, plus Tailscale via
-# tsnet and ngrok via ngrok-go, so neither needs a client on the machine), frpc
-# (Apache-2.0), openvpn (GPL-2.0, macOS and Linux only) and wintun.dll
-# (proprietary, Windows only — see THIRD-PARTY-NOTICES.md). Built or fetched by
-# scripts/{build-sidecar,build-frpc,build-openvpn,fetch-wintun} before
+# tsnet and ngrok via ngrok-go, so neither needs a client on the machine),
+# openvpn (GPL-2.0, macOS and Linux only) and wintun.dll (proprietary, Windows
+# only — see THIRD-PARTY-NOTICES.md). Built or fetched by
+# scripts/{build-sidecar,build-addyd,build-openvpn,fetch-wintun} before
 # electron-builder runs; CI must do that or the app ships with no engines and
 # every VPN profile reports binary-missing.
 #
 # The `filter: **/*` below is what carries wintun.dll: the directory is copied
 # whole rather than by a list of executable names, and the DLL has to land in
 # the same directory as opsmaxx-netd.exe to be found at all.
+#
+# frpc is NOT shipped — every antivirus flags it as a hacktool and quarantined
+# our installers — so the user installs frp themselves. Older checkouts built it
+# into resources/bin, and a stale copy there must never reach an installer: the
+# two negations below drop it whatever is on disk.
 #
 # ${platform}-${arch} expands to Node's own names (darwin-arm64, win32-x64,
 # ...), which is exactly what process.platform/process.arch produce at
@@ -71,7 +76,7 @@ files:
 extraResources:
   - from: resources/bin/${platform}-${arch}
     to: bin/${platform}-${arch}
-    filter: ['**/*']
+    filter: ['**/*', '!**/frpc', '!**/frpc.exe']
   - from: resources/bin/manifest.json
     to: bin/manifest.json
 

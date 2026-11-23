@@ -48,13 +48,13 @@ describe('the manifest describes what actually shipped', () => {
   })
 
   it('keeps the version, which is not derivable from the bytes', () => {
-    writeFileSync(join(root, 'darwin-arm64', 'frpc'), 'x')
+    writeFileSync(join(root, 'darwin-arm64', 'openvpn'), 'x')
     writeFileSync(
       join(root, 'manifest.json'),
-      JSON.stringify({ version: 1, binaries: { 'darwin-arm64/frpc': { sha256: sha('old'), version: '0.71.0' } } })
+      JSON.stringify({ version: 1, binaries: { 'darwin-arm64/openvpn': { sha256: sha('old'), version: '2.6.22' } } })
     )
     rehashManifest(root)
-    expect(manifest()['darwin-arm64/frpc'].version).toBe('0.71.0')
+    expect(manifest()['darwin-arm64/openvpn'].version).toBe('2.6.22')
   })
 
   it('reports nothing when the manifest is already true', () => {

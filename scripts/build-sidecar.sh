@@ -10,7 +10,7 @@
 # the notices. See docs/plans/vpn-tunnel-clients.md section 4 for why openvpn
 # is deliberately NOT bundled the same way.
 #
-# CI must run this (and scripts/build-frpc.sh) BEFORE electron-builder.
+# CI must run this BEFORE electron-builder.
 # electron-builder.yml pulls resources/bin/${platform}-${arch} in through
 # extraResources, and a missing directory is silent at package time — it only
 # surfaces at runtime as every profile reporting `binary-missing`.

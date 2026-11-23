@@ -17,8 +17,8 @@
 # tarball of the exact tree it built (see SRC_TARBALL below) — the release
 # workflow uploads it as a release asset beside the installers.
 #
-# Why native builds rather than the six-target cross-compile build-frpc.sh
-# does: frp is Go with CGO off, so one machine can emit every target. OpenVPN
+# Why native builds rather than the six-target cross-compile build-sidecar.sh
+# does: the sidecar is Go with CGO off, so one machine can emit every target. OpenVPN
 # is C/autotools linked against OpenSSL, and there is no equivalent. So this
 # script builds for the host platform only, and the release workflow runs it on
 # each runner.
@@ -38,7 +38,7 @@
 # the same source. Reproducing this build gets you an equivalent binary, not an
 # identical one. The pinned tag, the pinned commit and the published source
 # archive are what let someone check that the source is what we say it is;
-# `build-frpc.sh` can promise more only because Go with `-trimpath -buildid=`
+# `build-sidecar.sh` can promise more only because Go with `-trimpath -buildid=`
 # is deterministic and C is not.
 set -euo pipefail
 
