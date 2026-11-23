@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Lock, ShieldCheck, X } from 'lucide-react'
 import { toast } from '../../store/toast'
 import { useApp } from '../../store/app'
 import { nameKey } from '../../../../shared/workspace'
+import { WorkspaceFacts } from '../workspace/WorkspaceManager'
 import { openAi, openSettings } from '../../store/nav'
 import { sessionModeLabel, sessionModeOf } from '../../../../shared/mcp'
 import type {
@@ -180,7 +181,12 @@ export function SessionAccess({
   const [held, setHeld] = useState<string[] | null>(null)
   const [moving, setMoving] = useState(false)
   const propReach = session.workspaces.map((w) => w.id).join()
-  useEffect(() => setHeld(null), [propReach])
+  // Only once the prop has caught up with it: a reload that set off before
+  // main answered carries the old list, and dropping `held` for that would
+  // put the old list back on screen and under the next click.
+  useEffect(() => {
+    if (held && held.join() === propReach) setHeld(null)
+  }, [held, propReach])
   const granted = held ?? session.workspaces.map((w) => w.id)
   // Everything below that reads the session's reach re-reads when it moves.
   const reach = granted.join()
@@ -363,6 +369,7 @@ export function SessionAccess({
                   {w.name}
                   {w.hasPassword && <Lock size={12} className="faint" />}
                 </label>
+                <WorkspaceFacts id={w.id} />
                 {locked && (
                   // The same gate the switcher uses: it opens the unlock dialog.
                   <button className="btn sm" onClick={() => useApp.getState().setWorkspace(w.id)}>

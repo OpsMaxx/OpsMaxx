@@ -260,9 +260,12 @@ export function setSessionMode(id: string, mode: SessionMode): McpAgentSession |
  * revoking it says what is meant. Also refuses:
  *  - adding a workspace in `locked` -- one whose password nobody has entered.
  *    One the session already has may stay: keeping it widens nothing.
- *  - two workspaces whose names differ only in case or Unicode form. Tools
- *    address workspaces by name, so the agent could not tell them apart, and
- *    an agent that made the second one could pass it off as the first.
+ *  - adding a workspace whose name, ignoring case and Unicode form, matches
+ *    another in the result. Tools address workspaces by name, so the agent
+ *    could not tell them apart, and an agent that made the second one could
+ *    pass it off as the first. Only additions: a session that already holds
+ *    two such (granted before this rule, or renamed since) may still drop
+ *    anything, including one of the pair.
  */
 export function setSessionWorkspaces(
   id: string,
@@ -282,8 +285,10 @@ export function setSessionWorkspaces(
   if (next.size === 0) return null
   const had = new Set(session.workspaces.map((w) => w.id))
   if ([...next.keys()].some((wid) => !had.has(wid) && locked.includes(wid))) return null
-  const names = new Set([...next.values()].map((w) => nameKey(w.name)))
-  if (names.size !== next.size) return null
+  const added = [...next.values()].filter((w) => !had.has(w.id))
+  const clashes = (w: WorkspaceRef): boolean =>
+    [...next.values()].some((o) => o.id !== w.id && nameKey(o.name) === nameKey(w.name))
+  if (added.some(clashes)) return null
   session.workspaces = [...next.values()]
   writeSessions()
   return session

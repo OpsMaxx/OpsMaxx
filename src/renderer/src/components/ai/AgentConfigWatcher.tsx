@@ -8,7 +8,7 @@ import { agentServerFields } from '../../lib/agentServerPatch'
 import { rdpSecretId } from '../../../../shared/rdp'
 import type { DbKind } from '../../../../shared/db'
 import { saveDatabaseEdit } from '../../store/dbEditor'
-import { flushSave } from '../../store/persist'
+import { flushSave, saveSoon } from '../../store/persist'
 import { nameKey } from '../../../../shared/workspace'
 import type { Hop, TunnelKind } from '../../types'
 import { t } from '../../lib/i18n'
@@ -153,8 +153,16 @@ function toHops(route: RequestHop[] | undefined): Hop[] | undefined {
   }))
 }
 
-/** A workspace protected by a password nobody has entered this run is the
- *  person's to open first, for an agent as much as for anyone at the keyboard. */
+/**
+ * A workspace protected by a password nobody has entered this run is the
+ * person's to open first, for an agent as much as for anyone at the keyboard.
+ *
+ * The rule: nothing an agent writes goes INTO a locked workspace -- no server
+ * added, no server edited or moved, no folder made or renamed, no rename of the
+ * workspace itself. Removals and the tunnel and database tools are left as
+ * they were: a session granted the workspace could already do those, and
+ * taking something out is not putting something in.
+ */
 function checkUnlocked(workspaceId: string): void {
   if (!useApp.getState().isWorkspaceAccessible(workspaceId)) throw new Error('That workspace is locked in OpsMaxx.')
 }
@@ -198,14 +206,17 @@ function checkFolderNameFree(workspaceId: string, parentId: string | null, name:
  * Written to disk now rather than on the debounce, because main's cache is
  * refreshed from that save and the agent's next call reads the cache: without
  * this, "create a folder, then file a server into it" fails on the second step.
- * A failed save is not this request's failure -- the change is made, and the
- * debounced save tries again.
+ *
+ * A failed write still answers ok: the change exists in the app, and an error
+ * would have the agent try again and make it twice. The write is re-armed on
+ * the usual debounce instead -- flushSave cleared that timer, so nothing else
+ * would retry it until the next edit.
  */
 async function saved(): Promise<void> {
   try {
     await flushSave()
   } catch {
-    /* see above */
+    saveSoon()
   }
 }
 
@@ -228,6 +239,7 @@ export function AgentConfigWatcher(): null {
         const req = request as unknown as CreateRequest
         try {
           // Before the row exists, so a refusal leaves nothing to take back.
+          checkUnlocked(req.workspaceId)
           if (req.folderId) checkServerFolder(req.workspaceId, req.folderId)
           const serverId = useApp.getState().addServer({
             workspaceId: req.workspaceId,
@@ -335,7 +347,7 @@ export function AgentConfigWatcher(): null {
               run: () => useApp.getState().setActivity('connections')
             }
           )
-          if (req.folderId) await saved()
+          await saved()
           api?.replyCreateServer?.(id, { ok: true, serverId })
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err)
@@ -356,6 +368,7 @@ export function AgentConfigWatcher(): null {
             case 'server.update': {
               const before = useApp.getState().servers.find((s) => s.id === req.serverId)
               if (!before) throw new Error('That server no longer exists.')
+              checkUnlocked(before.workspaceId)
               const { password, keyPath, passphrase, certificatePath, route } = req.patch
               const rest = agentServerFields(req.patch)
               const hops = toHops(route)

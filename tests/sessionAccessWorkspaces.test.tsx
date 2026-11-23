@@ -146,3 +146,49 @@ describe('review round 1', () => {
     expect(useToasts.getState().toasts.some((t) => t.kind === 'error' && /already has a workspace with that name/.test(t.message))).toBe(true)
   })
 })
+
+describe('review round 2', () => {
+  it('shows the same facts as the Workspaces dialog on each row it offers', async () => {
+    useApp.setState((s) => ({
+      workspaces: [
+        ...s.workspaces,
+        { id: 'w6', name: 'prod', color: 'pink', hidden: false, locked: false, hasPassword: false, agentCreated: true }
+      ],
+      servers: [{ id: 's1', workspaceId: 'w1', name: 'a' }]
+    }) as never)
+    setup(vi.fn())
+    await openPanel()
+    const panel = screen.getByTestId('session-workspaces')
+    expect(panel.textContent).toContain('1 server')
+    expect(panel.textContent).toContain('Created by an agent')
+    // "Prod" and the agent's "prod" both carry the warning.
+    expect(panel.textContent!.split('Same name as another workspace')).toHaveLength(3)
+  })
+
+  it('keeps main’s answer over a reload that set off before it', async () => {
+    // Two changes answered, then the reload the FIRST one asked for lands. It
+    // differs from the prop, so the old rule dropped `held` for it and put the
+    // second workspace's box back to unticked.
+    useApp.setState((st) => ({
+      workspaces: [...st.workspaces, { id: 'w4', name: 'Edge', color: 'cyan', hidden: false, locked: false, hasPassword: false }]
+    }) as never)
+    const set = vi.fn(async (_id: string, ids: string[]) => ({ ...session, workspaces: ids.map((id) => ({ id, name: id })) }))
+    setup(set)
+    const view = render(<SessionAccess session={session} groups={groups} onChanged={vi.fn()} />)
+    await userEvent.click(screen.getByRole('button', { name: /Workspaces/ }))
+    const box = (name: RegExp) => screen.getByRole('checkbox', { name }) as HTMLInputElement
+    await userEvent.click(box(/Lab/))
+    await waitFor(() => expect(box(/Edge/).disabled).toBe(false))
+    await userEvent.click(box(/Edge/))
+    await waitFor(() => expect(box(/Edge/).checked).toBe(true))
+
+    const stale = { ...session, workspaces: [{ id: 'w1', name: 'Prod' }, { id: 'w2', name: 'Lab' }] }
+    view.rerender(<SessionAccess session={stale} groups={groups} onChanged={vi.fn()} />)
+    expect(box(/Edge/).checked).toBe(true)
+
+    // And once the prop catches up, it is the prop again.
+    const fresh = { ...session, workspaces: ['w1', 'w2', 'w4'].map((id) => ({ id, name: id })) }
+    view.rerender(<SessionAccess session={fresh} groups={groups} onChanged={vi.fn()} />)
+    expect(box(/Edge/).checked).toBe(true)
+  })
+})

@@ -109,3 +109,41 @@ describe('only the person can change a session’s workspaces', () => {
     expect(server).not.toMatch(/aiMcp:setSessionWorkspaces/)
   })
 })
+
+describe('review round 2: same names', () => {
+  beforeEach(() => resetMcpAuthForTests())
+  const BETAS = [
+    { id: 'b1', name: 'Beta' },
+    { id: 'b2', name: 'BETA' },
+    { id: 'c', name: 'C' },
+    { id: 'd', name: 'D' }
+  ]
+  function holdingTwoBetas() {
+    // Granted at creation, which has no such rule, or renamed into a clash since.
+    return createSession({
+      agentName: 'A',
+      workspaces: [BETAS[0], BETAS[1], BETAS[2]],
+      groupId: null,
+      groupName: 'x',
+      ttlMinutes: 60
+    }).session
+  }
+
+  it('lets a session holding two of a name drop anything', () => {
+    const s = holdingTwoBetas()
+    expect(setSessionWorkspaces(s.id, ['b1', 'b2'], BETAS)?.workspaces.map((w) => w.id)).toEqual(['b1', 'b2'])
+    expect(setSessionWorkspaces(s.id, ['b1'], BETAS)?.workspaces.map((w) => w.id)).toEqual(['b1'])
+  })
+
+  it('still adds a workspace whose name clashes with nothing', () => {
+    const s = holdingTwoBetas()
+    expect(setSessionWorkspaces(s.id, ['b1', 'b2', 'c', 'd'], BETAS)?.workspaces).toHaveLength(4)
+  })
+
+  it('refuses to add a workspace whose name another in the result has', () => {
+    const { session } = makeSession()
+    const known = [...BETAS, { id: 'ws-1', name: 'Production' }]
+    expect(setSessionWorkspaces(session.id, ['ws-1', 'b1'], known)?.workspaces).toHaveLength(2)
+    expect(setSessionWorkspaces(session.id, ['ws-1', 'b1', 'b2'], known)).toBeNull()
+  })
+})

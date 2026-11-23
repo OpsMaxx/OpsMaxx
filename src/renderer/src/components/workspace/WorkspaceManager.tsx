@@ -25,14 +25,6 @@ export function WorkspaceManager(): React.JSX.Element {
   const setWorkspace = useApp((s) => s.setWorkspace)
   const unlockedWorkspaces = useApp((s) => s.unlockedWorkspaces)
   const deleteWorkspace = useApp((s) => s.deleteWorkspace)
-  const servers = useApp((s) => s.servers)
-  const serverCount = new Map<string, number>()
-  for (const sv of servers) serverCount.set(sv.workspaceId, (serverCount.get(sv.workspaceId) ?? 0) + 1)
-  // Two workspaces an agent would address by the same name. Worth a warning
-  // whoever made them, and the reason the agent badge exists: a workspace an
-  // agent created can otherwise pass for the one the person meant to grant.
-  const nameCount = new Map<string, number>()
-  for (const w of workspaces) nameCount.set(nameKey(w.name), (nameCount.get(nameKey(w.name)) ?? 0) + 1)
   // Confirming a delete: holds the workspace id awaiting confirmation.
   const [confirming, setConfirming] = useState<string | null>(null)
 
@@ -92,27 +84,19 @@ export function WorkspaceManager(): React.JSX.Element {
     wname,
     wcolor,
     isHidden,
-    hasPassword,
-    agentCreated
+    hasPassword
   }: {
     id: string
     wname: string
     wcolor: WorkspaceColor
     isHidden: boolean
     hasPassword: boolean
-    agentCreated: boolean
   }): React.JSX.Element => (
     <>
       <div className="list-row" style={{ padding: '10px 14px' }}>
         <span className="ws-dot" style={{ background: colorVar[wcolor], color: colorVar[wcolor] }} />
         <span className="r-title">{wname}</span>
-        <span className="s-desc">{t('workspace.manager.serverCount', { count: serverCount.get(id) ?? 0 })}</span>
-        {agentCreated && <span className="chip info">{t('workspace.manager.agentCreated')}</span>}
-        {(nameCount.get(nameKey(wname)) ?? 0) > 1 && (
-          <span className="chip warn" title={t('workspace.manager.sameNameTitle')}>
-            {t('workspace.manager.sameName')}
-          </span>
-        )}
+        <WorkspaceFacts id={id} />
         {hasPassword && (
           <span
             className="row"
@@ -341,7 +325,6 @@ export function WorkspaceManager(): React.JSX.Element {
             wcolor={w.color}
             isHidden={false}
             hasPassword={w.hasPassword}
-            agentCreated={w.agentCreated === true}
           />
         ))}
       </div>
@@ -359,12 +342,38 @@ export function WorkspaceManager(): React.JSX.Element {
               wcolor={w.color}
               isHidden
               hasPassword={w.hasPassword}
-              agentCreated={w.agentCreated === true}
-            />
+              />
           ))}
         </div>
       )}
     </Modal>
+  )
+}
+
+/**
+ * What tells two workspaces apart at a glance: how many servers each holds,
+ * whether an agent made it, and whether another has the same name as an agent
+ * would read it. Shown wherever a workspace is chosen for an agent, because an
+ * agent-made "Prod" beside the real one is exactly what someone might grant by
+ * mistake. Renderer-only: none of it is sent to an agent.
+ */
+export function WorkspaceFacts({ id }: { id: string }): React.JSX.Element | null {
+  const t = useT()
+  const servers = useApp((s) => s.servers.reduce((n, sv) => n + (sv.workspaceId === id ? 1 : 0), 0))
+  const workspaces = useApp((s) => s.workspaces)
+  const me = workspaces.find((w) => w.id === id)
+  if (!me) return null
+  const clash = workspaces.some((w) => w.id !== id && nameKey(w.name) === nameKey(me.name))
+  return (
+    <>
+      <span className="s-desc">{t('workspace.manager.serverCount', { count: servers })}</span>
+      {me.agentCreated && <span className="chip info">{t('workspace.manager.agentCreated')}</span>}
+      {clash && (
+        <span className="chip warn" title={t('workspace.manager.sameNameTitle')}>
+          {t('workspace.manager.sameName')}
+        </span>
+      )}
+    </>
   )
 }
 

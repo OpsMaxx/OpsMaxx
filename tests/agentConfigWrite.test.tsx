@@ -576,3 +576,59 @@ describe('review round 1', () => {
     })
   })
 })
+
+describe('review round 2', () => {
+  const LOCKED_W1 = () =>
+    useApp.setState((s) => ({
+      workspaces: s.workspaces.map((w) => (w.id === 'w1' ? { ...w, hasPassword: true } : w)),
+      unlockedWorkspaces: []
+    }) as never)
+  const ADD = { workspaceId: 'w1', name: 'Web04', host: '10.0.0.4', port: 22, username: 'root', auth: 'agent' }
+
+  it('refuses any server added to a locked workspace, folder or not', async () => {
+    LOCKED_W1()
+    mount()
+    fireCreate?.({ id: 'c1', request: ADD })
+    await waitFor(() => expect(createReplies).toHaveLength(1))
+    expect(createReplies[0].result).toEqual({ ok: false, error: 'That workspace is locked in OpsMaxx.' })
+    expect(useApp.getState().servers.map((s) => s.name)).toEqual(['Scanner01'])
+  })
+
+  it('refuses any edit to a server in a locked workspace', async () => {
+    LOCKED_W1()
+    mount()
+    fire?.({ id: 'r1', request: { kind: 'server.update', serverId: 's1', patch: { port: 2200 } } })
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(replies[0].result).toEqual({ ok: false, error: 'That workspace is locked in OpsMaxx.' })
+    expect(useApp.getState().servers[0].port).toBe(22)
+  })
+
+  it('still lets a server in a locked workspace be removed', async () => {
+    LOCKED_W1()
+    mount()
+    fire?.({ id: 'r1', request: { kind: 'server.remove', serverId: 's1' } })
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(replies[0].result.ok).toBe(true)
+  })
+
+  it('saves before answering every add, not only one into a folder', async () => {
+    mount()
+    fireCreate?.({ id: 'c1', request: ADD })
+    await waitFor(() => expect(createReplies).toHaveLength(1))
+    expect(order[0]).toBe('save')
+  })
+
+  it('answers ok when the write fails, and tries the write again', async () => {
+    // The change exists in the app; an error would have the agent make it twice.
+    mount()
+    let calls = 0
+    window.opsmaxx!.data.save = vi.fn(async () => {
+      calls++
+      if (calls === 1) throw new Error('disk full')
+    }) as never
+    fire?.({ id: 'r1', request: { kind: 'workspace.add', name: 'Lab' } })
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(replies[0].result.ok).toBe(true)
+    await waitFor(() => expect(calls).toBe(2), { timeout: 2000 })
+  })
+})
