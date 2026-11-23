@@ -82,7 +82,7 @@ describe('server instructions', () => {
 
   it('names the areas that genuinely have no tool, so the agent does not shell out to reach them', () => {
     const instructions = (client.getInstructions() ?? '').toLowerCase()
-    for (const missing of ['vault', 'restoring a backup', 'add_ci_connection', 'add_workspace']) {
+    for (const missing of ['vault', 'restoring a backup', 'add_ci_connection', 'grant_workspace']) {
       expect(instructions).toContain(missing)
     }
   })

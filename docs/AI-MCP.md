@@ -53,13 +53,13 @@ another MCP client. For the short pitch and the security summary, see the
 
 ## The MCP server
 
-`src/main/services/mcpServer.ts` registers **61 tools** — 53 core, plus the 8-tool CI/CD set at
-the end of the table. `tests/localTerminalNotExposed.test.ts` holds the same 61 as a reviewed
+`src/main/services/mcpServer.ts` registers **65 tools** — 57 core, plus the 8-tool CI/CD set at
+the end of the table. `tests/localTerminalNotExposed.test.ts` holds the same 65 as a reviewed
 whitelist, so a new tool cannot appear on the bridge without a diff somebody reads.
 
 | Tool | Capability gating it | What it returns |
 |---|---|---|
-| `list_workspaces` | — | The workspace(s) this session is scoped to |
+| `list_workspaces` | — | The workspace(s) this session is scoped to. With `includeFolders: true`, each one's server-folder paths (`Prod/EU`), the values the `folder` parameters take; a workspace that may not list its servers does not show its folders |
 | `list_servers` | `viewServer` | Friendly names only, filtered to what the session can see |
 | `get_server_details` | `viewServer` | Name, OS, session profile, access group, effective ALLOW/ASK/DENY per capability — **never hostname/IP/username** |
 | `execute_command` | `terminal` (+ `sudo` if the command is sudo/doas, + file path rules for any absolute path it names); a destructive, elevated or run-time-computed command is **risky** | stdout/stderr/exit code, redacted |
@@ -84,9 +84,13 @@ whitelist, so a new tool cannot appear on the bridge without a diff somebody rea
 | `delete_tunnel` | `sshTunnel`, **risky**, **never cached** | That the tunnel is gone; it is stopped first if running |
 | `list_vpns` | `vpnControl`, resolved per **workspace** as a read | Names, engine, mode and state — **never an endpoint, key or listener address** |
 | `set_vpn` | `vpnControl`; starting, or stopping with live sessions depending on it, is **risky**; **frp refused outside Bypass** | Confirmation, with a listener count |
-| `add_server` | `manageServers`, resolved on the **workspace**, **never cached**; not risky, so ALLOW adds without asking | The name the new connection was saved under. `auth` takes `password`, `key`, `certificate` (a key plus the CA-signed `certificatePath`, `<keyPath>-cert.pub` when omitted) or `agent`. `jumpHosts` names existing servers to reach it through, so a bastion-only host can be onboarded without disclosing one; `verify: true` dials it once and reports whether it came up rather than reporting a dead entry as added |
-| `update_server` | `manageServers`, **risky**; a session grant covers only further changes to that one server | Which fields changed. Only what you pass is touched — a port change does not disturb the stored credential |
+| `add_server` | `manageServers`, resolved on the **workspace**, **never cached**; not risky, so ALLOW adds without asking | The name the new connection was saved under. `auth` takes `password`, `key`, `certificate` (a key plus the CA-signed `certificatePath`, `<keyPath>-cert.pub` when omitted) or `agent`. `jumpHosts` names existing servers to reach it through, so a bastion-only host can be onboarded without disclosing one; `verify: true` dials it once and reports whether it came up rather than reporting a dead entry as added. `folder` files it under a server folder of the same workspace, by path |
+| `update_server` | `manageServers`, **risky**; a session grant covers only further changes to that one server | Which fields changed. Only what you pass is touched — a port change does not disturb the stored credential. `folder` moves it between server folders of **its own workspace** (`""` is the root); there is no way to move a server to another workspace, because that changes which restriction governs it |
 | `remove_server` | `manageServers`, **risky**, **never cached** | That the connection and its stored credential are gone. The approval names what the removal takes with it when the server is another server's jump host |
+| `create_workspace` | `manageServers` not denied in at least one of the session's workspaces; **asks every time, even at allow** (only Bypass skips it; Read-only refuses it), **never cached** | That the workspace exists — and that it is **in no AI session, this one included**. Only the user can add it to a session (AI Access → the session → Workspaces). A name is checked for collisions only against the session's own workspaces, so no answer reveals one outside the grant |
+| `rename_workspace` | `manageServers` in that workspace; **asks every time, even at allow** (only Bypass skips it), **never cached** | The rename, shown to the approver as `"old" → "new"`. Only a workspace in the session. Asked for because approvals and the audit log name a workspace by its name: a silent rename would make the next dialog say the wrong one |
+| `create_folder` | `manageServers` in that workspace; not risky, so ALLOW is silent; a session grant covers only further creates in that workspace | A server folder at the root or under `parentFolder` (a path such as `Prod/EU`, case-insensitive per segment). A same-named sibling, or a path segment matching two folders, is refused rather than guessed. Folders grant and restrict nothing |
+| `rename_folder` | As `create_folder` | The folder's old and new path. The same sibling rule |
 | `test_connection` | `viewServer` | Whether the connection came up, and the *category* of failure if not — never a hostname, port or username, and never the driver's own text, which contains the address |
 | `list_containers` | `containers` | Containers on one server: image, state, the runtime's own status line, published ports and compose project. It says when it fell back to root, and distinguishes "not in a project" from "the runtime could not say" |
 | `container_logs` | `containers`, weighed higher at the prompt than the list | The last lines a container wrote. **It never follows** — a stream would outlive the approval that authorised it, and the stop-all-AI-access switch works by resolving requests still pending |
@@ -402,6 +406,15 @@ workspaces including future ones" — and every tool resolves servers against ex
 `listCachedServers(session.workspaces.map(w => w.id))` (`mcpDataCache.ts`) only ever loads servers
 belonging to a granted workspace in the first place. A workspace left out isn't denied to the
 session — it is invisible, because it's never in the candidate list `serverResolver.ts` searches.
+
+An agent can create and rename workspaces (`create_workspace`, `rename_workspace`) and server
+folders, and none of that moves the boundary. A workspace it creates is in no session — not even
+the one that created it — until the user adds it under **AI Access → the session → Workspaces**;
+the bridge has no tool that edits a session's workspace list. Every lookup those tools make — the
+workspace to rename, a name to collide with, the folder a path names — is made inside the
+session's own workspaces, so a refusal never says anything about one outside them. Workspace and
+folder names are refused if they hold control characters, line breaks or text-direction
+overrides, since they are later shown to people in approval dialogs.
 
 Restrictions still resolve per server, not per session: `resolveRestriction` (`policyEngine.ts`)
 looks up any assignment on a server using **that server's own workspace**, not "the session's
