@@ -372,6 +372,45 @@ describe('managing connections says which of the three things it is doing', () =
   })
 })
 
+// Workspaces and folders share manageServers with the server tools, and their
+// actions used to fall to the add branch -- creating a workspace was described
+// to the approver as storing a credential. Each verb gets its own sentence,
+// built from the action string mcpServer.ts writes for it.
+describe('workspace and folder actions are not described as adding a server', () => {
+  const consequence = (action: string): string =>
+    describeConsequence(subject({ capability: 'manageServers', action })).text
+  const reason = (action: string): string => riskReasons(subject({ capability: 'manageServers', action })).join(' ')
+  const ADD_SERVER = describeConsequence(subject({ capability: 'manageServers', action: 'Add server "x" (root@h:22)' })).text
+
+  it('says a created workspace is granted to no session', () => {
+    const text = consequence('Create workspace "Staging" (not added to this AI session)')
+    expect(text).toContain('“Staging”')
+    expect(text).toContain('not granted to any AI session')
+    expect(text).not.toBe(ADD_SERVER)
+    expect(reason('Create workspace "Staging" (not added to this AI session)')).not.toContain('credential')
+  })
+
+  it('names both sides of a workspace rename, and the old name is not the agent\u2019s to move', () => {
+    const text = consequence('Rename workspace "Prod" \u2192 "Sandbox"')
+    expect(text).toContain('“Prod” to “Sandbox”')
+    // A new name crafted to look like a second arrow stays in the new name.
+    expect(consequence('Rename workspace "Prod" \u2192 "a" \u2192 "b"')).toContain('“Prod” to “a" \u2192 "b”')
+  })
+
+  it('describes folder creates and renames as folders', () => {
+    expect(consequence('Create folder "Prod/EU" in Alpha')).toContain('server folder “Prod/EU”')
+    expect(consequence('Rename folder "Prod/EU" \u2192 "Prod/Europe" in Alpha')).toContain('“Prod/EU” to “Prod/Europe”')
+    for (const a of ['Create folder "Prod/EU" in Alpha', 'Rename folder "A" \u2192 "B" in Alpha']) {
+      expect(consequence(a)).not.toBe(ADD_SERVER)
+      expect(reason(a)).toContain('grant and restrict nothing')
+    }
+  })
+
+  it('still describes a server add as one', () => {
+    expect(ADD_SERVER).toContain('stores a credential')
+  })
+})
+
 describe('tunnels say whether one is being written, removed, started or stopped', () => {
   const say = (action: string): string =>
     `${riskReasons(subject({ capability: 'sshTunnel', action })).join(' ')} ${

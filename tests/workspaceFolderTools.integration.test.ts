@@ -20,12 +20,13 @@ const { refreshMcpDataCache } = await import('../src/main/services/mcpDataCache'
 const { setAssignment, saveGroup, getGroup, resetPolicyCacheForTests } = await import(
   '../src/main/services/policyStore'
 )
-const { setMcpConfig, createSession, resetMcpAuthForTests } = await import('../src/main/services/mcpAuth')
+const { setMcpConfig, createSession, revokeSession, resetMcpAuthForTests } = await import('../src/main/services/mcpAuth')
 const { startMcpServer, stopMcpServer } = await import('../src/main/services/mcpServer')
 const { onApprovalEvent, respondToApproval, resetApprovalVolumeForTests } = await import(
   '../src/main/services/approvals'
 )
 const { listAudit } = await import('../src/main/services/auditLog')
+const { describeConsequence } = await import('../src/shared/approvalRisk')
 const { setAgentServerCreator, setAgentConfigWriter } = await import('../src/main/services/agentConfigWrite')
 type AgentServerRequest = import('../src/main/services/agentConfigWrite').AgentServerRequest
 type AgentConfigRequest = import('../src/main/services/agentConfigWrite').AgentConfigRequest
@@ -173,6 +174,8 @@ describe('create_workspace', () => {
         expect(a.requests).toHaveLength(2)
         expect(a.requests[0].sessionGrant).toBeUndefined()
         expect(a.requests[0].action).toContain('Create workspace "Gamma"')
+        // The dialog reads the action this tool built; it must not say "adds a server".
+        expect(describeConsequence(a.requests[0]).text).toContain('not granted to any AI session')
         expect(written).toEqual([
           { kind: 'workspace.add', name: 'Gamma' },
           { kind: 'workspace.add', name: 'Delta' }
@@ -263,6 +266,7 @@ describe('rename_workspace', () => {
         expect(a.requests).toHaveLength(1)
         expect(a.requests[0].sessionGrant).toBeUndefined()
         expect(a.requests[0].action).toBe('Rename workspace "Alpha" \u2192 "Sandbox"')
+        expect(describeConsequence(a.requests[0]).text).toContain('\u201cAlpha\u201d to \u201cSandbox\u201d')
         expect(written).toEqual([{ kind: 'workspace.rename', workspaceId: 'ws-a', name: 'Sandbox' }])
         const row = listAudit().find((e) => e.action === 'Rename workspace "Alpha" \u2192 "Sandbox"')
         expect(row?.approval).toBe('approved')
@@ -346,6 +350,7 @@ describe('folders', () => {
         await call(c, 'create_folder', { name: 'One', workspaceName: 'Alpha' })
         expect(a.requests).toHaveLength(1)
         expect(a.requests[0].sessionGrant).toBe('tool')
+        expect(describeConsequence(a.requests[0]).text).toContain('server folder \u201cOne\u201d')
       })
     } finally {
       a.stop()
@@ -429,5 +434,60 @@ describe('filing servers into folders', () => {
       expect(created[1].folderId).toBeNull()
       expect(created).toHaveLength(2)
     })
+  })
+})
+
+// The user can take a workspace out of a live session -- or revoke it -- while
+// one of its approval cards is still open. A yes clicked afterwards was about
+// a session that no longer reaches that workspace, so gate() re-reads the
+// session after the answer and refuses.
+describe('a session that changes while its approval waits', () => {
+  async function pendingCall(change: (sessionId: string, session: { workspaces: { id: string; name: string }[] }) => void): Promise<string> {
+    const { session, token } = createSession({
+      agentName: 'Shrinking Agent',
+      workspaces: SESSION_WORKSPACES,
+      groupId: MANAGE_ASK,
+      groupName: MANAGE_ASK,
+      ttlMinutes: null
+    })
+    const off = onApprovalEvent((e) => {
+      if (e.type === 'created') {
+        change(session.id, session)
+        respondToApproval(e.request.id, 'approved')
+      }
+    })
+    const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${PORT}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } }
+    })
+    const c = new Client({ name: 'ws-shrink-test', version: '1.0.0' })
+    await c.connect(transport)
+    try {
+      return await call(c, 'create_folder', { name: 'Late', workspaceName: 'Alpha' })
+    } finally {
+      off()
+      await c.close()
+    }
+  }
+
+  it('refuses when the workspace was taken out of the session', async () => {
+    const out = await pendingCall((_, session) => {
+      session.workspaces = [{ id: 'ws-b', name: 'Beta' }]
+    })
+    expect(out).toBe('Denied: This session no longer has access to that workspace.')
+    expect(written).toHaveLength(0)
+    const row = listAudit().find((e) => e.action === 'Create folder "Late" in Alpha')
+    expect(row?.result).toBe('denied')
+  })
+
+  it('refuses when the session was revoked', async () => {
+    const out = await pendingCall((id) => revokeSession(id))
+    expect(out).toContain('revoked while the request waited')
+    expect(written).toHaveLength(0)
+  })
+
+  it('still runs when nothing changed', async () => {
+    const out = await pendingCall(() => undefined)
+    expect(out).toContain('Created folder "Late"')
+    expect(written).toHaveLength(1)
   })
 })
