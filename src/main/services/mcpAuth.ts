@@ -245,6 +245,35 @@ export function setSessionMode(id: string, mode: SessionMode): McpAgentSession |
   return session
 }
 
+/**
+ * Change which workspaces a live session reaches. Takes effect on its next
+ * request: every request authenticates afresh and reads this same object.
+ *
+ * Human-only, like setSessionMode: IPC calls it and no MCP tool does (held by
+ * tests/sessionWorkspaces). Adding a workspace is a grant, so what is stored
+ * comes from `known` -- the workspaces the app has actually saved -- never from
+ * the caller: an id that is not there is dropped, and the name is the saved one.
+ *
+ * Refuses (null) a revoked or expired session, and a list that would leave it
+ * none. A session with no workspace can do nothing yet still looks connected;
+ * revoking it says what is meant.
+ */
+export function setSessionWorkspaces(id: string, workspaceIds: unknown, known: WorkspaceRef[]): McpAgentSession | null {
+  if (!Array.isArray(workspaceIds)) return null
+  const session = loadSessions().find((s) => s.id === id)
+  if (!session || session.revoked || isExpired(session)) return null
+  const byId = new Map(known.map((w) => [w.id, w]))
+  const next = new Map<string, WorkspaceRef>()
+  for (const wid of workspaceIds) {
+    const w = typeof wid === 'string' ? byId.get(wid) : undefined
+    if (w) next.set(w.id, { id: w.id, name: w.name })
+  }
+  if (next.size === 0) return null
+  session.workspaces = [...next.values()]
+  writeSessions()
+  return session
+}
+
 export function revokeSession(id: string): void {
   const list = loadSessions()
   const session = list.find((s) => s.id === id)

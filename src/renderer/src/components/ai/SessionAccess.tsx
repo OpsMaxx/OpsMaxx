@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronRight, ShieldCheck, X } from 'lucide-react'
+import { ChevronDown, ChevronRight, Lock, ShieldCheck, X } from 'lucide-react'
 import { toast } from '../../store/toast'
+import { useApp } from '../../store/app'
 import { openAi, openSettings } from '../../store/nav'
 import { sessionModeLabel, sessionModeOf } from '../../../../shared/mcp'
 import type {
@@ -157,6 +158,9 @@ export function SessionAccess({
   onChanged: () => void
 }): React.JSX.Element {
   const [open, setOpen] = useState(false)
+  const [wsOpen, setWsOpen] = useState(false)
+  const allWorkspaces = useApp((s) => s.workspaces)
+  const unlocked = useApp((s) => s.unlockedWorkspaces)
   const [detail, setDetail] = useState(false)
   const [rows, setRows] = useState<CapabilityExplanation[] | null>(null)
   const [protectedCount, setProtectedCount] = useState(0)
@@ -167,6 +171,9 @@ export function SessionAccess({
   // What the "why" column names as the source: the group for Custom, else the
   // profile itself, which stands on no group the user picked.
   const baseName = mode === 'custom' ? groupName : sessionModeLabel(mode)
+  const granted = session.workspaces.map((w) => w.id)
+  // Everything below that reads the session's reach re-reads when it moves.
+  const reach = granted.join()
 
   const refetch = (): void => {
     void window.opsmaxx?.aiMcp
@@ -174,7 +181,7 @@ export function SessionAccess({
       .then((r) => setRows(r ?? []))
       .catch(() => setRows([]))
   }
-  useEffect(refetch, [session.id, session.groupId, mode])
+  useEffect(refetch, [session.id, session.groupId, mode, reach])
 
   const loadRestrictions = (): void => {
     restrictionsFor(session, groups)
@@ -182,14 +189,14 @@ export function SessionAccess({
       .catch(() => setRestrictions([]))
   }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(loadRestrictions, [session.id, groups])
+  useEffect(loadRestrictions, [session.id, groups, reach])
 
   useEffect(() => {
     protectedCountFor(session)
       .then(setProtectedCount)
       .catch(() => setProtectedCount(0))
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session.id])
+  }, [session.id, reach])
 
   const changeGroup = async (groupId: string, quiet = false): Promise<void> => {
     const group = groups.find((g) => g.id === groupId) ?? null
@@ -242,6 +249,27 @@ export function SessionAccess({
     toast(t('ai.sessionAccess.nowOn', { agent: session.agentName, profile: sessionModeLabel(next) }), 'ok')
   }
 
+  // Main checks the ids against the saved workspace list and refuses an empty
+  // one; what comes back is what is in force, so success is read from it rather
+  // than assumed. A workspace an agent created a moment ago may not be saved
+  // yet, and is dropped -- the toast says to try again.
+  const toggleWorkspace = async (workspaceId: string, name: string, on: boolean): Promise<void> => {
+    const ids = on ? [...granted, workspaceId] : granted.filter((id) => id !== workspaceId)
+    const updated = await window.opsmaxx?.aiMcp.setSessionWorkspaces?.(session.id, ids).catch(() => null)
+    if (!updated || updated.workspaces.some((w) => w.id === workspaceId) !== on) {
+      toast(t('ai.sessionAccess.workspaceNotChanged', { agent: session.agentName, name }), 'error')
+      return
+    }
+    setRows(null)
+    onChanged()
+    toast(
+      on
+        ? t('ai.sessionAccess.workspaceGranted', { agent: session.agentName, name })
+        : t('ai.sessionAccess.workspaceTaken', { agent: session.agentName, name }),
+      'ok'
+    )
+  }
+
   const removeRestriction = async (r: Restriction): Promise<void> => {
     try {
       await window.opsmaxx?.aiPolicy.removeAssignment?.(r.id)
@@ -277,7 +305,56 @@ export function SessionAccess({
         <button className="btn sm" onClick={() => setOpen((v) => !v)} aria-expanded={open}>
           {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {t('ai.sessionAccess.effectiveAccess')}
         </button>
+        <button className="btn sm" onClick={() => setWsOpen((v) => !v)} aria-expanded={wsOpen}>
+          {wsOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />} {t('ai.sessionAccess.workspaces')}
+        </button>
       </div>
+
+      {wsOpen && (
+        <div style={{ marginTop: 10, display: 'grid', gap: 6 }} data-testid="session-workspaces">
+          <div className="s-desc" style={{ lineHeight: 1.5 }}>
+            {t('ai.sessionAccess.workspacesExplain', { agent: session.agentName, access: baseName })}
+          </div>
+          {allWorkspaces.map((w) => {
+            const on = granted.includes(w.id)
+            // Granting a locked workspace would hand an agent what the person
+            // at this keyboard cannot see without the password. Taking one
+            // away only narrows, so that stays open.
+            const locked = !on && w.hasPassword && !unlocked.includes(w.id)
+            const last = on && granted.length === 1
+            return (
+              <div key={w.id} className="row" style={{ gap: 8, alignItems: 'center' }}>
+                <label
+                  className="row"
+                  style={{ gap: 8, cursor: locked || last ? 'default' : 'pointer' }}
+                  title={
+                    locked
+                      ? t('ai.sessionAccess.workspaceLockedTitle', { name: w.name })
+                      : last
+                        ? t('ai.sessionAccess.lastWorkspaceTitle')
+                        : undefined
+                  }
+                >
+                  <input
+                    type="checkbox"
+                    checked={on}
+                    disabled={locked || last}
+                    onChange={(e) => void toggleWorkspace(w.id, w.name, e.target.checked)}
+                  />
+                  {w.name}
+                  {w.hasPassword && <Lock size={12} className="faint" />}
+                </label>
+                {locked && (
+                  // The same gate the switcher uses: it opens the unlock dialog.
+                  <button className="btn sm" onClick={() => useApp.getState().setWorkspace(w.id)}>
+                    {t('workspace.unlock.unlock')}
+                  </button>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
 
       {/* Shown whether or not the panel is open: a restriction is the one thing
           that makes "I picked Full Access and it still asks" true, and it is

@@ -511,6 +511,7 @@ import {
   killAllSessions,
   setSessionGroup,
   setSessionMode,
+  setSessionWorkspaces,
   type CreateSessionInput
 } from './services/mcpAuth'
 import {
@@ -6169,6 +6170,13 @@ ipcMain.handle('aiMcp:setSessionMode', (_e, id: string, mode: SessionMode) => {
   if (session && mode === 'readOnly') denyPendingForSession(id)
   return session
 })
+// The human's switch too, and likewise the only one: no MCP tool reaches
+// setSessionWorkspaces. Ids are checked against the saved workspace list, not
+// trusted from the window. The unlock state of a password-protected workspace
+// lives in the renderer only, so the panel is what holds a locked one back.
+ipcMain.handle('aiMcp:setSessionWorkspaces', (_e, id: string, workspaceIds: string[]) =>
+  setSessionWorkspaces(id, workspaceIds, listCachedWorkspaces())
+)
 ipcMain.handle('aiMcp:explainAccess', (_e, sessionId: string, serverId: string | null) =>
   explainSessionAccess(sessionId, serverId)
 )

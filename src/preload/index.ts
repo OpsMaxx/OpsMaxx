@@ -2265,6 +2265,8 @@ const api = {
       ipcRenderer.invoke('aiMcp:setSessionGroup', id, groupId, groupName),
     setSessionMode: (id: string, mode: SessionMode): Promise<McpAgentSession | null> =>
       ipcRenderer.invoke('aiMcp:setSessionMode', id, mode),
+    setSessionWorkspaces: (id: string, workspaceIds: string[]): Promise<McpAgentSession | null> =>
+      ipcRenderer.invoke('aiMcp:setSessionWorkspaces', id, workspaceIds),
     // A client waiting on the OAuth flow. It holds nothing but what is needed to
     // decide: who is asking, and where the browser will be sent back to. The
     // PKCE challenge and the code stay in main.
