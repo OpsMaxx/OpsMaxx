@@ -5,7 +5,8 @@
  * and some fields of a server record are not an agent's to set at all —
  * `shares` mounts folders from this computer on the server, which no agent path
  * may do (tests/reverseMountNotExposed.test.ts). Credentials and the route are
- * handled by the caller; they are not plain fields.
+ * handled by the caller; they are not plain fields. So is `folderId`, which
+ * has to be checked against the server's own workspace before it is applied.
  */
 const AGENT_FIELDS = ['name', 'host', 'port', 'username', 'auth', 'os', 'cloud'] as const
 

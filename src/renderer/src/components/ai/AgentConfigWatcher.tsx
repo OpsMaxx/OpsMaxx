@@ -42,6 +42,7 @@ interface CreateRequest {
   os?: string
   route?: RequestHop[]
   cloud?: CloudTarget
+  folderId?: string | null
 }
 
 interface ServerPatch {
@@ -57,6 +58,7 @@ interface ServerPatch {
   os?: string
   route?: RequestHop[]
   cloud?: CloudTarget
+  folderId?: string | null
 }
 
 type ConfigRequest =
@@ -75,6 +77,10 @@ type ConfigRequest =
   | { kind: 'database.add'; workspaceId: string; fields: DatabaseFields; secret?: DatabaseSecret }
   | { kind: 'database.update'; databaseId: string; patch: Partial<DatabaseFields>; secret?: DatabaseSecret }
   | { kind: 'database.remove'; databaseId: string }
+  | { kind: 'workspace.add'; name: string }
+  | { kind: 'workspace.rename'; workspaceId: string; name: string }
+  | { kind: 'folder.add'; workspaceId: string; name: string; parentId: string | null }
+  | { kind: 'folder.rename'; folderId: string; name: string }
 
 interface DatabaseFields {
   name: string
@@ -145,6 +151,29 @@ function toHops(route: RequestHop[] | undefined): Hop[] | undefined {
   }))
 }
 
+/**
+ * Throws unless `folderId` is a server folder in `workspaceId`; null is the
+ * root and always fine.
+ *
+ * Main resolved the folder already, but inside the workspace it believed the
+ * server was in, from a cache a save behind. A folder in another workspace
+ * would leave the server listed in one workspace and drawn under a folder of
+ * another, and the workspace is what decides which session can reach it.
+ */
+function checkServerFolder(workspaceId: string, folderId: string | null): void {
+  if (folderId === null) return
+  const folder = useApp.getState().folders.find((f) => f.id === folderId)
+  if (!folder) throw new Error('That folder no longer exists.')
+  if ((folder.kind ?? 'server') !== 'server') throw new Error('That folder is not a server folder.')
+  if (folder.workspaceId !== workspaceId) throw new Error('That folder is in a different workspace.')
+}
+
+function nameOf(raw: unknown): string {
+  const name = typeof raw === 'string' ? raw.trim() : ''
+  if (!name) throw new Error('A name is required.')
+  return name
+}
+
 // Mounted once at the app root, like ApprovalWatcher. The add_server MCP tool
 // has already resolved the workspace, checked the access group and taken the
 // user's approval by the time this runs — the work left here is the part only
@@ -157,6 +186,8 @@ export function AgentConfigWatcher(): null {
       void (async () => {
         const req = request as unknown as CreateRequest
         try {
+          // Before the row exists, so a refusal leaves nothing to take back.
+          checkServerFolder(req.workspaceId, req.folderId ?? null)
           const serverId = useApp.getState().addServer({
             workspaceId: req.workspaceId,
             name: req.name,
@@ -170,6 +201,7 @@ export function AgentConfigWatcher(): null {
             // exactly how a bastion-only server would come back configured to
             // dial direct and time out, with nothing saying why.
             route: toHops(req.route) ?? [],
+            folderId: req.folderId ?? null,
             // Same trap, same fix: without this a cloud server would be saved
             // with an empty host and no way to reach anything.
             ...(req.cloud ? { cloud: req.cloud } : {})
@@ -285,7 +317,11 @@ export function AgentConfigWatcher(): null {
               const { password, keyPath, passphrase, certificatePath, route } = req.patch
               const rest = agentServerFields(req.patch)
               const hops = toHops(route)
+              // Checked against the server's own workspace, which no patch can
+              // change, and before anything is written so a refusal is whole.
+              if (req.patch.folderId !== undefined) checkServerFolder(before.workspaceId, req.patch.folderId)
               useApp.getState().updateServer(req.serverId, { ...rest, ...(hops ? { route: hops } : {}) })
+              if (req.patch.folderId !== undefined) useApp.getState().moveServerToFolder(req.serverId, req.patch.folderId)
 
               // A credential is only rewritten when the agent sent one. An
               // update that changes a port must not silently erase the key the
@@ -434,6 +470,50 @@ export function AgentConfigWatcher(): null {
               void window.opsmaxx?.secrets.delete(req.databaseId)
               toast(t('ai.agentConfig.databaseRemoved', { name: gone.name }), 'ok')
               api?.replyConfigWrite?.(id, { ok: true, id: req.databaseId })
+              return
+            }
+            // A new workspace is in no session, this one's included, until the
+            // person grants it under AI & MCP -> Sessions. Never locked, hidden
+            // or password-protected: those are the person's to set.
+            case 'workspace.add': {
+              const name = nameOf(req.name)
+              const workspaceId = useApp.getState().addWorkspace(name)
+              toast(t('ai.agentConfig.workspaceAdded', { name }), 'ok')
+              api?.replyConfigWrite?.(id, { ok: true, id: workspaceId })
+              return
+            }
+            case 'workspace.rename': {
+              const name = nameOf(req.name)
+              const before = useApp.getState().workspaces.find((w) => w.id === req.workspaceId)
+              if (!before) throw new Error('That workspace no longer exists.')
+              useApp.getState().renameWorkspace(req.workspaceId, name)
+              toast(t('ai.agentConfig.workspaceRenamed', { from: before.name, name }), 'ok')
+              api?.replyConfigWrite?.(id, { ok: true, id: req.workspaceId })
+              return
+            }
+            case 'folder.add': {
+              const name = nameOf(req.name)
+              if (!useApp.getState().workspaces.some((w) => w.id === req.workspaceId))
+                throw new Error('That workspace no longer exists.')
+              checkServerFolder(req.workspaceId, req.parentId ?? null)
+              const folderId = useApp.getState().addFolder(name, req.parentId ?? null, 'server', req.workspaceId)
+              toast(t('ai.agentConfig.folderAdded', { name }), 'ok', {
+                label: t('ai.agentConfig.showIt'),
+                run: () => useApp.getState().setActivity('connections')
+              })
+              api?.replyConfigWrite?.(id, { ok: true, id: folderId })
+              return
+            }
+            case 'folder.rename': {
+              const name = nameOf(req.name)
+              const before = useApp.getState().folders.find((f) => f.id === req.folderId)
+              if (!before) throw new Error('That folder no longer exists.')
+              // Database folders are a separate tree the folder tools do not
+              // speak for.
+              if ((before.kind ?? 'server') !== 'server') throw new Error('That folder is not a server folder.')
+              useApp.getState().renameFolder(req.folderId, name)
+              toast(t('ai.agentConfig.folderRenamed', { from: before.name, name }), 'ok')
+              api?.replyConfigWrite?.(id, { ok: true, id: req.folderId })
               return
             }
           }
