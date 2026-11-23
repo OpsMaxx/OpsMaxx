@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { randomBytes } from 'node:crypto'
-import type { ApprovalRequest, ApprovalScope } from '../../shared/mcp'
+import type { ApprovalRequest, ApprovalScope, StructuralChange } from '../../shared/mcp'
 import { contentPreview, sanitizeAgentIntent } from '../../shared/approvalRisk'
 import { remoteText } from '../../shared/remoteText'
 import { getMcpConfig } from './mcpAuth'
@@ -232,6 +232,7 @@ export interface CreateApprovalInput {
    */
   writeContent?: { content: string; knownSecrets: string[] }
   workspaceOf?: ApprovalRequest['workspaceOf']
+  structural?: ApprovalRequest['structural']
   /**
    * Aborted when the agent's MCP request goes away — the client was killed, or
    * cancelled the call. The request then ends as `disconnected` at once rather
@@ -304,6 +305,12 @@ export function wouldRefuse(input: RationingInput): boolean {
   return refusal(input) !== null
 }
 
+function sanitizeStructural(s: StructuralChange): StructuralChange {
+  return Object.fromEntries(
+    Object.entries(s).map(([k, v]) => [k, k === 'kind' || typeof v !== 'string' ? v : remoteText(v, NAME_MAX_CHARS)])
+  ) as StructuralChange
+}
+
 export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDecision> {
   const subject = subjectKey(input)
   const refused = refusal(input)
@@ -344,6 +351,9 @@ export function requestApproval(input: CreateApprovalInput): Promise<ApprovalDec
     action: remoteText(input.action, ACTION_MAX_CHARS),
     riskReason: remoteText(input.riskReason, ACTION_MAX_CHARS),
     serverName: input.serverName === null ? null : remoteText(input.serverName, NAME_MAX_CHARS) || '(unnamed)',
+    // Names inside it are the same kind of text as serverName -- one of them
+    // is agent-written -- so they pass the same floor.
+    structural: input.structural && sanitizeStructural(input.structural),
     // Redacted over the WHOLE content, then cut: a known secret straddling the
     // cut would otherwise survive as a prefix no pattern recognises.
     contentPreview: writeContent
