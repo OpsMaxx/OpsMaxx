@@ -104,3 +104,45 @@ describe('a session’s workspaces', () => {
     expect(set).toHaveBeenCalledWith('sess-1', ['w2'])
   })
 })
+
+describe('review round 1', () => {
+  it('holds every box while a change is in flight, and builds the next on main’s answer', async () => {
+    // Two quick ticks used to both start from the prop, so the second undid
+    // the first. Now the second waits, and starts from what main answered.
+    const four = [
+      ...useApp.getState().workspaces,
+      { id: 'w4', name: 'Edge', color: 'cyan', hidden: false, locked: false, hasPassword: false }
+    ]
+    useApp.setState({ workspaces: four } as never)
+    let release: (() => void) | null = null
+    const set = vi.fn(
+      (_id: string, ids: string[]) =>
+        new Promise((resolve) => {
+          release = () => resolve({ ...session, workspaces: ids.map((id) => ({ id, name: id })) })
+        })
+    )
+    setup(set)
+    await openPanel()
+    await userEvent.click(screen.getByRole('checkbox', { name: /Lab/ }))
+    expect((screen.getByRole('checkbox', { name: /Edge/ }) as HTMLInputElement).disabled).toBe(true)
+
+    release!()
+    await waitFor(() => expect((screen.getByRole('checkbox', { name: /Edge/ }) as HTMLInputElement).disabled).toBe(false))
+    await userEvent.click(screen.getByRole('checkbox', { name: /Edge/ }))
+    release!()
+    await waitFor(() => expect(set).toHaveBeenCalledTimes(2))
+    expect(set.mock.calls[1][1]).toEqual(['w1', 'w2', 'w4'])
+  })
+
+  it('says why it will not add a workspace with the same name as one the session has', async () => {
+    useApp.setState((s) => ({
+      workspaces: [...s.workspaces, { id: 'w5', name: 'PROD', color: 'pink', hidden: false, locked: false, hasPassword: false }]
+    }) as never)
+    const set = vi.fn()
+    setup(set)
+    await openPanel()
+    await userEvent.click(screen.getByRole('checkbox', { name: /PROD/ }))
+    expect(set).not.toHaveBeenCalled()
+    expect(useToasts.getState().toasts.some((t) => t.kind === 'error' && /already has a workspace with that name/.test(t.message))).toBe(true)
+  })
+})

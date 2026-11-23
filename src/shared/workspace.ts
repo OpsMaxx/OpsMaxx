@@ -21,3 +21,12 @@
 // it would only make a second, stricter gate people hit when switching
 // workspaces several times a day.
 export const WS_MIN_PASSWORD = 6
+
+/**
+ * What two workspace or folder names are compared by. Agents address both by
+ * name, so names that differ only in case or Unicode form ("Prod", "PROD",
+ * full-width "Ｐｒｏｄ") would resolve to whichever one the lookup met first.
+ */
+export function nameKey(name: string): string {
+  return name.normalize('NFKC').toLowerCase()
+}

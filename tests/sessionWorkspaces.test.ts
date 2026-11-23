@@ -67,6 +67,19 @@ describe('setSessionWorkspaces', () => {
     expect(setSessionWorkspaces('sess-nope', ['ws-2'], KNOWN)).toBeNull()
   })
 
+  it('will not add a locked workspace, but lets one the session has stay', () => {
+    const { session } = makeSession()
+    expect(setSessionWorkspaces(session.id, ['ws-1', 'ws-2'], KNOWN, ['ws-2'])).toBeNull()
+    expect(setSessionWorkspaces(session.id, ['ws-1', 'ws-2'], KNOWN, ['ws-1'])?.workspaces).toEqual(KNOWN)
+  })
+
+  it('refuses two workspaces an agent could not tell apart by name', () => {
+    const { session } = makeSession()
+    const known = [...KNOWN, { id: 'ws-3', name: 'ＰＲＯＤＵＣＴＩＯＮ' }]
+    expect(setSessionWorkspaces(session.id, ['ws-1', 'ws-3'], known)).toBeNull()
+    expect(getSession(session.id)?.workspaces).toEqual([{ id: 'ws-1', name: 'Production' }])
+  })
+
   it('reaches a connected client on its next request, without a reconnect', () => {
     // Every MCP request authenticates afresh and reads the record found here.
     setMcpConfig({ enabled: true })
@@ -81,9 +94,12 @@ describe('only the person can change a session’s workspaces', () => {
   const src = (p: string): string => readFileSync(p, 'utf8')
 
   it('is wired over IPC, checked against the saved workspace list', () => {
-    expect(src('src/main/index.ts')).toMatch(
-      /ipcMain\.handle\('aiMcp:setSessionWorkspaces',[\s\S]{0,120}setSessionWorkspaces\(id, workspaceIds, listCachedWorkspaces\(\)\)/
-    )
+    const handler = src('src/main/index.ts').match(/ipcMain\.handle\('aiMcp:setSessionWorkspaces',[\s\S]*?\n\}\)/)?.[0] ?? ''
+    expect(handler).toContain('setSessionWorkspaces(id, workspaceIds, listCachedWorkspaces(), locked)')
+    // Locked means protected and not unlocked since launch.
+    expect(handler).toMatch(/wsLockIds\(\)\.filter\(\(w\) => !wsUnlockedThisRun\.has\(w\)\)/)
+    // A removal drops the session's standing approvals, or a re-tick revives them.
+    expect(handler).toContain('clearSessionElevations(id)')
     expect(src('src/preload/index.ts')).toContain("ipcRenderer.invoke('aiMcp:setSessionWorkspaces', id, workspaceIds)")
   })
 

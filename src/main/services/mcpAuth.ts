@@ -5,6 +5,7 @@ import { randomBytes, createHash, timingSafeEqual } from 'node:crypto'
 import type { McpAgentSession, McpGlobalConfig, SessionMode, WorkspaceRef } from '../../shared/mcp'
 import { DEFAULT_MCP_PORT, PICKERLESS_MODE, isSessionMode } from '../../shared/mcp'
 import { atomicWriteFileSync } from './atomicWrite'
+import { nameKey } from '../../shared/workspace'
 
 const CONFIG_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-config.json')
 const SESSIONS_FILE = join(app.getPath('userData'), 'opsmaxx-mcp-sessions.json')
@@ -256,9 +257,19 @@ export function setSessionMode(id: string, mode: SessionMode): McpAgentSession |
  *
  * Refuses (null) a revoked or expired session, and a list that would leave it
  * none. A session with no workspace can do nothing yet still looks connected;
- * revoking it says what is meant.
+ * revoking it says what is meant. Also refuses:
+ *  - adding a workspace in `locked` -- one whose password nobody has entered.
+ *    One the session already has may stay: keeping it widens nothing.
+ *  - two workspaces whose names differ only in case or Unicode form. Tools
+ *    address workspaces by name, so the agent could not tell them apart, and
+ *    an agent that made the second one could pass it off as the first.
  */
-export function setSessionWorkspaces(id: string, workspaceIds: unknown, known: WorkspaceRef[]): McpAgentSession | null {
+export function setSessionWorkspaces(
+  id: string,
+  workspaceIds: unknown,
+  known: WorkspaceRef[],
+  locked: readonly string[] = []
+): McpAgentSession | null {
   if (!Array.isArray(workspaceIds)) return null
   const session = loadSessions().find((s) => s.id === id)
   if (!session || session.revoked || isExpired(session)) return null
@@ -269,6 +280,10 @@ export function setSessionWorkspaces(id: string, workspaceIds: unknown, known: W
     if (w) next.set(w.id, { id: w.id, name: w.name })
   }
   if (next.size === 0) return null
+  const had = new Set(session.workspaces.map((w) => w.id))
+  if ([...next.keys()].some((wid) => !had.has(wid) && locked.includes(wid))) return null
+  const names = new Set([...next.values()].map((w) => nameKey(w.name)))
+  if (names.size !== next.size) return null
   session.workspaces = [...next.values()]
   writeSessions()
   return session

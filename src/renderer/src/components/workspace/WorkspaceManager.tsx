@@ -6,6 +6,7 @@ import { rdpSecretId } from '../../../../shared/rdp'
 // The one value wslock.ts enforces in main, imported rather than copied, so the
 // form can refuse a short password itself instead of round-tripping to be told.
 import { WS_MIN_PASSWORD } from '../../../../shared/workspace'
+import { nameKey } from '../../../../shared/workspace'
 import { toast } from '../../store/toast'
 import { colorVar } from '../layout/WorkspaceSwitcher'
 import type { WorkspaceColor } from '../../types'
@@ -24,6 +25,14 @@ export function WorkspaceManager(): React.JSX.Element {
   const setWorkspace = useApp((s) => s.setWorkspace)
   const unlockedWorkspaces = useApp((s) => s.unlockedWorkspaces)
   const deleteWorkspace = useApp((s) => s.deleteWorkspace)
+  const servers = useApp((s) => s.servers)
+  const serverCount = new Map<string, number>()
+  for (const sv of servers) serverCount.set(sv.workspaceId, (serverCount.get(sv.workspaceId) ?? 0) + 1)
+  // Two workspaces an agent would address by the same name. Worth a warning
+  // whoever made them, and the reason the agent badge exists: a workspace an
+  // agent created can otherwise pass for the one the person meant to grant.
+  const nameCount = new Map<string, number>()
+  for (const w of workspaces) nameCount.set(nameKey(w.name), (nameCount.get(nameKey(w.name)) ?? 0) + 1)
   // Confirming a delete: holds the workspace id awaiting confirmation.
   const [confirming, setConfirming] = useState<string | null>(null)
 
@@ -83,18 +92,27 @@ export function WorkspaceManager(): React.JSX.Element {
     wname,
     wcolor,
     isHidden,
-    hasPassword
+    hasPassword,
+    agentCreated
   }: {
     id: string
     wname: string
     wcolor: WorkspaceColor
     isHidden: boolean
     hasPassword: boolean
+    agentCreated: boolean
   }): React.JSX.Element => (
     <>
       <div className="list-row" style={{ padding: '10px 14px' }}>
         <span className="ws-dot" style={{ background: colorVar[wcolor], color: colorVar[wcolor] }} />
         <span className="r-title">{wname}</span>
+        <span className="s-desc">{t('workspace.manager.serverCount', { count: serverCount.get(id) ?? 0 })}</span>
+        {agentCreated && <span className="chip info">{t('workspace.manager.agentCreated')}</span>}
+        {(nameCount.get(nameKey(wname)) ?? 0) > 1 && (
+          <span className="chip warn" title={t('workspace.manager.sameNameTitle')}>
+            {t('workspace.manager.sameName')}
+          </span>
+        )}
         {hasPassword && (
           <span
             className="row"
@@ -316,7 +334,15 @@ export function WorkspaceManager(): React.JSX.Element {
           {t('workspace.manager.activeHeading', { count: active.length })}
         </div>
         {active.map((w) => (
-          <Row key={w.id} id={w.id} wname={w.name} wcolor={w.color} isHidden={false} hasPassword={w.hasPassword} />
+          <Row
+            key={w.id}
+            id={w.id}
+            wname={w.name}
+            wcolor={w.color}
+            isHidden={false}
+            hasPassword={w.hasPassword}
+            agentCreated={w.agentCreated === true}
+          />
         ))}
       </div>
 
@@ -326,7 +352,15 @@ export function WorkspaceManager(): React.JSX.Element {
             {t('workspace.manager.hiddenHeading', { count: hidden.length })}
           </div>
           {hidden.map((w) => (
-            <Row key={w.id} id={w.id} wname={w.name} wcolor={w.color} isHidden hasPassword={w.hasPassword} />
+            <Row
+              key={w.id}
+              id={w.id}
+              wname={w.name}
+              wcolor={w.color}
+              isHidden
+              hasPassword={w.hasPassword}
+              agentCreated={w.agentCreated === true}
+            />
           ))}
         </div>
       )}

@@ -24,6 +24,10 @@ let deleted: string[] = []
 let setCalls: { id: string; blob: string }[] = []
 let replies: { id: string; result: { ok: boolean; error?: string } }[] = []
 let stopped: string[] = []
+// Saves and replies in the order they happened: a reply has to follow the save
+// that refreshes main's cache, or the agent's next call misses the change.
+let order: string[] = []
+let retired: string[] = []
 let closed: string[] = []
 
 function mount(): void {
@@ -34,6 +38,8 @@ function mount(): void {
   setCalls = []
   replies = []
   stopped = []
+  order = []
+  retired = []
   closed = []
   stubBridge({
     aiMcp: {
@@ -49,9 +55,17 @@ function mount(): void {
         return () => {}
       }),
       replyConfigWrite: vi.fn((id: string, result: { ok: boolean; error?: string }) => {
+        order.push(`reply:${id}`)
         replies.push({ id, result })
       })
     },
+    data: {
+      save: vi.fn(async () => {
+        order.push('save')
+      })
+    },
+    ssh: { poolEvict: vi.fn(async (id: string) => void retired.push(`ssh:${id}`)) },
+    sftp: { disconnect: vi.fn(async (id: string) => void retired.push(`sftp:${id}`)) },
     secrets: {
       set: vi.fn(async (id: string, blob: string) => {
         setCalls.push({ id, blob })
@@ -459,5 +473,106 @@ describe('workspaces and folders', () => {
     await waitFor(() => expect(replies).toHaveLength(2))
     expect(replies[1].result).toEqual({ ok: false, error: 'That folder is not a server folder.' })
     expect(useApp.getState().folders.find((f) => f.id === 'f-db')!.name).toBe('DBs')
+  })
+})
+
+describe('review round 1', () => {
+  it('moves a server without retiring its connections or bumping its revision', async () => {
+    // A move is a sidebar reshuffle. Going through updateServer dropped every
+    // live terminal and SFTP session to the box for nothing.
+    mount()
+    fire?.({ id: 'r1', request: { kind: 'server.update', serverId: 's1', patch: { folderId: 'f1' } } })
+
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(useApp.getState().servers[0].folderId).toBe('f1')
+    expect(useApp.getState().servers[0].rev).toBeUndefined()
+    expect(retired).toEqual([])
+  })
+
+  it('still retires connections when a move comes with a real change', async () => {
+    mount()
+    fire?.({ id: 'r1', request: { kind: 'server.update', serverId: 's1', patch: { folderId: 'f1', port: 2200 } } })
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(useApp.getState().servers[0]).toMatchObject({ folderId: 'f1', port: 2200, rev: 1 })
+    expect(retired).toContain('ssh:s1')
+  })
+
+  it.each([
+    ['workspace.add', { kind: 'workspace.add', name: 'Lab' }],
+    ['workspace.rename', { kind: 'workspace.rename', workspaceId: 'w1', name: 'Prod' }],
+    ['folder.add', { kind: 'folder.add', workspaceId: 'w1', name: 'API', parentId: null }],
+    ['folder.rename', { kind: 'folder.rename', folderId: 'f1', name: 'Frontend' }],
+    ['a move', { kind: 'server.update', serverId: 's1', patch: { folderId: 'f1' } }]
+  ])('saves before answering %s, so the next tool call sees it', async (_what, request) => {
+    mount()
+    fire?.({ id: 'r1', request })
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(replies[0].result.ok).toBe(true)
+    expect(order).toEqual(['save', 'reply:r1'])
+  })
+
+  it('marks a workspace an agent made', async () => {
+    mount()
+    fire?.({ id: 'r1', request: { kind: 'workspace.add', name: 'Lab' } })
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(useApp.getState().workspaces.find((w) => w.name === 'Lab')!.agentCreated).toBe(true)
+  })
+
+  it.each([
+    ['folder.add', { kind: 'folder.add', workspaceId: 'w1', name: 'ｗｅｂ', parentId: null }],
+    ['folder.rename', { kind: 'folder.rename', folderId: 'f-new', name: 'WEB' }]
+  ])('%s refuses a sibling name that differs only in case or form', async (_what, request) => {
+    useApp.setState((s) => ({ folders: [...s.folders, { id: 'f-new', workspaceId: 'w1', name: 'New', parentId: null, kind: 'server' }] }) as never)
+    mount()
+    fire?.({ id: 'r1', request })
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(replies[0].result).toEqual({ ok: false, error: 'A folder with that name already exists there.' })
+  })
+
+  it('lets a folder be renamed to a new case of its own name', async () => {
+    mount()
+    fire?.({ id: 'r1', request: { kind: 'folder.rename', folderId: 'f1', name: 'WEB' } })
+    await waitFor(() => expect(replies).toHaveLength(1))
+    expect(replies[0].result.ok).toBe(true)
+  })
+
+  describe('a locked workspace', () => {
+    beforeEach(() => {
+      useApp.setState((s) => ({
+        workspaces: s.workspaces.map((w) => (w.id === 'w1' ? { ...w, hasPassword: true } : w)),
+        unlockedWorkspaces: []
+      }) as never)
+    })
+
+    it.each([
+      ['workspace.rename', { kind: 'workspace.rename', workspaceId: 'w1', name: 'X' }],
+      ['folder.add', { kind: 'folder.add', workspaceId: 'w1', name: 'X', parentId: null }],
+      ['folder.rename', { kind: 'folder.rename', folderId: 'f1', name: 'X' }],
+      ['a move', { kind: 'server.update', serverId: 's1', patch: { folderId: 'f1' } }],
+      ['a move to the root', { kind: 'server.update', serverId: 's1', patch: { folderId: null } }]
+    ])('refuses %s', async (_what, request) => {
+      mount()
+      fire?.({ id: 'r1', request })
+      await waitFor(() => expect(replies).toHaveLength(1))
+      expect(replies[0].result).toEqual({ ok: false, error: 'That workspace is locked in OpsMaxx.' })
+    })
+
+    it('refuses to add a server into one of its folders', async () => {
+      mount()
+      fireCreate?.({
+        id: 'c1',
+        request: { workspaceId: 'w1', name: 'Web03', host: '10.0.0.3', port: 22, username: 'root', auth: 'agent', folderId: 'f1' }
+      })
+      await waitFor(() => expect(createReplies).toHaveLength(1))
+      expect(createReplies[0].result).toEqual({ ok: false, error: 'That workspace is locked in OpsMaxx.' })
+    })
+
+    it('allows all of it once unlocked', async () => {
+      useApp.setState({ unlockedWorkspaces: ['w1'] } as never)
+      mount()
+      fire?.({ id: 'r1', request: { kind: 'workspace.rename', workspaceId: 'w1', name: 'Prod' } })
+      await waitFor(() => expect(replies).toHaveLength(1))
+      expect(replies[0].result.ok).toBe(true)
+    })
   })
 })

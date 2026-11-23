@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight, Lock, ShieldCheck, X } from 'lucide-react'
 import { toast } from '../../store/toast'
 import { useApp } from '../../store/app'
+import { nameKey } from '../../../../shared/workspace'
 import { openAi, openSettings } from '../../store/nav'
 import { sessionModeLabel, sessionModeOf } from '../../../../shared/mcp'
 import type {
@@ -63,7 +64,9 @@ const whereOf = (r: Restriction): string =>
 async function restrictionsFor(session: McpAgentSession, groups: AccessGroup[]): Promise<Restriction[]> {
   const api = window.opsmaxx?.aiPolicy
   const [assignments, servers] = await Promise.all([api?.listAssignments?.(), api?.listServers?.()])
-  const mine = new Map(session.workspaces.map((w) => [w.id, w.name]))
+  // The name as it is now: the session stored the one it had when granted.
+  const live = new Map(useApp.getState().workspaces.map((w) => [w.id, w.name]))
+  const mine = new Map(session.workspaces.map((w) => [w.id, live.get(w.id) ?? w.name]))
   const serverById = new Map((servers ?? []).map((s) => [s.id, s]))
   const out: Restriction[] = []
   for (const a of assignments ?? []) {
@@ -171,7 +174,14 @@ export function SessionAccess({
   // What the "why" column names as the source: the group for Custom, else the
   // profile itself, which stands on no group the user picked.
   const baseName = mode === 'custom' ? groupName : sessionModeLabel(mode)
-  const granted = session.workspaces.map((w) => w.id)
+  // What main last answered, until the next reload of the session brings the
+  // same thing back as a prop. Two quick clicks must each build on the
+  // previous answer, not on a prop that has not caught up yet.
+  const [held, setHeld] = useState<string[] | null>(null)
+  const [moving, setMoving] = useState(false)
+  const propReach = session.workspaces.map((w) => w.id).join()
+  useEffect(() => setHeld(null), [propReach])
+  const granted = held ?? session.workspaces.map((w) => w.id)
   // Everything below that reads the session's reach re-reads when it moves.
   const reach = granted.join()
 
@@ -254,12 +264,21 @@ export function SessionAccess({
   // than assumed. A workspace an agent created a moment ago may not be saved
   // yet, and is dropped -- the toast says to try again.
   const toggleWorkspace = async (workspaceId: string, name: string, on: boolean): Promise<void> => {
+    // Main refuses this too; asked here first so the toast can say why.
+    const clash = on && allWorkspaces.some((w) => granted.includes(w.id) && nameKey(w.name) === nameKey(name))
+    if (clash) {
+      toast(t('ai.sessionAccess.workspaceSameName', { agent: session.agentName, name }), 'error')
+      return
+    }
     const ids = on ? [...granted, workspaceId] : granted.filter((id) => id !== workspaceId)
+    setMoving(true)
     const updated = await window.opsmaxx?.aiMcp.setSessionWorkspaces?.(session.id, ids).catch(() => null)
+    setMoving(false)
     if (!updated || updated.workspaces.some((w) => w.id === workspaceId) !== on) {
       toast(t('ai.sessionAccess.workspaceNotChanged', { agent: session.agentName, name }), 'error')
       return
     }
+    setHeld(updated.workspaces.map((w) => w.id))
     setRows(null)
     onChanged()
     toast(
@@ -338,7 +357,7 @@ export function SessionAccess({
                   <input
                     type="checkbox"
                     checked={on}
-                    disabled={locked || last}
+                    disabled={locked || last || moving}
                     onChange={(e) => void toggleWorkspace(w.id, w.name, e.target.checked)}
                   />
                   {w.name}

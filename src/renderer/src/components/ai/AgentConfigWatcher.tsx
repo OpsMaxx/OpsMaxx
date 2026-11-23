@@ -8,6 +8,8 @@ import { agentServerFields } from '../../lib/agentServerPatch'
 import { rdpSecretId } from '../../../../shared/rdp'
 import type { DbKind } from '../../../../shared/db'
 import { saveDatabaseEdit } from '../../store/dbEditor'
+import { flushSave } from '../../store/persist'
+import { nameKey } from '../../../../shared/workspace'
 import type { Hop, TunnelKind } from '../../types'
 import { t } from '../../lib/i18n'
 
@@ -151,9 +153,15 @@ function toHops(route: RequestHop[] | undefined): Hop[] | undefined {
   }))
 }
 
+/** A workspace protected by a password nobody has entered this run is the
+ *  person's to open first, for an agent as much as for anyone at the keyboard. */
+function checkUnlocked(workspaceId: string): void {
+  if (!useApp.getState().isWorkspaceAccessible(workspaceId)) throw new Error('That workspace is locked in OpsMaxx.')
+}
+
 /**
- * Throws unless `folderId` is a server folder in `workspaceId`; null is the
- * root and always fine.
+ * Throws unless `folderId` is a server folder in `workspaceId` (null is the
+ * root) and that workspace is unlocked.
  *
  * Main resolved the folder already, but inside the workspace it believed the
  * server was in, from a cache a save behind. A folder in another workspace
@@ -161,11 +169,44 @@ function toHops(route: RequestHop[] | undefined): Hop[] | undefined {
  * another, and the workspace is what decides which session can reach it.
  */
 function checkServerFolder(workspaceId: string, folderId: string | null): void {
+  checkUnlocked(workspaceId)
   if (folderId === null) return
   const folder = useApp.getState().folders.find((f) => f.id === folderId)
   if (!folder) throw new Error('That folder no longer exists.')
   if ((folder.kind ?? 'server') !== 'server') throw new Error('That folder is not a server folder.')
   if (folder.workspaceId !== workspaceId) throw new Error('That folder is in a different workspace.')
+}
+
+/** Main refuses a same-named sibling before asking, but from a cache a save
+ *  behind; this is the live tree. `except` is the folder being renamed. */
+function checkFolderNameFree(workspaceId: string, parentId: string | null, name: string, except?: string): void {
+  const key = nameKey(name)
+  const taken = useApp
+    .getState()
+    .folders.some(
+      (f) =>
+        f.id !== except &&
+        f.workspaceId === workspaceId &&
+        (f.kind ?? 'server') === 'server' &&
+        (f.parentId ?? null) === parentId &&
+        nameKey(f.name) === key
+    )
+  if (taken) throw new Error('A folder with that name already exists there.')
+}
+
+/**
+ * Written to disk now rather than on the debounce, because main's cache is
+ * refreshed from that save and the agent's next call reads the cache: without
+ * this, "create a folder, then file a server into it" fails on the second step.
+ * A failed save is not this request's failure -- the change is made, and the
+ * debounced save tries again.
+ */
+async function saved(): Promise<void> {
+  try {
+    await flushSave()
+  } catch {
+    /* see above */
+  }
 }
 
 function nameOf(raw: unknown): string {
@@ -187,7 +228,7 @@ export function AgentConfigWatcher(): null {
         const req = request as unknown as CreateRequest
         try {
           // Before the row exists, so a refusal leaves nothing to take back.
-          checkServerFolder(req.workspaceId, req.folderId ?? null)
+          if (req.folderId) checkServerFolder(req.workspaceId, req.folderId)
           const serverId = useApp.getState().addServer({
             workspaceId: req.workspaceId,
             name: req.name,
@@ -294,6 +335,7 @@ export function AgentConfigWatcher(): null {
               run: () => useApp.getState().setActivity('connections')
             }
           )
+          if (req.folderId) await saved()
           api?.replyCreateServer?.(id, { ok: true, serverId })
         } catch (err) {
           const reason = err instanceof Error ? err.message : String(err)
@@ -319,8 +361,15 @@ export function AgentConfigWatcher(): null {
               const hops = toHops(route)
               // Checked against the server's own workspace, which no patch can
               // change, and before anything is written so a refusal is whole.
-              if (req.patch.folderId !== undefined) checkServerFolder(before.workspaceId, req.patch.folderId)
-              useApp.getState().updateServer(req.serverId, { ...rest, ...(hops ? { route: hops } : {}) })
+              const moving = req.patch.folderId !== undefined
+              if (moving) checkServerFolder(before.workspaceId, req.patch.folderId ?? null)
+              // A move alone is not an edit: updateServer bumps the revision and
+              // retires every live connection to the server, which is right for
+              // a new host or credential and wrong for a sidebar reshuffle.
+              const onlyMoving =
+                moving && !Object.entries(req.patch).some(([k, v]) => k !== 'folderId' && v !== undefined)
+              if (!onlyMoving)
+                useApp.getState().updateServer(req.serverId, { ...rest, ...(hops ? { route: hops } : {}) })
               if (req.patch.folderId !== undefined) useApp.getState().moveServerToFolder(req.serverId, req.patch.folderId)
 
               // A credential is only rewritten when the agent sent one. An
@@ -349,6 +398,7 @@ export function AgentConfigWatcher(): null {
                 label: t('ai.agentConfig.showIt'),
                 run: () => useApp.getState().setActivity('connections')
               })
+              if (moving) await saved()
               api?.replyConfigWrite?.(id, { ok: true, id: req.serverId })
               return
             }
@@ -477,8 +527,9 @@ export function AgentConfigWatcher(): null {
             // or password-protected: those are the person's to set.
             case 'workspace.add': {
               const name = nameOf(req.name)
-              const workspaceId = useApp.getState().addWorkspace(name)
+              const workspaceId = useApp.getState().addWorkspace(name, undefined, { agentCreated: true })
               toast(t('ai.agentConfig.workspaceAdded', { name }), 'ok')
+              await saved()
               api?.replyConfigWrite?.(id, { ok: true, id: workspaceId })
               return
             }
@@ -486,8 +537,10 @@ export function AgentConfigWatcher(): null {
               const name = nameOf(req.name)
               const before = useApp.getState().workspaces.find((w) => w.id === req.workspaceId)
               if (!before) throw new Error('That workspace no longer exists.')
+              checkUnlocked(req.workspaceId)
               useApp.getState().renameWorkspace(req.workspaceId, name)
               toast(t('ai.agentConfig.workspaceRenamed', { from: before.name, name }), 'ok')
+              await saved()
               api?.replyConfigWrite?.(id, { ok: true, id: req.workspaceId })
               return
             }
@@ -496,11 +549,13 @@ export function AgentConfigWatcher(): null {
               if (!useApp.getState().workspaces.some((w) => w.id === req.workspaceId))
                 throw new Error('That workspace no longer exists.')
               checkServerFolder(req.workspaceId, req.parentId ?? null)
+              checkFolderNameFree(req.workspaceId, req.parentId ?? null, name)
               const folderId = useApp.getState().addFolder(name, req.parentId ?? null, 'server', req.workspaceId)
               toast(t('ai.agentConfig.folderAdded', { name }), 'ok', {
                 label: t('ai.agentConfig.showIt'),
                 run: () => useApp.getState().setActivity('connections')
               })
+              await saved()
               api?.replyConfigWrite?.(id, { ok: true, id: folderId })
               return
             }
@@ -511,8 +566,11 @@ export function AgentConfigWatcher(): null {
               // Database folders are a separate tree the folder tools do not
               // speak for.
               if ((before.kind ?? 'server') !== 'server') throw new Error('That folder is not a server folder.')
+              checkUnlocked(before.workspaceId)
+              checkFolderNameFree(before.workspaceId, before.parentId ?? null, name, before.id)
               useApp.getState().renameFolder(req.folderId, name)
               toast(t('ai.agentConfig.folderRenamed', { from: before.name, name }), 'ok')
+              await saved()
               api?.replyConfigWrite?.(id, { ok: true, id: req.folderId })
               return
             }

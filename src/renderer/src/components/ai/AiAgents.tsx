@@ -377,6 +377,8 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
   const [workspaces, setWorkspaces] = useState<WorkspaceOpt[]>([])
   const [groups, setGroups] = useState<AccessGroup[]>([])
   const focusSessionId = useNav((s) => s.aiSessionId)
+  // Names as they are now; a session stores the one each workspace had when granted.
+  const liveWorkspaces = useApp((s) => s.workspaces)
   const t = useT()
 
   // Sent here to look at one session (from the approval dialog): scroll to it
@@ -468,7 +470,7 @@ export function AiAgents({ sessionsOnly = false }: { sessionsOnly?: boolean }): 
               </div>
               <div className="r-sub">
                 {t(ws.length > 1 ? 'ai.agents.workspacesLine' : 'ai.agents.workspaceLine', {
-                  names: ws.map((w) => w.name).join(', ') || '—',
+                  names: ws.map((w) => liveWorkspaces.find((x) => x.id === w.id)?.name ?? w.name).join(', ') || '—',
                   started: fmtTime(s.createdAt)
                 })}
                 {s.expiresAt ? t('ai.agents.expires', { time: fmtTime(s.expiresAt) }) : t('ai.agents.noExpiry')}

@@ -512,6 +512,7 @@ import {
   setSessionGroup,
   setSessionMode,
   setSessionWorkspaces,
+  getSession,
   type CreateSessionInput
 } from './services/mcpAuth'
 import {
@@ -5921,7 +5922,17 @@ ipcMain.handle('vault:bio-unlock', async () => resumeChecksAfterUnlock(await bio
 
 // ---- Workspace locks ----
 ipcMain.handle('wslock:ids', () => wsLockIds())
-ipcMain.handle('wslock:verify', (_e, id: string, password: string) => wsLockVerify(id, password))
+// Which protected workspaces someone has typed the password for since launch.
+// Main has no other view of the renderer's unlock state, and granting a
+// protected workspace to an agent session is refused until this has it.
+// ponytail: never cleared on a re-lock in the window (the panel holds that
+// case); a wslock:locked IPC from lockWorkspace would close it if it matters.
+const wsUnlockedThisRun = new Set<string>()
+ipcMain.handle('wslock:verify', async (_e, id: string, password: string) => {
+  const ok = await wsLockVerify(id, password)
+  if (ok) wsUnlockedThisRun.add(id)
+  return ok
+})
 ipcMain.handle('wslock:set', (_e, id: string, password: string, current?: string) =>
   wsLockSet(id, password, current)
 )
@@ -6172,11 +6183,21 @@ ipcMain.handle('aiMcp:setSessionMode', (_e, id: string, mode: SessionMode) => {
 })
 // The human's switch too, and likewise the only one: no MCP tool reaches
 // setSessionWorkspaces. Ids are checked against the saved workspace list, not
-// trusted from the window. The unlock state of a password-protected workspace
-// lives in the renderer only, so the panel is what holds a locked one back.
-ipcMain.handle('aiMcp:setSessionWorkspaces', (_e, id: string, workspaceIds: string[]) =>
-  setSessionWorkspaces(id, workspaceIds, listCachedWorkspaces())
-)
+// trusted from the window, and a protected workspace nobody has unlocked since
+// launch cannot be added.
+//
+// Not written to the AI audit log: that file is the bridge's record and every
+// row in it is an agent's (see approvalLog.ts). This is the person's change.
+ipcMain.handle('aiMcp:setSessionWorkspaces', (_e, id: string, workspaceIds: string[]) => {
+  const before = getSession(id)?.workspaces.map((w) => w.id) ?? []
+  const locked = wsLockIds().filter((w) => !wsUnlockedThisRun.has(w))
+  const session = setSessionWorkspaces(id, workspaceIds, listCachedWorkspaces(), locked)
+  // "Approve for this session" answers are keyed on the session, not on the
+  // workspace. Left in place, unticking a workspace and ticking it again later
+  // would quietly bring back every approval given while it was granted before.
+  if (session && before.some((w) => !session.workspaces.some((x) => x.id === w))) clearSessionElevations(id)
+  return session
+})
 ipcMain.handle('aiMcp:explainAccess', (_e, sessionId: string, serverId: string | null) =>
   explainSessionAccess(sessionId, serverId)
 )

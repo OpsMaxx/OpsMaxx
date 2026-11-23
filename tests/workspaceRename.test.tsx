@@ -36,3 +36,20 @@ describe('renaming a workspace', () => {
     expect((screen.getByTitle('Unlock Vault to rename it.') as HTMLButtonElement).disabled).toBe(true)
   })
 })
+
+describe('telling workspaces apart', () => {
+  it('shows each one’s server count, which an agent made, and names that collide', () => {
+    useApp.setState({
+      workspaces: [
+        { id: 'w1', name: 'Prod', color: 'green', hidden: false, locked: false, hasPassword: false },
+        { id: 'w3', name: 'prod', color: 'blue', hidden: false, locked: false, hasPassword: false, agentCreated: true }
+      ],
+      servers: [{ id: 's1', workspaceId: 'w1', name: 'a' }, { id: 's2', workspaceId: 'w1', name: 'b' }]
+    } as never)
+    render(<WorkspaceManager />)
+    expect(screen.getByText('2 servers')).toBeTruthy()
+    expect(screen.getByText('0 servers')).toBeTruthy()
+    expect(screen.getAllByText('Created by an agent')).toHaveLength(1)
+    expect(screen.getAllByText('Same name as another workspace')).toHaveLength(2)
+  })
+})

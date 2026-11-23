@@ -754,7 +754,7 @@ interface AppState {
   syncWorkspaceLocks: (lockedIds: string[]) => void
   toggleWorkspaceHidden: (id: string) => void
   /** No color: the first one no workspace uses yet, else round the palette. */
-  addWorkspace: (name: string, color?: Workspace['color']) => string
+  addWorkspace: (name: string, color?: Workspace['color'], extra?: Pick<Workspace, 'agentCreated'>) => string
   renameWorkspace: (id: string, name: string) => void
   deleteWorkspace: (id: string) => void
   toggleFavorite: (serverId: string) => void
@@ -2022,14 +2022,17 @@ export const useApp = create<AppState>((set, get) => ({
       workspaces: s.workspaces.map((w) => (w.id === id ? { ...w, hidden: !w.hidden } : w))
     })),
 
-  addWorkspace: (name, color) => {
+  addWorkspace: (name, color, extra) => {
     const id = uid('ws')
     set((s) => {
       const used = new Set(s.workspaces.map((w) => w.color))
       const pick =
         color ?? WORKSPACE_COLORS.find((c) => !used.has(c)) ?? WORKSPACE_COLORS[s.workspaces.length % WORKSPACE_COLORS.length]
       return {
-        workspaces: [...s.workspaces, { id, name, color: pick, hidden: false, locked: false, hasPassword: false }]
+        workspaces: [
+          ...s.workspaces,
+          { id, name, color: pick, hidden: false, locked: false, hasPassword: false, ...extra }
+        ]
       }
     })
     return id
