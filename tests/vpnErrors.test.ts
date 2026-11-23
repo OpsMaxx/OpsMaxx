@@ -17,6 +17,7 @@ import {
 const ALL_CODES: VpnErrorCode[] = [
   'binary-missing',
   'binary-untrusted',
+  'binary-outdated',
   'config-invalid',
   'config-rejected',
   'auth-failed',

@@ -6583,6 +6583,7 @@
   "shared.hostFacts.source.notReported": "采集器未报告此来源",
   "main.vpn.error.binary-missing": "找不到运行此隧道的程序。{{detail}}",
   "main.vpn.error.binary-untrusted": "内置的隧道程序与预期的校验和不符，因此未运行。{{detail}}",
+  "main.vpn.error.binary-outdated": "已安装的隧道程序版本过旧，OpsMaxx 无法使用。{{detail}}",
   "main.vpn.error.config-invalid": "此配置无效。{{detail}}",
   "main.vpn.error.config-rejected": "此配置因试图运行程序而被拒绝。{{detail}}",
   "main.vpn.error.auth-failed": "服务器拒绝了这些凭据。{{detail}}",

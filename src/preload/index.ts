@@ -1877,7 +1877,9 @@ const api = {
       ipcRenderer.invoke('vpn:stop', id, force),
     reload: (id: string): Promise<VpnResult> => ipcRenderer.invoke('vpn:reload', id),
     validate: (spec: VpnSpec): Promise<VpnValidation> => ipcRenderer.invoke('vpn:validate', spec),
-    probe: (kind: VpnKind): Promise<VpnEngineInfo> => ipcRenderer.invoke('vpn:probe', kind),
+    /** `profileId` probes that stored profile's own engine path, if it has one. */
+    probe: (kind: VpnKind, profileId?: string): Promise<VpnEngineInfo> =>
+      ipcRenderer.invoke('vpn:probe', kind, profileId),
     /**
      * This machine's own name for a Tailscale node.
      *

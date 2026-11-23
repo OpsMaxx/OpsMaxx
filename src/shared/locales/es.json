@@ -6822,6 +6822,7 @@
   "shared.hostFacts.source.notReported": "el recopilador no informó sobre esta fuente",
   "main.vpn.error.binary-missing": "No se encontró el programa que ejecuta este túnel.{{detail}}",
   "main.vpn.error.binary-untrusted": "El programa de túnel incluido no coincide con su suma de comprobación esperada, así que no se ejecutó.{{detail}}",
+  "main.vpn.error.binary-outdated": "El programa de túnel instalado es demasiado antiguo para OpsMaxx.{{detail}}",
   "main.vpn.error.config-invalid": "Este perfil no es válido.{{detail}}",
   "main.vpn.error.config-rejected": "Se rechazó esta configuración porque intenta ejecutar programas.{{detail}}",
   "main.vpn.error.auth-failed": "El servidor rechazó estas credenciales.{{detail}}",

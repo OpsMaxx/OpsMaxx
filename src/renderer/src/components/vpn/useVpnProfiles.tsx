@@ -6,6 +6,7 @@ import { toast, type ToastAction } from '../../store/toast'
 import { bytes, clsx } from '../../lib/format'
 import { bridgeHas } from '../../lib/bridge'
 import { withVaultUnlock } from '../../lib/withVaultUnlock'
+import { flushSave } from '../../store/persist'
 import { isVpnRunning } from '../../../../shared/vpn'
 import { engineForKindIsBundled, engineForKindIsUserSupplied } from '../../../../shared/vpnEngines'
 import type {
@@ -42,6 +43,17 @@ const KIND_LABEL: Record<VpnKind, string> = {
   frp: 'frp',
   tailscale: 'Tailscale',
   ngrok: 'ngrok'
+}
+
+/** The engine path this profile set for itself, for the kinds that have one. */
+function ownPath(p: VpnProfile): string | undefined {
+  return p.spec.kind === 'openvpn' || p.spec.kind === 'frp' ? p.spec.binaryPath : undefined
+}
+
+/** Which probe answers for this profile's row: its own, when it names its own
+ *  engine path, otherwise the one shared by its kind. */
+function probeKey(p: VpnProfile): string {
+  return ownPath(p) ? p.id : p.spec.kind
 }
 
 /** The proxies whose exposure the user has not ticked. Start refuses while this
@@ -173,6 +185,8 @@ function openExternal(url: string): void {
 }
 
 const NO_DETAIL = { detail: '' }
+/** Codes whose detail says more than their sentence — see `headline`. */
+const DETAIL_IS_HEADLINE: VpnErrorCode[] = ['internal', 'binary-outdated']
 /** The sentence main opens a failure with for `code`, without its detail. Main
  *  sends it in English (an agent reads the same result); the catalog holds it
  *  under one key, so the English is what the text is matched against and the
@@ -194,14 +208,21 @@ const opening = (code: VpnErrorCode): MessageKey => `main.vpn.error.${code}`
  *  message with no fact in it, in front of the one detail that explained the
  *  failure. When the sentence is that one, the detail IS the headline.
  *
+ *  `binary-outdated` is promoted the same way, for a different reason: its
+ *  sentence is true but the detail opens with the one that matters — "frpc
+ *  0.61.0 is too old; OpsMaxx needs 0.62.0 or newer" — and a row that says
+ *  only "too old" leaves the reader to open Details for the number.
+ *
  *  With `code`, a message that opens with that code's sentence is answered with
  *  the sentence in the user's language. */
 export function headline(text: string, code?: VpnErrorCode): string {
   const trimmed = text.trim()
-  for (const said of [englishT(opening('internal'), NO_DETAIL), tr(opening('internal'), NO_DETAIL)]) {
-    if (!trimmed.startsWith(said)) continue
-    const rest = trimmed.slice(said.length).trim()
-    return rest !== '' ? headline(rest) : tr(opening('internal'), NO_DETAIL)
+  for (const promoted of DETAIL_IS_HEADLINE) {
+    for (const said of [englishT(opening(promoted), NO_DETAIL), tr(opening(promoted), NO_DETAIL)]) {
+      if (!trimmed.startsWith(said)) continue
+      const rest = trimmed.slice(said.length).trim()
+      return rest !== '' ? headline(rest) : tr(opening(promoted), NO_DETAIL)
+    }
   }
   if (code && trimmed.startsWith(englishT(opening(code), NO_DETAIL))) {
     return tr(opening(code), NO_DETAIL)
@@ -246,8 +267,9 @@ function remedyFor(
     // OpenVPN does on macOS and Linux — so a missing engine there is a damaged
     // install, and offering a download page would send the reader off to
     // install something they already have. An frpc that is present but too
-    // old arrives here too, and installing a newer one is its fix as well.
+    // old (`binary-outdated`) gets the same button: a newer one is its fix.
     case 'binary-missing':
+    case 'binary-outdated':
       return (
         installAction(kind, platform) ??
         // A damaged install is not unfixable, which is what "no button at all"
@@ -357,7 +379,8 @@ export function useVpnProfiles(): VpnProfiles {
     dependents: VpnDependent[]
     attached: { id: string; kind: VpnDependent['kind']; name: string }[]
   } | null>(null)
-  const [engines, setEngines] = useState<Partial<Record<VpnKind, VpnEngineInfo>>>({})
+  // Keyed by `probeKey`: the kind, or the profile for one with its own path.
+  const [engines, setEngines] = useState<Record<string, VpnEngineInfo>>({})
   // Feeds `engineForKindIsUserSupplied`, which decides whether a missing engine is the
   // user's to install or a damaged install of ours. Null until the round trip
   // lands, and that shared helper treats null as "not the user's".
@@ -416,22 +439,47 @@ export function useVpnProfiles(): VpnProfiles {
     })
   }, [setVpnStatus])
 
-  // Probe once per kind actually in use. A missing OpenVPN binary is the kind of
-  // thing that should be visible before Start is pressed, not after.
-  const kinds = useMemo(() => [...new Set(profiles.map((p) => p.spec.kind))].join(','), [profiles])
+  // Probe once per kind actually in use, and once per profile that names its
+  // own engine path. A missing OpenVPN binary is the kind of thing that should
+  // be visible before Start is pressed, not after — and a profile pointed at
+  // a copy of its own must be judged by that copy: frp on Windows searches
+  // nowhere, so a kind-wide probe would keep Start disabled forever after the
+  // user had set a perfectly good path.
+  //
+  // The path is part of the key, so editing it re-probes; focus re-probes too,
+  // so installing frpc in a terminal enables Start when the user comes back.
+  const probes = useMemo(
+    () =>
+      [...new Set(profiles.map((p) => `${probeKey(p)}\u0000${p.spec.kind}\u0000${ownPath(p) ?? ''}`))].join(
+        '\u0001'
+      ),
+    [profiles]
+  )
+  const [focusTick, setFocusTick] = useState(0)
   useEffect(() => {
-    if (!kinds) return
+    const onFocus = (): void => setFocusTick((n) => n + 1)
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+  useEffect(() => {
+    if (!probes) return
     if (!bridgeHas(window.opsmaxx?.vpn as Record<string, unknown> | undefined, 'probe')) return
     let live = true
-    for (const k of kinds.split(',') as VpnKind[]) {
-      void window.opsmaxx?.vpn.probe(k).then((info) => {
-        if (live && info) setEngines((e) => ({ ...e, [k]: info }))
-      })
+    for (const entry of probes.split('\u0001')) {
+      const [key, kind, path] = entry.split('\u0000') as [string, VpnKind, string]
+      // Main reads the profile from its own store rather than taking a path
+      // from here, so an edit has to have been written before it is asked.
+      const ready = path ? Promise.resolve().then(flushSave).catch(() => undefined) : Promise.resolve()
+      void ready
+        .then(() => window.opsmaxx?.vpn.probe(kind, path ? key : undefined))
+        .then((info) => {
+          if (live && info) setEngines((e) => ({ ...e, [key]: info }))
+        })
     }
     return () => {
       live = false
     }
-  }, [kinds])
+  }, [probes, focusTick])
 
   const start = useCallback(async (p: VpnProfile): Promise<void> => {
     setBusy((b) => ({ ...b, [p.id]: true }))
@@ -635,7 +683,7 @@ export function useVpnProfiles(): VpnProfiles {
     const health = vpnHealth(status)
     const running = !!status && isVpnRunning(status.state)
     const ungated = ungatedProxies(p)
-    const engine = engines[p.spec.kind]
+    const engine = engines[probeKey(p)]
     const open = expanded === p.id
     const gated = !running && ungated.length > 0
     const engineMissing = engine?.available === false

@@ -6822,6 +6822,7 @@
   "shared.hostFacts.source.notReported": "der Sammler hat zu dieser Quelle nichts berichtet",
   "main.vpn.error.binary-missing": "Das Programm, das diesen Tunnel betreibt, wurde nicht gefunden.{{detail}}",
   "main.vpn.error.binary-untrusted": "Das mitgelieferte Tunnelprogramm stimmt nicht mit seiner erwarteten Prüfsumme überein und wurde daher nicht ausgeführt.{{detail}}",
+  "main.vpn.error.binary-outdated": "Das installierte Tunnelprogramm ist für OpsMaxx zu alt.{{detail}}",
   "main.vpn.error.config-invalid": "Dieses Profil ist ungültig.{{detail}}",
   "main.vpn.error.config-rejected": "Diese Konfiguration wurde abgelehnt, weil sie versucht, Programme auszuführen.{{detail}}",
   "main.vpn.error.auth-failed": "Der Server hat diese Anmeldedaten abgelehnt.{{detail}}",

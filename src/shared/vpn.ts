@@ -507,6 +507,8 @@ export interface VpnStats {
 export type VpnErrorCode =
   | 'binary-missing'
   | 'binary-untrusted'
+  // Found, and older than the driver can drive (frpc below 0.62.0).
+  | 'binary-outdated'
   | 'config-invalid'
   | 'config-rejected'
   | 'auth-failed'

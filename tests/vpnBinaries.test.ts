@@ -10,6 +10,7 @@ import {
   writeFileSync
 } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   resetBinaryCache,
@@ -469,15 +470,60 @@ describe('frpc, which OpsMaxx never ships', () => {
     expect(isVpnError(err) && err.code).toBe('config-invalid')
   })
 
-  it('refuses a confirmed frpc that is too old, naming both versions and how to get a newer one', async () => {
+  it('refuses a confirmed frpc that is too old, leading with both versions', async () => {
     const file = frpcShim(join(root, 'tools'), '0.51.3')
     const err = await resolveEngineBinary('frpc', { binaryPath: file, confirmed: true }).catch(
       (e) => e
     )
-    expect(isVpnError(err) && err.code).toBe('binary-missing')
-    expect(err.detail).toContain('frpc 0.51.3')
-    expect(err.detail).toContain('0.62.0 or newer')
+    expect(isVpnError(err) && err.code).toBe('binary-outdated')
+    // First, because it is the headline: the program IS there.
+    expect(err.detail.startsWith('frpc 0.51.3 is too old; OpsMaxx needs 0.62.0 or newer.')).toBe(true)
     expect(err.detail).toContain('github.com/fatedier/frp/releases')
+  })
+
+  it('says why a binary that will not run reported no version', async () => {
+    // What Gatekeeper does to an unsigned download, and what a broken binary
+    // does anywhere: killed before it prints a thing. "Did not report a
+    // version" sent people to check the version of a program that never ran.
+    const dir = join(root, 'killed')
+    mkdirSync(dir, { recursive: true, mode: 0o755 })
+    const file = join(dir, 'frpc')
+    writeFileSync(file, '#!/bin/sh\nkill -9 $$\n')
+    chmodSync(file, 0o755)
+    const err = await resolveEngineBinary('frpc', { binaryPath: file, confirmed: true }).catch(
+      (e) => e
+    )
+    expect(isVpnError(err) && err.code).toBe('binary-missing')
+    expect(err.detail).toContain('was killed (SIGKILL)')
+    expect(err.detail).toContain('0.62.0 or newer')
+  })
+
+  it.runIf(process.platform === 'darwin')(
+    'names the quarantine attribute, and the command that clears it, on macOS',
+    async () => {
+      const dir = join(root, 'download')
+      mkdirSync(dir, { recursive: true, mode: 0o755 })
+      const file = join(dir, 'frpc')
+      writeFileSync(file, '#!/bin/sh\nkill -9 $$\n')
+      chmodSync(file, 0o755)
+      execFileSync('/usr/bin/xattr', ['-w', 'com.apple.quarantine', '0081;00000000;Safari;', file])
+      const err = await resolveEngineBinary('frpc', { binaryPath: file, confirmed: true }).catch(
+        (e) => e
+      )
+      expect(err.detail).toContain(`xattr -d com.apple.quarantine ${realpathSync(file)}`)
+    }
+  )
+
+  it('carries none of the OpenVPN coexistence talk', async () => {
+    // frpc creates no tun device and claims no route; "utun6 already carries
+    // traffic" or "Tunnelblick is installed" under an frp row is about
+    // somebody else's problem.
+    const file = frpcShim(join(root, 'tools'), '0.71.0')
+    const info = await resolveEngineBinary('frpc', { binaryPath: file, confirmed: true })
+    expect(info.advisories).toBeUndefined()
+    const old = frpcShim(join(root, 'old'), '0.61.0')
+    const err = await resolveEngineBinary('frpc', { binaryPath: old, confirmed: true }).catch((e) => e)
+    expect(err.detail).not.toContain('copy of OpenVPN')
   })
 
   it.skipIf(installed || process.platform === 'win32')(
@@ -486,8 +532,10 @@ describe('frpc, which OpsMaxx never ships', () => {
       const old = frpcShim(join(root, 'old'), '0.61.0')
       process.env.PATH = join(root, 'old')
       const err = await resolveEngineBinary('frpc', {}).catch((e) => e)
-      expect(isVpnError(err) && err.code).toBe('binary-missing')
-      expect(err.detail).toContain(`Found but not used: ${old} is frpc 0.61.0`)
+      // Every refusal was the version, so the version is the headline.
+      expect(isVpnError(err) && err.code).toBe('binary-outdated')
+      expect(err.detail).toContain('frpc 0.61.0 is too old; OpsMaxx needs 0.62.0 or newer.')
+      expect(err.detail).toContain(`Found ${old} (0.61.0)`)
 
       // And a newer one later on PATH still gets its turn.
       const good = frpcShim(join(root, 'new'), '0.62.0')

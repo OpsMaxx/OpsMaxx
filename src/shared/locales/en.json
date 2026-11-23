@@ -6832,6 +6832,7 @@
   "shared.hostFacts.source.notReported": "the collector did not report on this source",
   "main.vpn.error.binary-missing": "The program that runs this tunnel could not be found.{{detail}}",
   "main.vpn.error.binary-untrusted": "The bundled tunnel program does not match its expected checksum, so it was not run.{{detail}}",
+  "main.vpn.error.binary-outdated": "The installed tunnel program is too old for OpsMaxx.{{detail}}",
   "main.vpn.error.config-invalid": "This profile is not valid.{{detail}}",
   "main.vpn.error.config-rejected": "This configuration was rejected because it tries to run programs.{{detail}}",
   "main.vpn.error.auth-failed": "The server rejected these credentials.{{detail}}",

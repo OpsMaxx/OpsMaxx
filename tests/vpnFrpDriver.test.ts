@@ -319,12 +319,21 @@ describe('frp driver lifecycle', () => {
     }
   )
 
+  it('probes a profile by its own path, so a row is judged by the frpc it will run', async () => {
+    // The kind-wide probe has no path to go on; a row with one must not be
+    // greyed out by it.
+    const info = await frpDriver.probe(makeSpec([proxy()]))
+    expect(info.available).toBe(true)
+    expect(info.path).toBe(realpathSync(frpcPath))
+    expect(info.version).toBe('0.71.0')
+  })
+
   it('refuses an frpc older than the driver can drive, naming both versions, and spawns nothing', async () => {
     // 0.51 reads no TOML and 0.52–0.61 HTML-escape the token they template in.
     writeFileSync(frpcPath, '#!/bin/sh\necho 0.61.0\n')
     const profile = makeProfile(makeSpec([proxy()]))
     const err = await frpDriver.start(profile, makeCtx().ctx).catch((e) => e)
-    expect(isVpnError(err) && err.code).toBe('binary-missing')
+    expect(isVpnError(err) && err.code).toBe('binary-outdated')
     expect(err.detail).toContain('0.61.0')
     expect(err.detail).toContain('0.62.0')
     expect(spawns).toHaveLength(0)

@@ -71,9 +71,12 @@ export interface VpnDriver<S extends VpnSpec = VpnSpec> {
    *  every keystroke. */
   validateConfig(spec: S): VpnValidation
 
-  /** Locate and integrity-check the engine. Cached for the app run. Never
-   *  spawns a profile. */
-  probe(): Promise<VpnEngineInfo>
+  /** Locate and integrity-check the engine. Never spawns a profile. With a
+   *  spec, answers for THAT profile — its own `binaryPath`, where the kind has
+   *  one — because a row whose engine is a path the user set must not be
+   *  judged by the kind-wide search, which may find nothing (frp on Windows
+   *  searches nowhere at all). */
+  probe(spec?: S): Promise<VpnEngineInfo>
 
   start(profile: VpnProfile & { spec: S }, ctx: VpnDriverContext): Promise<VpnStartResult>
 

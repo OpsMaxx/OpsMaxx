@@ -6822,6 +6822,7 @@
   "shared.hostFacts.source.notReported": "le collecteur n’a pas rendu compte de cette source",
   "main.vpn.error.binary-missing": "Le programme qui exécute ce tunnel est introuvable.{{detail}}",
   "main.vpn.error.binary-untrusted": "Le programme de tunnel fourni ne correspond pas à sa somme de contrôle attendue ; il n’a donc pas été exécuté.{{detail}}",
+  "main.vpn.error.binary-outdated": "Le programme de tunnel installé est trop ancien pour OpsMaxx.{{detail}}",
   "main.vpn.error.config-invalid": "Ce profil n’est pas valide.{{detail}}",
   "main.vpn.error.config-rejected": "Cette configuration a été rejetée, car elle tente d’exécuter des programmes.{{detail}}",
   "main.vpn.error.auth-failed": "Le serveur a rejeté ces identifiants.{{detail}}",

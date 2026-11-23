@@ -589,9 +589,9 @@ export const frpDriver: VpnDriver<FrpSpec> = {
     return validateFrpSpec(spec)
   },
 
-  async probe(): Promise<VpnEngineInfo> {
+  async probe(spec?: FrpSpec): Promise<VpnEngineInfo> {
     try {
-      return await resolveFrpc()
+      return await resolveFrpc(spec)
     } catch (e) {
       // A missing or too-old frpc is a state the UI shows, not an exception it
       // has to handle; this is where it turns into text. The detail already

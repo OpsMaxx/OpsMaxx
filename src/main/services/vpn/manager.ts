@@ -211,7 +211,11 @@ export function vpnValidate(spec: VpnSpec): VpnValidation {
   }
 }
 
-export async function vpnProbe(kind: VpnKind): Promise<VpnEngineInfo> {
+/** The engine for `kind`, or — given a profile id — for that stored profile.
+ *  The spec is read from this machine's own store, never taken from the
+ *  caller: a `binaryPath` counts as confirmed only because it is there (see
+ *  `resolveFrpc` in drivers/frp.ts). */
+export async function vpnProbe(kind: VpnKind, profileId?: string): Promise<VpnEngineInfo> {
   // driverFor returns undefined for a kind that is not in the registry, which
   // only a corrupt profile or a malformed IPC argument can produce — but the
   // resulting TypeError would escape the IPC handler as an unhandled rejection
@@ -220,8 +224,10 @@ export async function vpnProbe(kind: VpnKind): Promise<VpnEngineInfo> {
   if (!driver) {
     return { kind, available: false, bundled: false, reason: `Unknown tunnel type "${kind}".` }
   }
+  const profile = profileId ? vpnProfile(profileId) : null
+  const spec = profile?.spec.kind === kind ? profile.spec : undefined
   try {
-    return await driver.probe()
+    return await (driver.probe as (spec?: VpnSpec) => Promise<VpnEngineInfo>)(spec)
   } catch (e) {
     return { kind, available: false, bundled: false, reason: toVpnResult(e).error }
   }

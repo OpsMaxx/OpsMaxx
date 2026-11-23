@@ -134,3 +134,36 @@ describe('frp, which OpsMaxx no longer ships', () => {
     open.mockRestore()
   })
 })
+
+describe('a profile that names its own engine', () => {
+  // The row used to be judged by a probe per KIND. frp on Windows searches
+  // nowhere, so that probe always says "missing" — and Start stayed disabled
+  // forever on a profile whose path the user had set and the engine would
+  // have run. The row now asks main about THIS profile, by id; main reads the
+  // stored path itself rather than taking one from the renderer.
+  it('enables Start on Windows once the frp profile has a confirmed path', async () => {
+    const p = profile('frp')
+    ;(p.spec as { binaryPath?: string }).binaryPath = 'C:\\Tools\\frp\\frpc.exe'
+    probe.mockImplementation((k: VpnKind, id?: string) =>
+      Promise.resolve(
+        id === p.id
+          ? ({ kind: k, available: true, bundled: false, path: 'C:\\Tools\\frp\\frpc.exe', version: '0.71.0' } as VpnEngineInfo)
+          : frpMissing()
+      )
+    )
+    show(p, 'win32')
+    await waitFor(() => expect(probe).toHaveBeenCalledWith('frp', p.id))
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false)
+    )
+    expect(screen.queryByRole('button', { name: 'Install frp' })).toBeNull()
+  })
+
+  it('still probes by kind for a profile without a path, and re-probes on focus', async () => {
+    show(profile('frp'), 'win32')
+    await waitFor(() => expect(probe).toHaveBeenCalledWith('frp', undefined))
+    const before = probe.mock.calls.length
+    window.dispatchEvent(new Event('focus'))
+    await waitFor(() => expect(probe.mock.calls.length).toBeGreaterThan(before))
+  })
+})
