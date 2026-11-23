@@ -170,6 +170,28 @@ export function approvalWhere(r: { serverName: string | null; workspaceName: str
  * it does not belong here. It is still a hand-kept copy of somebody else's
  * rules, which is precisely why it is no longer what the operator reads first.
  */
+/**
+ * The workspace and folder tools' actions, read back off the exact strings
+ * mcpServer.ts builds for them. The OLD name comes first and is matched lazily:
+ * it was written by the user, while the new one is the agent's, so an agent
+ * cannot make a new name containing `" → "` move the split into the old one.
+ */
+function structuralAction(action: string):
+  | { kind: 'workspaceCreate'; vars: { name: string } }
+  | { kind: 'workspaceRename' | 'folderRename'; vars: { from: string; to: string } }
+  | { kind: 'folderCreate'; vars: { path: string } }
+  | null {
+  let m = /^Create workspace "(.*)" \(not added to this AI session\)$/s.exec(action)
+  if (m) return { kind: 'workspaceCreate', vars: { name: m[1] } }
+  m = /^Rename workspace "(.*?)" \u2192 "(.*)"$/s.exec(action)
+  if (m) return { kind: 'workspaceRename', vars: { from: m[1], to: m[2] } }
+  m = /^Create folder "(.*)" in .*$/s.exec(action)
+  if (m) return { kind: 'folderCreate', vars: { path: m[1] } }
+  m = /^Rename folder "(.*?)" \u2192 "(.*)" in .*$/s.exec(action)
+  if (m) return { kind: 'folderRename', vars: { from: m[1], to: m[2] } }
+  return null
+}
+
 export function riskReasons(s: ApprovalSubject): string[] {
   const out: string[] = []
   const action = s.action
@@ -217,14 +239,21 @@ export function riskReasons(s: ApprovalSubject): string[] {
   // Same problem, same fix: this capability grew two verbs that destroy or
   // rewrite rather than add, and a single sentence about "writes ... and stores
   // a credential" describes none of what a removal does.
-  if (s.capability === 'manageServers')
+  //
+  // Workspaces and folders joined it later, and fell to serverAdd: creating a
+  // workspace was described as storing a credential. They are matched first.
+  if (s.capability === 'manageServers') {
+    const structural = structuralAction(action)
     out.push(
-      /^remove\b/i.test(action)
-        ? st('shared.approvalRisk.reason.serverRemove')
-        : /^(change|update)\b/i.test(action)
-          ? st('shared.approvalRisk.reason.serverChange')
-          : st('shared.approvalRisk.reason.serverAdd')
+      structural
+        ? st(`shared.approvalRisk.reason.${structural.kind}`)
+        : /^remove\b/i.test(action)
+          ? st('shared.approvalRisk.reason.serverRemove')
+          : /^(change|update)\b/i.test(action)
+            ? st('shared.approvalRisk.reason.serverChange')
+            : st('shared.approvalRisk.reason.serverAdd')
     )
+  }
 
   const prod = productionHint(s)
   if (prod) out.push(st('shared.approvalRisk.reason.production', { name: prod }))
@@ -574,7 +603,10 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
           : st('shared.approvalRisk.consequence.vpnStop'),
         known: true
       }
-    case 'manageServers':
+    case 'manageServers': {
+      const structural = structuralAction(action)
+      if (structural)
+        return { text: st(`shared.approvalRisk.consequence.${structural.kind}`, structural.vars), known: true }
       return {
         text: /^remove\b/i.test(action)
           ? st('shared.approvalRisk.consequence.serverRemove')
@@ -583,6 +615,7 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
             : st('shared.approvalRisk.consequence.serverAdd'),
         known: true
       }
+    }
     case 'viewServer':
       return {
         text: st('shared.approvalRisk.consequence.viewServer', { host }),
