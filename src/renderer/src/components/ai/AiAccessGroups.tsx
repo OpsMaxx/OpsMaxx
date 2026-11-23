@@ -68,7 +68,8 @@ function PermSegment({
 // Every capability in AI_CAPABILITIES is now gated by at least one tool —
 // sshTunnel by list_tunnels/set_tunnel/create_tunnel/delete_tunnel,
 // databaseAccess by query_database, manageServers by
-// add_server/update_server/remove_server, vpnControl by list_vpns/set_vpn —
+// add_server/update_server/remove_server and the workspace and folder tools,
+// vpnControl by list_vpns/set_vpn —
 // so the grid no longer carries a
 // "displayed but does nothing" tier. If one is ever added back, it needs a
 // visible marker here rather than a silent row: a permission the user believes

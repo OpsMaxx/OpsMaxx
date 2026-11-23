@@ -1875,6 +1875,27 @@ export function evaluateServerWrite(group: AccessGroup | null, act: 'change' | '
     : manage
 }
 
+// Creating or renaming a WORKSPACE asks at every setting, Confirm risky actions
+// or not; only a mode applied after this (Bypass) makes it silent, and
+// Read-only refuses it. `allow` on manageServers means "add servers without
+// asking me" and says nothing about the workspace list itself.
+//
+// Renaming is the sharper of the two. Approval dialogs and the audit log name a
+// workspace by its name, so a silent rename of "Prod" to "Sandbox" would make
+// the next approval dialog about Prod say Sandbox -- the dialog would lie.
+// Creating is asked for because it is a change to the user's own structure that
+// no access group was written to anticipate; it grants nothing (see
+// create_workspace).
+export function evaluateWorkspaceWrite(group: AccessGroup | null, act: 'create' | 'rename'): Decision {
+  if (!group) return { decision: 'deny', reason: 'No AI access is assigned to this workspace.' }
+  if (evaluateCapability(group, 'manageServers').decision === 'deny')
+    return { decision: 'deny', reason: 'Managing servers is denied for this access group.' }
+  return {
+    decision: 'ask',
+    reason: act === 'create' ? 'Creating a workspace is always approved first.' : 'Renaming a workspace is always approved first.'
+  }
+}
+
 // VPN kinds an AI agent may never run, whatever access group governs it.
 //
 // The same treatment as UNRESTRICTED_SHELL_PATTERNS above, for the same reason.

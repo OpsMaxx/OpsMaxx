@@ -150,8 +150,19 @@ export interface CachedCicdConnection {
   enabled: boolean
 }
 
+/** A server folder. Folders carry no policy; the bridge reads them only so an
+ *  agent can address one by path when filing a server. Database folders share
+ *  the persisted list and are dropped here: no tool files a database. */
+export interface CachedFolder {
+  id: string
+  workspaceId: string
+  name: string
+  parentId: string | null
+}
+
 interface DataShape {
   workspaces?: unknown
+  folders?: unknown
   servers?: unknown
   databases?: unknown
   tunnels?: unknown
@@ -199,6 +210,22 @@ function parseWorkspaces(raw: unknown): CachedWorkspace[] {
     .filter(isRecord)
     .filter((w) => typeof w.id === 'string' && typeof w.name === 'string')
     .map((w) => ({ id: w.id as string, name: w.name as string }))
+}
+
+// A record with no `kind` predates database folders and is a server folder, the
+// same default the renderer applies when it loads (store/app.ts).
+function parseFolders(raw: unknown): CachedFolder[] {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter(isRecord)
+    .filter((f) => typeof f.id === 'string' && typeof f.workspaceId === 'string' && typeof f.name === 'string')
+    .filter((f) => (f.kind ?? 'server') === 'server')
+    .map((f) => ({
+      id: f.id as string,
+      workspaceId: f.workspaceId as string,
+      name: f.name as string,
+      parentId: typeof f.parentId === 'string' ? f.parentId : null
+    }))
 }
 
 function parseServers(raw: unknown): CachedServer[] {
@@ -380,6 +407,7 @@ export function serverToSshConfig(
 }
 
 let workspaces: CachedWorkspace[] = []
+let folders: CachedFolder[] = []
 let servers: CachedServer[] = []
 let databases: CachedDatabase[] = []
 let tunnels: CachedTunnel[] = []
@@ -389,6 +417,7 @@ let cicdConnections: CachedCicdConnection[] = []
 export function refreshMcpDataCache(data?: unknown): void {
   const raw = (data ?? loadData()) as DataShape | null
   workspaces = parseWorkspaces(raw?.workspaces)
+  folders = parseFolders(raw?.folders)
   servers = parseServers(raw?.servers)
   databases = parseDatabases(raw?.databases)
   tunnels = parseTunnels(raw?.tunnels)
@@ -442,6 +471,11 @@ export function getCachedCicdConnection(id: string): CachedCicdConnection | null
 
 export function listCachedWorkspaces(): CachedWorkspace[] {
   return workspaces
+}
+
+/** Server folders in ONE workspace. There is deliberately no unscoped form. */
+export function listCachedFolders(workspaceId: string): CachedFolder[] {
+  return folders.filter((f) => f.workspaceId === workspaceId)
 }
 
 export function listCachedServers(workspaceId?: string | string[]): CachedServer[] {

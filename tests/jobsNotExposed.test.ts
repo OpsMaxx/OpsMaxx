@@ -123,6 +123,13 @@ const ALLOWED_TOOLS = [
   // and remove_server always asks, whatever the access group says.
   'update_server',
   'remove_server',
+  // OpsMaxx's own workspace and folder records. None of them adds a workspace
+  // to any session -- only the user does that -- so none widens what an agent
+  // reaches. Workspace create and rename ask at every setting short of Bypass.
+  'create_workspace',
+  'rename_workspace',
+  'create_folder',
+  'rename_folder',
   // Dials a saved server and hangs up. It runs no command and returns nothing
   // from the host, which is why it sits on `viewServer` rather than `terminal`:
   // "is this entry healthy" must not require the ability to run things.
