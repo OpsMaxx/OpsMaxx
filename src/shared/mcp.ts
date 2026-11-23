@@ -453,6 +453,15 @@ export interface McpAgentSession {
 // tell apart from a measured value. Optional says "this may genuinely not have
 // been recorded", and every consumer is forced to decide what to print when it
 // was not. See src/renderer/src/components/ai/ApprovalDialog.tsx.
+/** What a workspace or folder tool is about to do, named by its parts. `to`
+ *  null on a folder move is the workspace root. */
+export type StructuralChange =
+  | { kind: 'workspaceCreate'; name: string }
+  | { kind: 'workspaceRename'; from: string; to: string }
+  | { kind: 'folderCreate'; path: string }
+  | { kind: 'folderRename'; from: string; to: string }
+  | { kind: 'folderMove'; server: string; to: string | null }
+
 export interface ApprovalRequest {
   id: string
   sessionId: string
@@ -563,6 +572,13 @@ export interface ApprovalRequest {
    * call returns nothing unless every one of them is approved.
    */
   workspaceOf?: { index: number; total: number }
+
+  /**
+   * A workspace or folder change, as fields. The approval copy renders these
+   * rather than parsing `action`, which is a sentence with agent-written names
+   * in it. Absent for every other kind of request.
+   */
+  structural?: StructuralChange
 
   /** How far the operator's yes reached, once there was one. See ApprovalScope. */
   grantedScope?: ApprovalScope

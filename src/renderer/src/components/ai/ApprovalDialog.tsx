@@ -272,6 +272,7 @@ export function ApprovalDialog({
     risk: request.risk,
     serverName: request.serverName,
     workspaceName: request.workspaceName,
+    structural: request.structural,
     // Main's own rule, when the gate() call site recorded one. explainRisk
     // prefers it over the derivation in approvalRisk.ts, which exists now only
     // for a call site that supplied none.

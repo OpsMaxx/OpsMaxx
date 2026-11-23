@@ -12,7 +12,7 @@ import type { HostMetrics } from '../../shared/ssh'
 import { formatBytes } from '../../shared/bytesForecast'
 import { assessCommand } from '../../shared/commandRisk'
 
-import { authenticate, getSession, getMcpConfig, type AuthFailureReason } from './mcpAuth'
+import { authenticate, getSession, getMcpConfig, isExpired, type AuthFailureReason } from './mcpAuth'
 import { startCliPairing, confirmCliPairing } from './cliPairing'
 import {
   protectedResourceMetadata,
@@ -148,7 +148,8 @@ import type {
   AuditEntry,
   CapabilityExplanation,
   McpAgentSession,
-  SessionMode
+  SessionMode,
+  StructuralChange
 } from '../../shared/mcp'
 
 function text(s: string): CallToolResult {
@@ -731,7 +732,10 @@ function workspaceCheck(
   workspaceId: string,
   evaluate: (g: AccessGroup) => Decision,
   mutating: boolean,
-  protectServerId: string | null = null
+  protectServerId: string | null = null,
+  // The group and the workspace's restriction only, before the mode: for the
+  // one question a mode must not answer. See create_workspace.
+  opts: { beforeMode?: true } = {}
 ): Decision {
   const grant = sessionGroupFor(session)
   if (!grant) return NO_GROUP
@@ -741,14 +745,17 @@ function workspaceCheck(
   const found = resolveRestriction(listAssignments(), '', workspaceId)
   if (found.kind === 'no-ai-access') return NO_AI_ACCESS
   const restriction = found.kind === 'group' ? getGroup(found.groupId) : null
-  return applyMode(
-    withRestriction(
-      evaluate(grant),
-      restriction ? evaluate(restriction) : null,
-      `the workspace's access group ("${restriction?.name}")`
-    ),
-    { mode: modeOf(session), protectedTarget: isProtected(protectServerId, workspaceId), mutating }
+  const decided = withRestriction(
+    evaluate(grant),
+    restriction ? evaluate(restriction) : null,
+    `the workspace's access group ("${restriction?.name}")`
   )
+  if (opts.beforeMode) return decided
+  return applyMode(decided, {
+    mode: modeOf(session),
+    protectedTarget: isProtected(protectServerId, workspaceId),
+    mutating
+  })
 }
 
 function effectiveCapability(
@@ -1043,6 +1050,12 @@ interface GateSubject {
   writeContent?: { content: string; knownSecrets: string[] }
   /** Which of the workspaces one call is asking about this is. See gateWorkspaces. */
   workspaceOf?: { index: number; total: number }
+  /**
+   * A workspace or folder change as fields, for the approval copy to render.
+   * The dialog used to parse these back out of `action`, a sentence with
+   * agent-written names inside it.
+   */
+  structural?: StructuralChange
 }
 
 /**
@@ -1296,6 +1309,7 @@ async function gate(
       sessionGrant,
       writeContent: subject.writeContent,
       workspaceOf: subject.workspaceOf,
+      structural: subject.structural,
       signal: extra?.signal
     })
     const approved = decision === 'approved' || decision === 'approved-for-session'
@@ -1315,19 +1329,21 @@ async function gate(
         result: errorText('Cancelled: the request was withdrawn before it could run, so nothing ran.')
       }
     }
-    // Approved, but the session changed under the card while it waited. The
-    // user can take a workspace out of a live session, revoke it or delete it
-    // without answering what it already has queued, and a yes clicked later
-    // was about a session that no longer reaches this. Read fresh, not from
-    // ctx.session: that is the record as it was when the call authenticated.
-    // Only this branch can wait on a human, so only it needs the re-check.
+    // Approved, but what the card was about changed while it waited: the
+    // session revoked, deleted or expired, the action's workspace taken out of
+    // it or deleted. None of those answers what is already queued. Read fresh,
+    // not ctx.session (the record as it authenticated). Only this branch waits.
     if (approved) {
       const now = getSession(ctx.session.id)
-      const gone = !now || now.revoked
-      if (gone || !now.workspaces.some((w) => w.id === ctx.workspaceId)) {
-        const reason = gone
-          ? 'This session was revoked while the request waited, so nothing ran.'
-          : 'This session no longer has access to that workspace.'
+      const reason =
+        !now || now.revoked || isExpired(now)
+          ? 'This session was revoked or expired while the request waited, so nothing ran.'
+          : !now.workspaces.some((w) => w.id === ctx.workspaceId)
+            ? 'This session no longer has access to that workspace.'
+            : ctx.workspaceId && !getCachedWorkspace(ctx.workspaceId)
+              ? 'That workspace was deleted while the request waited, so nothing ran.'
+              : null
+      if (reason) {
         recordAudit({ ...auditBase(ctx), approval: decision, result: 'denied', error: `Approved too late: ${reason}` })
         return { ok: false, result: errorText(`Denied: ${reason}`) }
       }
@@ -2277,24 +2293,53 @@ function vpnSummary(v: CachedVpn): string {
 // ------------------------------------------------- workspaces and folders
 //
 // Names an agent writes are read later by people -- in an approval dialog, the
-// audit log, the sidebar -- and by other agents, as data. A line break or a
-// bidi override in one is a way to make that text say something it does not,
-// so they are refused rather than stripped: a silently altered name is not the
-// one the agent will go on addressing.
-// eslint-disable-next-line no-control-regex -- matching control characters is the point
-const UNSAFE_NAME_CHARS = /[\u0000-\u001f\u007f\u2028\u2029\u202a-\u202e\u2066-\u2069]/
+// audit log, the sidebar -- and by other agents, as data. Anything that makes
+// that text say something it does not is refused rather than stripped: a
+// silently altered name is not the one the agent will go on addressing.
+//
+//   hidden       controls, format characters (bidi marks and overrides, ZWSP,
+//                BOM, soft hyphen, tags), line/paragraph separators, private
+//                use, unassigned, and every default-ignorable (variation
+//                selectors, the Hangul filler)
+//   quotes       the marks the approval copy wraps a name in
+//   stacked      more than two combining marks in a row paint over the text
+//                beside them
+//   mixed        letters from more than one script whose letters pass for
+//                each other's
+//
+// ponytail: no UTS #39 confusable skeletons. Mixed-script refusal is the
+// stand-in, so a name written wholly in Cyrillic look-alikes still passes;
+// compare skeletons if whole-name impersonation turns out to matter.
+const HIDDEN_NAME_CHARS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\p{Co}\p{Cn}]|\p{Default_Ignorable_Code_Point}/u
+const QUOTE_CHARS = /["“”]/
+const STACKED_MARKS = /\p{M}{3,}/u
+const LOOKALIKE_SCRIPTS = (['Latin', 'Cyrillic', 'Greek', 'Armenian', 'Cherokee', 'Georgian', 'Coptic'] as const).map(
+  (script) => ({ script, re: new RegExp(`\\p{Script=${script}}`, 'u') })
+)
 const MAX_NAME_CHARS = 64
 
 function validName(raw: string, what: 'workspace' | 'folder'): { name: string } | { error: string } {
-  const name = raw.trim()
+  // NFC so the name stored is the one compared and displayed, however the
+  // agent happened to compose it.
+  const name = raw.trim().normalize('NFC')
   if (!name) return { error: `A ${what} name cannot be empty.` }
-  if (UNSAFE_NAME_CHARS.test(name))
-    return { error: `A ${what} name may not contain control characters, line breaks or text-direction overrides.` }
+  // On the raw text: trim() would quietly drop a leading BOM or line break.
+  if (HIDDEN_NAME_CHARS.test(raw))
+    return { error: `A ${what} name may not contain invisible, control or text-direction characters, or line breaks.` }
+  if (QUOTE_CHARS.test(name)) return { error: `A ${what} name may not contain quotation marks.` }
+  // Decomposed, so a precomposed letter's own accent counts toward the stack.
+  if (STACKED_MARKS.test(name.normalize('NFD'))) return { error: `A ${what} name may not stack more than two combining marks.` }
+  const scripts = LOOKALIKE_SCRIPTS.filter(({ re }) => [...name].some((ch) => re.test(ch))).map((s) => s.script)
+  if (scripts.length > 1)
+    return { error: `A ${what} name may not mix ${scripts.join(' and ')} letters, which can be made to look alike.` }
   if ([...name].length > MAX_NAME_CHARS) return { error: `A ${what} name may be at most ${MAX_NAME_CHARS} characters.` }
   if (what === 'folder' && name.includes('/'))
     return { error: 'A folder name may not contain "/": it separates folders in a path.' }
   return { name }
 }
+
+/** What two names are compared as: "ﬁle" and "FILE" collide. */
+const nameKey = (s: string): string => s.trim().normalize('NFKC').toLowerCase()
 
 /** The session's workspaces under their current names. Every workspace tool
  *  resolves inside this list and nothing wider. */
@@ -2302,26 +2347,32 @@ function sessionWorkspaces(session: McpAgentSession): { id: string; name: string
   return session.workspaces.map((w) => ({ id: w.id, name: getCachedWorkspace(w.id)?.name ?? w.name }))
 }
 
-/** "Prod/EU" for a folder, walking up to the workspace root. */
-function folderPath(folder: CachedFolder, all: CachedFolder[]): string {
-  const parts = [folder.name]
-  const seen = new Set([folder.id])
-  let parent = folder.parentId
-  // `seen` guards a parent cycle a hand-edited data file could contain.
-  while (parent && !seen.has(parent)) {
-    seen.add(parent)
-    const p = all.find((f) => f.id === parent)
-    if (!p) break
-    parts.unshift(p.name)
-    parent = p.parentId
+/**
+ * The path of every server folder in one workspace that a path can reach,
+ * walked DOWN from the root -- the one walk both the listing and
+ * resolveFolderPath use, so what list_workspaces prints is exactly what
+ * resolves. A folder whose name is blank or holds "/", or whose parent chain is
+ * broken, cyclic or leaves the workspace, has no path and is not in the map.
+ */
+function folderPaths(workspaceId: string): { all: CachedFolder[]; paths: Map<string, string> } {
+  const all = listCachedFolders(workspaceId)
+  const paths = new Map<string, string>()
+  const walk = (parentId: string | null, prefix: string): void => {
+    for (const f of all) {
+      if (f.parentId !== parentId || paths.has(f.id) || !f.name.trim() || f.name.includes('/')) continue
+      const path = prefix ? `${prefix}/${f.name.trim()}` : f.name.trim()
+      paths.set(f.id, path)
+      walk(f.id, path)
+    }
   }
-  return parts.join('/')
+  walk(null, '')
+  return { all, paths }
 }
 
 /**
- * A folder path, resolved from the root of ONE workspace, case-insensitively
- * per segment. Empty is the root (null). Only that workspace's folders are
- * looked at, so no path can reach a folder anywhere else.
+ * A folder path, resolved from the root of ONE workspace, per segment by
+ * nameKey. Empty is the root (null). Only that workspace's folders are looked
+ * at, so no path can reach a folder anywhere else.
  *
  * Two folders with the same name under one parent exist in real data (the UI
  * never stopped it), and picking one would file a server somewhere the agent
@@ -2330,15 +2381,14 @@ function folderPath(folder: CachedFolder, all: CachedFolder[]): string {
 function resolveFolderPath(
   workspace: { id: string; name: string },
   path: string
-): { folder: CachedFolder | null } | { error: string } {
+): { folder: CachedFolder | null; path: string } | { error: string } {
   const segments = path.split('/').map((s) => s.trim()).filter(Boolean)
-  const all = listCachedFolders(workspace.id)
+  const { all, paths } = folderPaths(workspace.id)
+  const reachable = all.filter((f) => paths.has(f.id))
   let current: CachedFolder | null = null
   for (const [i, seg] of segments.entries()) {
     const so = segments.slice(0, i + 1).join('/')
-    const matches = all.filter(
-      (f) => f.parentId === (current?.id ?? null) && f.name.toLowerCase() === seg.toLowerCase()
-    )
+    const matches = reachable.filter((f) => f.parentId === (current?.id ?? null) && nameKey(f.name) === nameKey(seg))
     if (matches.length === 0) return { error: `No folder "${so}" in workspace ${workspace.name}.` }
     if (matches.length > 1)
       return {
@@ -2348,7 +2398,28 @@ function resolveFolderPath(
       }
     current = matches[0]
   }
-  return { folder: current }
+  return { folder: current, path: current ? (paths.get(current.id) ?? '') : '' }
+}
+
+/**
+ * A folder lookup's refusal, unless the session may not see the workspace's
+ * servers: then every failure reads the same, so "no such folder", "two of
+ * them" and "that name is taken" cannot be used to map a tree it is not shown.
+ */
+function folderRefusal(session: McpAgentSession, workspace: { id: string; name: string }, error: string): CallToolResult {
+  const hidden = effectiveWorkspaceCapability(session, workspace.id, 'viewServer', { mutating: false }).decision === 'deny'
+  return errorText(hidden ? `That folder path cannot be used in workspace ${workspace.name}.` : error)
+}
+
+/**
+ * A refusal returned BEFORE a tool looks anything up. A session that may not
+ * manage servers here must not learn, from which error comes back, whether a
+ * name is taken or a folder exists. `check` is always a deny, so this is
+ * gate()'s own deny branch and its own audit row.
+ */
+async function deniedEarly(ctx: AuditContext, check: Decision, toolName: string): Promise<CallToolResult> {
+  const gated = await gate(ctx, check, { toolName, level: 'low', because: 'refused before it was looked up' })
+  return gated.ok ? errorText(`Denied: ${check.reason}`) : gated.result
 }
 
 /** add_server's and add_database's rule: a name, or the only workspace there is. */
@@ -2494,9 +2565,12 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const visible = workspacesThatMayList(auth.session, 'viewServer')
       const blocks = scoped.map((w) => {
         if (!visible.has(w.id)) return `${w.name}\n  (folders not shown: viewing servers is denied here)`
-        const all = listCachedFolders(w.id)
-        const paths = all.map((f) => folderPath(f, all)).sort((a, b) => a.localeCompare(b))
-        return paths.length ? `${w.name}\n${paths.map((p) => `  - ${p}`).join('\n')}` : `${w.name}\n  (no folders)`
+        const { all, paths } = folderPaths(w.id)
+        const lines = [...paths.values()].sort((a, b) => a.localeCompare(b)).map((p) => `  - ${p}`)
+        // Listed only if a path resolves to it, so every line printed works.
+        const lost = all.length - paths.size
+        if (lost > 0) lines.push(`  (${lost} folder(s) can't be addressed by path)`)
+        return lines.length ? `${w.name}\n${lines.join('\n')}` : `${w.name}\n  (no folders)`
       })
       return text(`Workspaces:\n${blocks.join('\n')}`)
     }
@@ -2531,7 +2605,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const { session } = auth
       const workspaceIds = session.workspaces.map((w) => w.id)
-      const workspaceNames = session.workspaces.map((w) => getCachedWorkspace(w.id)?.name ?? w.name)
+      const workspaceNames = sessionWorkspaces(session).map((w) => w.name)
       const servers = listCachedServers(workspaceIds).filter(
         (s) => effectiveCapability(session, s.id, 'viewServer').decision !== 'deny'
       )
@@ -3712,7 +3786,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
       const { session } = auth
 
-      const scoped = session.workspaces.map((w) => ({ ...w, name: getCachedWorkspace(w.id)?.name ?? w.name }))
+      const scoped = sessionWorkspaces(session)
       const workspace = args.workspaceName
         ? scoped.find((w) => w.name.toLowerCase() === args.workspaceName!.trim().toLowerCase())
         : scoped.length === 1
@@ -4499,6 +4573,15 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
 
       const name = args.name.trim()
       if (!name) return errorText('A server name is required.')
+      // Before the duplicate and folder lookups: their answers are not for a
+      // session that may not add here.
+      const may = effectiveWorkspaceCapability(session, workspace.id, 'manageServers')
+      if (may.decision === 'deny')
+        return deniedEarly(
+          { session, workspaceId: workspace.id, workspaceName: workspace.name, serverId: 'pending-new-server', serverName: name, action: `Add server "${name}"`, capability: 'manageServers' },
+          may,
+          'add_server'
+        )
       // Every other tool addresses servers by friendly name, so a duplicate
       // would make an existing server unreachable through this bridge.
       if (listCachedServers([workspace.id]).some((s) => s.name.toLowerCase() === name.toLowerCase())) {
@@ -4554,9 +4637,9 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if ('error' in jump) return jump.error
 
       // Resolved inside the workspace just picked, never across the session.
-      const filed = args.folder?.trim() ? resolveFolderPath(workspace, args.folder) : { folder: null }
-      if ('error' in filed) return errorText(filed.error)
-      const inFolder = filed.folder ? `, in folder "${folderPath(filed.folder, listCachedFolders(workspace.id))}"` : ''
+      const filed = args.folder?.trim() ? resolveFolderPath(workspace, args.folder) : { folder: null, path: '' }
+      if ('error' in filed) return folderRefusal(session, workspace, filed.error)
+      const inFolder = filed.folder ? `, in folder "${filed.path}"` : ''
 
       const ctx: AuditContext = {
         session,
@@ -4733,8 +4816,19 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if ('error' in resolved) return resolved.error
       const { server: target, workspace } = resolved.match
 
+      // Before the name and folder lookups, whose answers are not for a
+      // session that may not manage this server at all.
+      const may = effectiveCapability(session, target.id, 'manageServers', { mutating: true })
+      if (may.decision === 'deny')
+        return deniedEarly(
+          { session, workspaceId: target.workspaceId, workspaceName: workspace.name, serverId: target.id, serverName: target.name, action: `Change server "${target.name}"`, capability: 'manageServers' },
+          may,
+          'update_server'
+        )
+
       const changes: string[] = []
       const patch: AgentServerPatch = {}
+      let movedTo: string | null = null
 
       if (args.name !== undefined) {
         const next = args.name.trim()
@@ -4839,18 +4933,20 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         // The server's OWN workspace, never one the agent names: a move between
         // workspaces changes which access group governs the server, and
         // AgentServerPatch has no field that could express one.
-        const filed = args.folder.trim() ? resolveFolderPath(workspace, args.folder) : { folder: null }
-        if ('error' in filed) return errorText(filed.error)
+        const filed = args.folder.trim() ? resolveFolderPath(workspace, args.folder) : { folder: null, path: '' }
+        if ('error' in filed) return folderRefusal(session, workspace, filed.error)
         patch.folderId = filed.folder?.id ?? null
-        changes.push(
-          filed.folder
-            ? `folder to "${folderPath(filed.folder, listCachedFolders(target.workspaceId))}"`
-            : 'folder to the workspace root'
-        )
+        movedTo = filed.folder ? filed.path : null
+        changes.push(filed.folder ? `folder to "${filed.path}"` : 'folder to the workspace root')
       }
 
       if (changes.length === 0) return errorText('Nothing to change — pass at least one field to update.')
 
+      // A move between folders and nothing else touches no connection detail,
+      // so it is gated as a folder edit (create_folder's grade) rather than as
+      // a rewrite of the connection. `os` changes no `changes` entry, so the
+      // test is on the patch itself.
+      const folderOnly = Object.keys(patch).length === 1 && 'folderId' in patch
       const ctx: AuditContext = {
         session,
         workspaceId: target.workspaceId,
@@ -4858,7 +4954,9 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         serverId: target.id,
         serverName: target.name,
         // Names what moves, never the credential itself.
-        action: `Change server "${target.name}" (${changes.join(', ')})`,
+        action: folderOnly
+          ? `Move server "${target.name}" to ${movedTo ? `folder "${movedTo}"` : 'the workspace root'} in ${workspace.name}`
+          : `Change server "${target.name}" (${changes.join(', ')})`,
         capability: 'manageServers'
       }
       // Not silent while Confirm risky actions is on. Repointing a connection is the
@@ -4878,21 +4976,34 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       // remove_server, to another connection, or past the end of the session.
       // Repointing an entry at a fenced machine is fenced like adding one.
       const repointed = args.host !== undefined || args.port !== undefined
-      const check = withFence(
-        serverWriteCheck(session, target, 'change'),
-        repointed && !target.cloud ? fenceForTarget(session, patch.host ?? target.host, patch.port ?? target.port, target.id) : null
-      )
+      const check = folderOnly
+        ? may
+        : withFence(
+            serverWriteCheck(session, target, 'change'),
+            repointed && !target.cloud ? fenceForTarget(session, patch.host ?? target.host, patch.port ?? target.port, target.id) : null
+          )
       const gated = await gate(
         ctx,
         check,
-        {
-          toolName: 'update_server',
-          level: 'high',
-          because:
-            'it rewrites a saved connection, and later calls that name it go wherever it now points',
-          intent: args.intent,
-          elevationScope: 'update_server'
-        },
+        folderOnly
+          ? {
+              toolName: 'update_server',
+              level: 'low',
+              because: 'it moves a server to another folder of the same workspace. Folders grant and restrict nothing',
+              intent: args.intent,
+              // Its own scope: a yes to moving servers between folders must not
+              // also buy repointing one.
+              elevationScope: 'update_server:folder',
+              structural: { kind: 'folderMove', server: target.name, to: movedTo }
+            }
+          : {
+              toolName: 'update_server',
+              level: 'high',
+              because:
+                'it rewrites a saved connection, and later calls that name it go wherever it now points',
+              intent: args.intent,
+              elevationScope: 'update_server'
+            },
         extra
       )
       if (!gated.ok) return gated.result
@@ -5046,38 +5157,41 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if ('error' in valid) return errorText(valid.error)
       const { name } = valid
       const scoped = sessionWorkspaces(session)
-      // Inside the session only. A duplicate there would leave one of the two
-      // unreachable by workspaceName, which every tool matches case-blind.
-      if (scoped.some((w) => w.name.toLowerCase() === name.toLowerCase()))
-        return errorText(`This session already has a workspace named "${name}".`)
 
       // The permission comes from a workspace the session already holds: the
-      // first whose manageServers is not denied (restrictions and the mode
-      // included). That workspace is what the approval and the audit row are
-      // filed under, since the new one does not exist yet.
-      const checked = scoped.map((w) => ({
-        workspace: w,
-        check: workspaceCheck(session, w.id, (g) => evaluateWorkspaceWrite(g, 'create'), true)
-      }))
-      const via = checked.find((c) => c.check.decision !== 'deny') ?? checked[0]
+      // first whose group and restriction do not deny manageServers. It is
+      // judged BEFORE the mode, because Bypass turns a deny into an allow and
+      // an agent with no write rights anywhere must not get this through it.
+      // The mode then applies as it does everywhere: Read-only refuses, Bypass
+      // is silent, anything else asks. The chosen workspace is what the
+      // approval and the audit row are filed under, since the new one does not
+      // exist yet.
+      const via = scoped.find(
+        (w) =>
+          workspaceCheck(session, w.id, (g) => evaluateWorkspaceWrite(g, 'create'), true, null, { beforeMode: true })
+            .decision !== 'deny'
+      )
       const ctx: AuditContext = {
         session,
-        workspaceId: via?.workspace.id ?? null,
-        workspaceName: via?.workspace.name ?? null,
+        workspaceId: (via ?? scoped[0])?.id ?? null,
+        workspaceName: (via ?? scoped[0])?.name ?? null,
         serverId: 'pending-new-workspace',
         serverName: name,
         action: `Create workspace "${name}" (not added to this AI session)`,
         capability: 'manageServers'
       }
-      const check: Decision =
-        via && via.check.decision !== 'deny'
-          ? via.check
-          : {
-              decision: 'deny',
-              reason:
-                'Creating a workspace needs Manage servers in at least one of this session’s ' +
-                'workspaces, and it is denied in all of them.'
-            }
+      if (!via)
+        return deniedEarly(ctx, {
+          decision: 'deny',
+          reason:
+            'Creating a workspace needs Manage servers in at least one of this session’s ' +
+            'workspaces, and it is denied in all of them.'
+        }, 'create_workspace')
+      // Inside the session only. A duplicate there would leave one of the two
+      // unreachable by workspaceName, which every tool matches case-blind.
+      if (scoped.some((w) => nameKey(w.name) === nameKey(name)))
+        return errorText(`This session already has a workspace named "${name}".`)
+      const check = workspaceCheck(session, via.id, (g) => evaluateWorkspaceWrite(g, 'create'), true)
       const gated = await gate(
         ctx,
         check,
@@ -5087,7 +5201,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           because:
             'it adds a workspace to OpsMaxx. It grants this agent nothing: the new workspace is in no AI session until you add it to one',
           intent: args.intent,
-          perCall: true
+          perCall: true,
+          structural: { kind: 'workspaceCreate', name }
         },
         extra
       )
@@ -5098,7 +5213,9 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
         auditError(ctx, gated.approval, result.error ?? 'unknown error')
         return errorText(`Could not create the workspace: ${result.error ?? 'unknown error'}`)
       }
-      auditSuccess(ctx, gated.approval)
+      // The row names what was made, in the same shape rename_workspace's rows
+      // use, so the two can be matched in the log.
+      auditSuccess({ ...ctx, serverId: result.id ? `workspace:${result.id}` : ctx.serverId }, gated.approval)
       return text(
         `Created workspace "${name}". It is NOT in this session: no tool here can see it or add ` +
           'anything to it until the user ticks it in OpsMaxx under AI & MCP \u2192 Active Sessions \u2192 ' +
@@ -5134,8 +5251,20 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if ('error' in valid) return errorText(valid.error)
       const { name } = valid
       if (name === workspace.name) return errorText(`The workspace is already named "${name}".`)
-      if (sessionWorkspaces(session).some((w) => w.id !== workspace.id && w.name.toLowerCase() === name.toLowerCase()))
+      if (sessionWorkspaces(session).some((w) => w.id !== workspace.id && nameKey(w.name) === nameKey(name)))
         return errorText(`This session already has a workspace named "${name}".`)
+
+      // Bypass makes this session's own calls silent; it does not get to
+      // rename a workspace silently, because the name is what OTHER sessions'
+      // approval cards and audit rows show, and their operators never chose
+      // Bypass. So an allow -- which only Bypass can produce here, since the
+      // policy answer is ask or deny -- is held at ask, as a Protected target
+      // holds a mode at ask.
+      const checked = workspaceCheck(session, workspace.id, (g) => evaluateWorkspaceWrite(g, 'rename'), true)
+      const check: Decision =
+        checked.decision === 'allow'
+          ? { decision: 'ask', reason: 'Renaming a workspace is asked for even in Bypass: other sessions show its name.' }
+          : checked
 
       const ctx: AuditContext = {
         session,
@@ -5151,7 +5280,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       }
       const gated = await gate(
         ctx,
-        workspaceCheck(session, workspace.id, (g) => evaluateWorkspaceWrite(g, 'rename'), true),
+        check,
         {
           toolName: 'rename_workspace',
           level: 'medium',
@@ -5159,7 +5288,8 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
             `it renames "${workspace.name}" to "${name}". Approvals and the audit log name a workspace ` +
             'by its name, so every later one will say the new name',
           intent: args.intent,
-          perCall: true
+          perCall: true,
+          structural: { kind: 'workspaceRename', from: workspace.name, to: name }
         },
         extra
       )
@@ -5228,25 +5358,35 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       const valid = validName(args.name, 'folder')
       if ('error' in valid) return errorText(valid.error)
       const { name } = valid
-      const parent = args.parentFolder?.trim() ? resolveFolderPath(workspace, args.parentFolder) : { folder: null }
-      if ('error' in parent) return errorText(parent.error)
-      const all = listCachedFolders(workspace.id)
-      const parentPath = parent.folder ? folderPath(parent.folder, all) : ''
-      const path = parentPath ? `${parentPath}/${name}` : name
+      // Before any lookup: a refused session learns nothing about the tree.
+      const check = effectiveWorkspaceCapability(session, workspace.id, 'manageServers', { mutating: true })
+      if (check.decision === 'deny')
+        return deniedEarly(folderCtx(session, workspace, name, `Create folder "${name}" in ${workspace.name}`), check, 'create_folder')
+      const parent = args.parentFolder?.trim()
+        ? resolveFolderPath(workspace, args.parentFolder)
+        : { folder: null, path: '' }
+      if ('error' in parent) return folderRefusal(session, workspace, parent.error)
+      const path = parent.path ? `${parent.path}/${name}` : name
       // A sibling with the same name would make both unreachable by path.
-      if (all.some((f) => f.parentId === (parent.folder?.id ?? null) && f.name.toLowerCase() === name.toLowerCase()))
-        return errorText(`A folder "${path}" already exists in ${workspace.name}.`)
+      // Every folder counts here, addressable or not.
+      if (
+        listCachedFolders(workspace.id).some(
+          (f) => f.parentId === (parent.folder?.id ?? null) && nameKey(f.name) === nameKey(name)
+        )
+      )
+        return folderRefusal(session, workspace, `A folder "${path}" already exists in ${workspace.name}.`)
 
       const ctx = folderCtx(session, workspace, path, `Create folder "${path}" in ${workspace.name}`)
       const gated = await gate(
         ctx,
-        effectiveWorkspaceCapability(session, workspace.id, 'manageServers', { mutating: true }),
+        check,
         {
           toolName: 'create_folder',
           level: 'low',
           because: 'it adds a folder to the server list. Folders grant and restrict nothing',
           intent: args.intent,
-          elevationScope: 'create_folder'
+          elevationScope: 'create_folder',
+          structural: { kind: 'folderCreate', path }
         },
         extra
       )
@@ -5293,29 +5433,41 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
       if ('error' in picked) return picked.error
       const { workspace } = picked
       if (!args.folder.trim()) return errorText('Name the folder to rename; the workspace root has no name of its own.')
-      const found = resolveFolderPath(workspace, args.folder)
-      if ('error' in found) return errorText(found.error)
-      const folder = found.folder!
       const valid = validName(args.name, 'folder')
       if ('error' in valid) return errorText(valid.error)
       const { name } = valid
+      // Before any lookup: a refused session learns nothing about the tree.
+      const check = effectiveWorkspaceCapability(session, workspace.id, 'manageServers', { mutating: true })
+      if (check.decision === 'deny')
+        return deniedEarly(
+          folderCtx(session, workspace, args.folder.trim(), `Rename folder "${args.folder.trim()}" in ${workspace.name}`),
+          check,
+          'rename_folder'
+        )
+      const found = resolveFolderPath(workspace, args.folder)
+      if ('error' in found) return folderRefusal(session, workspace, found.error)
+      const folder = found.folder!
       if (name === folder.name) return errorText(`The folder is already named "${name}".`)
-      const all = listCachedFolders(workspace.id)
-      const oldPath = folderPath(folder, all)
+      const oldPath = found.path
       const newPath = [...oldPath.split('/').slice(0, -1), name].join('/')
-      if (all.some((f) => f.id !== folder.id && f.parentId === folder.parentId && f.name.toLowerCase() === name.toLowerCase()))
-        return errorText(`A folder "${newPath}" already exists in ${workspace.name}.`)
+      if (
+        listCachedFolders(workspace.id).some(
+          (f) => f.id !== folder.id && f.parentId === folder.parentId && nameKey(f.name) === nameKey(name)
+        )
+      )
+        return folderRefusal(session, workspace, `A folder "${newPath}" already exists in ${workspace.name}.`)
 
       const ctx = folderCtx(session, workspace, newPath, `Rename folder "${oldPath}" → "${newPath}" in ${workspace.name}`)
       const gated = await gate(
         ctx,
-        effectiveWorkspaceCapability(session, workspace.id, 'manageServers', { mutating: true }),
+        check,
         {
           toolName: 'rename_folder',
           level: 'low',
           because: 'it renames a folder in the server list. Folders grant and restrict nothing',
           intent: args.intent,
-          elevationScope: 'rename_folder'
+          elevationScope: 'rename_folder',
+          structural: { kind: 'folderRename', from: oldPath, to: newPath }
         },
         extra
       )
@@ -6385,7 +6537,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     async ({ intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
-      const workspaces = auth.session.workspaces
+      const workspaces = sessionWorkspaces(auth.session)
       if (workspaces.length === 0) return errorText('This session has no workspaces.')
 
       // Checked per workspace, not once for the session. A session can hold
@@ -6934,7 +7086,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     async ({ intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
-      const workspaces = auth.session.workspaces
+      const workspaces = sessionWorkspaces(auth.session)
       if (workspaces.length === 0) return errorText('This session has no workspaces.')
 
       // Backups are configured per machine rather than per workspace, so this
@@ -7040,7 +7192,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
           return { id: c.id, label: c.label, detail: c.detail, decision: d.decision, reason: d.reason }
         })
       } else {
-        const ws = auth.session.workspaces[0]
+        const ws = sessionWorkspaces(auth.session)[0]
         if (!ws) return errorText('This session has no workspaces.')
         scope = `in ${ws.name}`
         header = modeHeader(auth.session, null, ws.id)
@@ -7092,7 +7244,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     async ({ limit, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
-      const workspaces = auth.session.workspaces
+      const workspaces = sessionWorkspaces(auth.session)
       if (workspaces.length === 0) return errorText('This session has no workspaces.')
 
       const checked = workspaces
@@ -7469,7 +7621,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     async ({ changedOnly, intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
-      const workspaces = auth.session.workspaces
+      const workspaces = sessionWorkspaces(auth.session)
       if (workspaces.length === 0) return errorText('This session has no workspaces.')
 
       const checked = workspaces
@@ -7587,7 +7739,7 @@ function normaliseCloudTarget(raw: unknown): CloudTarget | { error: string } {
     async ({ intent }, extra) => {
       const auth = authenticateExtra(extra)
       if ('error' in auth) return errorText(AUTH_MESSAGES[auth.error])
-      const workspaces = auth.session.workspaces
+      const workspaces = sessionWorkspaces(auth.session)
       if (workspaces.length === 0) return errorText('This session has no workspaces.')
 
       // Denied workspaces are dropped rather than failing the call: a session
@@ -8401,7 +8553,7 @@ function scopeSourcesFor(session: McpAgentSession, serverId: string | null): Sco
     return [
       {
         workspaceId: server?.workspaceId ?? null,
-        workspaceName: session.workspaces.find((w) => w.id === server?.workspaceId)?.name ?? null,
+        workspaceName: sessionWorkspaces(session).find((w) => w.id === server?.workspaceId)?.name ?? null,
         group: found.kind === 'group' ? getGroup(found.groupId) : null,
         shut: found.kind === 'no-ai-access'
       }
@@ -8410,7 +8562,9 @@ function scopeSourcesFor(session: McpAgentSession, serverId: string | null): Sco
   // EVERY workspace, not `workspaces[0]`. A session scoped to two of them was
   // explained by whichever happened to be first, so an assignment on the other
   // one denied calls the table showed as allowed.
-  return session.workspaces.map((w) => {
+  // Names read through the cache: the session record keeps the name a
+  // workspace had when it was granted, and it may have been renamed since.
+  return sessionWorkspaces(session).map((w) => {
     const found = resolveRestriction(listAssignments(), '', w.id)
     return {
       workspaceId: w.id,

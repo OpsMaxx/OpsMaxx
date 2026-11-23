@@ -125,7 +125,7 @@ function hashToken(raw: string): string {
   return createHash('sha256').update(raw).digest('hex')
 }
 
-function isExpired(session: McpAgentSession): boolean {
+export function isExpired(session: McpAgentSession): boolean {
   return session.expiresAt !== null && new Date(session.expiresAt).getTime() <= Date.now()
 }
 

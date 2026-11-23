@@ -37,7 +37,7 @@
 // is printed as a missing reason.
 
 import { englishT, st, type Translate } from './i18n'
-import type { AiCapability, ContentPreview } from './mcp'
+import type { AiCapability, ContentPreview, StructuralChange } from './mcp'
 
 /**
  * The scale, low to high, in order. Exported because the modal prints its
@@ -72,6 +72,8 @@ export interface ApprovalSubject {
    * the local derivation rather than blanking the band.
    */
   riskReason?: string
+  /** A workspace or folder change, as the bridge described it. See StructuralChange. */
+  structural?: StructuralChange
 }
 
 /**
@@ -171,25 +173,41 @@ export function approvalWhere(r: { serverName: string | null; workspaceName: str
  * rules, which is precisely why it is no longer what the operator reads first.
  */
 /**
- * The workspace and folder tools' actions, read back off the exact strings
- * mcpServer.ts builds for them. The OLD name comes first and is matched lazily:
- * it was written by the user, while the new one is the agent's, so an agent
- * cannot make a new name containing `" → "` move the split into the old one.
+ * The approval copy for a workspace or folder change, from the fields the
+ * bridge sent -- never parsed out of `action`, which holds agent-written names
+ * that could be shaped to move a parse.
  */
-function structuralAction(action: string):
-  | { kind: 'workspaceCreate'; vars: { name: string } }
-  | { kind: 'workspaceRename' | 'folderRename'; vars: { from: string; to: string } }
-  | { kind: 'folderCreate'; vars: { path: string } }
-  | null {
-  let m = /^Create workspace "(.*)" \(not added to this AI session\)$/s.exec(action)
-  if (m) return { kind: 'workspaceCreate', vars: { name: m[1] } }
-  m = /^Rename workspace "(.*?)" \u2192 "(.*)"$/s.exec(action)
-  if (m) return { kind: 'workspaceRename', vars: { from: m[1], to: m[2] } }
-  m = /^Create folder "(.*)" in .*$/s.exec(action)
-  if (m) return { kind: 'folderCreate', vars: { path: m[1] } }
-  m = /^Rename folder "(.*?)" \u2192 "(.*)" in .*$/s.exec(action)
-  if (m) return { kind: 'folderRename', vars: { from: m[1], to: m[2] } }
-  return null
+function structuralCopy(c: StructuralChange): { reason: string; consequence: string } {
+  switch (c.kind) {
+    case 'workspaceCreate':
+      return {
+        reason: st('shared.approvalRisk.reason.workspaceCreate'),
+        consequence: st('shared.approvalRisk.consequence.workspaceCreate', { name: c.name })
+      }
+    case 'workspaceRename':
+      return {
+        reason: st('shared.approvalRisk.reason.workspaceRename'),
+        consequence: st('shared.approvalRisk.consequence.workspaceRename', { from: c.from, to: c.to })
+      }
+    case 'folderCreate':
+      return {
+        reason: st('shared.approvalRisk.reason.folderCreate'),
+        consequence: st('shared.approvalRisk.consequence.folderCreate', { path: c.path })
+      }
+    case 'folderRename':
+      return {
+        reason: st('shared.approvalRisk.reason.folderRename'),
+        consequence: st('shared.approvalRisk.consequence.folderRename', { from: c.from, to: c.to })
+      }
+    case 'folderMove':
+      return {
+        reason: st('shared.approvalRisk.reason.folderMove'),
+        consequence:
+          c.to === null
+            ? st('shared.approvalRisk.consequence.folderMoveRoot', { server: c.server })
+            : st('shared.approvalRisk.consequence.folderMove', { server: c.server, to: c.to })
+      }
+  }
 }
 
 export function riskReasons(s: ApprovalSubject): string[] {
@@ -241,12 +259,12 @@ export function riskReasons(s: ApprovalSubject): string[] {
   // a credential" describes none of what a removal does.
   //
   // Workspaces and folders joined it later, and fell to serverAdd: creating a
-  // workspace was described as storing a credential. They are matched first.
+  // workspace was described as storing a credential. The bridge now sends
+  // them as fields (`structural`), which win over the verb.
   if (s.capability === 'manageServers') {
-    const structural = structuralAction(action)
     out.push(
-      structural
-        ? st(`shared.approvalRisk.reason.${structural.kind}`)
+      s.structural
+        ? structuralCopy(s.structural).reason
         : /^remove\b/i.test(action)
           ? st('shared.approvalRisk.reason.serverRemove')
           : /^(change|update)\b/i.test(action)
@@ -604,9 +622,7 @@ export function describeConsequence(s: ApprovalSubject): Consequence {
         known: true
       }
     case 'manageServers': {
-      const structural = structuralAction(action)
-      if (structural)
-        return { text: st(`shared.approvalRisk.consequence.${structural.kind}`, structural.vars), known: true }
+      if (s.structural) return { text: structuralCopy(s.structural).consequence, known: true }
       return {
         text: /^remove\b/i.test(action)
           ? st('shared.approvalRisk.consequence.serverRemove')

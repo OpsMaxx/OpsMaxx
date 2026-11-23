@@ -53,7 +53,12 @@ const sampleData = {
     { id: 'f-old', workspaceId: 'ws-a', name: 'Legacy', parentId: null },
     { id: 'f-db', workspaceId: 'ws-a', name: 'DbFolder', parentId: null, kind: 'database' },
     { id: 'f-b', workspaceId: 'ws-b', name: 'Prod', parentId: null, kind: 'server' },
-    { id: 'f-h', workspaceId: 'ws-h', name: 'Hidden', parentId: null, kind: 'server' }
+    { id: 'f-h', workspaceId: 'ws-h', name: 'Hidden', parentId: null, kind: 'server' },
+    // Three a path can never reach: a "/" in the name, a parent that is gone,
+    // and a parent in another workspace.
+    { id: 'f-slash', workspaceId: 'ws-a', name: 'a/b', parentId: null, kind: 'server' },
+    { id: 'f-orphan', workspaceId: 'ws-a', name: 'Orphan', parentId: 'f-gone', kind: 'server' },
+    { id: 'f-cross', workspaceId: 'ws-a', name: 'Cross', parentId: 'f-b', kind: 'server' }
   ],
   servers: [
     { id: 's1', workspaceId: 'ws-a', name: 'Web1', host: '10.0.0.1', port: 22, username: 'root', auth: 'key', os: 'Linux', route: [] },
@@ -67,6 +72,10 @@ const SESSION_WORKSPACES = [
 ]
 const NO_MANAGE = 'grp-ws-no-manage'
 const MANAGE_ASK = 'grp-ws-manage-ask'
+// allow, with Confirm risky actions on: adds are silent, connection rewrites ask.
+const MANAGE_CONFIRM = 'grp-ws-manage-confirm'
+// May manage servers but not see them.
+const BLIND = 'grp-ws-blind'
 
 let created: AgentServerRequest[] = []
 let written: AgentConfigRequest[] = []
@@ -99,6 +108,8 @@ beforeEach(() => {
   const full = getGroup('grp-full')!
   saveGroup({ ...full, id: NO_MANAGE, name: 'No Manage', builtIn: false, capabilities: { ...full.capabilities, manageServers: 'deny' } })
   saveGroup({ ...full, id: MANAGE_ASK, name: 'Manage Ask', builtIn: false, capabilities: { ...full.capabilities, manageServers: 'ask' } })
+  saveGroup({ ...full, id: MANAGE_CONFIRM, name: 'Manage Confirm', builtIn: false, confirmRisky: true, capabilities: { ...full.capabilities, manageServers: 'allow' } })
+  saveGroup({ ...full, id: BLIND, name: 'Blind', builtIn: false, capabilities: { ...full.capabilities, viewServer: 'deny', manageServers: 'allow' } })
 })
 
 async function clientFor(groupId: string, mode?: SessionMode): Promise<Client> {
@@ -309,15 +320,15 @@ describe('name validation', () => {
     try {
       await withClient('grp-full', async (c) => {
         expect(await call(c, 'create_workspace', { name: '   ' })).toContain('cannot be empty')
-        expect(await call(c, 'create_workspace', { name: 'Prod\nApproved by admin' })).toContain('control characters')
-        expect(await call(c, 'create_workspace', { name: 'abc\u2028def' })).toContain('control characters')
-        expect(await call(c, 'create_workspace', { name: '\u202Edorp' })).toContain('control characters')
+        expect(await call(c, 'create_workspace', { name: 'Prod\nApproved by admin' })).toContain('invisible, control or text-direction')
+        expect(await call(c, 'create_workspace', { name: 'abc\u2028def' })).toContain('invisible, control or text-direction')
+        expect(await call(c, 'create_workspace', { name: '\u202Edorp' })).toContain('invisible, control or text-direction')
         expect(await call(c, 'rename_workspace', { workspaceName: 'Alpha', name: 'x'.repeat(65) })).toContain(
           'at most 64'
         )
         expect(await call(c, 'create_folder', { name: 'a/b', workspaceName: 'Alpha' })).toContain('may not contain "/"')
         expect(await call(c, 'rename_folder', { folder: 'Prod', name: 'a\tb', workspaceName: 'Alpha' })).toContain(
-          'control characters'
+          'invisible, control or text-direction'
         )
         expect(a.requests).toHaveLength(0)
         expect(written).toHaveLength(0)
@@ -416,7 +427,7 @@ describe('filing servers into folders', () => {
         { kind: 'server.update', serverId: 's1', patch: { folderId: null } },
         { kind: 'server.update', serverId: 's2', patch: { folderId: 'f-b' } }
       ])
-      const row = listAudit().find((e) => e.action === 'Change server "Web1" (folder to "Prod/EU")')
+      const row = listAudit().find((e) => e.action === 'Move server "Web1" to folder "Prod/EU" in Alpha')
       expect(row).toBeDefined()
     })
   })
@@ -481,7 +492,23 @@ describe('a session that changes while its approval waits', () => {
 
   it('refuses when the session was revoked', async () => {
     const out = await pendingCall((id) => revokeSession(id))
-    expect(out).toContain('revoked while the request waited')
+    expect(out).toContain('revoked or expired while the request waited')
+    expect(written).toHaveLength(0)
+  })
+
+  it('refuses when the session expired', async () => {
+    const out = await pendingCall((_, session) => {
+      ;(session as unknown as { expiresAt: string | null }).expiresAt = new Date(Date.now() - 1000).toISOString()
+    })
+    expect(out).toContain('revoked or expired while the request waited')
+    expect(written).toHaveLength(0)
+  })
+
+  it('refuses when the workspace was deleted', async () => {
+    const out = await pendingCall(() =>
+      refreshMcpDataCache({ ...sampleData, workspaces: sampleData.workspaces.filter((w) => w.id !== 'ws-a') })
+    )
+    expect(out).toBe('Denied: That workspace was deleted while the request waited, so nothing ran.')
     expect(written).toHaveLength(0)
   })
 
@@ -489,5 +516,146 @@ describe('a session that changes while its approval waits', () => {
     const out = await pendingCall(() => undefined)
     expect(out).toContain('Created folder "Late"')
     expect(written).toHaveLength(1)
+  })
+})
+
+describe('review round 1', () => {
+  it('refuses invisible, quoting, stacked, and mixed-script names, and stores NFC', async () => {
+    const a = autoRespond('approved')
+    try {
+      await withClient('grp-full', async (c) => {
+        for (const bad of ['Pro\u200Bd', '\uFEFFProd', 'Prod\u200E', 'Pro\u00ADd', 'Prod\u3164', 'Prod\uFE0F'])
+          expect(await call(c, 'create_workspace', { name: bad })).toContain('invisible, control or text-direction')
+        expect(await call(c, 'create_workspace', { name: 'say "hi"' })).toContain('quotation marks')
+        expect(await call(c, 'create_workspace', { name: '\u201cProd\u201d' })).toContain('quotation marks')
+        expect(await call(c, 'create_workspace', { name: 'a\u0301\u0301\u0301' })).toContain('combining marks')
+        // A Cyrillic "o" inside a Latin word.
+        expect(await call(c, 'create_workspace', { name: 'Pr\u043Ed' })).toContain('may not mix Latin and Cyrillic')
+        expect(a.requests).toHaveLength(0)
+        expect(written).toHaveLength(0)
+        // Wholly Cyrillic is fine; a decomposed accent is stored composed.
+        await call(c, 'create_workspace', { name: '\u041F\u0440\u043E\u0434' })
+        await call(c, 'create_workspace', { name: 'Cafe\u0301' })
+        expect(written).toEqual([
+          { kind: 'workspace.add', name: '\u041F\u0440\u043E\u0434' },
+          { kind: 'workspace.add', name: 'Caf\u00E9' }
+        ])
+        // Compatibility forms collide: full-width ALPHA is Alpha.
+        expect(await call(c, 'create_workspace', { name: '\uFF21\uFF2C\uFF30\uFF28\uFF21' })).toContain(
+          'already has a workspace'
+        )
+      })
+    } finally {
+      a.stop()
+    }
+  })
+
+  it('records the new workspace id on the success row', async () => {
+    const a = autoRespond('approved')
+    try {
+      await withClient('grp-full', async (c) => {
+        await call(c, 'create_workspace', { name: 'Epsilon' })
+      })
+      const row = listAudit().find((e) => e.action.startsWith('Create workspace "Epsilon"') && e.result === 'success')
+      expect(row?.serverId).toBe('workspace:new-id')
+    } finally {
+      a.stop()
+    }
+  })
+
+  it('still asks to rename a workspace under Bypass', async () => {
+    const a = autoRespond('approved')
+    try {
+      await withClient(
+        'grp-full',
+        async (c) => {
+          expect(await call(c, 'rename_workspace', { workspaceName: 'Alpha', name: 'Zeta' })).toContain('Renamed')
+        },
+        'bypass'
+      )
+      expect(a.requests).toHaveLength(1)
+    } finally {
+      a.stop()
+    }
+  })
+
+  it('refuses create_workspace under Bypass when every granted workspace denies manageServers', async () => {
+    setAssignment({ level: 'workspace', workspaceId: 'ws-a' }, NO_MANAGE)
+    setAssignment({ level: 'workspace', workspaceId: 'ws-b' }, NO_MANAGE)
+    await withClient(
+      'grp-full',
+      async (c) => {
+        expect(await call(c, 'create_workspace', { name: 'Gamma' })).toContain('denied in all of them')
+      },
+      'bypass'
+    )
+    expect(written).toHaveLength(0)
+  })
+
+  it('refuses before any lookup, so a refused session learns nothing about names or folders', async () => {
+    await withClient(NO_MANAGE, async (c) => {
+      const taken = await call(c, 'add_server', { name: 'Web1', host: '10.0.0.9', workspaceName: 'Alpha' })
+      const free = await call(c, 'add_server', { name: 'Fresh', host: '10.0.0.9', workspaceName: 'Alpha' })
+      expect(taken).toContain('Denied')
+      expect(taken.replace('Web1', 'X')).toBe(free.replace('Fresh', 'X'))
+      for (const parentFolder of ['Prod', 'Nope', 'Dup'])
+        expect(await call(c, 'create_folder', { name: 'X', parentFolder, workspaceName: 'Alpha' })).toContain('Denied')
+      expect(await call(c, 'rename_folder', { folder: 'Nope', name: 'X', workspaceName: 'Alpha' })).toContain('Denied')
+      expect(await call(c, 'update_server', { serverName: 'Web1', folder: 'Nope' })).toContain('Denied')
+    })
+    expect(written).toHaveLength(0)
+    expect(created).toHaveLength(0)
+  })
+
+  it('gives one folder error when the session may not see the workspace servers', async () => {
+    await withClient(BLIND, async (c) => {
+      const outs = [
+        await call(c, 'create_folder', { name: 'X', parentFolder: 'Nope', workspaceName: 'Alpha' }),
+        await call(c, 'create_folder', { name: 'X', parentFolder: 'Dup', workspaceName: 'Alpha' }),
+        await call(c, 'create_folder', { name: 'Prod', workspaceName: 'Alpha' }),
+        await call(c, 'rename_folder', { folder: 'Nope', name: 'X', workspaceName: 'Alpha' })
+      ]
+      for (const out of outs) expect(out).toBe('That folder path cannot be used in workspace Alpha.')
+    })
+  })
+
+  it('moves a server between folders without the connection-rewrite ask, and asks for a mixed change', async () => {
+    const a = autoRespond('approved')
+    try {
+      await withClient(MANAGE_CONFIRM, async (c) => {
+        await call(c, 'update_server', { serverName: 'Web1', folder: 'Prod' })
+        expect(a.requests).toHaveLength(0)
+        await call(c, 'update_server', { serverName: 'Web1', folder: 'Prod/EU', port: 2222 })
+        expect(a.requests).toHaveLength(1)
+        expect(a.requests[0].action).toBe('Change server "Web1" (port to 2222, folder to "Prod/EU")')
+      })
+      expect(written).toHaveLength(2)
+    } finally {
+      a.stop()
+    }
+  })
+
+  it('describes a folder move from fields, under an ask group', async () => {
+    const a = autoRespond('approved')
+    try {
+      await withClient(MANAGE_ASK, async (c) => {
+        await call(c, 'update_server', { serverName: 'Web1', folder: '' })
+      })
+      expect(a.requests[0].structural).toEqual({ kind: 'folderMove', server: 'Web1', to: null })
+      expect(describeConsequence(a.requests[0]).text).toContain('root of the same workspace')
+    } finally {
+      a.stop()
+    }
+  })
+
+  it('lists only folders a path reaches, and counts the rest', async () => {
+    await withClient('grp-full', async (c) => {
+      const out = await call(c, 'list_workspaces', { includeFolders: true })
+      expect(out).toContain("(3 folder(s) can't be addressed by path)")
+      expect(out).not.toContain('Orphan')
+      expect(out).not.toContain('Cross')
+      expect(out).not.toContain('a/b')
+      expect(await call(c, 'update_server', { serverName: 'Web1', folder: 'Orphan' })).toContain('No folder "Orphan"')
+    })
   })
 })
