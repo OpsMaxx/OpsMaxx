@@ -62,6 +62,9 @@ export interface AgentServerRequest {
    * pass, because the provider's own CLI holds the session.
    */
   cloud?: CloudTarget
+  /** The server folder to file it under, already resolved inside `workspaceId`.
+   *  Absent or null means the workspace root. */
+  folderId?: string | null
 }
 
 export interface AgentServerResult {
@@ -87,6 +90,11 @@ export interface AgentServerPatch {
   os?: string
   route?: AgentHop[]
   cloud?: CloudTarget
+  /** Move it to this server folder, resolved inside the server's OWN workspace.
+   *  Absent means leave it where it is; null means the workspace root. There is
+   *  deliberately no workspace field: a move between workspaces changes which
+   *  access group governs the server, and no agent may do that. */
+  folderId?: string | null
 }
 
 /** A saved database connection as an agent may describe it.
@@ -132,6 +140,14 @@ export type AgentConfigRequest =
       secret?: AgentDatabaseSecret
     }
   | { kind: 'database.remove'; databaseId: string }
+  // Workspaces and folders. None of these changes what any session can reach:
+  // a workspace created here is in no session until the user grants it
+  // (setSessionWorkspaces, human-only over IPC), and folders carry no policy.
+  | { kind: 'workspace.add'; name: string }
+  | { kind: 'workspace.rename'; workspaceId: string; name: string }
+  /** Always a server folder (FolderKind 'server'). `parentId` null is the root. */
+  | { kind: 'folder.add'; workspaceId: string; name: string; parentId: string | null }
+  | { kind: 'folder.rename'; folderId: string; name: string }
 
 export interface AgentConfigResult {
   ok: boolean
