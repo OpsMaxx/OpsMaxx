@@ -5636,7 +5636,9 @@ ipcMain.handle('vpn:start', async (e, id: string) => {
 ipcMain.handle('vpn:stop', (_e, id: string, force?: boolean) => vpnStop(id, { force }))
 ipcMain.handle('vpn:reload', (_e, id: string) => vpnReload(id))
 ipcMain.handle('vpn:validate', (_e, spec: VpnSpec) => vpnValidate(spec))
-ipcMain.handle('vpn:probe', (_e, kind: VpnKind) => vpnProbe(kind))
+ipcMain.handle('vpn:probe', (_e, kind: VpnKind, profileId?: unknown) =>
+  vpnProbe(kind, typeof profileId === 'string' ? profileId : undefined)
+)
 // This machine's own name for a Tailscale node, which is deliberately NOT in
 // the profile: `TailscaleSpec.hostname` syncs, and a tailnet hostname names one
 // device, so paired machines would register under one label. It lives beside

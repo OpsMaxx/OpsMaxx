@@ -128,6 +128,16 @@ describe('the licence texts reach the installed app', () => {
     // lands beside opsmaxx-netd.exe. A filter that named executables would
     // silently leave it out.
     const bin = (builder.extraResources ?? []).find((r) => r.from.includes('resources/bin/$'))
-    expect(bin?.filter).toEqual(['**/*'])
+    expect(bin?.filter?.[0]).toBe('**/*')
+  })
+
+  it('never ships frpc, even when a stale build sits in resources/bin', () => {
+    // Antivirus flags frpc as a hacktool and quarantined installers that
+    // carried it, so it is not shipped. Older checkouts still have a copy on
+    // disk; the negations keep it out of the copy above.
+    const bin = (builder.extraResources ?? []).find((r) => r.from.includes('resources/bin/$'))
+    expect(bin?.filter).toEqual(['**/*', '!**/frpc', '!**/frpc.exe'])
+    const manifest = readFileSync('resources/bin/manifest.json', 'utf8')
+    expect(manifest).not.toMatch(/frpc/)
   })
 })

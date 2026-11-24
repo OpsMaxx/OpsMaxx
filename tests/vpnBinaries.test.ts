@@ -10,13 +10,15 @@ import {
   writeFileSync
 } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import {
   resetBinaryCache,
   resolveBundled,
   resolveEngineBinary,
   resolveSystem,
-  sha256File
+  sha256File,
+  tooOld
 } from '../src/main/services/vpn/binaries'
 import { isVpnError } from '../src/main/services/vpn/errors'
 
@@ -358,5 +360,199 @@ describe('bundled first, system second', () => {
     expect(isVpnError(err) && err.code).toBe('binary-missing')
     expect(err.detail).not.toContain('build-openvpn.sh')
     expect(err.detail).toContain('does not search PATH on Windows')
+  })
+})
+
+describe('frpc, which OpsMaxx never ships', () => {
+  // Antivirus flags upstream frpc as a hacktool, so it is the user's install —
+  // found on the same allowlist-then-PATH ladder as a system OpenVPN, held to
+  // the same rules, and additionally refused when it is too old to drive.
+  const FRPC_ALLOWLIST = [
+    '/usr/local/bin/frpc',
+    '/opt/homebrew/bin/frpc',
+    '/opt/local/bin/frpc',
+    '/usr/bin/frpc',
+    '/run/current-system/sw/bin/frpc'
+  ]
+  const installed = FRPC_ALLOWLIST.some((p) => existsSync(p))
+
+  function frpcShim(dir: string, version: string, name = 'frpc'): string {
+    mkdirSync(dir, { recursive: true, mode: 0o755 })
+    const file = join(dir, name)
+    // The real binary prints the bare version and nothing else.
+    writeFileSync(file, `#!/bin/sh\necho ${version}\n`)
+    chmodSync(file, 0o755)
+    return file
+  }
+
+  it('ignores a copy in the bundled-engine directory, manifest and all', async () => {
+    // The old layout, as an upgrade could leave it. Shipping frpc is over, so
+    // finding one there must not quietly bring it back.
+    const body = '#!/bin/sh\necho 0.71.0\n'
+    const file = join(binRoot, PLATFORM_DIR, 'frpc')
+    writeFileSync(file, body)
+    chmodSync(file, 0o755)
+    writeManifest({ [`${PLATFORM_DIR}/frpc`]: { sha256: hash(body) } })
+    process.env.PATH = ''
+
+    const result = await resolveEngineBinary('frpc', {}).catch((e) => e)
+    if (isVpnError(result)) {
+      expect(result.detail).not.toContain(binRoot)
+    } else {
+      // Only reachable on a machine with a real frpc on the allowlist.
+      expect(result.bundled).toBe(false)
+      expect(result.path).not.toContain(binRoot)
+    }
+  })
+
+  it.skipIf(installed || process.platform === 'win32')(
+    'looks on the fixed allowlist, then PATH, and says where with install advice',
+    async () => {
+      process.env.PATH = ''
+      const err = await resolveEngineBinary('frpc', {}).catch((e) => e)
+      expect(isVpnError(err) && err.code).toBe('binary-missing')
+      expect(err.detail).toContain(`Looked in ${FRPC_ALLOWLIST.join(', ')} and on PATH.`)
+      expect(err.detail).toContain('github.com/fatedier/frp/releases')
+      expect(err.detail).toContain('Set the path')
+      expect(err.detail).not.toContain('build-frpc')
+      if (process.platform === 'darwin') expect(err.detail).toContain('brew install frpc')
+    }
+  )
+
+  it('keeps every allowlisted location inside a root only an administrator writes', () => {
+    // The list is asserted rather than exercised: its entries are real system
+    // paths a test cannot create. What makes them safe to auto-accept is that
+    // each one lives under a root the symlink check enforces.
+    const roots = ['/usr', '/opt', '/bin', '/sbin', '/nix', '/snap', '/run/current-system']
+    for (const p of FRPC_ALLOWLIST) {
+      expect(roots.some((r) => p.startsWith(`${r}/`))).toBe(true)
+    }
+    // /snap/bin/frpc would resolve to /usr/bin/snap, which is not frpc.
+    expect(FRPC_ALLOWLIST.some((p) => p.startsWith('/snap/'))).toBe(false)
+  })
+
+  it.skipIf(installed || process.platform === 'win32')('falls back to PATH on POSIX', async () => {
+    const file = frpcShim(join(root, 'pathdir'), '0.71.0')
+    process.env.PATH = join(root, 'pathdir')
+
+    const info = await resolveEngineBinary('frpc', {})
+    expect(info.kind).toBe('frp')
+    expect(info.path).toBe(realpathSync(file))
+    expect(info.bundled).toBe(false)
+    expect(info.version).toBe('0.71.0')
+  })
+
+  it('never searches PATH for it on Windows, and points at the confirmed path instead', async () => {
+    const dir = join(root, 'hijack')
+    frpcShim(dir, '0.71.0', 'frpc.exe')
+    frpcShim(dir, '0.71.0')
+    process.env.PATH = dir
+    stubPlatform('win32')
+
+    const err = await resolveEngineBinary('frpc', {}).catch((e) => e)
+    expect(isVpnError(err) && err.code).toBe('binary-missing')
+    expect(err.detail).toContain('does not search PATH on Windows')
+    expect(err.detail).toContain('frpc.exe')
+    expect(err.detail).toContain('Set the path')
+    expect(err.detail).not.toContain(dir)
+  })
+
+  it('runs a confirmed path wherever the user keeps it', async () => {
+    const file = frpcShim(join(root, 'tools'), '0.72.0')
+    const info = await resolveEngineBinary('frpc', { binaryPath: file, confirmed: true })
+    expect(info.path).toBe(realpathSync(file))
+    expect(info.version).toBe('0.72.0')
+  })
+
+  it('refuses an unconfirmed path, like any other engine', async () => {
+    const file = frpcShim(join(root, 'tools'), '0.72.0')
+    const err = await resolveEngineBinary('frpc', { binaryPath: file }).catch((e) => e)
+    expect(isVpnError(err) && err.code).toBe('config-invalid')
+  })
+
+  it('refuses a confirmed frpc that is too old, leading with both versions', async () => {
+    const file = frpcShim(join(root, 'tools'), '0.51.3')
+    const err = await resolveEngineBinary('frpc', { binaryPath: file, confirmed: true }).catch(
+      (e) => e
+    )
+    expect(isVpnError(err) && err.code).toBe('binary-outdated')
+    // First, because it is the headline: the program IS there.
+    expect(err.detail.startsWith('frpc 0.51.3 is too old; OpsMaxx needs 0.62.0 or newer.')).toBe(true)
+    expect(err.detail).toContain('github.com/fatedier/frp/releases')
+  })
+
+  it('says why a binary that will not run reported no version', async () => {
+    // What Gatekeeper does to an unsigned download, and what a broken binary
+    // does anywhere: killed before it prints a thing. "Did not report a
+    // version" sent people to check the version of a program that never ran.
+    const dir = join(root, 'killed')
+    mkdirSync(dir, { recursive: true, mode: 0o755 })
+    const file = join(dir, 'frpc')
+    writeFileSync(file, '#!/bin/sh\nkill -9 $$\n')
+    chmodSync(file, 0o755)
+    const err = await resolveEngineBinary('frpc', { binaryPath: file, confirmed: true }).catch(
+      (e) => e
+    )
+    expect(isVpnError(err) && err.code).toBe('binary-missing')
+    expect(err.detail).toContain('was killed (SIGKILL)')
+    expect(err.detail).toContain('0.62.0 or newer')
+  })
+
+  it.runIf(process.platform === 'darwin')(
+    'names the quarantine attribute, and the command that clears it, on macOS',
+    async () => {
+      const dir = join(root, 'download')
+      mkdirSync(dir, { recursive: true, mode: 0o755 })
+      const file = join(dir, 'frpc')
+      writeFileSync(file, '#!/bin/sh\nkill -9 $$\n')
+      chmodSync(file, 0o755)
+      execFileSync('/usr/bin/xattr', ['-w', 'com.apple.quarantine', '0081;00000000;Safari;', file])
+      const err = await resolveEngineBinary('frpc', { binaryPath: file, confirmed: true }).catch(
+        (e) => e
+      )
+      expect(err.detail).toContain(`xattr -d com.apple.quarantine ${realpathSync(file)}`)
+    }
+  )
+
+  it('carries none of the OpenVPN coexistence talk', async () => {
+    // frpc creates no tun device and claims no route; "utun6 already carries
+    // traffic" or "Tunnelblick is installed" under an frp row is about
+    // somebody else's problem.
+    const file = frpcShim(join(root, 'tools'), '0.71.0')
+    const info = await resolveEngineBinary('frpc', { binaryPath: file, confirmed: true })
+    expect(info.advisories).toBeUndefined()
+    const old = frpcShim(join(root, 'old'), '0.61.0')
+    const err = await resolveEngineBinary('frpc', { binaryPath: old, confirmed: true }).catch((e) => e)
+    expect(err.detail).not.toContain('copy of OpenVPN')
+  })
+
+  it.skipIf(installed || process.platform === 'win32')(
+    'passes over a too-old frpc on PATH and reports it as found but not used',
+    async () => {
+      const old = frpcShim(join(root, 'old'), '0.61.0')
+      process.env.PATH = join(root, 'old')
+      const err = await resolveEngineBinary('frpc', {}).catch((e) => e)
+      // Every refusal was the version, so the version is the headline.
+      expect(isVpnError(err) && err.code).toBe('binary-outdated')
+      expect(err.detail).toContain('frpc 0.61.0 is too old; OpsMaxx needs 0.62.0 or newer.')
+      expect(err.detail).toContain(`Found ${old} (0.61.0)`)
+
+      // And a newer one later on PATH still gets its turn.
+      const good = frpcShim(join(root, 'new'), '0.62.0')
+      process.env.PATH = [join(root, 'old'), join(root, 'new')].join(':')
+      expect((await resolveEngineBinary('frpc', {})).path).toBe(realpathSync(good))
+    }
+  )
+
+  it('compares versions numerically and refuses one it cannot read', () => {
+    expect(tooOld('frpc', '0.62.0')).toBeNull()
+    expect(tooOld('frpc', '0.71.0')).toBeNull()
+    expect(tooOld('frpc', '1.0.0')).toBeNull()
+    expect(tooOld('frpc.exe', '0.9.0')).toContain('0.62.0 or newer')
+    expect(tooOld('frpc', '0.61.9')).toContain('frpc 0.61.9')
+    expect(tooOld('frpc', undefined)).toContain('did not report a version')
+    expect(tooOld('frpc', 'usage: frpc [flags]')).toContain('did not report a version')
+    // No minimum for an engine whose version OpsMaxx chose.
+    expect(tooOld('openvpn', undefined)).toBeNull()
   })
 })

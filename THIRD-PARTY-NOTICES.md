@@ -46,16 +46,15 @@ Built or fetched by the scripts in `scripts/`, verified against
 | `goproxy` (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | BSD-3-Clause | all | `github.com/elazarl/goproxy` |
 | `tsnet` / Tailscale (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | BSD-3-Clause | all | `tailscale.com` |
 | `ngrok-go` (linked into `opsmaxx-netd`) | pinned in `sidecar/netd/go.mod` | MIT | all | `golang.ngrok.com/ngrok/v2` |
-| `frpc` | v0.71.0 | Apache-2.0 | all | `github.com/fatedier/frp` |
 | `openvpn` | v2.6.22 | **GPL-2.0** with OpenSSL exception | macOS, Linux | `github.com/OpenVPN/openvpn` |
 | OpenSSL (statically linked into `openvpn`) | 3.5.8 | Apache-2.0 | macOS, Linux | `github.com/openssl/openssl` |
 | `wintun.dll` | 0.14.1 | **Proprietary** — see below | Windows | `wintun.net/builds` (prebuilt, unmodified) |
 
-Apache-2.0 section 4 requires the licence text and any `NOTICE` file to travel
-with the binary. `scripts/build-frpc.sh` copies frp's `LICENSE` and `NOTICE`
-into `resources/licenses/frp/`, which ships inside the app. The same is done
-for OpenVPN (`resources/licenses/openvpn/`) and Wintun
-(`resources/licenses/wintun/`).
+frp is not bundled: OpsMaxx drives an `frpc` the user installs themselves.
+
+Each bundled component's licence text ships inside the app: OpenVPN and the
+OpenSSL it links in `resources/licenses/openvpn/`, Wintun in
+`resources/licenses/wintun/`.
 
 ### OpenVPN is bundled on macOS and Linux, and it is GPL-2.0
 

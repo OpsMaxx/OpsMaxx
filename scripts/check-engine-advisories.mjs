@@ -178,7 +178,7 @@ async function main() {
 
   // Say plainly what is not covered. A green check that quietly means "two of
   // the four bundled binaries" is the same false confidence in a nicer hat.
-  console.log('Not watched here: frpc and wintun.dll have no usable CPE feed.')
+  console.log('Not watched here: wintun.dll has no usable CPE feed.')
   console.log('Node dependencies are covered by `npm audit` in CI, Go by go.sum.')
   console.log()
 

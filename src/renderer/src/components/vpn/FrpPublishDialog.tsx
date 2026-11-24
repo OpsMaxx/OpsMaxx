@@ -14,7 +14,7 @@ import {
 } from '../../../../shared/frpTunnel'
 import { isVpnRunning } from '../../../../shared/vpn'
 import type { FrpSpec } from '../../../../shared/vpn'
-import { headline } from './useVpnProfiles'
+import { headline, installAction } from './useVpnProfiles'
 import { Switch } from '../common/Switch'
 import { useT } from '../../lib/i18n'
 
@@ -99,8 +99,18 @@ export function FrpPublishDialog({
       if (result && result.ok === false) {
         // The proxy stays on the profile. It is valid and confirmed; what
         // failed is the engine, and the row's own Start button is now the
-        // shortest way to try again.
-        toast(headline(result.error ?? t('vpn.frp.publish.startFailed')), 'error')
+        // shortest way to try again. No frpc at all — the state every upgrade
+        // from a build that shipped one starts in — gets the install button
+        // the row has, so the first publish is not a dead end.
+        const platform =
+          result.errorCode === 'binary-missing'
+            ? ((await window.opsmaxx?.platform().catch(() => null)) ?? null)
+            : null
+        toast(
+          headline(result.error ?? t('vpn.frp.publish.startFailed'), result.errorCode),
+          'error',
+          result.errorCode === 'binary-missing' ? installAction('frp', platform) : undefined
+        )
       } else {
         toast(t('vpn.frp.publish.published', { url }), 'ok')
       }

@@ -169,6 +169,15 @@ describe('a reverse-proxy profile arriving from another device', () => {
     expect(storedVpns()[0].autoStart).toBe(false)
   })
 
+  it('drops the frpc path, so this machine resolves its own', () => {
+    // OpsMaxx ships no frpc, so a path is how a Windows user runs one at all —
+    // and a Mac's /opt/homebrew/bin/frpc arriving there as their "confirmed"
+    // choice would refuse to start with someone else's disk in the message.
+    SOURCES.vpns!.write(inbound([frp({ spec: { ...frp().spec as object, binaryPath: '/opt/homebrew/bin/frpc' } })]))
+    expect(spec(0).binaryPath).toBeUndefined()
+    expect(spec(0).serverAddr).toBe('frp.example.com')
+  })
+
   it('leaves the exposure tick alone', () => {
     // Deliberately NOT stripped, and the reason is about what a strip costs
     // rather than about what the tick means.

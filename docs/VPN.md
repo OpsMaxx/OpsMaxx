@@ -160,7 +160,7 @@ it.
 install. It is built from a pinned upstream tag by `scripts/build-openvpn.sh`,
 statically linked against a pinned OpenSSL so it does not depend on anything on
 your machine, and hash-verified before it is run — the same treatment the
-WireGuard sidecar and the frp client get.
+WireGuard sidecar gets.
 
 **On Windows you still install OpenVPN yourself**, and the reason is a driver
 rather than a licence. OpenVPN needs a tun adapter, and neither adapter it
@@ -262,8 +262,48 @@ keyboard.
 ## frp — publishing a local port
 
 frp is the opposite direction from a VPN: instead of reaching in, it makes
-something on your machine reachable **from** an frp server. OpsMaxx bundles
-`frpc` v0.71.0 (Apache-2.0, built from source).
+something on your machine reachable **from** an frp server.
+
+### You install frp yourself
+
+**OpsMaxx does not include frp.** Antivirus software — Microsoft Defender among
+it — flags the upstream `frpc` program as a hacktool, because a reverse proxy
+is also what malware uses to reach out of a network. While OpsMaxx shipped it,
+that verdict landed on OpsMaxx itself: installers and updates were quarantined.
+The same verdict applies to **your own copy**: if your antivirus removes or
+blocks `frpc` after you install it, that is why, and allowing that one file is
+the fix.
+
+OpsMaxx needs **frpc 0.62.0 or newer**. It writes frp's TOML configuration
+(0.52.0 and later), and it passes your token to frpc through frp's
+`{{ .Envs.X }}` templating — which, up to 0.61, HTML-escaped what it
+substituted, so a token containing `+`, `&`, `<` or a quote silently became a
+different token. An older frpc is refused with a message that names the version
+it found.
+
+| Platform | How to get frpc |
+|---|---|
+| macOS | `brew install frpc` (homebrew-core), or a download from [the frp releases page](https://github.com/fatedier/frp/releases) |
+| Linux | a download from [the frp releases page](https://github.com/fatedier/frp/releases), copied to `/usr/local/bin` |
+| Windows | `frpc.exe` from [the frp releases page](https://github.com/fatedier/frp/releases), then **Set the path** on the profile |
+
+Where the binary comes from, in order: a path you set on the profile; then
+`/usr/local/bin/frpc`, `/opt/homebrew/bin/frpc`, `/opt/local/bin/frpc`,
+`/usr/bin/frpc` and `/run/current-system/sw/bin/frpc` (NixOS); then, on macOS
+and Linux only, `PATH`. Anything found there is held to the same rules as a
+system OpenVPN — no symlink out of `/usr`, `/opt`, `/nix` and the other
+administrator-owned roots, no world-writable parent directory. **On Windows
+nothing is searched at all**: frp has no installer there, every place it gets
+unzipped to is writable by your user account, and a program found that way is
+not one an administrator put there. The path you set on the profile is the
+only way in. Snap's `/snap/bin/frpc` is not used automatically — it is a link
+to `snap` itself — so point the profile at the binary inside
+`/snap/<name>/current/` instead.
+
+The path is specific to this computer, so it does not sync: another device
+finds its own frpc.
+
+### What frp is allowed to do
 
 This inverts OpsMaxx's usual threat model, so it is gated accordingly:
 
@@ -372,7 +412,7 @@ See [AI-SECURITY.md](AI-SECURITY.md).
 | WireGuard connects but nothing works; handshake never happens | Wrong endpoint, UDP blocked, or a captive portal you have not signed into |
 | Amber "degraded" after working fine | The tunnel stopped passing traffic — often a network change; it usually recovers |
 | Large transfers stall, small ones work | MTU. Try 1280 |
-| "The program that runs this tunnel could not be found" | Reinstall OpsMaxx — antivirus sometimes quarantines bundled binaries. On Windows only, an OpenVPN profile also needs OpenVPN installed |
+| "The program that runs this tunnel could not be found" | For WireGuard, and OpenVPN on macOS and Linux: reinstall OpsMaxx — antivirus sometimes quarantines bundled binaries. For OpenVPN on Windows, and frp everywhere: install it yourself (see above). Details names any copy that was found and refused, such as an frpc older than 0.62.0 |
 | "does not match its expected checksum" | The bundled binary was altered. Reinstall; do not override |
 | OpenVPN asks for the code again after a reconnect | Expected. Codes are never cached |
 | frp says "port already used" | Another proxy — possibly someone else's — already claims that remote port on that frp server |

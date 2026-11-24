@@ -403,9 +403,14 @@ export function createOpenVpnDriver(opts: OpenVpnDriverOptions = {}): OpenVpnDri
       return { ok: !issues.some((i) => i.severity === 'error'), issues }
     },
 
-    async probe(): Promise<VpnEngineInfo> {
+    async probe(spec?: OpenVpnSpec): Promise<VpnEngineInfo> {
       try {
-        return await resolveEngineBinary('openvpn', {})
+        // The profile's own path when it has one, confirmed by presence for
+        // the reason `resolveEngine` above gives.
+        return await resolveEngineBinary('openvpn', {
+          binaryPath: spec?.binaryPath,
+          confirmed: spec?.binaryPath !== undefined
+        })
       } catch (e) {
         return { kind: 'openvpn', available: false, bundled: false, reason: absentReason(e, platform) }
       }

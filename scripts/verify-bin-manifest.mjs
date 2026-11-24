@@ -37,9 +37,9 @@ const BIN_ROOT = join(ROOT, 'resources', 'bin')
 //     check would have passed an installer with no addyd in it at all — which
 //     is the exact sentence two paragraphs up, arrived at the hard way.
 const REQUIRED = {
-  darwin: ['opsmaxx-netd', 'opsmaxx-addyd', 'frpc', 'openvpn'],
-  linux: ['opsmaxx-netd', 'opsmaxx-addyd', 'frpc', 'openvpn'],
-  win32: ['opsmaxx-netd', 'opsmaxx-addyd', 'frpc', 'wintun.dll']
+  darwin: ['opsmaxx-netd', 'opsmaxx-addyd', 'openvpn'],
+  linux: ['opsmaxx-netd', 'opsmaxx-addyd', 'openvpn'],
+  win32: ['opsmaxx-netd', 'opsmaxx-addyd', 'wintun.dll']
 }
 
 function fileNameFor(name, dir) {

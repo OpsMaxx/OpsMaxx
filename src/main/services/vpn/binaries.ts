@@ -26,10 +26,11 @@ import {
 //    search on Windows (E44) and no relative paths, world-writable parents,
 //    or symlinks out of an allowlisted root (E45).
 //
-// `resolveEngineBinary` is the two in order, and is what the OpenVPN driver
-// calls: OpsMaxx now ships `openvpn` on macOS and Linux, but a Windows
-// build has none — and someone may still want the copy they installed
-// themselves. See its own comment for why the ordering is not symmetric.
+// `resolveEngineBinary` is the two in order, and is what the OpenVPN and frp
+// drivers call: OpsMaxx ships `openvpn` on macOS and Linux but not Windows,
+// and ships `frpc` nowhere (see `BUNDLED_PLATFORMS` in shared/vpnEngines.ts) —
+// and someone may still want the copy they installed themselves. See its own
+// comment for why the ordering is not symmetric.
 
 // Which engine each binary implements. The name alone reaches the caller, so
 // this is where it turns back into a `VpnKind` for the returned info.
@@ -42,7 +43,7 @@ const ENGINE_KIND: Record<string, VpnKind> = {
   // that throw is the first line of resolution.
 }
 
-// The only directories a system-installed OpenVPN is accepted from, in the
+// The only directories a system-installed engine is accepted from, in the
 // order they are tried. A fixed list rather than a search: on Windows the
 // search *is* the vulnerability. Windows has no entry here because there is no
 // fixed list to write — see `winCandidates`.
@@ -63,6 +64,54 @@ const SYSTEM_CANDIDATES: Record<string, { posix: string[] }> = {
       '/run/current-system/sw/bin/openvpn'
     ]
   },
+  // frpc is a user binary, so `bin` rather than `sbin`. Every entry resolves
+  // inside `POSIX_ROOTS`, which is what makes the list safe to auto-accept.
+  //
+  // Nothing for Windows, deliberately and not as a gap: frp has no installer
+  // there, so it lives wherever someone unzipped it — Downloads, a tools
+  // folder, scoop's per-user shims — and every one of those is user-writable,
+  // which is exactly what `winRoots()` exists to exclude. The Windows answer
+  // is a path the user confirms in the profile.
+  frpc: {
+    posix: [
+      // Intel Homebrew (`brew install frpc`, homebrew-core), and where a binary
+      // from the upstream release is usually copied by hand. /usr.
+      '/usr/local/bin/frpc',
+      // Apple-silicon Homebrew; the link points into Cellar, still /opt.
+      '/opt/homebrew/bin/frpc',
+      // MacPorts. /opt.
+      '/opt/local/bin/frpc',
+      // A distribution or hand-built package. /usr.
+      '/usr/bin/frpc',
+      // NixOS (`pkgs.frp`): a symlink into /nix/store, a real Go binary there.
+      '/run/current-system/sw/bin/frpc'
+      // NOT /snap/bin/frpc. Every /snap/bin entry is a symlink to
+      // /usr/bin/snap, which picks the app from argv[0] — and `describe`
+      // reports the REAL path, so the driver would spawn `snap -c frpc.toml`.
+      // A snap user can still point "Set the path" at the binary inside
+      // /snap/<name>/current/.
+    ]
+  }
+}
+
+// The oldest engine each driver can actually drive, for engines whose version
+// the user picks. A bundled engine has no entry: we built it, so we know it.
+//
+// frpc 0.62.0, for two separate reasons:
+//  - The driver writes TOML (`frpConfig.ts`) with the v1 key layout —
+//    `auth.*`, `transport.*`, `webServer.*`, `log.to` — which frpc reads from
+//    0.52.0. Its admin API (`/healthz`, `/api/status`, `/api/config`,
+//    `/api/reload`, `POST /api/stop`) is older than that.
+//  - Secrets reach frpc as `{{ .Envs.X }}` templates. Up to and including
+//    0.61, frpc rendered its config with Go's `html/template`, which
+//    HTML-escapes what it substitutes: a token containing `+`, `&`, `<` or a
+//    quote silently became a DIFFERENT token, and the user saw "authentication
+//    failed" against a server whose token they had typed correctly. 0.62.0
+//    switched `pkg/config/load.go` to `text/template`.
+// So 0.52–0.61 would work for some tokens and not others, which is worse than
+// refusing them all with a sentence that names the fix.
+const MIN_VERSION: Record<string, [number, number, number]> = {
+  frpc: [0, 62, 0]
 }
 
 // A symlink is allowed to move a candidate around inside these roots — Homebrew
@@ -271,7 +320,11 @@ export async function otherVpnClients(): Promise<string[]> {
  * at all, so telling someone its copy of OpenVPN belongs to that app names a
  * file that does not exist and sends them hunting for it.
  */
-async function openVpnClientSentence(): Promise<string> {
+async function openVpnClientSentence(name: string): Promise<string> {
+  // OpenVPN's question only. frpc touches no routes and no tun device, and no
+  // other app's bundle carries one, so naming Tunnelblick on an frp failure
+  // would send the reader somewhere that has nothing to do with it.
+  if (name !== 'openvpn') return ''
   const others = (await otherVpnClients()).filter((label) => label !== 'WireGuard')
   if (!others.length) return ''
   return (
@@ -530,7 +583,6 @@ async function winCandidates(name: string): Promise<Candidate[]> {
 // always right and only less specific.
 const BUILD_SCRIPT: Record<string, string> = {
   'opsmaxx-netd': 'scripts/build-sidecar.sh',
-  frpc: 'scripts/build-frpc.sh',
   openvpn: 'scripts/build-openvpn.sh'
 }
 
@@ -601,7 +653,7 @@ export async function resolveBundled(name: string): Promise<VpnEngineInfo> {
     available: true,
     path: resolved.path,
     sha256: resolved.sha256,
-    version: resolved.version ?? (await probeVersion(resolved.path)),
+    version: resolved.version ?? (await probeVersion(resolved.path)).version,
     bundled: true
   }
   bundledCache.set(name, info)
@@ -647,13 +699,23 @@ export async function resolveSystem(
       // `openvpn` inside Tunnelblick or OpenVPN Connect lands here — so the
       // one user who has already gone looking for another app's copy was the
       // only one never told why theirs will not be run.
-      const others = await openVpnClientSentence()
+      const others = await openVpnClientSentence(name)
       throw new VpnError(
         'config-invalid',
         [`${opts.binaryPath} ${problem}`, others].filter(Boolean).join(' ')
       )
     }
-    return describe(kind, opts.binaryPath)
+    const checked = await describeChecked(name, kind, opts.binaryPath)
+    if (checked.outdated) throw await outdatedError(name, [checked.outdated])
+    // `binary-missing` rather than `config-invalid`: the path is right and the
+    // fix is a working program, which is the button that code gets.
+    if (checked.refusal) {
+      throw new VpnError(
+        'binary-missing',
+        [`${opts.binaryPath} ${checked.refusal}`, await installAdvice(name)].filter(Boolean).join(' ')
+      )
+    }
+    return checked.info
   }
 
   const candidates: Candidate[] = win32
@@ -663,15 +725,21 @@ export async function resolveSystem(
   // different problems with different fixes, and reporting them as one
   // sentence sent people to reinstall a program they already had.
   const refused: string[] = []
+  // The subset of `refused` that is "too old" and nothing else — when that is
+  // all there is, the headline is the version, not "could not be found".
+  const outdated: Outdated[] = []
   for (const candidate of candidates) {
     const problem = await checkExecutable(candidate.path, [
       ...(candidate.extraRoots ?? []),
       ...roots
     ])
-    if (!problem) return describe(kind, candidate.path)
+    // A copy too old to drive is refused like any other, so a newer one later
+    // in the list or on PATH still gets its turn.
+    const accepted = problem ? null : await describeIfNewEnough(name, kind, candidate.path, refused, outdated)
+    if (accepted) return accepted
     // `does not exist` is the ordinary case on any machine without this
     // engine, and listing forty of them buries the one that matters.
-    if (!problem.startsWith('does not exist')) refused.push(`${candidate.path} ${problem}`)
+    if (problem && !problem.startsWith('does not exist')) refused.push(`${candidate.path} ${problem}`)
   }
 
   // No PATH search on Windows, ever. `PATH` there routinely contains
@@ -683,7 +751,8 @@ export async function resolveSystem(
       if (!dir) continue
       const candidate = join(dir, name)
       if (await checkExecutable(candidate, [dir, ...roots])) continue
-      return describe(kind, candidate)
+      const accepted = await describeIfNewEnough(name, kind, candidate, refused, outdated)
+      if (accepted) return accepted
     }
   }
 
@@ -692,21 +761,128 @@ export async function resolveSystem(
   // put four sentences of advice in a toast with no control in it. The UI
   // renders the code's hint and a button that performs it, and shows this
   // detail behind a Details disclosure for whoever actually wants the paths.
-  const where = candidates.length
-    ? candidates.map((c) => c.path).join(', ')
-    : 'the standard install locations'
+  // An empty list is frpc on Windows, which has no install location worth the
+  // name (see SYSTEM_CANDIDATES) — so nothing is claimed to have been searched.
+  const where = candidates.map((c) => c.path).join(', ')
   const parts = [
     win32
-      ? `Looked in ${where}. OpsMaxx does not search PATH on Windows.`
-      : `Looked in ${where} and on PATH.`
+      ? `${where ? `Looked in ${where}. ` : ''}OpsMaxx does not search PATH on Windows.`
+      : `Looked in ${where || 'the standard install locations'} and on PATH.`
   ]
+  if (outdated.length && outdated.length === refused.length) throw await outdatedError(name, outdated)
+
   // The distinction the reader needs first: a refused candidate means the
-  // program IS installed, and no amount of installing it again will help.
+  // program IS installed, and no amount of installing it again will help —
+  // unless it was refused for its version, where a newer copy is the fix.
   if (refused.length) parts.push(`Found but not used: ${refused.join('; ')}.`)
   parts.push(loginPathCaveat(name))
-  parts.push(await openVpnClientSentence())
+  parts.push(await openVpnClientSentence(name))
   parts.push(await installAdvice(name))
   throw new VpnError('binary-missing', parts.filter(Boolean).join(' '))
+}
+
+/** A copy refused for its version alone. */
+interface Outdated {
+  path: string
+  version: string
+}
+
+/** The engine at `path`, and whether its version will do. */
+async function describeChecked(
+  name: string,
+  kind: VpnKind,
+  path: string
+): Promise<{ info: VpnEngineInfo; refusal: string | null; outdated?: Outdated }> {
+  // The real path is what actually executes, so that is what gets hashed and
+  // reported: auditing the symlink would audit the wrong bytes.
+  const real = await realpath(path)
+  const probe = await probeVersion(real)
+  const info: VpnEngineInfo = {
+    kind,
+    available: true,
+    path: real,
+    sha256: await sha256File(real),
+    version: probe.version,
+    bundled: false
+  }
+  const refusal = tooOld(name, probe.version, probe.problem)
+  const parsed = parseVersion(probe.version)
+  return {
+    info,
+    refusal,
+    outdated: refusal && parsed ? { path, version: parsed.join('.') } : undefined
+  }
+}
+
+/** `describeChecked`, or null with the reason pushed onto `refused` (and onto
+ *  `outdated` when the version is the only problem). */
+async function describeIfNewEnough(
+  name: string,
+  kind: VpnKind,
+  path: string,
+  refused: string[],
+  outdated: Outdated[]
+): Promise<VpnEngineInfo | null> {
+  const checked = await describeChecked(name, kind, path)
+  if (!checked.refusal) return checked.info
+  refused.push(`${path} ${checked.refusal}`)
+  if (checked.outdated) outdated.push(checked.outdated)
+  return null
+}
+
+/** "frpc 0.61.0 is too old; OpsMaxx needs 0.62.0 or newer." first, because it
+ *  is the whole story: the program IS installed, so "could not be found"
+ *  would send the reader to look for something they can see. */
+async function outdatedError(name: string, found: Outdated[]): Promise<VpnError> {
+  const base = name.endsWith('.exe') ? name.slice(0, -4) : name
+  const want = (MIN_VERSION[base] ?? []).join('.')
+  return new VpnError(
+    'binary-outdated',
+    [
+      `${base} ${found[0].version} is too old; OpsMaxx needs ${want} or newer.`,
+      `Found ${found.map((f) => `${f.path} (${f.version})`).join(', ')}.`,
+      await installAdvice(name)
+    ]
+      .filter(Boolean)
+      .join(' ')
+  )
+}
+
+function parseVersion(version: string | undefined): [number, number, number] | null {
+  const m = /(\d+)\.(\d+)\.(\d+)/.exec(version ?? '')
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null
+}
+
+/**
+ * Why this engine's version will not do, as a fragment to follow its path, or
+ * null when it will. Exported for the resolver tests.
+ *
+ * An unreadable version is refused too: every frpc release prints a bare
+ * `0.x.y` for `--version`, so a binary that does not is either not frpc or not
+ * one this driver has ever seen, and running it would fail later and worse.
+ */
+export function tooOld(
+  name: string,
+  version: string | undefined,
+  /** Why `--version` produced nothing, from `probeVersion`, when it is known. */
+  probeProblem?: string
+): string | null {
+  const min = MIN_VERSION[name.endsWith('.exe') ? name.slice(0, -4) : name]
+  if (!min) return null
+  const want = min.join('.')
+  const have = parseVersion(version)
+  if (!have) {
+    return probeProblem
+      ? `${probeProblem} OpsMaxx checks that it is ${name} ${want} or newer before running it.`
+      : `did not report a version OpsMaxx could read, and OpsMaxx needs ${name} ${want} or newer.`
+  }
+  for (let i = 0; i < 3; i++) {
+    if (have[i] > min[i]) return null
+    if (have[i] < min[i]) {
+      return `is ${name} ${have.join('.')}, and OpsMaxx needs ${want} or newer.`
+    }
+  }
+  return null
 }
 
 /**
@@ -741,31 +917,65 @@ export async function resolveSystem(
  * widening a boundary every future security review has to re-examine. The
  * sentence below costs nothing and reaches the same user.
  *
- * openvpn only, like `installAdvice`, and for the same kind of reason: "Set the
- * path" is rendered for this engine and no other (see the `engineMissing` block
- * in useVpnProfiles.tsx), so naming it on a WireGuard or frp failure would
- * point at a button that is not on the screen.
+ * openvpn and frpc only, like `installAdvice`, and for the same kind of reason:
+ * "Set the path" is rendered for those engines and no other (see the
+ * `engineMissing` block in useVpnProfiles.tsx), so naming it on a WireGuard
+ * failure would point at a button that is not on the screen.
  */
 function loginPathCaveat(name: string): string {
   // Not on Windows, which refuses the PATH search by design (E44) and says so
   // three lines up. Explaining that a search we did not do used the wrong PATH
   // would contradict the sentence next to it.
-  if (name !== 'openvpn' || process.platform === 'win32') return ''
+  if (!(name in SYSTEM_CANDIDATES) || process.platform === 'win32') return ''
   return (
     'OpsMaxx searched the PATH it was started with, which is not your login shell’s — ' +
-    'a desktop launcher hands the app the session’s PATH, so an openvpn installed by nix, ' +
-    'asdf or into a custom prefix answers `which openvpn` in a terminal and is not found ' +
+    `a desktop launcher hands the app the session’s PATH, so a ${name} installed by nix, ` +
+    `asdf or into a custom prefix answers \`which ${name}\` in a terminal and is not found ` +
     'here. Use “Set the path” to point at it.'
+  )
+}
+
+/** Where upstream publishes frpc for every platform. homebrew-core's `frpc`
+ *  formula is the macOS route. Linux gets no package-manager command because
+ *  none could be confirmed across distributions — Arch's official
+ *  repositories, for one, have no frp — and naming a package that does not
+ *  exist is worse than naming the download. */
+const FRP_RELEASES = 'https://github.com/fatedier/frp/releases'
+
+/** frpc's advice, which unlike openvpn's has no bundled copy to defer to on
+ *  any platform. The antivirus sentence is there because it is the most likely
+ *  reason a copy the user just installed is "missing" again tomorrow — and
+ *  because OpsMaxx stopped shipping frpc for exactly that reason, so the user
+ *  should hear it from us before their antivirus tells them. */
+function frpcInstallAdvice(): string {
+  const av =
+    'Antivirus software, Microsoft Defender included, often flags frpc as a hacktool ' +
+    'because it is a reverse proxy; if yours removes it, allow that file.'
+  if (process.platform === 'darwin') {
+    return `You can install it with \`brew install frpc\`, or download it from ${FRP_RELEASES}. ${av}`
+  }
+  if (process.platform === 'win32') {
+    return (
+      `Download frpc.exe from ${FRP_RELEASES} and use “Set the path” to point at it — ` +
+      `OpsMaxx does not look for frpc anywhere on Windows by itself. ${av}`
+    )
+  }
+  return (
+    `Download frpc from ${FRP_RELEASES} and copy it to /usr/local/bin, or use “Set the path” ` +
+    `to point at it. ${av}`
   )
 }
 
 /** How to get this engine on THIS machine, in one sentence.
  *
- *  Windows says nothing: `installHint` in the OpenVPN driver already prints
+ *  frpc has its own answer on every platform — see `frpcInstallAdvice`.
+ *
+ *  For openvpn, Windows says nothing: `installHint` in the OpenVPN driver already prints
  *  the full openvpn.net paragraph there — it is the one platform with no
  *  bundled copy — and two install instructions in one toast contradict each
  *  other about which to follow. */
 async function installAdvice(name: string): Promise<string> {
+  if (name === 'frpc') return frpcInstallAdvice()
   if (name !== 'openvpn' || process.platform === 'win32') return ''
   // AND NOT WHERE OPSMAXX SHIPS ONE.
   //
@@ -830,20 +1040,22 @@ export async function resolveEngineBinary(
   name: string,
   opts: SystemResolveOptions = {}
 ): Promise<VpnEngineInfo> {
-  if (opts.binaryPath) return withAdvisories(resolveSystem(name, opts))
+  if (opts.binaryPath) return withAdvisories(name, resolveSystem(name, opts))
   // Nothing to look for, so nothing to report about not finding it. Reporting
   // "run scripts/build-openvpn.sh" on Windows would send the reader to build a
   // target that does not exist.
   // `process.platform` read here rather than inside the predicate, so the
   // resolver tests that stub it still drive this decision.
-  if (!isEngineBundledOn(name, process.platform)) return withAdvisories(resolveSystem(name, opts))
+  if (!isEngineBundledOn(name, process.platform)) {
+    return withAdvisories(name, resolveSystem(name, opts))
+  }
 
   let bundledProblem: string
   try {
     // The bundled copy needs this as much as a system one — arguably more:
     // OpsMaxx ships its own openvpn on macOS and Linux, which is exactly
     // where Tunnelblick and Viscosity also live.
-    return await withAdvisories(resolveBundled(name))
+    return await withAdvisories(name, resolveBundled(name))
   } catch (e) {
     if (e instanceof VpnError && e.code === 'binary-untrusted') throw e
     // `detail`, not `message`: the message already carries the generic
@@ -852,7 +1064,7 @@ export async function resolveEngineBinary(
   }
 
   try {
-    return await withAdvisories(resolveSystem(name, opts))
+    return await withAdvisories(name, resolveSystem(name, opts))
   } catch (e) {
     // Both halves in one detail. Reporting only the second would say "install
     // openvpn" on a build that was supposed to ship one, which sends the
@@ -863,9 +1075,14 @@ export async function resolveEngineBinary(
 
 /** Attach the coexistence notes to a resolved engine. Never fails the
  *  resolve: an advisory that cannot be computed is not a reason to refuse a
- *  binary that was found. */
-async function withAdvisories(info: Promise<VpnEngineInfo>): Promise<VpnEngineInfo> {
+ *  binary that was found.
+ *
+ *  OpenVPN only. The notes are about two VPN clients fighting over a tun
+ *  device and the default route; frpc creates neither, so "utun6 already
+ *  carries traffic" under an frp row is noise about somebody else's problem. */
+async function withAdvisories(name: string, info: Promise<VpnEngineInfo>): Promise<VpnEngineInfo> {
   const resolved = await info
+  if (name !== 'openvpn') return resolved
   const advisories = await coexistenceAdvisories().catch(() => [])
   return advisories.length ? { ...resolved, advisories } : resolved
 }
@@ -873,20 +1090,6 @@ async function withAdvisories(info: Promise<VpnEngineInfo>): Promise<VpnEngineIn
 function detailOf(e: unknown): string {
   if (e instanceof VpnError) return e.detail ?? e.message
   return e instanceof Error ? e.message : String(e)
-}
-
-async function describe(kind: VpnKind, path: string): Promise<VpnEngineInfo> {
-  // The real path is what actually executes, so that is what gets hashed and
-  // reported: auditing the symlink would audit the wrong bytes.
-  const real = await realpath(path)
-  return {
-    kind,
-    available: true,
-    path: real,
-    sha256: await sha256File(real),
-    version: await probeVersion(real),
-    bundled: false
-  }
 }
 
 /** What else on this machine might be in the way. Empty on the ordinary
@@ -1041,31 +1244,82 @@ function isInside(child: string, root: string): boolean {
   return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel))
 }
 
-/** First non-empty line of `<binary> --version`, or undefined. Best effort:
- *  the version is shown in the UI and audited on change, but nothing refuses
- *  to run without it. */
-function probeVersion(file: string): Promise<string | undefined> {
+/** What `<binary> --version` said, or why it said nothing. */
+interface VersionProbe {
+  /** First non-empty line of output. */
+  version?: string
+  /** Set only when there was no output AND the run itself failed — killed,
+   *  timed out, not permitted — phrased to follow the binary's path. */
+  problem?: string
+}
+
+const VERSION_TIMEOUT_MS = 5_000
+
+/** Run `<binary> --version` and read the first line.
+ *
+ *  The version is shown in the UI and audited on change; for an engine with a
+ *  `MIN_VERSION` (frpc) it also decides whether the binary runs at all, so a
+ *  run that produced nothing reports WHY — a binary macOS kills on sight and
+ *  one that is simply not frpc need different fixes. */
+function probeVersion(file: string): Promise<VersionProbe> {
   return new Promise((resolve) => {
-    // OpenVPN exits 1 from `--version`, so the exit code is deliberately
-    // ignored and only the output is read. ENOEXEC — a file that is executable
-    // but is not a program for this machine — throws out of spawn rather than
-    // arriving at the callback, and must not take the whole resolve down with
-    // it: the version is decoration, the hash is the check that matters.
+    // OpenVPN exits 1 from `--version`, so a non-zero exit is not a failure
+    // and only the output is read. ENOEXEC — a file that is executable but is
+    // not a program for this machine — throws out of spawn rather than
+    // arriving at the callback, and must not take the whole resolve down.
     try {
       execFile(
         file,
         ['--version'],
-        { timeout: 5_000, windowsHide: true, maxBuffer: 1 << 20 },
-        (_err, stdout, stderr) => {
+        { timeout: VERSION_TIMEOUT_MS, windowsHide: true, maxBuffer: 1 << 20 },
+        (err, stdout, stderr) => {
           const line = `${stdout}\n${stderr}`
             .split(/\r?\n/)
             .map((s) => s.trim())
             .find(Boolean)
-          resolve(line || undefined)
+          if (line || !err) return resolve({ version: line || undefined })
+          void runProblem(file, err).then((problem) => resolve({ problem }))
         }
       )
+    } catch (e) {
+      void runProblem(file, e).then((problem) => resolve({ problem }))
+    }
+  })
+}
+
+/** Why a binary could not be run for its version, in words. */
+async function runProblem(file: string, e: unknown): Promise<string> {
+  const err = (e ?? {}) as { killed?: boolean; signal?: string | null; code?: unknown }
+  let why: string
+  if (err.killed && err.signal === 'SIGTERM') {
+    why = `did not answer \`--version\` within ${VERSION_TIMEOUT_MS / 1000} seconds and was stopped.`
+  } else if (err.signal) {
+    why = `was killed (${err.signal}) as soon as it ran.`
+  } else if (err.code === 'EACCES' || err.code === 'EPERM') {
+    why = `could not be run: the system did not permit it (${err.code}).`
+  } else {
+    why = `could not be run (${typeof err.code === 'string' ? err.code : 'no output'}).`
+  }
+  // A browser download on macOS carries this attribute, and Gatekeeper kills
+  // an unsigned binary that has it — which is exactly what the upstream frpc
+  // tarball is. The fix is one command, so it is named.
+  if (process.platform === 'darwin' && (await isQuarantined(file))) {
+    why +=
+      ' macOS has quarantined it as a download; run ' +
+      `\`xattr -d com.apple.quarantine ${file}\` and try again.`
+  }
+  return why
+}
+
+function isQuarantined(file: string): Promise<boolean> {
+  return new Promise((resolve) => {
+    try {
+      // Absolute, never a bare name — see `readRouteTunnels`.
+      execFile('/usr/bin/xattr', ['-p', 'com.apple.quarantine', file], { timeout: 2_000 }, (err) =>
+        resolve(!err)
+      )
     } catch {
-      resolve(undefined)
+      resolve(false)
     }
   })
 }

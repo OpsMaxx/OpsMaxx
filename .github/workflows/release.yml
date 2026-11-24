@@ -59,7 +59,7 @@ jobs:
             exit 1
           fi
 
-      # The WireGuard sidecar and the frp client are Go programs built from
+      # The WireGuard sidecar and the addy daemon are Go programs built from
       # source into resources/bin, and OpenVPN is a C program built the same
       # way. electron-builder pulls them in through extraResources, and a
       # missing build is silent at package time — it only surfaces at runtime
@@ -111,7 +111,7 @@ jobs:
       # disagree — if the list is wrong, the check that fails is the one whose
       # answer was used.
       #
-      # frpc, openvpn and wintun are unchanged: they are downloads or a
+      # openvpn and wintun are unchanged: they are a download and a
       # host-only autotools build, not the cross-compile this is about.
       - name: Build tunnel engines
         shell: bash
@@ -126,7 +126,6 @@ jobs:
           echo "building sidecars for: ${targets[*]}"
           bash scripts/build-sidecar.sh "${targets[@]}"
           bash scripts/build-addyd.sh "${targets[@]}"
-          npm run build:frpc
           npm run build:openvpn
           npm run fetch:wintun
 
@@ -491,7 +490,7 @@ jobs:
           # signature lookup; an endpoint also asks the cloud, and the cloud is
           # where the ML verdicts come from — the `!ml` and `!rfn` family names
           # that get unsigned Electron installers quarantined, including the
-          # Trojan:Win32/Kepavll!rfn this project already hit on frpc. Without
+          # Trojan:Win32/Kepavll!rfn that once quarantined a bundled helper. Without
           # these settings CI can pass a build that endpoint Defender blocks,
           # which is exactly what happened.
           #
@@ -503,7 +502,7 @@ jobs:
           # PUA detection is AuditMode, not Enabled, and BlockAtFirstSeen is
           # left alone: both are real-time-protection blocking knobs, and this
           # step wants detection, not remediation. Enabling them lets RTP
-          # quarantine frpc.exe or an installer out of release\ between the
+          # quarantine a helper or an installer out of release\ between the
           # build and the upload, which would surface as `if-no-files-found:
           # error` on a step that has nothing to do with Defender. The scan
           # below already passes -DisableRemediation for the same reason.
@@ -560,23 +559,6 @@ jobs:
             exit 1
           }
 
-          # The one exemption, and it is a single file identified by the hash
-          # this run recorded for it — not a literal pasted in here, because
-          # frpc is rebuilt from source every release and its bytes move with
-          # the runner's Go toolchain. Reading the manifest means the exemption
-          # covers exactly the binary this build produced and verified, and
-          # re-arms by itself the moment the file stops matching its own record.
-          #
-          # Why frpc is exempt at all: Defender reports Trojan:Win32/Kepavll!rfn
-          # on it, an ML family verdict, and frp is a tunnelling tool attackers
-          # use as often as operators do. The same v0.71.0 binary shipped in
-          # 0.28.3 the day before this appeared. Its integrity rests on a
-          # stronger control than an opinion: build-frpc.sh compiles it from a
-          # pinned tag AND commit, and verify-bin-manifest.mjs checks the bytes
-          # in this same job. Everything else here still hard-fails.
-          $manifest = Get-Content resources/bin/manifest.json -Raw | ConvertFrom-Json
-          $frpcSha = $manifest.binaries.'win32-x64/frpc.exe'.sha256
-          $notes = @()
           $bad = 0
           foreach ($f in $files) {
             Write-Host "Scanning $($f.FullName)"
@@ -587,15 +569,10 @@ jobs:
             $out | Write-Host
             switch ($code) {
               0 { }
+              # No exemptions: a flagged file fails the release.
               2 {
-                $sha = (Get-FileHash $f.FullName -Algorithm SHA256).Hash.ToLower()
-                if ($sha -eq $frpcSha) {
-                  Write-Warning "Defender flagged frpc.exe; exempt, matches the manifest hash $sha"
-                  $notes += "frpc.exe flagged, exempt (built from pinned frp source, hash $sha matches this build's manifest)"
-                } else {
-                  Write-Error "Defender flagged $($f.FullName)"
-                  $bad = 1
-                }
+                Write-Error "Defender flagged $($f.FullName)"
+                $bad = 1
               }
               # A scan that did not complete is not a scan that found nothing.
               # Anything other than 0 or 2 used to fall past the check and be
@@ -610,9 +587,7 @@ jobs:
             # One line, deliberately: the release job reads this back through
             # `tr -d '\r\n'`, so a newline here runs two sentences together in
             # the published table.
-            $how = "defs $defs, $($files.Count) files, cloud $cloud"
-            $line = if ($notes.Count -gt 0) { ($notes -join '; ') + " ($how)" } else { "no threats found ($how)" }
-            $line | Out-File -Encoding utf8 release/_defender.txt
+            "no threats found (defs $defs, $($files.Count) files, cloud $cloud)" | Out-File -Encoding utf8 release/_defender.txt
           }
           exit $bad
 

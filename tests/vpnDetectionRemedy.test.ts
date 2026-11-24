@@ -30,7 +30,9 @@ function profile(kind: VpnKind): VpnProfile {
     spec:
       kind === 'wireguard'
         ? { kind: 'wireguard', mode: 'userspace', peers: [] }
-        : { kind: 'openvpn', remotes: [] }
+        : kind === 'frp'
+          ? { kind: 'frp', serverAddr: 'frp.example.com', serverPort: 7000, proxies: [], visitors: [] }
+          : { kind: 'openvpn', remotes: [] }
   } as unknown as VpnProfile
 }
 
@@ -61,9 +63,22 @@ function show(p: VpnProfile, platform: NodeJS.Platform): void {
   render(createElement(Row, { p }))
 }
 
+/** What the frp driver reports with no frpc anywhere — never bundled, so the
+ *  shape `resolveSystem` produces, install advice and all. */
+function frpMissing(): VpnEngineInfo {
+  return {
+    kind: 'frp',
+    available: false,
+    bundled: false,
+    reason:
+      'The program that runs this tunnel could not be found. Looked in /usr/local/bin/frpc and on PATH. ' +
+      'Download frpc from https://github.com/fatedier/frp/releases and copy it to /usr/local/bin.'
+  } as unknown as VpnEngineInfo
+}
+
 beforeEach(() => {
   vi.clearAllMocks()
-  probe.mockImplementation((k: VpnKind) => Promise.resolve(missing(k)))
+  probe.mockImplementation((k: VpnKind) => Promise.resolve(k === 'frp' ? frpMissing() : missing(k)))
 })
 
 describe('a bundled engine that is not on disk', () => {
@@ -96,5 +111,59 @@ describe('a bundled engine that is not on disk', () => {
     // put back and saying otherwise would send the reader to the wrong place.
     expect(screen.queryByRole('button', { name: 'Reinstall OpsMaxx' })).toBeNull()
     await waitFor(() => expect(screen.queryByText(/ships inside OpsMaxx/)).toBeNull())
+  })
+})
+
+describe('frp, which OpsMaxx no longer ships', () => {
+  // An upgrade from a build that bundled frpc lands every frp profile here.
+  // The row has to say "install it", on every platform, and never "reinstall
+  // OpsMaxx" — reinstalling would bring nothing back.
+  it.each([
+    ['darwin', 'https://formulae.brew.sh/formula/frpc'],
+    ['linux', 'https://github.com/fatedier/frp/releases'],
+    ['win32', 'https://github.com/fatedier/frp/releases']
+  ] as const)('offers Install frp and Set the path on %s, and no reinstall', async (platform, url) => {
+    const open = vi.spyOn(window, 'open').mockReturnValue(null)
+    show(profile('frp'), platform)
+    const install = await screen.findByRole('button', { name: 'Install frp' })
+    expect(screen.getByRole('button', { name: 'Set the path' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Reinstall OpsMaxx' })).toBeNull()
+    expect(screen.queryByText(/ships inside OpsMaxx/)).toBeNull()
+    install.click()
+    expect(open).toHaveBeenCalledWith(url, '_blank', 'noopener,noreferrer')
+    open.mockRestore()
+  })
+})
+
+describe('a profile that names its own engine', () => {
+  // The row used to be judged by a probe per KIND. frp on Windows searches
+  // nowhere, so that probe always says "missing" — and Start stayed disabled
+  // forever on a profile whose path the user had set and the engine would
+  // have run. The row now asks main about THIS profile, by id; main reads the
+  // stored path itself rather than taking one from the renderer.
+  it('enables Start on Windows once the frp profile has a confirmed path', async () => {
+    const p = profile('frp')
+    ;(p.spec as { binaryPath?: string }).binaryPath = 'C:\\Tools\\frp\\frpc.exe'
+    probe.mockImplementation((k: VpnKind, id?: string) =>
+      Promise.resolve(
+        id === p.id
+          ? ({ kind: k, available: true, bundled: false, path: 'C:\\Tools\\frp\\frpc.exe', version: '0.71.0' } as VpnEngineInfo)
+          : frpMissing()
+      )
+    )
+    show(p, 'win32')
+    await waitFor(() => expect(probe).toHaveBeenCalledWith('frp', p.id))
+    await waitFor(() =>
+      expect((screen.getByRole('button', { name: 'Start' }) as HTMLButtonElement).disabled).toBe(false)
+    )
+    expect(screen.queryByRole('button', { name: 'Install frp' })).toBeNull()
+  })
+
+  it('still probes by kind for a profile without a path, and re-probes on focus', async () => {
+    show(profile('frp'), 'win32')
+    await waitFor(() => expect(probe).toHaveBeenCalledWith('frp', undefined))
+    const before = probe.mock.calls.length
+    window.dispatchEvent(new Event('focus'))
+    await waitFor(() => expect(probe.mock.calls.length).toBeGreaterThan(before))
   })
 })

@@ -25,7 +25,7 @@ Everything OpsMaxx does, what it replaces, and the shapes of work it was built f
 | **SSH tunnels** | Local forwards, remote forwards and a SOCKS5 proxy |
 | **WireGuard** | Userspace WireGuard with **no administrator rights** — the tunnel appears as a local SOCKS5 proxy and forwards, and your routing table is never touched |
 | **OpenVPN** | Bundled on macOS and Linux, driven over its management interface, with one-time codes and split tunnelling |
-| **frp** | Publish a local port through an frp server, with a per-proxy confirmation naming exactly what becomes reachable |
+| **frp** | Publish a local port through an frp server, with a per-proxy confirmation naming exactly what becomes reachable. Uses an frpc you install (0.62.0 or newer) — OpsMaxx does not ship it, because antivirus flags it |
 | **Traffic inspector** | Read the HTTP and HTTPS a machine is actually making — a Burp- or Fiddler-style proxy with one-click certificate install, terminals and SSH sessions routed automatically, and a host that pins its certificate named rather than silently missing |
 | **SSH & databases over VPN** | Point a server or a database at a VPN profile and it is brought up, waited for, and torn down with the session |
 | **HTTP client** | REST, WebSocket and GraphQL requests sent from this machine, through a server's SSH connection or over a VPN — a service bound to a server's loopback is one request away. Collections, environments with a production confirm, cURL and OpenAPI import, and Copy as cURL with credentials masked. [How to use it](08-user/guides/http-client.md) |

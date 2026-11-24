@@ -14,7 +14,7 @@ import type {
   VpnStatus,
   VpnValidation
 } from '../../../../shared/vpn'
-import { resolveBundled } from '../binaries'
+import { resolveEngineBinary } from '../binaries'
 import type { ResolvedVpnSecrets, VpnDriver, VpnDriverContext } from '../driver'
 import { describeVpnError, isVpnError, toVpnResult, VpnError } from '../errors'
 import type { FrpReadiness } from '../frpAdminApi'
@@ -46,6 +46,19 @@ import type { SupervisedSpec, SupervisorExit, SupervisorHandle } from '../superv
 //    zero would read as "no traffic" rather than "not measurable".
 
 const FRPC = 'frpc'
+
+/** The frpc to run for this profile. Never bundled (shared/vpnEngines.ts), so
+ *  this is the user's: the path they confirmed, else the allowlist, else PATH
+ *  on POSIX — and refused when older than the driver can drive (binaries.ts,
+ *  `MIN_VERSION`). `binaryPath` reaches a spec only from THIS machine's form;
+ *  sync strips it on landing (services/addy/collections.ts), so its presence
+ *  is the confirmation, exactly as for OpenVPN. */
+function resolveFrpc(spec?: FrpSpec): Promise<VpnEngineInfo> {
+  return resolveEngineBinary(FRPC, {
+    binaryPath: spec?.binaryPath,
+    confirmed: spec?.binaryPath !== undefined
+  })
+}
 // Fixed: the admin API is our own control channel, not an account, and the
 // password beside it is 32 fresh random bytes per run.
 const ADMIN_USER = 'opsmaxx'
@@ -433,7 +446,7 @@ async function start(
   const gate = exposureGate(profile.spec)
   if (gate) return toVpnResult(gate)
 
-  const engine = await resolveBundled(FRPC)
+  const engine = await resolveFrpc(profile.spec)
   const secrets = frpSecretsFrom(ctx.secrets)
 
   const run: Run = {
@@ -576,18 +589,18 @@ export const frpDriver: VpnDriver<FrpSpec> = {
     return validateFrpSpec(spec)
   },
 
-  async probe(): Promise<VpnEngineInfo> {
+  async probe(spec?: FrpSpec): Promise<VpnEngineInfo> {
     try {
-      return await resolveBundled(FRPC)
+      return await resolveFrpc(spec)
     } catch (e) {
-      // A missing or tampered binary is a state the UI shows, not an exception
-      // it has to handle. `resolveBundled` throws so nothing can mistake a
-      // tampered binary for an absent one; this is where that turns into text.
+      // A missing or too-old frpc is a state the UI shows, not an exception it
+      // has to handle; this is where it turns into text. The detail already
+      // says where it looked and how to install one on this platform.
       if (!isVpnError(e)) throw e
       return {
         kind: 'frp',
         available: false,
-        bundled: true,
+        bundled: false,
         reason: describeVpnError(e.code, e.detail)
       }
     }

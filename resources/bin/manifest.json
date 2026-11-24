@@ -31,36 +31,6 @@
       "size": 10647552,
       "version": "0.22.3"
     },
-    "darwin-x64/frpc": {
-      "sha256": "6ad2365210cad7c338e11265a44a1c7401f855ef81f862a0ed90d459cd41bba9",
-      "size": 16532704,
-      "version": "0.71.0"
-    },
-    "darwin-arm64/frpc": {
-      "sha256": "1059ed86cd57595d3b06438edf89cd9fc4c5f3d1ac7be948ef7d0189098233bb",
-      "size": 14656706,
-      "version": "0.71.0"
-    },
-    "linux-x64/frpc": {
-      "sha256": "bae41db7fc445cd24536cde1fc40a581bd95203b29cfa169b2470efc6efe0297",
-      "size": 16412798,
-      "version": "0.71.0"
-    },
-    "linux-arm64/frpc": {
-      "sha256": "b59d1efe83af4b1203e12ac767ac8d3931fb9ec9596a4d971b441868b87e1830",
-      "size": 14483582,
-      "version": "0.71.0"
-    },
-    "win32-x64/frpc.exe": {
-      "sha256": "cb25bc4baa8430f268f1253610108fe4d8ddd4fbf6b439a8eacf36bcccc89e71",
-      "size": 16544768,
-      "version": "0.71.0"
-    },
-    "win32-arm64/frpc.exe": {
-      "sha256": "70e621da31d62b80fbb6cb479da95b084d7d94434a13d0e529349c93d46070f2",
-      "size": 14337024,
-      "version": "0.71.0"
-    },
     "win32-x64/wintun.dll": {
       "sha256": "e5da8447dc2c320edc0fc52fa01885c103de8c118481f683643cacc3220dafce",
       "size": 427552,

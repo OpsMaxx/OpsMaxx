@@ -425,11 +425,10 @@ TypeScript resolver looks the binary up with
 `${platform}-${arch}` macro expands to the same strings.
 
 The script's last step merges hashes into `resources/bin/manifest.json` via
-`scripts/update-bin-manifest.mjs`, which is shared with `scripts/build-frpc.sh`
-and merges by binary name so the two scripts are order-independent.
+`scripts/update-bin-manifest.mjs`, which is shared with the other engine build
+scripts and merges by binary name so they are order-independent.
 
-> **CI must run `scripts/build-sidecar.sh` (and `scripts/build-frpc.sh`)
-> before `electron-builder`.** `electron-builder.yml` pulls
+> **CI must run `scripts/build-sidecar.sh` before `electron-builder`.** `electron-builder.yml` pulls
 > `resources/bin/${platform}-${arch}` in through `extraResources`, and a
 > missing directory is silent at package time — it surfaces only at runtime,
 > as every profile reporting `binary-missing`.

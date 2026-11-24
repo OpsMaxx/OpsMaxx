@@ -29,8 +29,8 @@ import (
 // and behaving as a CLI by sniffing environment variables an Electron spawn
 // does not have. None of that exists here.
 //
-// tailscale.com is BSD-3-Clause, so shipping it is the same arrangement frpc
-// (Apache-2.0) and OpenVPN (GPL-2.0) already have in resources/bin.
+// tailscale.com is BSD-3-Clause, so shipping it is the same arrangement
+// OpenVPN (GPL-2.0) already has in resources/bin.
 //
 // ── The consequence worth knowing ──────────────────────────────────────────
 //

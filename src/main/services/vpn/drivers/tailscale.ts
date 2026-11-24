@@ -23,8 +23,7 @@ import { createStateDir, runIdSegment, vpnStateRoot } from '../runDir'
  * There is no `tailscale` binary to find, no version to negotiate and nothing
  * for the user to install: `opsmaxx-netd` embeds a full Tailscale node via
  * tsnet, and this driver drives it over the same NDJSON protocol WireGuard
- * uses. tailscale.com is BSD-3-Clause, so it ships the way frpc and OpenVPN
- * already do.
+ * uses. tailscale.com is BSD-3-Clause, so it ships the way OpenVPN does.
  *
  * ── What a node here IS ────────────────────────────────────────────────────
  *

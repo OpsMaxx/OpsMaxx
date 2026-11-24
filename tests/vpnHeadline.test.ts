@@ -27,6 +27,18 @@ describe('the toast says something', () => {
     )
   })
 
+  it('leads with the versions for an engine that is too old, not with "too old"', () => {
+    const detail =
+      'frpc 0.61.0 is too old; OpsMaxx needs 0.62.0 or newer. Found /usr/bin/frpc (0.61.0).'
+    expect(headline(describeVpnError('binary-outdated', detail), 'binary-outdated')).toBe(
+      'frpc 0.61.0 is too old; OpsMaxx needs 0.62.0 or newer.'
+    )
+    // The row passes no code; the answer must not depend on it.
+    expect(headline(describeVpnError('binary-outdated', detail))).toBe(
+      'frpc 0.61.0 is too old; OpsMaxx needs 0.62.0 or newer.'
+    )
+  })
+
   it('handles a message with no sentence break', () => {
     expect(headline('  No response from the server  ')).toBe('No response from the server')
   })
