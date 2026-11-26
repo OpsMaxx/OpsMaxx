@@ -4621,6 +4621,8 @@
   "connections.addServer.authPassword": "Contraseña",
   "connections.addServer.authKey": "Clave privada",
   "connections.addServer.authAgent": "Agente SSH",
+  "connections.addServer.forwardAgentLabel": "Reenviar el agente SSH",
+  "connections.addServer.forwardAgentHint": "Permite que este servidor use tu agente SSH local en las sesiones de terminal, incluso si inicias sesión con contraseña. Actívalo solo en servidores de confianza.",
   "connections.addServer.authCertificate": "Certificado",
   "connections.addServer.missingName": "Ponle un nombre a esta conexión.",
   "connections.addServer.missingCloud": "Elige el proyecto, la ubicación y la instancia.",

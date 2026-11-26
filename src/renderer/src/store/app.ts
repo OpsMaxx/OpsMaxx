@@ -145,6 +145,8 @@ export interface AppSettings {
   // Minutes an authenticated SSH connection is kept alive after its last
   // session closes. 0 = close at once, -1 = keep until the app exits.
   sshMasterIdleMinutes: number
+  /** Local opt-ins, keyed by server ID and bound to the approved SSH destination. */
+  sshAgentForwarding?: Record<string, string>
   /**
    * The SSH agent OpsMaxx SERVES, for other tools to use.
    *

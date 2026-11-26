@@ -20,6 +20,13 @@ The terminal, the shell on this machine, the command palette and every keyboard 
 | Close tab | <kbd>Ctrl</kbd>+<kbd>W</kbd> |
 | Command palette | <kbd>Ctrl</kbd>+<kbd>K</kbd> |
 
+**SSH agent forwarding.** Edit a connection and select **Forward SSH agent** to let programs
+in its terminal use your local SSH agent. You can keep **Password** as the login method.
+Load your key into your local agent, then run `ssh-add -l` remotely to check which identities
+are available. The server must allow forwarding. Your private keys stay local, but a
+privileged user on the server can use the forwarded agent while the SSH connection is open.
+The setting is off by default and saved in this device's settings.
+
 **Open files in your own editor.** In the Files view, right-click a remote file
 and choose **Open in code** to edit it in VS Code (or whatever you configure in
 Settings → Editor). Saving uploads it back to the server automatically — no

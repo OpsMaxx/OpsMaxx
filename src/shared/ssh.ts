@@ -82,6 +82,8 @@ export interface SshConnectConfig extends SshHop {
   cols: number
   rows: number
   hops?: SshHop[]
+  /** Requested by a saved connection's interactive login shell only. */
+  forwardAgent?: boolean
   /**
    * Run this instead of the login shell, on a PTY.
    *

@@ -4,6 +4,8 @@ import type { Server } from '../types'
 import { sshHopsFor } from './ssh'
 import { withVaultUnlock } from './withVaultUnlock'
 import { buildDockerShellCommand } from '../../../shared/docker'
+import { serverIdentity } from '../../../shared/localMounts'
+import { useApp } from '../store/app'
 import { t } from './i18n'
 
 // Everything a terminal needs to run a session, with no knowledge of whether
@@ -143,8 +145,12 @@ export function sshTransport(
       // A credential kept in the vault is unreadable while the vault is
       // locked. Rather than failing with instructions to go and unlock it and
       // start again, ask here and carry straight on.
-      withVaultUnlock(t('lib.transport.vaultReason.connect', { name: server.name }), () =>
-        Promise.resolve(
+      withVaultUnlock(t('lib.transport.vaultReason.connect', { name: server.name }), () => {
+        const forwardAgent =
+          !server.sftpOnly &&
+          !server.rdpOnly &&
+          useApp.getState().settings.sshAgentForwarding?.[server.id] === serverIdentity(server)
+        return Promise.resolve(
           api()?.connect({
             sessionId,
             serverId: server.id,
@@ -155,13 +161,14 @@ export function sshTransport(
             rev: server.rev,
             cols,
             rows,
+            ...(forwardAgent ? { forwardAgent: true } : {}),
             // Jump hops need their own credentials: either the secrets stored
             // against the saved server they point at, or a key path set
             // directly on the hop.
             hops: sshHopsFor(server)
           })
         )
-      ),
+      }),
     write: (id, d) => api()?.write(id, d),
     resize: (id, c, r) => api()?.resize(id, c, r),
     close: (id) => api()?.close(id),

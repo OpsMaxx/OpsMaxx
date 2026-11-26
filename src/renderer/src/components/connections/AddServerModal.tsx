@@ -248,6 +248,9 @@ export function AddServerModal(): React.JSX.Element {
   const [hops, setHops] = useState<Hop[]>(existing?.route ?? [])
   const [vpnProfileId, setVpnProfileId] = useState<UUID | null>(existing?.vpnProfileId ?? null)
   const [sftpOnly, setSftpOnly] = useState(existing?.sftpOnly === true)
+  const [forwardAgentFor, setForwardAgentFor] = useState(
+    () => (existing && useApp.getState().settings.sshAgentForwarding?.[existing.id]) ?? null
+  )
   // Folder shares. NOT part of `fields`: they are per-machine and live in
   // main's own file, never on the server record, which syncs and is backed up
   // (see services/reverseMount.ts). Loaded from main, saved back through it.
@@ -443,6 +446,12 @@ export function AddServerModal(): React.JSX.Element {
   const isCloud = connectionType !== 'ssh' && connectionType !== 'rdp'
   const cloudProvider = isCloud ? (connectionType as CloudProvider) : null
   const cloudTarget = cloudProvider ? draftToTarget(cloudProvider, cloudDraft) : null
+  const sshDestination = {
+    host: isCloud ? '' : host.trim(),
+    port: Number(port) || 22,
+    username: username.trim() || 'root'
+  }
+  const forwardingIdentity = serverIdentity({ ...sshDestination, cloud: cloudTarget })
 
   const missing = missingField({
     name,
@@ -644,15 +653,14 @@ export function AddServerModal(): React.JSX.Element {
       // Empty for a cloud server. The provider resolves the address at connect
       // time, and for a private instance there is none to save until a tunnel
       // exists - so a value typed here before switching type must not survive.
-      host: isCloud ? '' : host.trim(),
-      port: Number(port) || 22,
+      ...sshDestination,
       tags: parseTags(tagsText),
       folderId,
       // `root` IS THE WRONG DEFAULT FOR A WINDOWS DESKTOP, and it was not
       // inert: rdpRelay falls back to this field, so an RDP-only record saved
       // with the form's SSH default tried to sign in as root. The one account
       // the user was actually asked for is the one that gets stored.
-      username: speaks === 'rdp' ? rdpAccount : username.trim() || 'root',
+      username: speaks === 'rdp' ? rdpAccount : sshDestination.username,
       auth,
       route: hops,
       vpnProfileId,
@@ -680,6 +688,15 @@ export function AddServerModal(): React.JSX.Element {
         : undefined
     }
     const id = editId ? (updateServer(editId, fields), editId) : addServer(fields)
+    const store = useApp.getState()
+    const forwarding = store.settings.sshAgentForwarding
+    if (speaks !== 'rdp' && !sftpOnly && forwardAgentFor === forwardingIdentity) {
+      store.setSettings({ sshAgentForwarding: { ...forwarding, [id]: forwardingIdentity } })
+    } else if (forwarding && Object.hasOwn(forwarding, id)) {
+      const next = { ...forwarding }
+      delete next[id]
+      store.setSettings({ sshAgentForwarding: next })
+    }
     if (sharesLoaded && (shares.length || editId)) {
       // Stamped with who the server is as saved, so a later change of address
       // — by anyone, an agent included — stops the shares mounting there.
@@ -1344,6 +1361,25 @@ export function AddServerModal(): React.JSX.Element {
                 i18nKey="connections.addServer.sftpOnlyHint"
                 components={{ mono: <span className="mono" /> }}
               />
+            </span>
+          </span>
+        </label>
+      )}
+
+      {speaks !== 'rdp' && !sftpOnly && (
+        <label className="row" style={{ gap: 'var(--sp-2)', alignItems: 'flex-start', marginBottom: 'var(--sp-3)' }}>
+          <input
+            type="checkbox"
+            checked={forwardAgentFor === forwardingIdentity}
+            onChange={(e) => setForwardAgentFor(e.target.checked ? forwardingIdentity : null)}
+            aria-labelledby="ssh-agent-forwarding-label"
+            aria-describedby="ssh-agent-forwarding-hint"
+            style={{ marginTop: 3 }}
+          />
+          <span className="col" style={{ gap: 2 }}>
+            <span id="ssh-agent-forwarding-label">{t('connections.addServer.forwardAgentLabel')}</span>
+            <span className="field-hint" id="ssh-agent-forwarding-hint">
+              {t('connections.addServer.forwardAgentHint')}
             </span>
           </span>
         </label>

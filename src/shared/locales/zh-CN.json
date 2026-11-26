@@ -4425,6 +4425,8 @@
   "connections.addServer.authPassword": "密码",
   "connections.addServer.authKey": "私钥",
   "connections.addServer.authAgent": "SSH 代理",
+  "connections.addServer.forwardAgentLabel": "转发 SSH 代理",
+  "connections.addServer.forwardAgentHint": "允许此服务器在终端会话中使用本地 SSH 代理，即使使用密码登录也可以。仅为受信任的服务器启用。",
   "connections.addServer.authCertificate": "证书",
   "connections.addServer.missingName": "为此连接命名。",
   "connections.addServer.missingCloud": "选择项目、位置和实例。",
