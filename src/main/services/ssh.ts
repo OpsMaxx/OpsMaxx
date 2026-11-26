@@ -1,6 +1,6 @@
 import net from 'node:net'
 import { Client, type ConnectConfig } from 'ssh2'
-import type { ClientChannel } from 'ssh2'
+import type { ClientChannel, ShellOptions } from 'ssh2'
 import { readFileSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { WebContents, app } from 'electron'
@@ -372,7 +372,8 @@ export function setDemoConnector(fn: (hop: SshHop) => Client): void {
 async function connectClient(
   hop: SshHop,
   sock?: NodeJS.ReadableStream,
-  allowPrompt = true
+  allowPrompt = true,
+  forwardAgent = false
 ): Promise<Client> {
   if (demoConnector) return demoConnector(hop)
   // The credentials are settled BEFORE a socket exists. Resolving them can
@@ -415,6 +416,19 @@ async function connectClient(
   let auth: ReturnType<typeof authFor>
   try {
     auth = authFor(hop)
+    if (forwardAgent && !auth.agent) {
+      // ssh2 otherwise adds the forwarding agent to its login methods.
+      auth = {
+        ...auth,
+        ...agentAuth(hop),
+        authHandler: auth.authHandler ?? [
+          'none',
+          ...(auth.password !== undefined ? ['password' as const] : []),
+          ...(auth.privateKey !== undefined ? ['publickey' as const] : []),
+          'keyboard-interactive'
+        ]
+      }
+    }
   } catch (err) {
     discard(sock)
     throw err
@@ -976,6 +990,8 @@ export interface PooledConnection {
   client: Client
   refs: number
   idle?: ReturnType<typeof setTimeout>
+  /** A terminal forwarding an agent has its own connection with no idle window. */
+  forwardAgent?: boolean
   // The hop this connection was opened through, held for as long as this
   // connection lives so a shared bastion is not torn down underneath it.
   parent?: PooledConnection
@@ -1097,9 +1113,11 @@ async function acquireOne(
    * property of the chain being walked, not of the connection. Two servers
    * behind the same bastion can sit at different depths.
    */
-  via?: { hop: SshHop & { serverId?: string }; index: number; count: number }
+  via?: { hop: SshHop & { serverId?: string }; index: number; count: number },
+  forwardAgent = false
 ): Promise<PooledConnection> {
-  const key = hopKey(hop, parent?.key)
+  const baseKey = hopKey(hop, parent?.key)
+  const key = forwardAgent ? `${baseKey}|agent-forward:${mintConnectionId('pooled')}` : baseKey
 
   const existing = pool.get(key)
   if (existing) {
@@ -1146,7 +1164,7 @@ async function acquireOne(
   const promise = (async () => {
     // Reached through the bastion when there is one.
     const sock = parent ? await hopForward(parent.client, hop, via) : undefined
-    const client = await connectClient(hop, sock, allowPrompt)
+    const client = await connectClient(hop, sock, allowPrompt, forwardAgent)
     const conn: PooledConnection = {
       key,
       id: mintConnectionId('pooled'),
@@ -1154,6 +1172,7 @@ async function acquireOne(
       username: hop.username,
       client,
       refs: 1,
+      ...(forwardAgent ? { forwardAgent: true } : {}),
       parent: parent ?? undefined
     }
     pool.set(key, conn)
@@ -1206,7 +1225,8 @@ export async function acquire(
   // False for unattended callers. An unknown host is then refused rather than
   // raising a trust dialog nobody is present to reason about. Set in main only
   // — never taken from the renderer. See verifyHostKey.
-  allowPrompt = true
+  allowPrompt = true,
+  forwardAgent = false
 ): Promise<PooledConnection> {
   // Behind a VPN, the first hop is dialled through a loopback forward into the
   // tunnel. The forward is attached to the pooled connection rather than
@@ -1237,7 +1257,7 @@ export async function acquire(
     if (!c.dialledAs) c.dialledAs = asked
     return c
   }
-  const cloudKey = cfg.cloudTarget && !cfg.hops?.length ? hopKey(cfg) : null
+  const cloudKey = !forwardAgent && cfg.cloudTarget && !cfg.hops?.length ? hopKey(cfg) : null
   if (cloudKey !== null && (pool.has(cloudKey) || connecting.has(cloudKey))) {
     return stamp(await acquireOne(cfg, null, allowPrompt))
   }
@@ -1301,7 +1321,8 @@ export async function acquire(
     const conn = await acquireOne(effective, parent, allowPrompt, true,
       // A failure opening the forward from the LAST hop to the target is the
       // bastion failing to reach the target, not the target refusing us.
-      hops.length > 0 ? { hop: hops[hops.length - 1], index: hops.length - 1, count: hops.length } : undefined
+      hops.length > 0 ? { hop: hops[hops.length - 1], index: hops.length - 1, count: hops.length } : undefined,
+      forwardAgent
     )
     if (dial) {
       // Attach to whichever connection actually owns the socket. On a pool hit
@@ -1590,7 +1611,7 @@ export function poolEvictServer(serverId: string): number {
 export function release(conn: PooledConnection): void {
   conn.refs--
   if (conn.refs > 0) return
-  if (idleMs === 0) {
+  if (conn.forwardAgent || idleMs === 0) {
     if (pool.get(conn.key) === conn) pool.delete(conn.key)
     destroy(conn)
     return
@@ -1660,8 +1681,12 @@ export async function sshConnect(wc: WebContents, cfg: SshConnectConfig): Promis
 
   try {
     status(wc, sessionId, 'connecting')
-    const conn = await acquire(cfg, (i, count) =>
-      status(wc, sessionId, 'hop', { hopIndex: i, hopCount: count })
+    const forwardAgent = typeof serverId === 'string' && !!serverId && !cfg.initialCommand && cfg.forwardAgent === true
+    const conn = await acquire(
+      cfg,
+      (i, count) => status(wc, sessionId, 'hop', { hopIndex: i, hopCount: count }),
+      true,
+      forwardAgent
     )
     const current = sessions.get(sessionId)
     if (!current) {
@@ -1687,7 +1712,11 @@ export async function sshConnect(wc: WebContents, cfg: SshConnectConfig): Promis
     type ShellCb = (err: Error | undefined, stream: ClientChannel) => void
     const open = (cb: ShellCb): void => {
       if (cfg.initialCommand) target.exec(cfg.initialCommand, { pty }, cb)
-      else target.shell(pty, cb)
+      else if (forwardAgent) {
+        // ssh2 1.17 supports this per-channel option, though its types omit it.
+        const options: ShellOptions & { agentForward: boolean } = { agentForward: true }
+        target.shell(pty, options, cb)
+      } else target.shell(pty, cb)
     }
     open((err, stream) => {
       if (err) {
@@ -2237,12 +2266,26 @@ function cleanup(sessionId: string): void {
   } catch {
     /* ignore */
   }
-  // The connection itself is shared, so hand it back rather than closing it --
-  // after the pasted images are off the server, which needs it a moment longer.
   const conn = s.conn
-  if (conn && s.pastedImages?.length)
-    void removePastedImages(conn.client, s.pastedImages).finally(() => release(conn))
-  else if (conn) release(conn)
+  if (!conn) return
+  const releaseSession = (): void => {
+    // A folder share can still hold a reference. End the forwarding connection
+    // with its terminal so that reference cannot keep the agent exposed.
+    if (conn.forwardAgent && conn.refs > 1) conn.client.end()
+    release(conn)
+  }
+  if (!s.pastedImages?.length) {
+    releaseSession()
+    return
+  }
+  // Give image cleanup a chance to finish. A server that stalls SFTP must
+  // not be able to keep a forwarded agent after the terminal has closed.
+  const removed = removePastedImages(conn.client, s.pastedImages)
+  if (conn.forwardAgent) {
+    void withDeadline(removed, 2000, 'Timed out removing pasted images').then(releaseSession, releaseSession)
+  } else {
+    void removed.finally(releaseSession)
+  }
 }
 
 /**

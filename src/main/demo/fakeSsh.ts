@@ -128,7 +128,11 @@ export function fakeClient(host: SshHop, r: Responder): Client {
     const { stdout, code } = r.exec(host, command)
     setImmediate(() => cb(undefined, execChannel(stdout, code)))
   }
-  c.shell = (_pty: unknown, cb: (err: Error | undefined, stream: FakeChannel) => void): void => {
+  c.shell = (_pty: unknown, optsOrCb: unknown, maybeCb?: unknown): void => {
+    const cb = (typeof optsOrCb === 'function' ? optsOrCb : maybeCb) as (
+      err: Error | undefined,
+      stream: FakeChannel
+    ) => void
     setImmediate(() => cb(undefined, shellChannel(host, r)))
   }
   c.sftp = (cb: (err: Error | undefined, sftp: unknown) => void): void => {
