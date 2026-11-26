@@ -112,6 +112,10 @@ interface Ctx {
   server: Server
 }
 
+type DropPosition = 'before' | 'after' | 'inside'
+type RowDragEvent = React.DragEvent<HTMLDivElement>
+const CONNECTION_DRAG_TYPE = 'application/x-opsmaxx-connection'
+
 /**
  * The shells on this machine, at the top of the connection list.
  *
@@ -207,6 +211,7 @@ export function ConnectionTree(): React.JSX.Element {
   const renameFolder = useApp((s) => s.renameFolder)
   const deleteFolder = useApp((s) => s.deleteFolder)
   const moveServerToFolder = useApp((s) => s.moveServerToFolder)
+  const moveServerBeside = useApp((s) => s.moveServerBeside)
   const openAddServer = useApp((s) => s.openAddServer)
   // Kept in settings, so a folded Recent stays folded across restarts.
   const recentCollapsed = useApp((s) => s.settings.recentCollapsed === true)
@@ -234,8 +239,60 @@ export function ConnectionTree(): React.JSX.Element {
    */
   const [pendingDelete, setPendingDelete] = useState<Server | null>(null)
   const [renaming, setRenaming] = useState<string | null>(null)
-  const [dragId, setDragId] = useState<string | null>(null)
-  const [dropFolder, setDropFolder] = useState<string | null>(null)
+  const draggedServer = useRef<Server | null>(null)
+  const [dropHint, setDropHint] = useState<{ key: string; position: DropPosition } | null>(null)
+
+  const finishDrag = (): void => {
+    draggedServer.current = null
+    setDropHint(null)
+  }
+
+  const dropTarget = <Position extends DropPosition>(
+    key: string,
+    positionFor: (e: RowDragEvent) => Position,
+    move: (serverId: string, position: Position) => void,
+    targetServerId?: string
+  ): Pick<React.HTMLAttributes<HTMLDivElement>, 'onDragOver' | 'onDragLeave' | 'onDrop'> => {
+    const source = (e: RowDragEvent): Server | null => {
+      const server = draggedServer.current
+      return server &&
+        server.id !== targetServerId &&
+        server.workspaceId === useApp.getState().activeId() &&
+        e.dataTransfer.types.includes(CONNECTION_DRAG_TYPE)
+        ? server
+        : null
+    }
+    return {
+      onDragOver: (e) => {
+        if (!source(e)) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        const position = positionFor(e)
+        setDropHint((hint) => (hint?.key === key && hint.position === position ? hint : { key, position }))
+      },
+      onDragLeave: (e) => {
+        if (e.relatedTarget instanceof Node && e.currentTarget.contains(e.relatedTarget)) return
+        setDropHint((hint) => (hint?.key === key ? null : hint))
+      },
+      onDrop: (e) => {
+        const server = source(e)
+        if (!server) return
+        e.preventDefault()
+        finishDrag()
+        move(server.id, positionFor(e))
+      }
+    }
+  }
+
+  const folderDropTarget = (folder?: FolderRecord): ReturnType<typeof dropTarget> =>
+    dropTarget(
+      folder ? `folder:${folder.id}` : 'root',
+      () => 'inside',
+      (serverId) => {
+        moveServerToFolder(serverId, folder?.id ?? null)
+        if (folder) toast(t('connections.tree.movedTo', { name: folder.name }))
+      }
+    )
 
   /**
    * Keyboard operation, as a WAI-ARIA tree with a roving tabindex.
@@ -479,6 +536,7 @@ export function ConnectionTree(): React.JSX.Element {
   const serverRow = (s: Server, key: string, level: number): React.JSX.Element => {
     const active = activeTab?.kind === 'ssh' && activeTab.serverId === s.id
     const distro = distroIcon(fleetFacts[s.id]?.facts?.distroId)
+    const inConnections = key === `srv:${s.id}`
     return (
       <div
         key={key}
@@ -490,11 +548,25 @@ export function ConnectionTree(): React.JSX.Element {
         aria-selected={active}
         data-key={key}
         tabIndex={focusKey === key ? 0 : -1}
-        className={clsx('tree-row', active && 'active')}
+        className={clsx('tree-row', active && 'active', dropHint?.key === key && `drop-${dropHint.position}`)}
         style={level > 1 ? undefined : { paddingLeft: 8 }}
         draggable
-        onDragStart={() => setDragId(s.id)}
-        onDragEnd={() => setDragId(null)}
+        onDragStart={(e) => {
+          draggedServer.current = s
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData(CONNECTION_DRAG_TYPE, 'move')
+        }}
+        onDragEnd={finishDrag}
+        {...(inConnections &&
+          dropTarget(
+            key,
+            (e) => {
+              const row = e.currentTarget.getBoundingClientRect()
+              return e.clientY < row.top + row.height / 2 ? 'before' : 'after'
+            },
+            (serverId, position) => moveServerBeside(serverId, s.id, position),
+            s.id
+          ))}
         // Handled on mousedown via the click counter: the click handler swaps
         // the active tab, which re-renders this row, and a dblclick event that
         // lands on a replaced node never fires.
@@ -596,19 +668,8 @@ export function ConnectionTree(): React.JSX.Element {
 
         <div className="tree-section">
           <div
-            className={clsx('tree-section-label', dropFolder === '__root__' && 'dragover')}
-            onDragOver={(e) => {
-              if (dragId) {
-                e.preventDefault()
-                setDropFolder('__root__')
-              }
-            }}
-            onDragLeave={() => setDropFolder(null)}
-            onDrop={() => {
-              if (dragId) moveServerToFolder(dragId, null)
-              setDropFolder(null)
-              setDragId(null)
-            }}
+            className={clsx('tree-section-label', dropHint?.key === 'root' && 'dragover')}
+            {...folderDropTarget()}
           >
             <FolderTree size={11} /> {t('layout.activity.connections')}{' '}
             <span className="count">{servers.length}</span>
@@ -639,28 +700,14 @@ export function ConnectionTree(): React.JSX.Element {
                       data-key={`folder:${f.id}`}
                       data-folder={f.id}
                       tabIndex={focusKey === `folder:${f.id}` ? 0 : -1}
-                      className={clsx('tree-row', dropFolder === f.id && 'dragover')}
+                      className={clsx('tree-row', dropHint?.key === `folder:${f.id}` && 'dragover')}
                       onClick={() => renaming !== f.id && setCollapsed((c) => ({ ...c, [f.id]: !c[f.id] }))}
                       onDoubleClick={() => setRenaming(f.id)}
                       onContextMenu={(e) => {
                         e.preventDefault()
                         setFolderCtx({ x: e.clientX, y: e.clientY, id: f.id })
                       }}
-                      onDragOver={(e) => {
-                        if (dragId) {
-                          e.preventDefault()
-                          setDropFolder(f.id)
-                        }
-                      }}
-                      onDragLeave={() => setDropFolder(null)}
-                      onDrop={() => {
-                        if (dragId) {
-                          moveServerToFolder(dragId, f.id)
-                          toast(t('connections.tree.movedTo', { name: f.name }))
-                        }
-                        setDropFolder(null)
-                        setDragId(null)
-                      }}
+                      {...folderDropTarget(f)}
                     >
                       <ChevronRight size={14} className={clsx('chev', open && 'open')} />
                       {open ? (
@@ -688,28 +735,14 @@ export function ConnectionTree(): React.JSX.Element {
                                 data-key={`folder:${cf.id}`}
                                 data-folder={cf.id}
                                 tabIndex={focusKey === `folder:${cf.id}` ? 0 : -1}
-                                className={clsx('tree-row', dropFolder === cf.id && 'dragover')}
+                                className={clsx('tree-row', dropHint?.key === `folder:${cf.id}` && 'dragover')}
                                 onClick={() => renaming !== cf.id && setCollapsed((c) => ({ ...c, [cf.id]: !c[cf.id] }))}
                                 onDoubleClick={() => setRenaming(cf.id)}
                                 onContextMenu={(e) => {
                                   e.preventDefault()
                                   setFolderCtx({ x: e.clientX, y: e.clientY, id: cf.id })
                                 }}
-                                onDragOver={(e) => {
-                                  if (dragId) {
-                                    e.preventDefault()
-                                    setDropFolder(cf.id)
-                                  }
-                                }}
-                                onDragLeave={() => setDropFolder(null)}
-                                onDrop={() => {
-                                  if (dragId) {
-                                    moveServerToFolder(dragId, cf.id)
-                                    toast(t('connections.tree.movedTo', { name: cf.name }))
-                                  }
-                                  setDropFolder(null)
-                                  setDragId(null)
-                                }}
+                                {...folderDropTarget(cf)}
                               >
                                 <ChevronRight size={14} className={clsx('chev', copen && 'open')} />
                                 {copen ? (

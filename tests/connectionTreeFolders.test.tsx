@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { fireEvent, render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { stubBridge } from './setup/renderer'
 import { ConnectionTree } from '../src/renderer/src/components/connections/ConnectionTree'
@@ -95,6 +95,97 @@ describe('adding a connection inside a folder', () => {
     useApp.getState().setModal('add-server')
     render(<AddServerModal />)
     expect((screen.getByLabelText('Folder') as HTMLSelectElement).value).toBe('')
+  })
+})
+
+describe('dragging connections', () => {
+  const serverRow = (name: string): HTMLElement =>
+    within(screen.getByRole('tree', { name: 'Connections' })).getByRole('treeitem', {
+      name: new RegExp(`^${name},`)
+    })
+
+  function startDrag(row: HTMLElement) {
+    const types: string[] = []
+    const dataTransfer = { types, setData: (type: string) => types.push(type) }
+    fireEvent.dragStart(row, { dataTransfer })
+    return dataTransfer
+  }
+
+  function dragEvent(type: 'dragover' | 'drop', target: HTMLElement, dataTransfer: object, clientY: number): void {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientY })
+    Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+    fireEvent(target, event)
+  }
+
+  beforeEach(() => {
+    const workspaceId = useApp.getState().activeId()
+    useApp.setState((s) => ({
+      servers: [
+        ...s.servers,
+        { ...base, id: 'srv-b', workspaceId, folderId: null, name: 'db', host: '10.0.0.2' },
+        { ...base, id: 'srv-c', workspaceId, folderId: null, name: 'web', host: '10.0.0.3' }
+      ]
+    }) as never)
+  })
+
+  it('shows the insertion edge and reorders above or below a connection', () => {
+    render(<ConnectionTree />)
+    const db = serverRow('db')
+    const web = serverRow('web')
+    db.getBoundingClientRect = () => new DOMRect(0, 100, 200, 28)
+    const dataTransfer = startDrag(web)
+    dragEvent('dragover', db, dataTransfer, 104)
+    expect(db.classList.contains('drop-before')).toBe(true)
+    dragEvent('drop', db, dataTransfer, 104)
+    expect(db.classList.contains('drop-before')).toBe(false)
+    expect(web.nextElementSibling).toBe(db)
+
+    const secondDrag = startDrag(web)
+    dragEvent('dragover', db, secondDrag, 124)
+    expect(db.classList.contains('drop-after')).toBe(true)
+    dragEvent('drop', db, secondDrag, 124)
+    expect(db.nextElementSibling).toBe(web)
+  })
+
+  it('moves into a collapsed subfolder, beside a connection in its parent, and back to root', async () => {
+    render(<ConnectionTree />)
+    const eu = folderRow('EU')
+    await userEvent.click(eu)
+    const toFolder = startDrag(serverRow('web'))
+    fireEvent.dragOver(eu, { dataTransfer: toFolder })
+    expect(eu.classList.contains('dragover')).toBe(true)
+    fireEvent.drop(eu, { dataTransfer: toFolder })
+    expect(useApp.getState().servers.find((s) => s.id === 'srv-c')?.folderId).toBe('f-eu')
+
+    await userEvent.click(eu)
+    const api = serverRow('api')
+    api.getBoundingClientRect = () => new DOMRect(0, 100, 200, 28)
+    const besideApi = startDrag(serverRow('web'))
+    dragEvent('drop', api, besideApi, 104)
+    expect(useApp.getState().servers.find((s) => s.id === 'srv-c')?.folderId).toBe('f-prod')
+    expect(serverRow('web').nextElementSibling).toBe(api)
+
+    const toRoot = startDrag(serverRow('web'))
+    const header = screen.getByTitle('New folder').parentElement!
+    fireEvent.dragOver(header, { dataTransfer: toRoot })
+    expect(header.classList.contains('dragover')).toBe(true)
+    fireEvent.drop(header, { dataTransfer: toRoot })
+    expect(useApp.getState().servers.find((s) => s.id === 'srv-c')?.folderId).toBeNull()
+    expect(serverRow('web').parentElement).toBe(serverRow('db').parentElement)
+  })
+
+  it('clears the insertion indicator on cancel and ignores external drops', () => {
+    render(<ConnectionTree />)
+    const db = serverRow('db')
+    const web = serverRow('web')
+    const original = useApp.getState().servers
+    const dataTransfer = startDrag(web)
+    fireEvent.dragOver(db, { dataTransfer })
+    expect(db.classList.contains('drop-after')).toBe(true)
+    fireEvent.dragEnd(web)
+    expect(db.classList.contains('drop-after')).toBe(false)
+    fireEvent.drop(db, { dataTransfer: { types: ['text/plain'] } })
+    expect(useApp.getState().servers).toBe(original)
   })
 })
 
