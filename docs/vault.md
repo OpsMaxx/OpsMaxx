@@ -29,16 +29,16 @@ rotates, and carried inside an encrypted backup to another machine.
 
 | Credential | Notes |
 |---|---|
-| Server password | Saved to the vault by default when you add a server |
+| Server password | Can be saved to the vault or your operating system’s secure storage |
 | **SSH private key** | The **key itself**, not a path to it — so it travels with a backup, which a filename never could. Pick a key and Add Server offers to store it |
 | Server key passphrase | Held on the same `sshkey` entry as the key |
-| Database password | Saved to the vault by default |
+| Database password | Can be saved to the vault or your operating system’s secure storage |
 | **Database connection string** | The whole URI, which carries its own password inside it |
 | CI/CD API token, VPN and tunnel secrets, S3 backup keys, the scheduled-backup passphrase | Vault-only; these were never anywhere else |
 
-The OS keychain is still the fallback — for anything you choose not to put in the vault,
-and for the few things that cannot be vault-backed because they are needed before anyone
-has typed a master password.
+If you skip vault setup, new SSH and database credentials use your operating system’s
+secure storage by default. To choose that default even with a vault, turn off
+**Save new connection credentials to the vault** under **Settings → Security**.
 
 ### Secured, and locked
 

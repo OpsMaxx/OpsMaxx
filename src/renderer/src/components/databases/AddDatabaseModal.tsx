@@ -135,7 +135,10 @@ export function AddDatabaseModal(): React.JSX.Element {
   // has one or the other, never both, and the blob has always said which by
   // which field is present — so a second id rather than a slot discriminator.
   const [vaultUriEntryId, setVaultUriEntryId] = useState('')
-  const [saveToVault, setSaveToVault] = useState(true)
+  const [vaultChoice, setSaveToVault] = useState<boolean>()
+  const preferVault = useApp((s) => s.settings.preferVaultForNewCredentials)
+  const hasVault = useVault((s) => s.exists)
+  const saveToVault = vaultChoice ?? preferVault ?? hasVault === true
   // No `vaultUnlocked &&`: a reference is valid whatever the vault is doing,
   // and resolution at connect time already prompts when it cannot read it.
   const usingVault = vaultEntryId !== ''
@@ -332,8 +335,7 @@ export function AddDatabaseModal(): React.JSX.Element {
           : null
 
     /**
-     * A typed credential goes into the vault unless the user said otherwise,
-     * the same default Add Server has.
+     * An opted-in credential goes into the vault, as in Add Server.
      *
      * Both shapes, because both are credentials: a password, and a connection
      * string that has a password inside it. The URI half is why this is worth
