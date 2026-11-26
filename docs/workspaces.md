@@ -57,11 +57,11 @@ There is also a small **New folder** button on the `CONNECTIONS` section header 
 
 Deleting a folder never deletes its contents — servers and subfolders move back to the top level.
 
-### Move servers into folders
+### Reorder and move servers
 
-**Drag and drop.** Drag a server onto a folder to move it in; drag it onto the `CONNECTIONS` header to move it back to the root. Folders show a running count of everything inside them, including subfolders.
+**Drag and drop.** Drop a server on the top or bottom half of another server row in Connections to place it before or after that server, including across folders. Drop it onto a folder to move it in, or onto the `CONNECTIONS` header to move it back to the root. Folders show a running count of everything inside them, including subfolders.
 
-Databases have their own, separate folder tree with the same behaviour, so a "Staging" folder for servers does not clutter the database sidebar.
+Databases have their own folder tree, so a "Staging" folder for servers does not clutter the database sidebar.
 
 ### Import from `~/.ssh/config`
 

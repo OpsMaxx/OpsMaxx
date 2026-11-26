@@ -781,6 +781,7 @@ interface AppState {
   renameFolder: (id: string, name: string) => void
   deleteFolder: (id: string) => void
   moveServerToFolder: (serverId: string, folderId: string | null) => void
+  moveServerBeside: (serverId: string, targetId: string, side: 'before' | 'after') => void
   moveDatabaseToFolder: (databaseId: string, folderId: string | null) => void
   addMonitorGroup: (name: string) => string
   renameMonitorGroup: (id: string, name: string) => void
@@ -2290,6 +2291,25 @@ export const useApp = create<AppState>((set, get) => ({
     set((s) => ({
       servers: s.servers.map((sv) => (sv.id === serverId ? { ...sv, folderId } : sv))
     })),
+
+  moveServerBeside: (serverId, targetId, side) =>
+    set((s) => {
+      if (serverId === targetId) return s
+      const from = s.servers.findIndex((sv) => sv.id === serverId)
+      const targetIndex = s.servers.findIndex((sv) => sv.id === targetId)
+      const server = s.servers[from]
+      const target = s.servers[targetIndex]
+      if (!server || !target || server.workspaceId !== target.workspaceId) return s
+
+      // Use the actual anchor in the saved array, even when search hides siblings.
+      const gap = targetIndex + (side === 'after' ? 1 : 0)
+      const to = gap > from ? gap - 1 : gap
+      if (to === from && server.folderId === target.folderId) return s
+      const servers = [...s.servers]
+      servers.splice(from, 1)
+      servers.splice(to, 0, server.folderId === target.folderId ? server : { ...server, folderId: target.folderId })
+      return { servers }
+    }),
 
   addTunnel: (input) => {
     const id = uid('tun')

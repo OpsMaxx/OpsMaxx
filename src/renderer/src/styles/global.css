@@ -598,8 +598,15 @@ button {
 .tree-row:focus-visible .tree-add {
   visibility: visible;
 }
-.tree-row.dragover {
+.tree-row.dragover,
+.tree-section-label.dragover {
   box-shadow: inset 0 0 0 1px var(--accent-border);
+}
+.tree-row.drop-before {
+  box-shadow: inset 0 2px var(--accent);
+}
+.tree-row.drop-after {
+  box-shadow: inset 0 -2px var(--accent);
 }
 /* Inset, because the row clips its overflow and sits flush with the scroll
    area's edge: the global ring's outward offset was cut off on both sides. */
