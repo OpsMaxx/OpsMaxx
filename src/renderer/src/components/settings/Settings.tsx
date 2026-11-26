@@ -713,6 +713,28 @@ function VaultState(): React.JSX.Element {
   )
 }
 
+function VaultWindowsSessionPreference(): React.JSX.Element | null {
+  const t = useT()
+  const exists = useVault((s) => s.exists)
+  const unlocked = useVault((s) => s.unlocked)
+  const windowsSession = useVault((s) => s.windowsSession)
+
+  const setWindowsSession = async (enabled: boolean): Promise<void> => {
+    if (enabled && !unlocked && !(await useVaultPrompt.getState().request(t('settingsPage.vault.unlockReason')))) return
+    await useVault.getState().setWindowsSession(enabled)
+  }
+
+  if (!exists || !windowsSession) return null
+  return (
+    <SettingSwitch
+      label={t('settingsPage.vault.windowsSession.title')}
+      desc={t('settingsPage.vault.windowsSession.desc')}
+      checked={windowsSession.enabled}
+      onChange={(enabled) => void setWindowsSession(enabled)}
+    />
+  )
+}
+
 /**
  * What to paste into a bug report.
  *
@@ -1428,6 +1450,7 @@ export function Settings(): React.JSX.Element {
                   <option value={0}>{t('common.never')}</option>
                 </select>
               </div>
+              <VaultWindowsSessionPreference />
               <SettingSwitch
                 label={t('settingsPage.vault.touchId.title')}
                 desc={t('settingsPage.vault.touchId.desc')}

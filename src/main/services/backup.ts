@@ -507,6 +507,7 @@ export const ALL_DATA_FILES = [
   // single worst omission on this list: deleting opsmaxx-vault.json and leaving
   // this behind leaves an on-disk key for a vault the user was told was gone.
   'opsmaxx-vault-bio.json',
+  'opsmaxx-vault-windows-session.json',
   // Trusted RDP host certificates — hostnames and fingerprints, the same kind
   // of thing as opsmaxx-known-hosts.json two lines up.
   'opsmaxx-rdp-certs.json',
