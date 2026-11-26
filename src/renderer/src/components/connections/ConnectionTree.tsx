@@ -138,6 +138,9 @@ function LocalMachineSection({ query }: { query: string }): React.JSX.Element | 
   const openShell = useApp((s) => s.focusOrOpenLocal)
   // Absence means enabled, matching main's own copy in services/localGate.ts.
   const enabled = useApp((s) => s.settings.localTerminalEnabled !== false)
+  const collapsed = useApp((s) => s.settings.localMachineCollapsed === true)
+  const setSettings = useApp((s) => s.setSettings)
+  const toggle = (): void => setSettings({ localMachineCollapsed: !collapsed })
 
   useEffect(() => {
     if (!enabled) return
@@ -159,10 +162,22 @@ function LocalMachineSection({ query }: { query: string }): React.JSX.Element | 
 
   return (
     <div className="tree-section">
-      <div className="tree-section-label">
+      <div
+        className="tree-section-label toggle"
+        role="button"
+        tabIndex={0}
+        aria-expanded={!collapsed}
+        onClick={toggle}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter' && e.key !== ' ') return
+          e.preventDefault()
+          toggle()
+        }}
+      >
+        <ChevronRight size={11} className={clsx('chev', !collapsed && 'open')} />
         <Monitor size={11} /> {t('connections.tree.thisMachine')}
       </div>
-      {ordered.map((sh) => (
+      {!collapsed && ordered.map((sh) => (
         // role/tabIndex/onKeyDown because `.tree-row` is a div with an onClick
         // and nothing else. Buttons rather than rows of the tree below: these
         // are a flat list of actions with no folders to walk.

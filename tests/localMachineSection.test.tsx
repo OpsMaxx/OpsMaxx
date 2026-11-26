@@ -41,7 +41,10 @@ const SHELLS: LocalShell[] = [
 describe('This machine section', () => {
   beforeEach(() => {
     stubBridge({ local: { shells: vi.fn().mockResolvedValue(SHELLS) } })
-    useApp.setState({ localShells: [] })
+    useApp.setState((s) => ({
+      localShells: [],
+      settings: { ...s.settings, localMachineCollapsed: undefined, localTerminalEnabled: true }
+    }))
   })
 
   it('asks for the shell list on mount', async () => {
@@ -73,6 +76,24 @@ describe('This machine section', () => {
     // discoverability feature no keyboard user can reach.
     expect(rows.length).toBeGreaterThan(0)
     for (const row of rows) expect(row.getAttribute('tabindex')).toBe('0')
+  })
+
+  it('remembers when collapsed and expands from the keyboard', async () => {
+    useApp.setState({ localShells: SHELLS, refreshLocalShells: vi.fn() })
+    const { unmount } = render(<ConnectionTree />)
+    const header = screen.getByRole('button', { name: 'This machine' })
+    await userEvent.click(header)
+    expect(header.getAttribute('aria-expanded')).toBe('false')
+    expect(screen.queryByRole('button', { name: 'bash' })).toBeNull()
+    expect(useApp.getState().settings.localMachineCollapsed).toBe(true)
+
+    unmount()
+    render(<ConnectionTree />)
+    const collapsedHeader = screen.getByRole('button', { name: 'This machine', expanded: false })
+    collapsedHeader.focus()
+    await userEvent.keyboard('{Enter}')
+    expect(collapsedHeader.getAttribute('aria-expanded')).toBe('true')
+    expect(screen.getByRole('button', { name: 'bash' })).toBeTruthy()
   })
 
   it('disappears when local support is switched off', async () => {
