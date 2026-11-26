@@ -51,6 +51,8 @@ The Connections toolbar has three actions — from left to right:
 
 There is also a small **New folder** button on the `CONNECTIONS` section header itself.
 
+Click **This Machine** or **Recent** to collapse or expand that section. OpsMaxx remembers each section's state.
+
 ### Create a subfolder
 
 **Right-click any folder** → **New subfolder**. The same menu has **Rename** and **Delete**.

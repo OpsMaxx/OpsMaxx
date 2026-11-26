@@ -331,6 +331,8 @@ export interface AppSettings {
   cicdDetailHeight?: number
   /** The sidebar's Recent list is folded. Absent means open, for the reason above. */
   recentCollapsed?: boolean
+  /** The sidebar's This Machine list is folded. Absent means open. */
+  localMachineCollapsed?: boolean
   // Command used to open remote files. Empty means the OS default handler.
   externalEditorCommand: string
   // Double-clicking a file opens it externally rather than in the inline editor.
