@@ -57,6 +57,8 @@ export function VaultUnlockModal(): React.JSX.Element | null {
   const clearError = useVault((s) => s.clearError)
   const exists = useVault((s) => s.exists)
   const damaged = useVault((s) => s.damaged)
+  const canResume = useVault((s) => s.windowsSession?.canResume === true)
+  const continueWindowsSession = useVault((s) => s.continueWindowsSession)
   const refresh = useVault((s) => s.refresh)
   const bioAvailable = useVault((s) => s.bioAvailable)
   const bioEnabled = useVault((s) => s.bioEnabled)
@@ -233,6 +235,16 @@ export function VaultUnlockModal(): React.JSX.Element | null {
               : t('vault.unlock.unlockIntro')}
         </div>
       </div>
+
+      {canResume && (
+        <button
+          className="btn primary"
+          style={{ width: '100%', marginBottom: 10 }}
+          onClick={() => void continueWindowsSession().then((ok) => ok && close(true))}
+        >
+          {t('vault.gate.continueWindowsSession')}
+        </button>
+      )}
 
       {canUseBio && (
         <button

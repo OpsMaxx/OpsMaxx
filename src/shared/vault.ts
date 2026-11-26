@@ -120,6 +120,7 @@ export interface VaultStatus {
   unlocked: boolean
   stage: VaultStage
   entryCount: number
+  windowsSession?: { enabled: boolean; canResume: boolean }
   /**
    * The file is there and cannot be read as a vault.
    *

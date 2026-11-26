@@ -288,6 +288,7 @@ export function vaultUnlockWithKey(k: Buffer, s: Buffer): VaultResult {
   const file = readFile()
   if (!file) return { ok: false, error: 'No vault exists yet.' }
   try {
+    if (!Buffer.from(file.salt, 'base64').equals(s)) return { ok: false, error: 'The stored key is for a different vault.' }
     const entries = decrypt(file, k)
     key = Buffer.from(k)
     salt = Buffer.from(s)
@@ -356,6 +357,13 @@ export function vaultSecure(): VaultResult {
   if (idleTimer) clearTimeout(idleTimer)
   idleTimer = null
   if (key) stage = 'secured'
+  return { ok: true }
+}
+
+export function vaultReopenSecured(): VaultResult {
+  if (stage !== 'secured' || !key) return { ok: false, error: 'The vault is locked.' }
+  stage = 'open'
+  touchVaultActivity()
   return { ok: true }
 }
 

@@ -243,6 +243,14 @@ import {
   vaultExternalChange
 } from './services/vault'
 import type { VaultEntry, VaultResult } from '../shared/vault'
+import {
+  continueVaultWindowsSession,
+  renewVaultWindowsSession,
+  restoreVaultWindowsSession,
+  revokeVaultWindowsSession,
+  setVaultWindowsSession,
+  vaultWindowsSessionStatus
+} from './services/vaultWindowsSession'
 import { VAULT_LOCKED } from '../shared/vault'
 import { wsLockIds, wsLockSet, wsLockVerify, wsLockRemove, wsLockDelete } from './services/wslock'
 import { tunnelStart, tunnelStop, tunnelList, tunnelDisposeAll } from './services/tunnel'
@@ -2132,6 +2140,7 @@ async function closeLiveSessions(): Promise<void> {
   // Last, and deliberately: the vault is what several of the above were using
   // to authenticate, so it is the one thing that must still be there while
   // they close.
+  revokeVaultWindowsSession()
   vaultDispose()
 }
 
@@ -5174,6 +5183,7 @@ addySession.onApplied((collections) => {
       // It unwraps a key that no longer opens this file, so a biometric unlock
       // would now fail in a way that looks like the sensor's fault.
       forgetSessionKey()
+      revokeVaultWindowsSession()
       notifyRenderer('vault:replaced')
     }
   }
@@ -5784,7 +5794,9 @@ setVpnPrompter((req) => {
 })
 
 // ---- Vault ----
-ipcMain.handle('vault:status', () => vaultStatus())
+ipcMain.handle('vault:status', () => ({ ...vaultStatus(), windowsSession: vaultWindowsSessionStatus() }))
+ipcMain.handle('vault:set-windows-session', (_e, enabled: boolean) => setVaultWindowsSession(enabled === true))
+ipcMain.handle('vault:continue-windows-session', () => continueVaultWindowsSession())
 // What is configured that cannot run while the vault is shut, one phrase per
 // surface. For the launch prompt in docs/plans/vault-ux.md §5.1 — the point of
 // which is that nothing ever ASKED, so four subsystems sat dead from launch.
@@ -5831,9 +5843,11 @@ const resumeChecksAfterUnlock = (r: { ok: boolean }): { ok: boolean } => {
   return r
 }
 
-ipcMain.handle('vault:unlock', async (_e, password: string) =>
-  resumeChecksAfterUnlock(await vaultUnlock(password))
-)
+ipcMain.handle('vault:unlock', async (_e, password: string) => {
+  const r = await vaultUnlock(password)
+  if (r.ok) renewVaultWindowsSession()
+  return resumeChecksAfterUnlock(r)
+})
 
 const notifyRenderer = (channel: string, payload?: unknown): void => {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload)
@@ -5850,6 +5864,7 @@ const notifyRenderer = (channel: string, payload?: unknown): void => {
  * one, so an idle timeout left that material behind.
  */
 const lockVaultFully = (): VaultResult => {
+  const revoked = revokeVaultWindowsSession()
   forgetSessionKey()
   forgetVpnEdits()
   // Every remembered SSH-agent approval, and every prompt still on screen.
@@ -5868,7 +5883,7 @@ const lockVaultFully = (): VaultResult => {
   globalShortcut.unregisterAll()
   const r = vaultLock()
   notifyRenderer('vault:auto-locked')
-  return r
+  return revoked.ok ? r : revoked
 }
 
 /**
@@ -5897,13 +5912,17 @@ ipcMain.handle('vault:save', (_e, entries: VaultEntry[]) => vaultSave(entries))
 // user to set it up again.
 ipcMain.handle('vault:change-password', async (_e, current: string, next: string) => {
   const result = await vaultChangePassword(current, next)
-  if (result.ok) disableBiometricUnlock()
+  if (result.ok) {
+    disableBiometricUnlock()
+    renewVaultWindowsSession()
+  }
   return result
 })
 ipcMain.handle('vault:destroy', () => {
   // A stored biometric key opens a vault that no longer exists; leaving it
   // behind is dead material on disk.
   disableBiometricUnlock()
+  revokeVaultWindowsSession()
   const r = vaultDestroy()
   // Sync paused for this vault would otherwise wait for an unlock that can no
   // longer happen, until the next launch.
@@ -6625,6 +6644,7 @@ app.whenReady().then(() => {
     app.setAsDefaultProtocolClient(ADDY_LINK_SCHEME)
   }
   installCsp()
+  restoreVaultWindowsSession()
   // Only the instance that won the single-instance lock gets here, which is the
   // whole reason the store is opened from inside whenReady rather than at
   // module scope. See startHistory.
@@ -6757,7 +6777,10 @@ app.whenReady().then(() => {
     notifyRenderer('vault:secured')
   })
   powerMonitor.on('suspend', () => {
-    lockVaultFully()
+    if (vaultWindowsSessionStatus()?.enabled) {
+      vaultSecure()
+      notifyRenderer('vault:secured')
+    } else lockVaultFully()
   })
 
   // Children a previous run left behind. Identity — exe path AND start time —

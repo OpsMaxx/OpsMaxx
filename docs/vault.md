@@ -52,11 +52,18 @@ polling and scheduled backups go on using the credentials in it. The timer measu
 postpone it.
 
 **Locked** is the full stop — the key is gone from memory and nothing can resolve a
-credential until you unlock it. That happens when you quit, when you press **Lock now**,
+credential until you unlock it. By default that happens when you quit, when you press **Lock now**,
 and when your machine **sleeps**. Locking the screen secures the vault rather than
 locking it, because a screensaver is you stepping away, not the machine going off.
 
-One exception, and it is one you turn on yourself. If you enable **Touch ID unlock**
+On Windows, **Keep the vault unlocked until Windows signs out** under **Settings →
+Security** lets you close and reopen OpsMaxx without retyping the master password.
+The vault key is wrapped with Windows secure storage and held in the current Windows
+session. Signing out, shutting down, restarting, or choosing **Lock Now** requires
+the password again. The vault view can still be secured after idle time, screen lock,
+or sleep, and you can reopen it for this Windows session.
+
+If you enable **Touch ID unlock**
 (macOS only) and choose to keep it across restarts, a copy of the vault's derived key is
 kept on disk, wrapped by the OS keychain, so your fingerprint can open the vault without
 your master password. Locked still means nothing in this process can resolve a credential;

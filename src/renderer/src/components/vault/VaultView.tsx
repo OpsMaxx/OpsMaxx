@@ -129,6 +129,8 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
   const clearError = useVault((s) => s.clearError)
   const busy = useVault((s) => s.busy)
   const stage = useVault((s) => s.stage)
+  const canResume = useVault((s) => s.windowsSession?.canResume === true)
+  const continueWindowsSession = useVault((s) => s.continueWindowsSession)
 
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -221,6 +223,12 @@ function VaultGate({ mode }: { mode: 'create' | 'unlock' }): React.JSX.Element {
               ? t('vault.gate.securedBody')
               : t('vault.gate.lockedBody')}
         </p>
+
+        {canResume && (
+          <button className="btn primary" style={{ width: '100%', marginBottom: 10 }} onClick={() => void continueWindowsSession()}>
+            {t('vault.gate.continueWindowsSession')}
+          </button>
+        )}
 
         {canUseBio && (
           <button

@@ -3,7 +3,7 @@ import { useApp } from './app'
 import { bridgeOn } from '../lib/bridge'
 import { toast } from './toast'
 import { t } from '../lib/i18n'
-import type { VaultEntry, VaultField, VaultKind, VaultStage } from '../../../shared/vault'
+import type { VaultEntry, VaultField, VaultKind, VaultStage, VaultStatus } from '../../../shared/vault'
 
 let seq = 0
 const uid = (p: string): string => `${p}-${Date.now().toString(36)}-${seq++}`
@@ -68,11 +68,14 @@ export interface VaultState {
   query: string
   error: string | null
   busy: boolean
+  windowsSession: VaultStatus['windowsSession']
 
   refresh: () => Promise<void>
   create: (password: string) => Promise<boolean>
   unlock: (password: string) => Promise<boolean>
   lock: () => Promise<void>
+  setWindowsSession: (enabled: boolean) => Promise<void>
+  continueWindowsSession: () => Promise<boolean>
   changePassword: (current: string, next: string) => Promise<boolean>
   destroy: () => Promise<boolean>
 
@@ -109,6 +112,7 @@ export const useVault = create<VaultState>((set, get) => ({
   query: '',
   error: null,
   busy: false,
+  windowsSession: undefined,
   bioAvailable: false,
   bioKind: 'none',
   bioReason: null,
@@ -167,7 +171,7 @@ export const useVault = create<VaultState>((set, get) => ({
     // `unlocked: true` here would light up every picker and sidebar as though
     // the entries were in hand.
     const open = st.stage === 'open'
-    set({ exists: st.exists, damaged: st.damaged === true, unlocked: open, stage: st.stage })
+    set({ exists: st.exists, damaged: st.damaged === true, unlocked: open, stage: st.stage, windowsSession: st.windowsSession })
     if (open) {
       const r = await window.opsmaxx?.vault.list()
       if (r?.ok && r.entries) set({ entries: r.entries })
@@ -202,8 +206,22 @@ export const useVault = create<VaultState>((set, get) => ({
   },
 
   lock: async () => {
-    await window.opsmaxx?.vault.lock()
+    const result = await window.opsmaxx?.vault.lock()
     set({ unlocked: false, stage: 'locked', entries: [], selectedId: null, query: '', error: null })
+    if (result?.error) toast(result.error, 'error')
+  },
+
+  setWindowsSession: async (enabled) => {
+    const result = await window.opsmaxx?.vault?.setWindowsSession?.(enabled)
+    if (result?.error) toast(result.error, 'error')
+    await get().refresh()
+  },
+
+  continueWindowsSession: async () => {
+    const result = await window.opsmaxx?.vault?.continueWindowsSession?.()
+    if (result?.error) toast(result.error, 'error')
+    await get().refresh()
+    return result?.ok === true
   },
 
   changePassword: async (current, next) => {
@@ -341,6 +359,7 @@ export function startVaultLockWatch(): () => void {
 
   const clear = (stage: VaultStage): void => {
     useVault.setState({ unlocked: false, stage, entries: [], selectedId: null, query: '' })
+    if (useVault.getState().windowsSession?.enabled) void useVault.getState().refresh()
   }
 
   const offSecured = bridgeOn('vault.onSecured', window.opsmaxx?.vault?.onSecured, () => {
