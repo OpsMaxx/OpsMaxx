@@ -241,7 +241,10 @@ export function AddServerModal(): React.JSX.Element {
   const [agentSocket, setAgentSocket] = useState('')
   // '' means "enter a new one"; anything else is a vault entry id.
   const [vaultEntryId, setVaultEntryId] = useState('')
-  const [saveToVault, setSaveToVault] = useState(true)
+  const [vaultChoice, setSaveToVault] = useState<boolean>()
+  const preferVault = useApp((s) => s.settings.preferVaultForNewCredentials)
+  const hasVault = useVault((s) => s.exists)
+  const saveToVault = vaultChoice ?? preferVault ?? hasVault === true
   const [foundKeys, setFoundKeys] = useState<
     { path: string; fileName: string; algorithm: string | null; encrypted: boolean }[]
   >([])

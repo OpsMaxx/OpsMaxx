@@ -877,6 +877,7 @@ export function Settings(): React.JSX.Element {
   const theme = useApp((s) => s.theme)
   const setTheme = useApp((s) => s.setTheme)
   const settings = useApp((s) => s.settings)
+  const hasVault = useVault((s) => s.exists)
   const setSettings = useApp((s) => s.setSettings)
   const zoomTerminal = useApp((s) => s.zoomTerminal)
   const t = useT()
@@ -1408,6 +1409,12 @@ export function Settings(): React.JSX.Element {
               <h2>{t('settingsPage.vault.heading')}</h2>
               <div className="sub">{t('settingsPage.vault.sub')}</div>
               <VaultState />
+              <SettingSwitch
+                label={t('settingsPage.vault.preferVault.title')}
+                desc={t('settingsPage.vault.preferVault.desc')}
+                checked={settings.preferVaultForNewCredentials ?? hasVault === true}
+                onChange={(checked) => setSettings({ preferVaultForNewCredentials: checked })}
+              />
               <div className="setting-row">
                 <div className="s-info">
                   <div className="s-title">{t('settingsPage.vault.autoLock.title')}</div>

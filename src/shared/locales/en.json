@@ -814,6 +814,8 @@
   "settingsPage.vault.unlock": "Unlock vault",
   "settingsPage.vault.heading": "Vault",
   "settingsPage.vault.sub": "The encrypted store for passwords, SSH keys and API keys.",
+  "settingsPage.vault.preferVault.title": "Save new connection credentials to the vault",
+  "settingsPage.vault.preferVault.desc": "When off, new SSH and database credentials use your operating system’s secure storage and you can skip vault setup.",
   "settingsPage.vault.autoLock.title": "Secure after inactivity",
   "settingsPage.vault.autoLock.desc": "Clears the vault from this screen and asks for your master password before showing it again. Nothing else stops — connections, background checks, pipeline polling and scheduled backups keep using the credentials in it. The vault locks completely when you quit or your machine sleeps. The timer counts vault inactivity, not time since you started the app, and background work does not postpone it.",
   "settingsPage.vault.autoLock.minutes_one": "{{count}} minute",

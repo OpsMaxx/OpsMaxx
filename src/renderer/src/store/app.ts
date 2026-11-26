@@ -178,6 +178,8 @@ export interface AppSettings {
   // never locks makes every other protection on it optional, so the default is
   // deliberately short rather than off.
   vaultAutoLockMinutes: number
+  /** Absent uses the vault for new credentials only when one exists. */
+  preferVaultForNewCredentials?: boolean
   /**
    * Record how large each database is, once an hour.
    *
